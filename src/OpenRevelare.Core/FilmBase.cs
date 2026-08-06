@@ -122,6 +122,17 @@ public static class FilmBase
     ///
     /// Frames are expected already downsampled (~640px) by the caller; that is plenty for
     /// percentile statistics and keeps 7k×18k scans from taking minutes each.
+    ///
+    /// ⚠ DELIBERATE DIVERGENCE FROM negative/film_base.py — the per-frame pick is CO-SITED.
+    /// Python took three INDEPENDENT per-channel percentiles, which draws R, G and B from three
+    /// different pixels. The film base is one physical material, so its three channels must be
+    /// read off the same place; independent extremes bake a spurious cast straight into the
+    /// fulcrum every later density divides by. This is the same failure
+    /// <see cref="HighlightDensityFromRoll"/> already guards against at the highlight end — see
+    /// the comment there — and it is worse here, because t_base contaminates the whole roll
+    /// rather than one white point. <see cref="CoSitedFilmBase"/> holds the replacement and the
+    /// level-matching argument; the CLI's <c>t_base_roll</c> parity dump no longer matches the
+    /// Python reference by design.
     /// </summary>
     /// <param name="sprocketThreshold">
     /// Bright-end valley luma (board↔base cut) from sprocket threshold estimation. Given → board
@@ -154,27 +165,30 @@ public static class FilmBase
             int total = img.PixelCount;
             float[] s = img.Data, v = val.Data;
 
-            var keptR = new List<double>(total);
-            var keptG = new List<double>(total);
-            var keptB = new List<double>(total);
+            // The board mask keys off the RAW frame, where the threshold was calibrated, but
+            // both the ranking luma and the sampled values come from the value domain — the
+            // same split HighlightDensityFromRoll uses, and required on Path A where the
+            // decouple matrix moves the channels out from under a raw-domain rank.
+            var keptLuma = new double[total];
+            var keptRgb = new float[total * 3];
+            int kept = 0;
             double pct = sprocketThreshold is null ? 99.99 : 99.0;
             for (int p = 0; p < total; p++)
             {
                 int i = p * 3;
                 if (sprocketThreshold is double thr)
                 {
-                    double luma = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
-                    if (luma > thr) continue;
+                    double maskLuma = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
+                    if (maskLuma > thr) continue;
                 }
-                keptR.Add(v[i]); keptG.Add(v[i + 1]); keptB.Add(v[i + 2]);
+                int k = kept * 3;
+                keptRgb[k] = v[i]; keptRgb[k + 1] = v[i + 1]; keptRgb[k + 2] = v[i + 2];
+                keptLuma[kept] = ((double)v[i] + v[i + 1] + v[i + 2]) / 3.0;
+                kept++;
             }
-            if (keptR.Count == 0) continue;
-            perFrame.Add(new[]
-            {
-                Percentile(keptR.ToArray(), pct),
-                Percentile(keptG.ToArray(), pct),
-                Percentile(keptB.ToArray(), pct),
-            });
+            if (kept == 0) continue;
+            if (CoSitedFilmBase(keptLuma, keptRgb, kept, pct) is { } framePick)
+                perFrame.Add(framePick);
         }
 
         if (perFrame.Count == 0)
@@ -188,6 +202,97 @@ public static class FilmBase
             throw new ArgumentException("EstimateTBaseFromRoll: estimated T_base contains non-positive values");
         return tBase;
     }
+
+    /// <summary>
+    /// One frame's film base: the per-channel mean of its brightest CO-SITED pixels — rank every
+    /// kept pixel by luma, take the bright tail, average the three channels over exactly those
+    /// pixels. All three components therefore come from the same physical patch of bare base.
+    ///
+    /// The tail is 2×(100−pct)% deep rather than the point value at pct. For a tail that is
+    /// roughly linear — which the film base, being one near-uniform material, is — the mean of
+    /// the top 2q% sits at the (100−q)th percentile. That doubling is what stops the switch
+    /// from a point percentile to a tail MEAN from shifting the level on its own; without it
+    /// the estimate drifts brighter and every downstream density shifts with it.
+    ///
+    /// Ranking by luma rather than per channel does still move the result, downward: the luma
+    /// of a noisy base averages three independent channel noises, so the selected tail sits
+    /// ~1/√3 as far above the true base as a per-channel tail would. That is a gain, not a
+    /// residual — it is inflation the old estimator was baking in. On a synthetic base of
+    /// (0.70, 0.42, 0.20) with σ=0.02 noise, a clipped board and a red object brighter in R
+    /// than the base: independent percentiles returned (0.964, 0.458, 0.344), this returns
+    /// (0.723, 0.443, 0.223) — the remaining lift is uniform across channels, so it costs a
+    /// ~0.013 density offset and no cast.
+    /// </summary>
+    /// <returns>The (3,) base, or null when the guard rejected every sample.</returns>
+    private static double[]? CoSitedFilmBase(double[] luma, float[] rgb, int count, double pct)
+    {
+        var keys = new double[count];
+        Array.Copy(luma, keys, count);
+        var order = new int[count];
+        for (int i = 0; i < count; i++) order[i] = i;
+        Array.Sort(keys, order);          // ascending — the film base is the BRIGHT end
+
+        double tailFraction = Math.Max(100.0 - pct, 0.0) / 100.0;
+        int tailCount = Math.Clamp((int)Math.Ceiling(count * tailFraction * 2.0), 1, count);
+
+        // Spike guard, ported from NexFilm's density_histogram_extremes. Its published
+        // constants (skip a bin holding >10% of samples while under 20% accumulated) are
+        // stated against a 1% tail, i.e. 10× and 20× the tail depth — expressed that way they
+        // carry over to the 0.01% no-board branch, where a fixed 10% would never fire.
+        double spike = count * tailFraction * 10.0;
+        double guard = count * tailFraction * 20.0;
+
+        // No-guard retry: if a frame is degenerate enough that the guard ate the whole tail,
+        // a plateau-contaminated base still beats no base at all.
+        return BrightTailMean(keys, order, rgb, count, tailCount, spike, guard)
+            ?? BrightTailMean(keys, order, rgb, count, tailCount, double.PositiveInfinity, 0.0);
+    }
+
+    /// <summary>
+    /// Per-channel mean of the <paramref name="tailCount"/> brightest pixels, walking the
+    /// luma-sorted order downward and SKIPPING any plateau of identical quantised luma that
+    /// alone supplies more than <paramref name="spike"/> samples while fewer than
+    /// <paramref name="guard"/> have been passed. A clipped light-board, a blown specular or a
+    /// flat-filled border occupies one level and would otherwise BE the entire tail; real base,
+    /// carrying grain and an illumination gradient, spreads across levels and survives.
+    /// Skipped plateaus contribute to neither the mean nor the passed count.
+    /// </summary>
+    private static double[]? BrightTailMean(double[] keys, int[] order, float[] rgb, int count,
+                                            int tailCount, double spike, double guard)
+    {
+        var sum = new double[3];
+        int taken = 0;
+        double passed = 0;
+        int i = count - 1;
+        while (i >= 0 && taken < tailCount)
+        {
+            long level = QuantiseLuma(keys[i]);
+            int j = i;
+            while (j >= 0 && QuantiseLuma(keys[j]) == level) j--;
+            int run = i - j;                              // the plateau occupies (j, i]
+
+            if (run > spike && passed < guard) { i = j; continue; }
+
+            for (int k = i; k > j && taken < tailCount; k--)
+            {
+                int b = order[k] * 3;
+                sum[0] += rgb[b]; sum[1] += rgb[b + 1]; sum[2] += rgb[b + 2];
+                taken++;
+            }
+            passed += run;
+            i = j;
+        }
+        if (taken == 0) return null;
+        return new[] { sum[0] / taken, sum[1] / taken, sum[2] / taken };
+    }
+
+    /// <summary>
+    /// 16-bit levels — the granularity the scans actually carry, and the analogue of NexFilm's
+    /// 65536-bin histogram. Everything at or above 1.0 (clipping, and any post-decouple
+    /// overshoot) collapses into the top level, which is precisely the plateau the guard exists
+    /// to drop.
+    /// </summary>
+    private static long QuantiseLuma(double luma) => (long)(Math.Clamp(luma, 0.0, 1.0) * 65535.0);
 
     /// <summary>
     /// Auto-estimate highlight WB by finding the roll's brightest highlight — the negative's
