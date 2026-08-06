@@ -307,7 +307,9 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 
 ## 打赏
 
-软件免费、开源、无广告。如果觉得有用，可以请我喝杯咖啡。
+Revelare 最早是自己做着玩的小工具，那时候 vibe coding 花了不少成本，就想着开放大部分功能，只把几个进阶的翻拍工作流定个价，多少补贴一点。结果真的有人愿意购买支持——非常感谢大家。
+
+后来听取了很多人的意见，重写了一遍，补上了三平台，做到觉得完成度差不多了，决定开源，算是对社区的一点回馈。软件现在免费、无广告。如果觉得有用，可以请我喝杯咖啡。
 
 <p align="center">
   <img src="docs/assets/donate-wechat.png" width="220" alt="微信支付">
