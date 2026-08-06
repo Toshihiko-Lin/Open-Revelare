@@ -17,9 +17,15 @@ namespace OpenRevelare.Core;
 public static class JpegIO
 {
     /// <summary>Encode to JPEG. Roll annotations are NOT written to EXIF — they are burned into
-    /// the contact sheet's info bar instead (see the GUI's SheetInfoBar).</summary>
+    /// the contact sheet's info bar instead (see the GUI's SheetInfoBar).
+    ///
+    /// Staged through <see cref="ExportFile.Write"/> for the same reason as TIFF: ImageSharp's
+    /// Save truncates the destination before it has anything to put there.</summary>
     public static void ExportJpeg(ImageBuffer img, string path, int quality = 95,
                                   string? description = null)
+        => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description));
+
+    private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description)
     {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;

@@ -109,9 +109,18 @@ public static class TiffIO
 
     /// <summary>Write a 16-bit RGB TIFF. Data is quantised as-is (already encoded upstream).
     /// Roll annotations are NOT written here — they are burned into the contact sheet's info bar
-    /// instead (see the GUI's SheetInfoBar), so exports carry no note-derived EXIF.</summary>
+    /// instead (see the GUI's SheetInfoBar), so exports carry no note-derived EXIF.
+    ///
+    /// Staged through <see cref="ExportFile.Write"/>: LibTiff truncates its destination on open,
+    /// so a 60 MP write that fails partway would otherwise leave a stump where the previous good
+    /// export was. Every caller gets this, which is the point of putting it here rather than at
+    /// the call sites.</summary>
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode = CompressionMode.Lzw,
                                     ColorSpace? iccSpace = null, string? description = null)
+        => ExportFile.Write(path, target => WriteTiff16(img, target, mode, iccSpace, description));
+
+    private static void WriteTiff16(ImageBuffer img, string path, CompressionMode mode,
+                                    ColorSpace? iccSpace, string? description)
     {
         Compression compression = mode switch
         {
