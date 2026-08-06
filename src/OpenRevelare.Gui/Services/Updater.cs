@@ -43,7 +43,7 @@ public static class Updater
     /// <summary>The Gitee mirror still carries the pre-open-source product name, and its assets
     /// are still called Revelare-*. Nothing here matches on the product name — assets are picked
     /// by extension and architecture — so the mirror can be renamed without touching this.</summary>
-    public const string GiteeRepo = "Toshihiko-Lin/revelare";
+    public const string GiteeRepo = "Toshihiko-Lin/revelare-release";
     public const string GiteeLatestReleaseUrl = $"https://gitee.com/api/v5/repos/{GiteeRepo}/releases/latest";
     public const string GiteeReleasesPageUrl = $"https://gitee.com/{GiteeRepo}/releases/latest";
 
