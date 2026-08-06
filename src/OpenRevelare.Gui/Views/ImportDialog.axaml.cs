@@ -24,6 +24,13 @@ public partial class ImportDialog : Window
     private static readonly HashSet<string> RawTiffExt = new(StringComparer.OrdinalIgnoreCase)
     { ".arw", ".nef", ".cr2", ".cr3", ".dng", ".raf", ".rw2", ".orf", ".pef", ".srw", ".tif", ".tiff" };
 
+    internal static readonly string[] FormatPresets =
+    {
+        "135", "135 Half-frame", "APS",
+        "120 (645)", "120 (6x6)", "120 (6x7)", "120 (6x9)", "120 (6x12)", "120 (6x17)",
+        "4x5", "5x7", "8x10",
+    };
+
     public ObservableCollection<string> Files { get; } = new();
     public ImportConfig? Result { get; private set; }
 
@@ -31,6 +38,7 @@ public partial class ImportDialog : Window
     {
         InitializeComponent();
         FileList.ItemsSource = Files;
+        FormatCombo.ItemsSource = FormatPresets;
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = $"{Files.Count} 张";
@@ -110,6 +118,14 @@ public partial class ImportDialog : Window
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
         };
         cfg.Paths.AddRange(Files);
+        cfg.Notes.CameraBody = CameraEdit.Text ?? "";
+        cfg.Notes.FilmStock = FilmEdit.Text ?? "";
+        cfg.Notes.RollNumber = RollNoEdit.Text ?? "";
+        cfg.Notes.DevLab = LabEdit.Text ?? "";
+        cfg.Notes.DevDate = DateEdit.Text ?? "";
+        cfg.Notes.Location = LocationEdit.Text ?? "";
+        cfg.Notes.RollNote = NoteEdit.Text ?? "";
+        cfg.Notes.Format = FormatCombo.Text ?? "";
         Result = cfg;
         Close(true);
     }

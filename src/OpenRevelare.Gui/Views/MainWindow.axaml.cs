@@ -1388,18 +1388,26 @@ public partial class MainWindow : Window
     private async void OnExportClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
+        // Options first, destination second: the format decides the extension the save dialog
+        // should be offering, so asking for a filename first asks in the wrong order.
+        var opts = new ExportDialog(rollMode: false);
+        if (await opts.ShowDialog<bool>(this) != true) return;
+        Models.ExportOptions opt = opts.Options;
+
+        bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "导出正片",
-            DefaultExtension = "tiff",
+            DefaultExtension = opt.Extension,
             FileTypeChoices = new List<FilePickerFileType>
             {
-                new("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
-                new("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
+                jpeg
+                    ? new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } }
+                    : new FilePickerFileType("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
         string? path = file?.TryGetLocalPath();
-        if (path != null) await Vm.ExportAsync(path);
+        if (path != null) await Vm.ExportAsync(path, opt);
     }
 
     private async void OnLoadLccClick(object? sender, RoutedEventArgs e)
@@ -1421,13 +1429,17 @@ public partial class MainWindow : Window
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
+        var opts = new ExportDialog(rollMode: true);
+        if (await opts.ShowDialog<bool>(this) != true) return;
+        Models.ExportOptions opt = opts.Options;
+
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "选择整卷导出目录（16-bit TIFF）",
+            Title = $"选择整卷导出目录（{opt.Summary()}）",
             AllowMultiple = false,
         });
         string? dir = folders.FirstOrDefault()?.TryGetLocalPath();
-        if (dir != null) await Vm.ExportRollAsync(dir, jpeg: false);
+        if (dir != null) await Vm.ExportRollAsync(dir, opt);
     }
 
     private async void OnContactSheetClick(object? sender, RoutedEventArgs e)

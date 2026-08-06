@@ -38,6 +38,18 @@ public static class Catalog
         public string FilmStock { get; set; } = "";
         public string CameraBody { get; set; } = "";
         public string DevDate { get; set; } = "";
+
+        // The rest of the roll's annotation. Mirrored here for the same reason as the four above:
+        // the library filters and searches on these, and opening every .ncproj to read them would
+        // defeat the point of having an index. The .ncproj stays the source of truth — an entry
+        // missing these (written by an older build) simply does not take part in their facets
+        // until that roll is next saved.
+        public string FilmIso { get; set; } = "";
+        public string DevLab { get; set; } = "";
+        public string DevProcess { get; set; } = "";
+        public string Location { get; set; } = "";
+        public string Format { get; set; } = "";
+
         public int FrameCount { get; set; }
 
         public DateTime ImportedAt { get; set; } = DateTime.Now;
@@ -207,6 +219,11 @@ public static class Catalog
                         FilmStock = d.Meta.FilmStock,
                         CameraBody = d.Meta.CameraBody,
                         DevDate = d.Meta.DevDate,
+                        FilmIso = d.Meta.FilmIso,
+                        DevLab = d.Meta.DevLab,
+                        DevProcess = d.Meta.DevProcess,
+                        Location = d.Meta.Location,
+                        Format = d.Meta.Format,
                         // The file's own timestamps are the best evidence available; a scanned
                         // roll should not jump to the front of the wall as if freshly imported.
                         ImportedAt = info.CreationTime,

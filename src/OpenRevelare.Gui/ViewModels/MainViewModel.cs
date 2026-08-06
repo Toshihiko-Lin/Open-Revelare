@@ -1464,6 +1464,11 @@ public partial class MainViewModel : ViewModelBase
         _roll.FilmStock = Notes.FilmStock;
         _roll.CameraBody = Notes.CameraBody;
         _roll.DevDate = Notes.DevDate;
+        _roll.FilmIso = Notes.FilmIso;
+        _roll.DevLab = Notes.DevLab;
+        _roll.DevProcess = Notes.DevProcess;
+        _roll.Location = Notes.Location;
+        _roll.Format = Notes.Format;
         _roll.FrameCount = Frames.Count;
         _roll.ModifiedAt = DateTime.Now;
     }
@@ -1490,6 +1495,7 @@ public partial class MainViewModel : ViewModelBase
                 CameraBody = Notes.CameraBody, FilmStock = Notes.FilmStock, FilmIso = Notes.FilmIso,
                 RollNumber = Notes.RollNumber, DevLab = Notes.DevLab, DevProcess = Notes.DevProcess,
                 DevDate = Notes.DevDate, Location = Notes.Location, RollNote = Notes.RollNote,
+                Format = Notes.Format,
             },
         };
         foreach (RollFrame f in Frames)
@@ -1820,7 +1826,7 @@ public partial class MainViewModel : ViewModelBase
         Notes.FilmIso = data.Meta.FilmIso; Notes.RollNumber = data.Meta.RollNumber;
         Notes.DevLab = data.Meta.DevLab; Notes.DevProcess = data.Meta.DevProcess;
         Notes.DevDate = data.Meta.DevDate; Notes.Location = data.Meta.Location;
-        Notes.RollNote = data.Meta.RollNote;
+        Notes.RollNote = data.Meta.RollNote; Notes.Format = data.Meta.Format;
 
         // Rebuild the roll (caches already cleared above, before calibration warmed them).
         _prevFrame = null;
@@ -1906,6 +1912,20 @@ public partial class MainViewModel : ViewModelBase
         _configLoad = true;
         try { await LoadRollAsync(cfg.Paths); }
         finally { _configLoad = false; }
+
+        // After the load, not before: a new roll resets its notes, which would wipe whatever the
+        // import dialog just collected. Blank fields are left alone rather than written through,
+        // so an untouched dialog cannot clear anything the roll already had.
+        if (cfg.Notes.CameraBody is { Length: > 0 } camera) Notes.CameraBody = camera;
+        if (cfg.Notes.FilmStock is { Length: > 0 } film) Notes.FilmStock = film;
+        if (cfg.Notes.FilmIso is { Length: > 0 } iso) Notes.FilmIso = iso;
+        if (cfg.Notes.RollNumber is { Length: > 0 } rollNumber) Notes.RollNumber = rollNumber;
+        if (cfg.Notes.DevLab is { Length: > 0 } lab) Notes.DevLab = lab;
+        if (cfg.Notes.DevProcess is { Length: > 0 } process) Notes.DevProcess = process;
+        if (cfg.Notes.DevDate is { Length: > 0 } date) Notes.DevDate = date;
+        if (cfg.Notes.Location is { Length: > 0 } location) Notes.Location = location;
+        if (cfg.Notes.RollNote is { Length: > 0 } note) Notes.RollNote = note;
+        if (cfg.Notes.Format is { Length: > 0 } format) Notes.Format = format;
 
         // Bake into every frame's stored params so export / thumbnails carry them.
         foreach (RollFrame f in Frames)
@@ -2498,8 +2518,26 @@ public partial class MainViewModel : ViewModelBase
             : "已从卷中移除该帧";
     }
 
+    /// <summary>
+    /// The one place an <see cref="ExportOptions"/> becomes a file. Single-frame, roll and any
+    /// later export path go through here so the dialog cannot promise a setting that only some
+    /// of them honour.
+    /// </summary>
+    private static void WriteExport(ImageBuffer img, string path, FrameParams p, ExportOptions opt)
+    {
+        // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
+        // whereas shrinking the negative first would throw away detail the render still needed
+        // — and would move every Stage-1 measurement with it.
+        ImageBuffer outImg = opt.Downsample ? Resample.Box(img, opt.MaxLongEdge) : img;
+        // NONE intent writes linear data. No profile offered here describes that, so an "embed"
+        // request is honoured only where it would be true.
+        ColorSpace? icc = opt.EmbedIcc && p.OutputIntent == OutputIntent.Basic ? ColorSpace.Srgb : null;
+        if (opt.Format == ExportFormat.Jpeg) JpegIO.ExportJpeg(outImg, path, opt.JpegQuality, icc: icc);
+        else TiffIO.ExportTiff16(outImg, path, opt.TiffCompression, icc);
+    }
+
     /// <summary>Export every frame at full resolution into a folder, each with its own params.</summary>
-    public async Task ExportRollAsync(string folder, bool jpeg)
+    public async Task ExportRollAsync(string folder, ExportOptions opt)
     {
         if (Frames.Count == 0) return;
         if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();   // capture live edits
@@ -2509,9 +2547,9 @@ public partial class MainViewModel : ViewModelBase
             var frames = Frames.ToList();
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var reserved = ExportFile.NewReservations();
-            string extension = jpeg ? "jpg" : "tiff";
+            string extension = opt.Extension;
             ExportFile.CleanupStale(folder);
-            int renamed = 0;
+            int renamed = 0, skipped = 0;
             for (int i = 0; i < frames.Count; i++)
             {
                 RollFrame f = frames[i];
@@ -2521,26 +2559,21 @@ public partial class MainViewModel : ViewModelBase
                 string baseName = Path.GetFileNameWithoutExtension(f.Path);
                 string name = baseName;
                 for (int dup = 2; !usedNames.Add(name); dup++) name = $"{baseName}_副本{dup - 1}";
-                // Unique, not overwrite: a roll export names its files after the SCANS, so the
-                // folder the user picked may already hold an earlier export, or unrelated files
-                // that happen to match. Nothing here was individually confirmed the way a save
-                // dialog confirms a single file, so nothing here may silently replace anything.
-                // Never null under Unique — only Skip declines to return a path.
-                string outPath = ExportFile.Reserve(folder, name, extension,
-                                                    ExportFile.ConflictPolicy.Unique, reserved)!;
+                // A roll export names its files after the SCANS and runs unattended, so the folder
+                // may already hold an earlier export or unrelated matching files. What happens
+                // then is the user's call, made in the export dialog — the default being the one
+                // that cannot destroy anything.
+                string? outPath = ExportFile.Reserve(folder, name, extension, opt.Conflict, reserved);
+                if (outPath is null) { skipped++; continue; }
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
-                await Task.Run(() =>
-                {
-                    ImageBuffer outImg = Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), p);
-                    ColorSpace? icc = p.OutputIntent == OutputIntent.Basic ? ColorSpace.Srgb : null;
-                    if (jpeg) JpegIO.ExportJpeg(outImg, outPath, quality: 95);
-                    else TiffIO.ExportTiff16(outImg, outPath, TiffIO.CompressionMode.Lzw, icc);
-                });
+                await Task.Run(() => WriteExport(Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), p),
+                                                 outPath, p, opt));
             }
-            StatusText = renamed > 0
-                ? $"整卷导出完成（{frames.Count} 帧，其中 {renamed} 帧重名已另存）→ {folder}"
-                : $"整卷导出完成（{frames.Count} 帧）→ {folder}";
+            string detail = "";
+            if (renamed > 0) detail += $"，其中 {renamed} 帧重名已另存";
+            if (skipped > 0) detail += $"，跳过 {skipped} 帧同名";
+            StatusText = $"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}";
         }
         catch (Exception ex) { StatusText = "整卷导出失败：" + ex.Message; }
         finally { IsBusy = false; ReleaseBulkBuffers(); }
@@ -2646,7 +2679,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly object _fullSlotGate = new();
 
     // ── Export (full resolution) ────────────────────────────────────────────────
-    public async Task ExportAsync(string path)
+    public async Task ExportAsync(string path, ExportOptions opt)
     {
         if (CurrentFrame is not { } frame || !HasImage) return;
         IsBusy = true;
@@ -2655,20 +2688,11 @@ public partial class MainViewModel : ViewModelBase
         {
             FrameParams p = BuildParams();
             string srcPath = frame.Path;
-            // Overwrite stays the rule for a single export: the save dialog already asked.
+            // Overwrite stays the rule for a single export: the save dialog already asked, and the
+            // format came from the options dialog rather than being guessed from the extension.
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
-            await Task.Run(() =>
-            {
-                ImageBuffer full = LoadFullLinear(srcPath);
-                ImageBuffer outImg = Pipeline.ProcessFrame(full, p);
-                string ext = Path.GetExtension(path).ToLowerInvariant();
-                ColorSpace? icc = p.OutputIntent == OutputIntent.Basic ? ColorSpace.Srgb : null;
-                if (ext is ".jpg" or ".jpeg")
-                    JpegIO.ExportJpeg(outImg, path, quality: 95);
-                else
-                    TiffIO.ExportTiff16(outImg, path, TiffIO.CompressionMode.Lzw, icc);
-            });
-            StatusText = "已导出：" + Path.GetFileName(path);
+            await Task.Run(() => WriteExport(Pipeline.ProcessFrame(LoadFullLinear(srcPath), p), path, p, opt));
+            StatusText = $"已导出：{Path.GetFileName(path)} · {opt.Summary()}";
         }
         catch (Exception ex)
         {
