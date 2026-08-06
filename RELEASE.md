@@ -5,10 +5,12 @@
 
 | 通道 | 谁在读 | 更新方式 |
 |---|---|---|
-| GitHub Releases | 能连上 github.com 的用户 | 打 tag，CI 自动建 draft，**人工点发布** |
-| `version.json` | 所有人（含旧版 Python 0.8.0 构建） | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
+| GitHub Releases API | 新版（≥1.0.0）能连上 github.com 的用户 | 打 tag，CI 自动建 draft，**人工点发布** |
+| Gitee Releases API | 新版（≥1.0.0）所有用户（race 模式，谁先回谁赢） | **人工**把 GitHub release 搬过去 |
+| `version.json` | 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
 
-客户端两条并发查、GitHub 优先，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
+新版客户端 (≥1.0.0) 两条 Release API 并发查、谁先响应谁赢，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
+旧版 (0.8.0) 仍走 `version.json`。
 
 ---
 
@@ -35,14 +37,19 @@ git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <
       这些脚本的可执行位记录在 git index 里（`100755`）——在 Windows 上新增脚本时
       记得 `git update-index --chmod=+x`，否则 runner 上是 Permission denied。
 
-## 三、发布 draft
+## 三、发布 draft + 搬 Gitee
 
 - [ ] 补网盘 / Gitee 镜像链接，写正文。
 - [ ] **点 Publish release。** GitHub 的 `/releases/latest` 不返回 draft 和 prerelease，
       在点下去之前，所有客户端的检测结果都是「已是最新版本」。
+- [ ] **手动把这个 release 搬到 Gitee。** 在 `https://gitee.com/Toshihiko-Lin/revelare/releases`
+      新建一个标签和 release，标签名与 GitHub 一致（例如 `1.0.0`，不带 v），正文与 GitHub 一致，
+      把 GitHub release 的几个包（setup.exe / AppImage / dmg）上传为附件。
+      新版客户端 (≥1.0.0) 会同时查询两个 API，谁先响应谁赢——搬到 Gitee 之后大陆用户才能收到通知。
 
-## 四、推 manifest —— 别忘了这步
+## 四、推 manifest —— 别忘了这步（仅旧版 0.8.0 需要）
 
+旧版 Python 构建 (0.8.0) 仍然轮询 `version.json`，要手工更新。
 Gitee 仓库 `Toshihiko-Lin/revelare-release` 根目录的 `version.json`：
 
 ```json
@@ -54,12 +61,12 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 根目录的 `version.json`：
 }
 ```
 
-- [ ] `version` 与 csproj、与 tag 一致。客户端按它跟自己的版本比大小，
-      写小了或者忘了改，等于这次发版对 manifest 那条通道不存在。
+- [ ] `version` 与 csproj、与 tag 一致。**旧版客户端 (0.8.0)** 按它跟自己的版本比大小，
+      写小了或者忘了改，等于这次发版对那条通道不存在。新版 (≥1.0.0) 不再读这个文件。
 - [ ] `download_url` 指向能直连的镜像（Gitee / 网盘），不要指向 GitHub——
-      这条通道存在的理由就是有人连不上 GitHub。
+      这条通道存在的理由就是旧版 0.8.0 用户中有人连不上 GitHub。
 - [ ] `changelog` 是 **HTML**（`<b>` / `<br>`），不是 Markdown。
-      客户端会摊平成纯文本再显示。
+      旧版客户端会摊平成纯文本再显示。
 - [ ] 目前它只有中文，英文界面下弹出的更新通知正文也是中文。
 
 `https://revelare.netlify.app/version.json` 302 到这个文件，缓存 60 秒，
@@ -67,8 +74,11 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 根目录的 `version.json`：
 
 ## 五、验证
 
-- [ ] `curl -sL https://revelare.netlify.app/version.json` 读到的是新版本号。
-- [ ] `curl -s -o /dev/null -w '%{http_code}' https://api.github.com/repos/Toshihiko-Lin/Open-Revelare/releases/latest`
-      返回 200，且 `tag_name` 是新 tag。
+- [ ] **旧版 (0.8.0) 通道**：`curl -sL https://revelare.netlify.app/version.json` 读到的是新版本号。
+- [ ] **新版 (≥1.0.0) 通道**：
+      - GitHub API: `curl -s https://api.github.com/repos/Toshihiko-Lin/Open-Revelare/releases/latest | grep tag_name`
+        返回新 tag。
+      - Gitee API: `curl -s https://gitee.com/api/v5/repos/Toshihiko-Lin/revelare/releases/latest | grep tag_name`
+        返回新 tag。
 - [ ] 拿上一个版本的安装包装一台干净机器，等 3 秒看有没有弹「发现新版本」。
       两条通道任何一条通就会弹——所以这一步过了，只说明**至少有一条**通。

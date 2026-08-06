@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -11,24 +12,27 @@ namespace OpenRevelare.Gui.Services;
 /// running build. Any network/parse/rate-limit error returns null silently — a failed update
 /// check must never surface as an error.
 ///
-/// TWO CHANNELS, on purpose:
+/// TWO MIRRORS, asked at the same time:
 /// <list type="bullet">
-///   <item><b>GitHub Releases</b> — the source of truth, and the only one that knows which asset
-///   belongs to the platform we are running on.</item>
-///   <item><b>The manifest</b> at <see cref="ManifestUrl"/> — a Netlify 302 onto a Gitee-hosted
-///   version.json. This is the channel the pre-1.0 build already polls, so it is maintained and
-///   reachable regardless of what GitHub is doing.</item>
+///   <item><b>GitHub Releases</b> — the canonical one.</item>
+///   <item><b>Gitee Releases</b> — the same builds, moved across by hand at release time.</item>
 /// </list>
 /// api.github.com is unreachable from much of mainland China, which is most of this project's
 /// users: on GitHub alone their check does not fail, it hangs and then silently gives up, and
-/// they never hear that a release happened. The manifest is what makes the notice arrive at all
-/// for them. It is also what keeps the check working while the repository is still private —
-/// /releases/latest 404s for an anonymous client until the repo is public AND the draft release
-/// has been published (that endpoint excludes drafts and prereleases).
+/// they never hear that a release happened. Reaching a mirror is also exactly what tells us the
+/// user can DOWNLOAD from it, so the link handed back is always the one from whichever mirror
+/// answered — sending someone to a github.com asset they cannot fetch would be no better than
+/// staying quiet.
 ///
-/// Publishing therefore has TWO steps, and the second is manual: publish the GitHub release,
-/// then push the new version.json to the Gitee release repo. Skipping the second one leaves
-/// every mainland user on the old build with no way of knowing.
+/// The two APIs are near enough identical — <c>tag_name</c>, a Markdown <c>body</c>, and an
+/// <c>assets</c> array of name + browser_download_url — that one parser reads both. Gitee tags
+/// are bare ("1.0.0") where GitHub's carry a v ("v1.0.0"), and Gitee dates the release with
+/// <c>created_at</c> rather than <c>published_at</c>; both are handled in <see cref="FromApiAsync"/>.
+///
+/// NOT the version.json manifest. That one still exists and is still what the pre-1.0 Python
+/// build (APP_VERSION 0.8.0) polls, but it carries a single download_url — one Windows installer
+/// for everybody — so it cannot tell a Linux user where their AppImage is. Leave it to the old
+/// app; releases from 1.0.0 on are found through the release APIs above.
 /// </summary>
 public static class Updater
 {
@@ -36,16 +40,15 @@ public static class Updater
     public const string LatestReleaseUrl = $"https://api.github.com/repos/{Repo}/releases/latest";
     public const string ReleasesPageUrl = $"https://github.com/{Repo}/releases/latest";
 
-    /// <summary>The manifest the pre-1.0 build polls. 302s to raw.giteeusercontent.com; served
-    /// with a 60 s cache, so a pushed version.json reaches users about a minute later.</summary>
-    public const string ManifestUrl = "https://revelare.netlify.app/version.json";
+    /// <summary>The Gitee mirror still carries the pre-open-source product name, and its assets
+    /// are still called Revelare-*. Nothing here matches on the product name — assets are picked
+    /// by extension and architecture — so the mirror can be renamed without touching this.</summary>
+    public const string GiteeRepo = "Toshihiko-Lin/revelare";
+    public const string GiteeLatestReleaseUrl = $"https://gitee.com/api/v5/repos/{GiteeRepo}/releases/latest";
+    public const string GiteeReleasesPageUrl = $"https://gitee.com/{GiteeRepo}/releases/latest";
 
-    /// <summary>Landing page — where a download link points when nothing better is on offer.</summary>
-    public const string SiteUrl = "https://revelare.netlify.app/";
-
-    /// <summary><see cref="Changelog"/> is always PLAIN TEXT: the two channels write their notes
-    /// in different markup (the manifest in HTML, GitHub in Markdown) and the notice dialog has
-    /// no renderer for either, so flattening happens here rather than at the call site.</summary>
+    /// <summary><see cref="Changelog"/> is always PLAIN TEXT — release bodies are Markdown and
+    /// the notice dialog has no renderer, so flattening happens here rather than at the call site.</summary>
     public sealed record UpdateInfo(string Version, string ReleaseDate, string DownloadUrl, string Changelog);
 
     /// <summary>
@@ -65,101 +68,74 @@ public static class Updater
     }
 
     /// <summary>
-    /// Asks both channels and returns a release only when it is newer than <paramref
+    /// Asks both mirrors and returns a release only when it is newer than <paramref
     /// name="currentVersion"/>. 6 s for the background check at startup; the manual 检查更新…
     /// menu item passes 8 s.
     /// </summary>
     public static async Task<UpdateInfo?> CheckAsync(string currentVersion, int timeoutSec = 6)
     {
-        // CONCURRENTLY, not GitHub-then-fallback. Sequential would spend the whole timeout on a
-        // blocked github.com BEFORE the manifest was even tried — doubling the wait for exactly
-        // the users the fallback exists for. Side by side, the check costs one timeout, which is
-        // what it cost when there was only one channel.
-        Task<UpdateInfo?> github = FromGitHubAsync(currentVersion, timeoutSec);
-        Task<UpdateInfo?> manifest = FromManifestAsync(currentVersion, timeoutSec);
-        await Task.WhenAll(github, manifest);
-        // GitHub wins a tie: only it can name the asset for THIS platform, where the manifest
-        // has one URL for everyone. Neither task throws — both swallow their own failures.
-        return await github ?? await manifest;
+        Task<UpdateInfo?> github = FromApiAsync(LatestReleaseUrl, ReleasesPageUrl, currentVersion, timeoutSec);
+        Task<UpdateInfo?> gitee = FromApiAsync(GiteeLatestReleaseUrl, GiteeReleasesPageUrl, currentVersion, timeoutSec);
+
+        // A RACE, not Task.WhenAll. Where github.com is blocked it does not refuse the connection,
+        // it hangs until the timeout — so waiting for both would make every check in mainland
+        // China take the full 6 s (8 s on the manual one) even though Gitee answered in a fraction
+        // of that. Whoever finds a release first is the answer, and switching mirrors costs the
+        // user nothing they can see.
+        var pending = new List<Task<UpdateInfo?>> { github, gitee };
+        while (pending.Count > 0)
+        {
+            Task<UpdateInfo?> finished = await Task.WhenAny(pending);
+            pending.Remove(finished);
+            // GitHub is canonical, so it wins whenever it is already done — including the common
+            // case where both mirrors are reachable and answer within a few ms of each other.
+            if (github.IsCompleted && await github is { } canonical) return canonical;
+            if (await finished is { } info) return info;
+        }
+        return null;
+        // The loser keeps running to its own timeout and is dropped. It cannot throw: FromApiAsync
+        // swallows everything, so nothing is left unobserved.
     }
 
-    private static HttpClient NewClient(string currentVersion, int timeoutSec)
-    {
-        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSec) };
-        // GitHub rejects requests without a User-Agent outright.
-        http.DefaultRequestHeaders.UserAgent.ParseAdd($"OpenRevelare/{currentVersion}");
-        return http;
-    }
-
-    private static async Task<UpdateInfo?> FromGitHubAsync(string currentVersion, int timeoutSec)
+    /// <summary>
+    /// One mirror. <paramref name="pageUrl"/> is where the download button goes when the release
+    /// carries nothing for this platform — a landing page still beats a dead button, and it is
+    /// also what a source-only release should hand back.
+    /// </summary>
+    private static async Task<UpdateInfo?> FromApiAsync(
+        string apiUrl, string pageUrl, string currentVersion, int timeoutSec)
     {
         try
         {
-            using HttpClient http = NewClient(currentVersion, timeoutSec);
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-            string json = await http.GetStringAsync(LatestReleaseUrl);
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSec) };
+            // GitHub rejects requests without a User-Agent outright; Gitee does not mind one.
+            http.DefaultRequestHeaders.UserAgent.ParseAdd($"OpenRevelare/{currentVersion}");
+            http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+            string json = await http.GetStringAsync(apiUrl);
             if (JsonNode.Parse(json) is not JsonObject d) return null;
 
-            // Tags are "v1.2.3"; the comparison wants bare dotted numbers.
+            // GitHub tags are "v1.2.3", Gitee's are "1.2.3"; the comparison wants bare numbers.
             string remote = (d["tag_name"]?.GetValue<string>() ?? "").TrimStart('v', 'V');
             if (remote.Length == 0 || Compare(remote, currentVersion) <= 0) return null;
 
-            string date = d["published_at"]?.GetValue<string>() ?? "";
+            // published_at is GitHub's, created_at is Gitee's.
+            string date = d["published_at"]?.GetValue<string>()
+                          ?? d["created_at"]?.GetValue<string>() ?? "";
             if (date.Length >= 10) date = date[..10];        // 2026-08-06T…Z → 2026-08-06
 
-            return new UpdateInfo(remote, date, PlatformAssetUrl(d),
+            return new UpdateInfo(remote, date, PlatformAssetUrl(d, pageUrl),
                                   MarkdownToText(d["body"]?.GetValue<string>() ?? ""));
         }
         catch { return null; }
     }
 
     /// <summary>
-    /// The manifest channel: <c>{version, release_date, download_url, changelog}</c>, the shape
-    /// the pre-1.0 build has always read. Kept tolerant of a missing field — this file is edited
-    /// by hand at release time, and a typo in it must cost the notice, not the app.
-    /// </summary>
-    private static async Task<UpdateInfo?> FromManifestAsync(string currentVersion, int timeoutSec)
-    {
-        try
-        {
-            using HttpClient http = NewClient(currentVersion, timeoutSec);
-            string json = await http.GetStringAsync(ManifestUrl);
-            if (JsonNode.Parse(json) is not JsonObject d) return null;
-
-            string remote = (d["version"]?.GetValue<string>() ?? "").TrimStart('v', 'V');
-            if (remote.Length == 0 || Compare(remote, currentVersion) <= 0) return null;
-
-            return new UpdateInfo(remote,
-                                  d["release_date"]?.GetValue<string>() ?? "",
-                                  ManifestDownloadUrl(d["download_url"]?.GetValue<string>() ?? ""),
-                                  HtmlToText(d["changelog"]?.GetValue<string>() ?? ""));
-        }
-        catch { return null; }
-    }
-
-    /// <summary>
-    /// The manifest carries ONE download_url, and today it is the Windows installer — it is
-    /// shared with the pre-1.0 build, which only ever shipped for Windows. Handing that .exe to a
-    /// Linux or macOS user as "your download" is worse than no link at all, so anything that is
-    /// plainly not this platform's artifact degrades to the site's download page.
-    /// </summary>
-    private static string ManifestDownloadUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return SiteUrl;
-        string name = url.ToLowerInvariant();
-        bool fits = OperatingSystem.IsMacOS() ? name.Contains(".dmg")
-                  : OperatingSystem.IsLinux() ? name.Contains(".appimage")
-                  : name.Contains(".exe");
-        return fits ? url : SiteUrl;
-    }
-
-    /// <summary>
     /// The release asset for the platform we are running on, matched on the file name the
-    /// packaging scripts produce (setup.exe / .AppImage / -arm64|-x86_64.dmg). Falls back to the
-    /// release page itself when nothing matches — a landing page still beats a dead button, and
-    /// it is also what a source-only release should hand back.
+    /// packaging scripts produce (setup.exe / .AppImage / -arm64|-x86_64.dmg). Both mirrors use
+    /// the same names. Gitee additionally lists the source archives it generates for every tag
+    /// (1.0.0.zip, 1.0.0.tar.gz); neither matches an extension below, so they are skipped.
     /// </summary>
-    private static string PlatformAssetUrl(JsonObject d)
+    private static string PlatformAssetUrl(JsonObject d, string pageUrl)
     {
         if (d["assets"] is JsonArray assets)
         {
@@ -178,20 +154,12 @@ public static class Updater
                 if (hit) return url;
             }
         }
-        return d["html_url"]?.GetValue<string>() ?? ReleasesPageUrl;
-    }
-
-    /// <summary>Minimal HTML→text for the manifest changelog (it uses &lt;b&gt; and &lt;br&gt;).</summary>
-    private static string HtmlToText(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        s = Regex.Replace(s, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
-        s = Regex.Replace(s, "<[^>]+>", "");
-        return Collapse(s);
+        // Gitee's response has no html_url, hence the caller-supplied page.
+        return d["html_url"]?.GetValue<string>() ?? pageUrl;
     }
 
     /// <summary>
-    /// Minimal Markdown→text for a GitHub release body. The notice is a plain TextBlock with no
+    /// Minimal Markdown→text for a release body. The notice is a plain TextBlock with no
     /// renderer, so <c>### macOS 首次打开</c> and <c>**Beta**</c> would otherwise reach the user
     /// as punctuation. A de-emphasiser, not a parser: it handles the marks this project's release
     /// notes actually use and leaves everything else — links included — legible as written.
@@ -199,15 +167,15 @@ public static class Updater
     private static string MarkdownToText(string s)
     {
         if (string.IsNullOrEmpty(s)) return "";
+        s = s.Replace("\r\n", "\n");                                              // Gitee sends CRLF
         s = Regex.Replace(s, @"^\s{0,3}#{1,6}\s*", "", RegexOptions.Multiline);   // ### heading
+        s = Regex.Replace(s, @"^\s{0,3}>\s?", "", RegexOptions.Multiline);        // > quote
         s = Regex.Replace(s, @"(\*\*|__)(.+?)\1", "$2", RegexOptions.Singleline); // **bold**
         s = Regex.Replace(s, "`([^`]*)`", "$1");                                  // `code`
-        return Collapse(s);
+        // Trim, and never let more than one blank line through: both mirrors write their notes
+        // for a page with margins, and the notice is a dialog that has to stay one screen.
+        return Regex.Replace(s.Trim(), @"\n{3,}", "\n\n");
     }
-
-    /// <summary>Trim, and never let more than one blank line through — both sources are written
-    /// for a page with margins, and the notice is a dialog that has to stay one screen.</summary>
-    private static string Collapse(string s) => Regex.Replace(s.Trim(), @"\n{3,}", "\n\n");
 
     /// <summary>Compare dotted versions ("1.2.3") component-wise. &gt;0 when a is newer.</summary>
     private static int Compare(string a, string b)
