@@ -49,13 +49,11 @@ public static class SheetStore
     /// <summary>Write a roll's sheet, then bring the store back under budget.</summary>
     public static void Save(string rollId, ImageBuffer sheet)
     {
-        string path = PathFor(rollId);
         Directory.CreateDirectory(Dir);
-        // Temp + replace: the roll list reads these files while they are being rewritten.
-        string tmp = path + ".tmp";
-        JpegIO.ExportJpeg(sheet, tmp, Quality);
-        if (File.Exists(path)) File.Replace(tmp, path, null);
-        else File.Move(tmp, path);
+        // The temp-and-replace this used to do by hand now lives in ExportFile, which
+        // JpegIO.ExportJpeg routes through — so the roll list still never sees a half-written
+        // cover, and there is one implementation of the dance instead of two.
+        JpegIO.ExportJpeg(sheet, PathFor(rollId), Quality);
         Trim();
     }
 
@@ -88,6 +86,9 @@ public static class SheetStore
         {
             var dir = new DirectoryInfo(Dir);
             if (!dir.Exists) return;
+            // Sheets are rewritten constantly, so this is the one directory where a crash mid-write
+            // is likely enough to be worth sweeping on the regular maintenance pass.
+            ExportFile.CleanupStale(Dir);
             FileInfo[] files = dir.GetFiles("*.jpg");
             long total = files.Sum(f => f.Length);
             if (total <= budget) return;

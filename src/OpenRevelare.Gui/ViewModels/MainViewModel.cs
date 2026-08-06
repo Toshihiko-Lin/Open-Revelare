@@ -2508,6 +2508,10 @@ public partial class MainViewModel : ViewModelBase
         {
             var frames = Frames.ToList();
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var reserved = ExportFile.NewReservations();
+            string extension = jpeg ? "jpg" : "tiff";
+            ExportFile.CleanupStale(folder);
+            int renamed = 0;
             for (int i = 0; i < frames.Count; i++)
             {
                 RollFrame f = frames[i];
@@ -2517,16 +2521,26 @@ public partial class MainViewModel : ViewModelBase
                 string baseName = Path.GetFileNameWithoutExtension(f.Path);
                 string name = baseName;
                 for (int dup = 2; !usedNames.Add(name); dup++) name = $"{baseName}_副本{dup - 1}";
+                // Unique, not overwrite: a roll export names its files after the SCANS, so the
+                // folder the user picked may already hold an earlier export, or unrelated files
+                // that happen to match. Nothing here was individually confirmed the way a save
+                // dialog confirms a single file, so nothing here may silently replace anything.
+                // Never null under Unique — only Skip declines to return a path.
+                string outPath = ExportFile.Reserve(folder, name, extension,
+                                                    ExportFile.ConflictPolicy.Unique, reserved)!;
+                if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
+                    renamed++;
                 await Task.Run(() =>
                 {
                     ImageBuffer outImg = Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), p);
-                    string outPath = Path.Combine(folder, name + (jpeg ? ".jpg" : ".tiff"));
                     ColorSpace? icc = p.OutputIntent == OutputIntent.Basic ? ColorSpace.Srgb : null;
                     if (jpeg) JpegIO.ExportJpeg(outImg, outPath, quality: 95);
                     else TiffIO.ExportTiff16(outImg, outPath, TiffIO.CompressionMode.Lzw, icc);
                 });
             }
-            StatusText = $"整卷导出完成（{frames.Count} 帧）→ {folder}";
+            StatusText = renamed > 0
+                ? $"整卷导出完成（{frames.Count} 帧，其中 {renamed} 帧重名已另存）→ {folder}"
+                : $"整卷导出完成（{frames.Count} 帧）→ {folder}";
         }
         catch (Exception ex) { StatusText = "整卷导出失败：" + ex.Message; }
         finally { IsBusy = false; ReleaseBulkBuffers(); }
@@ -2590,6 +2604,7 @@ public partial class MainViewModel : ViewModelBase
             using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
             ImageBuffer outImg = SheetComposer.ToBuffer(composed);
 
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() =>
             {
                 string ext = Path.GetExtension(path).ToLowerInvariant();
@@ -2640,6 +2655,8 @@ public partial class MainViewModel : ViewModelBase
         {
             FrameParams p = BuildParams();
             string srcPath = frame.Path;
+            // Overwrite stays the rule for a single export: the save dialog already asked.
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() =>
             {
                 ImageBuffer full = LoadFullLinear(srcPath);
