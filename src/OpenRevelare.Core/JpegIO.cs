@@ -22,10 +22,11 @@ public static class JpegIO
     /// Staged through <see cref="ExportFile.Write"/> for the same reason as TIFF: ImageSharp's
     /// Save truncates the destination before it has anything to put there.</summary>
     public static void ExportJpeg(ImageBuffer img, string path, int quality = 95,
-                                  string? description = null)
-        => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description));
+                                  string? description = null, ColorSpace? icc = null)
+        => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description, icc));
 
-    private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description)
+    private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,
+                                  ColorSpace? icc)
     {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;
@@ -42,6 +43,11 @@ public static class JpegIO
                 new EncodedString(EncodedString.CharacterCode.Unicode, description));
         }
         image.Metadata.ExifProfile = exif;
+        // Same profile the TIFF path embeds, from the same builder — an export dialog that offers
+        // one "embed ICC" switch must mean the same thing in both containers.
+        if (icc is ColorSpace cs)
+            image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
+                IccProfiles.Build(cs));
 
         image.ProcessPixelRows(accessor =>
         {
