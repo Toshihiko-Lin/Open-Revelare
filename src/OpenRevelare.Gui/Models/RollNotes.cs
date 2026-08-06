@@ -19,6 +19,7 @@ public sealed partial class RollNotes : ObservableObject
     [ObservableProperty] private string _devDate = "";
     [ObservableProperty] private string _location = "";
     [ObservableProperty] private string _rollNote = "";
+    [ObservableProperty] private string _format = "";
 
     /// <summary>
     /// Blank every field. Called when a NEW roll is imported: these notes are per-roll — they are
@@ -29,5 +30,6 @@ public sealed partial class RollNotes : ObservableObject
     {
         CameraBody = ""; FilmStock = ""; FilmIso = ""; RollNumber = "";
         DevLab = ""; DevProcess = ""; DevDate = ""; Location = ""; RollNote = "";
+        Format = "";
     }
 }

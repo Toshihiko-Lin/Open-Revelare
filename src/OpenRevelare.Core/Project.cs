@@ -28,6 +28,11 @@ public static class Project
         public string? LccPath;
         public string CameraBody = "", FilmStock = "", FilmIso = "", RollNumber = "";
         public string DevLab = "", DevProcess = "", DevDate = "", Location = "", RollNote = "";
+
+        /// <summary>Frame format — 135, 120 (6x6), 4x5 … Free text on disk even though the UI
+        /// offers a fixed list, because the list is a convenience and a roll shot on something
+        /// the list does not name is still a roll.</summary>
+        public string Format = "";
     }
 
     public sealed class Frame
@@ -153,6 +158,7 @@ public static class Project
         Add("camera_body", rm.CameraBody); Add("film_stock", rm.FilmStock); Add("film_iso", rm.FilmIso);
         Add("roll_number", rm.RollNumber); Add("dev_lab", rm.DevLab); Add("dev_process", rm.DevProcess);
         Add("dev_date", rm.DevDate); Add("location", rm.Location); Add("roll_note", rm.RollNote);
+        Add("format", rm.Format);
         return d;
     }
 
@@ -177,7 +183,7 @@ public static class Project
             FilmIso = Str(d, "film_iso", ""), RollNumber = Str(d, "roll_number", ""),
             DevLab = Str(d, "dev_lab", ""), DevProcess = Str(d, "dev_process", ""),
             DevDate = Str(d, "dev_date", ""), Location = Str(d, "location", ""),
-            RollNote = Str(d, "roll_note", ""),
+            RollNote = Str(d, "roll_note", ""), Format = Str(d, "format", ""),
         };
     }
 

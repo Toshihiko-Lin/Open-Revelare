@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="OpenRevelare.Gui.Views.ImportDialog"
-        Width="560" Height="620"
+        Width="600" Height="720"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="新建项目 / 导入">
@@ -28,6 +28,39 @@
                                    Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
                     </StackPanel>
                     <TextBlock Classes="groupHint" Text="支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。" />
+                </StackPanel>
+
+                <!-- ── 卷信息 ───────────────────────────────────────────
+                     Entered here because this is when you still remember it. Nothing in the
+                     pipeline reads these; they print on the contact sheet and title the roll
+                     in the catalog, and stay editable in the 印样 window afterwards.
+                     ──────────────────────────────────────────────────── -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="卷信息（可选）" FontWeight="SemiBold" />
+                    <Grid ColumnDefinitions="Auto,*,Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="画幅" Margin="0,3,8,3" />
+                        <AutoCompleteBox Grid.Row="0" Grid.Column="1" Name="FormatCombo" Margin="0,3,14,3"
+                                         FilterMode="None" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Classes="fieldLabel" Text="相机" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="0" Grid.Column="3" Name="CameraEdit" Margin="0,3" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="胶卷" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="1" Grid.Column="1" Name="FilmEdit" Margin="0,3,14,3" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Classes="fieldLabel" Text="卷号" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="1" Grid.Column="3" Name="RollNoEdit" Margin="0,3" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="冲洗店" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="2" Grid.Column="1" Name="LabEdit" Margin="0,3,14,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Classes="fieldLabel" Text="日期" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="2" Grid.Column="3" Name="DateEdit" Margin="0,3" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="地点" Margin="0,3,8,3" />
+                        <TextBox  Grid.Row="3" Grid.Column="1" Name="LocationEdit" Margin="0,3,14,3" />
+                    </Grid>
+                    <TextBox Name="NoteEdit" AcceptsReturn="True" Height="52" TextWrapping="Wrap"
+                             Watermark="备注" Margin="0,4,0,0" />
+                    <TextBlock Classes="groupHint"
+                               Text="印在印样上，不写入 EXIF；也是图库的筛选依据（胶卷 / 相机 / ISO / 冲洗店 / 工艺 / 地点 / 年份）。导入后仍可在图库「卷信息」里修改。" />
                 </StackPanel>
 
                 <!-- ── 翻拍光源 ─────────────────────────────────────── -->

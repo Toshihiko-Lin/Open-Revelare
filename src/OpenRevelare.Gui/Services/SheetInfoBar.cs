@@ -92,13 +92,11 @@ public static class SheetInfoBar
         {
             ("相机", n.CameraBody),
             ("胶卷", n.FilmStock),
-            ("ISO/ASA", n.FilmIso),
             ("卷号", n.RollNumber),
         };
         (string Label, string Value)[] col2 =
         {
             ("冲洗店", n.DevLab),
-            ("工艺", n.DevProcess),
             ("日期", n.DevDate),
             ("地点", n.Location),
         };
@@ -156,7 +154,7 @@ public static class SheetInfoBar
 
         private Metrics(double s, int width)
         {
-            Rows = 5;                        // four paired rows + 备注
+            Rows = 4;                        // three paired rows + 备注
             Pad = 34 * s;
             Gutter = 20 * s;
             Hairline = Math.Max(1, Math.Round(2 * s));

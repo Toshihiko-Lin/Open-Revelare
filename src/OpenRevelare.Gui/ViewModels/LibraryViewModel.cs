@@ -59,12 +59,61 @@ public sealed partial class RollCard : ObservableObject
     }
 }
 
+/// <summary>One value a roll can have inside a facet, with how many rolls have it.</summary>
+public sealed partial class FilterOption : ObservableObject
+{
+    public string Value { get; }
+    public int Count { get; }
+
+    /// <summary>Value and tally in one string: a facet whose counts are invisible makes the user
+    /// click through empty-ish filters to find out how much is behind each.</summary>
+    public string Label => $"{Value}    {Count}";
+
+    private readonly Action _onToggled;
+
+    [ObservableProperty] private bool _isChecked;
+
+    partial void OnIsCheckedChanged(bool value) => _onToggled();
+
+    public FilterOption(string value, int count, Action onToggled)
+    {
+        Value = value;
+        Count = count;
+        _onToggled = onToggled;
+    }
+}
+
+/// <summary>One filterable column of the catalog — 胶卷, 相机, 年份.</summary>
+public sealed class FilterFacet
+{
+    public string Name { get; }
+
+    /// <summary>Which field of the roll's annotation this facet groups by. Carried on the facet
+    /// rather than switched on its name, so adding one is a single line in the table below and
+    /// never a second place to edit.</summary>
+    internal Func<Catalog.Roll, string> Selector { get; }
+
+    public ObservableCollection<FilterOption> Options { get; } = new();
+
+    public FilterFacet(string name, Func<Catalog.Roll, string> selector)
+    {
+        Name = name;
+        Selector = selector;
+    }
+}
+
 /// <summary>
 /// The 图库 module: every roll this install knows about, as a wall of contact sheets.
 ///
 /// Deliberately knows nothing about frames. Opening a roll hands its .ncproj to the editing view
 /// model, which is the one thing that reads pixels — the library itself never decodes a negative,
 /// it only reads one JPEG per roll. That is what keeps a 500-roll catalog scrollable.
+///
+/// Filtering is done over the in-memory catalog, not by querying anything. <see cref="Catalog"/>
+/// is already fully loaded — it exists so the roll list can be drawn without opening dozens of
+/// project files — so faceting it is a LINQ pass over a few hundred small objects. (NexFilm, which
+/// has the same sidebar, does exactly this too: its SQLite is the persistence layer, and the
+/// filtering happens on a JavaScript array it loaded at startup.)
 /// </summary>
 public sealed partial class LibraryViewModel : ObservableObject
 {
@@ -72,7 +121,28 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// (rather than full size then shrinking) is what makes a wall of covers cheap.</summary>
     private const int CoverWidth = 320;
 
+    /// <summary>What the wall currently SHOWS — the 新建 tile plus whatever survives the filter.</summary>
     public ObservableCollection<RollCard> Rolls { get; } = new();
+
+    /// <summary>Every roll's card, filtered or not. Held separately so narrowing the filter is a
+    /// list rebuild and never a cover re-decode: the cards keep the bitmaps they already own.</summary>
+    private readonly List<RollCard> _all = new();
+
+    public ObservableCollection<FilterFacet> Facets { get; } = new();
+
+    [ObservableProperty] private string _searchText = "";
+
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+
+    /// <summary>Set while facets are being rebuilt, so restoring the previous ticks does not fire
+    /// one filter pass per checkbox.</summary>
+    private bool _rebuilding;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilterSummary))]
+    private bool _hasActiveFilter;
+
+    public string FilterSummary => HasActiveFilter ? $"已筛选 · 共 {_all.Count} 卷" : $"共 {_all.Count} 卷";
 
     [ObservableProperty] private RollCard? _selected;
 
@@ -88,8 +158,12 @@ public sealed partial class LibraryViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(RollCountText))]
     private bool _isEmpty = true;
 
-    /// <summary>Header count. Excludes the 新建 tile, which is furniture, not a roll.</summary>
-    public string RollCountText => IsEmpty ? "还没有卷" : $"{Rolls.Count - 1} 卷";
+    /// <summary>Header count. Excludes the 新建 tile, which is furniture, not a roll. Shows the
+    /// filtered count against the total when a filter is on, so a short wall is never mistaken for
+    /// a lost catalog.</summary>
+    public string RollCountText => IsEmpty ? "还没有卷"
+        : HasActiveFilter ? $"{Rolls.Count - 1} / {_all.Count} 卷"
+        : $"{_all.Count} 卷";
 
     /// <summary>
     /// Reload from the catalog and decode the covers. Ordered by IMPORT time, newest first — so a
@@ -99,18 +173,134 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// </summary>
     public async Task RefreshAsync()
     {
-        foreach (RollCard c in Rolls) { c.Cover?.Dispose(); c.Cover = null; }
-        Rolls.Clear();
+        foreach (RollCard c in _all) { c.Cover?.Dispose(); c.Cover = null; }
+        _all.Clear();
 
-        Rolls.Add(new RollCard(null));   // the 新建卷 tile always leads
         List<Catalog.Roll> rolls = Catalog.Rolls.OrderByDescending(r => r.ImportedAt).ToList();
-        foreach (Catalog.Roll r in rolls) Rolls.Add(new RollCard(r));
+        foreach (Catalog.Roll r in rolls) _all.Add(new RollCard(r));
         IsEmpty = rolls.Count == 0;
-        Selected = Rolls.Skip(1).FirstOrDefault();
+
+        RebuildFacets(rolls);
+        ApplyFilter();
 
         // Covers land one at a time so the wall draws immediately and fills in, rather than
-        // waiting on every JPEG before showing anything.
-        foreach (RollCard card in Rolls.ToList()) await RefreshCoverAsync(card);
+        // waiting on every JPEG before showing anything. Driven off _all, not the filtered view:
+        // a card the filter is hiding right now still needs its cover for when it comes back.
+        foreach (RollCard card in _all.ToList()) await RefreshCoverAsync(card);
+    }
+
+    /// <summary>
+    /// Recompute the facet lists from the catalog, preserving whatever was ticked. Values a roll
+    /// leaves blank are skipped rather than bucketed under "未填"— an empty film-stock field means
+    /// the user has not told us, not that these rolls belong together.
+    /// </summary>
+    private void RebuildFacets(IReadOnlyList<Catalog.Roll> rolls)
+    {
+        var ticked = Facets
+            .SelectMany(f => f.Options.Where(o => o.IsChecked).Select(o => (f.Name, o.Value)))
+            .ToHashSet();
+
+        _rebuilding = true;
+        Facets.Clear();
+        // Every field of 卷信息 that GROUPS. 卷号 is deliberately absent — it is unique per roll,
+        // so a facet built on it is a list of one-item buckets; the search box covers it instead.
+        // A facet whose values are all blank adds nothing and is dropped below, so a user who
+        // only ever fills in 胶卷 sees one facet rather than seven empty headings.
+        foreach (var (name, selector) in new (string, Func<Catalog.Roll, string>)[]
+                 {
+                     ("画幅", r => r.Format),
+                     ("胶卷", r => r.FilmStock),
+                     ("相机", r => r.CameraBody),
+                     ("冲洗店", r => r.DevLab),
+                     ("年份", r => Year(r.DevDate)),
+                 })
+        {
+            var facet = new FilterFacet(name, selector);
+            IEnumerable<IGrouping<string, Catalog.Roll>> groups = rolls
+                .Where(r => !string.IsNullOrWhiteSpace(selector(r)))
+                .GroupBy(r => selector(r).Trim(), StringComparer.OrdinalIgnoreCase);
+            // Commonest first, because that is the order someone scanning the list wants; 年份
+            // is the exception — a chronological axis read out of order is just confusing.
+            groups = name == "年份"
+                ? groups.OrderByDescending(g => g.Key, StringComparer.Ordinal)
+                : groups.OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.CurrentCulture);
+            foreach (IGrouping<string, Catalog.Roll> g in groups)
+                facet.Options.Add(new FilterOption(g.Key, g.Count(), ApplyFilter)
+                {
+                    IsChecked = ticked.Contains((name, g.Key)),
+                });
+            if (facet.Options.Count > 0) Facets.Add(facet);
+        }
+        _rebuilding = false;
+    }
+
+    /// <summary>The year a 冲洗日期 starts with, or empty when it is not dated. Kept lenient on
+    /// purpose: the field is free text, so anything not beginning with four digits simply does not
+    /// take part in the year facet rather than becoming a junk bucket.</summary>
+    private static string Year(string devDate)
+    {
+        string s = (devDate ?? "").TrimStart();
+        return s.Length >= 4 && s.Take(4).All(char.IsAsciiDigit) ? s[..4] : "";
+    }
+
+    /// <summary>Rebuild the visible wall from <see cref="_all"/> under the current facets and
+    /// search text. Within a facet the ticks are OR; between facets they are AND — the reading
+    /// that makes "Portra 400 + 年份 2024" mean what it looks like.</summary>
+    private void ApplyFilter()
+    {
+        if (_rebuilding) return;
+
+        RollCard? previous = Selected;
+        Rolls.Clear();
+        Rolls.Add(new RollCard(null));   // the 新建卷 tile always leads, filter or no filter
+        foreach (RollCard card in _all.Where(Matches)) Rolls.Add(card);
+
+        HasActiveFilter = !string.IsNullOrWhiteSpace(SearchText)
+                          || Facets.Any(f => f.Options.Any(o => o.IsChecked));
+        OnPropertyChanged(nameof(RollCountText));
+        OnPropertyChanged(nameof(FilterSummary));
+
+        // Keep the selection when it survived the filter; otherwise fall to the first roll so the
+        // wall is never left pointing at a card it is no longer showing.
+        Selected = previous is not null && Rolls.Contains(previous)
+            ? previous
+            : Rolls.Skip(1).FirstOrDefault();
+    }
+
+    private bool Matches(RollCard card)
+    {
+        if (card.Roll is not { } roll) return true;
+
+        foreach (FilterFacet facet in Facets)
+        {
+            var picked = facet.Options.Where(o => o.IsChecked).Select(o => o.Value).ToList();
+            if (picked.Count == 0) continue;   // an untouched facet constrains nothing
+            string value = facet.Selector(roll).Trim();
+            if (!picked.Contains(value, StringComparer.OrdinalIgnoreCase)) return false;
+        }
+
+        string query = SearchText.Trim();
+        if (query.Length == 0) return true;
+        // Search spans every annotation field, including the ones with no facet — 卷号 has no
+        // sensible facet but is exactly the sort of thing someone types into a search box.
+        return new[]
+            {
+                roll.Title, roll.RollNumber, roll.FilmStock, roll.CameraBody,
+                roll.FilmIso, roll.DevLab, roll.DevProcess, roll.Location, roll.DevDate,
+                roll.Format,
+            }
+            .Any(field => field?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
+    }
+
+    /// <summary>Drop every tick and the search box in one go — with three facets it is otherwise
+    /// entirely possible to lose track of why the wall is short.</summary>
+    public void ClearFilters()
+    {
+        _rebuilding = true;
+        foreach (FilterOption option in Facets.SelectMany(f => f.Options)) option.IsChecked = false;
+        _rebuilding = false;
+        SearchText = "";   // setter runs ApplyFilter; do it last so one pass covers everything
+        ApplyFilter();
     }
 
     /// <summary>(Re)read one card's cover off disk, decoding straight to card width.</summary>
@@ -153,6 +343,7 @@ public sealed partial class LibraryViewModel : ObservableObject
                 CameraBody = m.CameraBody, FilmStock = m.FilmStock, FilmIso = m.FilmIso,
                 RollNumber = m.RollNumber, DevLab = m.DevLab, DevProcess = m.DevProcess,
                 DevDate = m.DevDate, Location = m.Location, RollNote = m.RollNote,
+                Format = m.Format,
             };
         }
         catch { return null; }
@@ -172,7 +363,7 @@ public sealed partial class LibraryViewModel : ObservableObject
                 live.FilmIso = edited.FilmIso; live.RollNumber = edited.RollNumber;
                 live.DevLab = edited.DevLab; live.DevProcess = edited.DevProcess;
                 live.DevDate = edited.DevDate; live.Location = edited.Location;
-                live.RollNote = edited.RollNote;
+                live.RollNote = edited.RollNote; live.Format = edited.Format;
             }
             else
             {
@@ -181,7 +372,7 @@ public sealed partial class LibraryViewModel : ObservableObject
                 d.Meta.FilmIso = edited.FilmIso; d.Meta.RollNumber = edited.RollNumber;
                 d.Meta.DevLab = edited.DevLab; d.Meta.DevProcess = edited.DevProcess;
                 d.Meta.DevDate = edited.DevDate; d.Meta.Location = edited.Location;
-                d.Meta.RollNote = edited.RollNote;
+                d.Meta.RollNote = edited.RollNote; d.Meta.Format = edited.Format;
                 Project.Save(roll.ProjectPath, d);
                 // The cover still carries the OLD info bar; it is redrawn when this roll is next
                 // opened. Re-rendering it here would mean decoding the whole roll from the wall.
@@ -189,8 +380,16 @@ public sealed partial class LibraryViewModel : ObservableObject
 
             roll.CameraBody = edited.CameraBody; roll.FilmStock = edited.FilmStock;
             roll.RollNumber = edited.RollNumber; roll.DevDate = edited.DevDate;
+            roll.FilmIso = edited.FilmIso; roll.DevLab = edited.DevLab;
+            roll.DevProcess = edited.DevProcess; roll.Location = edited.Location;
+            roll.Format = edited.Format;
             Catalog.Upsert(roll);
             card.RefreshText();
+            // Editing 卷信息 changes what the sidebar can offer, so the facets are recounted here —
+            // otherwise a film stock just typed does not exist as a filter until the library is
+            // reopened, which reads as the filter being broken.
+            RebuildFacets(_all.Select(c => c.Roll).OfType<Catalog.Roll>().ToList());
+            ApplyFilter();
             return null;
         }
         catch (Exception ex) { return "保存卷信息失败：" + ex.Message; }

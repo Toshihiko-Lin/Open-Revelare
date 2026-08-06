@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -19,9 +20,10 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public sealed class RollInfoDialog : Window
 {
-    private readonly TextBox _camera = new(), _film = new(), _iso = new(), _number = new();
-    private readonly TextBox _lab = new(), _process = new(), _date = new(), _place = new();
+    private readonly TextBox _camera = new(), _film = new(), _number = new();
+    private readonly TextBox _lab = new(), _date = new(), _place = new();
     private readonly TextBox _note = new() { AcceptsReturn = true, Height = 66, TextWrapping = TextWrapping.Wrap };
+    private readonly AutoCompleteBox _format = new() { FilterMode = AutoCompleteFilterMode.None };
 
     public RollInfoDialog(string rollTitle, RollNotes initial)
     {
@@ -31,19 +33,22 @@ public sealed class RollInfoDialog : Window
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
+        _format.ItemsSource = ImportDialog.FormatPresets;
+        _format.Text = initial.Format;
+
         _camera.Text = initial.CameraBody; _film.Text = initial.FilmStock;
-        _iso.Text = initial.FilmIso; _number.Text = initial.RollNumber;
-        _lab.Text = initial.DevLab; _process.Text = initial.DevProcess;
+        _number.Text = initial.RollNumber;
+        _lab.Text = initial.DevLab;
         _date.Text = initial.DevDate; _place.Text = initial.Location;
         _note.Text = initial.RollNote;
 
         var grid = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-            RowDefinitions = new RowDefinitions(string.Join(",", new string[8].Select(_ => "Auto"))),
+            RowDefinitions = new RowDefinitions(string.Join(",", new string[7].Select(_ => "Auto"))),
         };
-        string[] labels = { "相机", "胶卷", "ISO/ASA", "卷号", "冲洗店", "工艺", "日期", "地点" };
-        TextBox[] boxes = { _camera, _film, _iso, _number, _lab, _process, _date, _place };
+        string[] labels = { "画幅", "相机", "胶卷", "卷号", "冲洗店", "日期", "地点" };
+        Control[] boxes = { _format, _camera, _film, _number, _lab, _date, _place };
         for (int i = 0; i < labels.Length; i++)
         {
             var t = new TextBlock
@@ -94,9 +99,10 @@ public sealed class RollInfoDialog : Window
     private RollNotes Collect() => new()
     {
         CameraBody = _camera.Text ?? "", FilmStock = _film.Text ?? "",
-        FilmIso = _iso.Text ?? "", RollNumber = _number.Text ?? "",
-        DevLab = _lab.Text ?? "", DevProcess = _process.Text ?? "",
+        RollNumber = _number.Text ?? "",
+        DevLab = _lab.Text ?? "",
         DevDate = _date.Text ?? "", Location = _place.Text ?? "",
         RollNote = _note.Text ?? "",
+        Format = _format.Text ?? "",
     };
 }
