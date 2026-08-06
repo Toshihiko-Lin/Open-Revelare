@@ -35,11 +35,16 @@ public sealed class TExtension : MarkupExtension
         };
 }
 
-/// <summary>One live translation, bound to by one XAML property. Registered weakly so that
-/// tearing a window down (or scrolling a virtualised list) does not leak its strings.</summary>
+/// <summary>One live translation, bound to by one XAML property.
+///
+/// Stored with a strong reference in <see cref="Live"/> so that the binding source is never
+/// garbage-collected between initialisation and the first language switch. Avalonia 11's binding
+/// expression does not guarantee holding a strong reference to an INPC source, so keeping the
+/// entry alive here is necessary for <see cref="RefreshAll"/> to reliably reach every live
+/// binding after a language change.</summary>
 public sealed class LocEntry : INotifyPropertyChanged
 {
-    private static readonly List<WeakReference<LocEntry>> Live = new();
+    private static readonly List<LocEntry> Live = new();
 
     static LocEntry() => Loc.Changed += RefreshAll;
 
@@ -48,7 +53,7 @@ public sealed class LocEntry : INotifyPropertyChanged
     public LocEntry(string key)
     {
         _key = key;
-        lock (Live) Live.Add(new WeakReference<LocEntry>(this));
+        lock (Live) Live.Add(this);
     }
 
     public string Value => Loc.T(_key);
@@ -57,15 +62,11 @@ public sealed class LocEntry : INotifyPropertyChanged
 
     private static void RefreshAll()
     {
-        lock (Live)
-        {
-            for (int i = Live.Count - 1; i >= 0; i--)
-            {
-                if (Live[i].TryGetTarget(out LocEntry? e))
-                    e.PropertyChanged?.Invoke(e, new PropertyChangedEventArgs(nameof(Value)));
-                else
-                    Live.RemoveAt(i);
-            }
-        }
+        LocEntry[] snapshot;
+        lock (Live) snapshot = Live.ToArray();
+
+        var args = new PropertyChangedEventArgs(nameof(Value));
+        foreach (var e in snapshot)
+            e.PropertyChanged?.Invoke(e, args);
     }
 }

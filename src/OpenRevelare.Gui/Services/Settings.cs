@@ -24,10 +24,10 @@ public static class Settings
 
         /// <summary>UI language: "auto" (follow the OS), "zh" or "en". See <see cref="Loc"/>.
         ///
-        /// Defaults to auto rather than to zh so a machine running an English Windows gets an
-        /// English UI on first launch without having to find the setting that fixes it — which is
-        /// the one setting a user cannot look up in a language they do not read.</summary>
-        public string Language { get; set; } = "auto";
+        /// Defaults to "zh": the primary audience is Chinese-speaking users, and an English-first
+        /// default would require them to find the setting in a language they may not read.
+        /// Non-Chinese systems can switch to auto or en via Preferences.</summary>
+        public string Language { get; set; } = "zh";
 
         // ── Disk cache for Adobe-converted linear DNGs ──────────────────────────
         // Session-scoped, so it never accumulates across runs. Location follows the SOURCE file
