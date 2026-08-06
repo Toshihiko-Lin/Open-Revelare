@@ -106,7 +106,7 @@ public static class SheetComposer
         if (lead.Length == 0) lead = "CONTACT SHEET";
 
         FormattedText left = Text(lead, m.HeaderSize, theme.HeaderText, FontWeight.SemiBold);
-        FormattedText right = Text($"{count} 帧", m.HeaderSize, theme.HeaderDim, FontWeight.Normal);
+        FormattedText right = Text(Loc.F($"{count} 帧"), m.HeaderSize, theme.HeaderDim, FontWeight.Normal);
 
         double baseline = m.Margin + (m.HeaderH - m.HeaderRuleGap - left.Height) / 2;
         ctx.DrawText(left, new Point(m.Margin, baseline));

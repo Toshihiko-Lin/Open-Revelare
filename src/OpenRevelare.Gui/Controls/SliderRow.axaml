@@ -1,17 +1,22 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i18n="using:OpenRevelare.Gui.Markup"
              xmlns:ctl="using:OpenRevelare.Gui.Controls"
              x:Class="OpenRevelare.Gui.Controls.SliderRow"
              x:DataType="ctl:SliderRow"
              x:Name="Root">
     <!-- 标签（双击重置）| 滑条 | 数字框 —— 复刻 Python _make_row 布局 -->
-    <Grid ColumnDefinitions="44,*,64" Margin="0,2">
+    <!-- Auto, not a fixed 44: 「曝光」 is two glyphs and "Exposure" is eight, so a width that
+         fits the Chinese label clips the English one. MinWidth keeps the sliders lined up in
+         Chinese, where every label is short enough that Auto would ragged-edge them. -->
+    <Grid ColumnDefinitions="Auto,*,64" Margin="0,2">
         <TextBlock Name="LabelText"
                    Grid.Column="0"
                    Text="{Binding Label, ElementName=Root}"
+                   MinWidth="44"
                    VerticalAlignment="Center" FontSize="12"
                    Foreground="{DynamicResource TextDimBrush}"
-                   ToolTip.Tip="双击重置"
+                   ToolTip.Tip="{i18n:T '双击重置'}"
                    DoubleTapped="OnLabelDoubleTapped" />
         <Slider Name="Sld"
                 Grid.Column="1"

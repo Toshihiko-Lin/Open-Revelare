@@ -178,7 +178,7 @@ public partial class MainViewModel : ViewModelBase
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
     }
 
-    [ObservableProperty] private string _statusText = "打开一张负片（RAW 或 TIFF）开始。";
+    [ObservableProperty] private string _statusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
     [ObservableProperty] private string _backgroundStatus = "";
@@ -287,22 +287,22 @@ public partial class MainViewModel : ViewModelBase
     public void Undo()
     {
         CommitUndo();
-        if (_undo.Count == 0) { StatusText = "没有可撤销的操作"; return; }
+        if (_undo.Count == 0) { StatusText = Loc.T("没有可撤销的操作"); return; }
         _redo.Add(CaptureSnapshot());
         RollSnapshot snap = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
         RestoreSnapshot(snap);
-        StatusText = $"已撤销（剩余 {_undo.Count} 步）";
+        StatusText = Loc.F($"已撤销（剩余 {_undo.Count} 步）");
     }
 
     public void Redo()
     {
-        if (_redo.Count == 0) { StatusText = "没有可重做的操作"; return; }
+        if (_redo.Count == 0) { StatusText = Loc.T("没有可重做的操作"); return; }
         _undo.Add(CaptureSnapshot());
         RollSnapshot snap = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
         RestoreSnapshot(snap);
-        StatusText = $"已重做（剩余 {_redo.Count} 步）";
+        StatusText = Loc.F($"已重做（剩余 {_redo.Count} 步）");
     }
 
     private void RestoreSnapshot(RollSnapshot snap)
@@ -341,7 +341,7 @@ public partial class MainViewModel : ViewModelBase
     private ImageBuffer? _lccFlatField;
     [ObservableProperty] private bool _lccAvailable;
     [ObservableProperty] private bool _lccEnabled;
-    [ObservableProperty] private string _lccStatus = "未载入平场校正";
+    [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
     partial void OnLccEnabledChanged(bool value) => ScheduleRender();
 
     /// <summary>Load a flat-field reference (RAW/TIFF) → mean-normalised LCC field, roll-level.</summary>
@@ -354,9 +354,9 @@ public partial class MainViewModel : ViewModelBase
             _lccSourcePath = path;
             LccAvailable = true;
             LccEnabled = true;   // triggers render
-            LccStatus = "已载入平场：" + Path.GetFileName(path);
+            LccStatus = Loc.T("已载入平场：") + Path.GetFileName(path);
         }
-        catch (Exception ex) { LccStatus = "平场载入失败：" + ex.Message; }
+        catch (Exception ex) { LccStatus = Loc.T("平场载入失败：") + ex.Message; }
     }
 
     // 镜头校正（预反相线性域，不依赖镜头库）：手动畸变 + 手动暗角
@@ -524,7 +524,7 @@ public partial class MainViewModel : ViewModelBase
     /// hid the fact that the crop travels with the frame.</summary>
     private string OrientationStatus(string what)
         => _cropRect is { } c
-            ? $"{what}（裁切已同步：{c.X:F2},{c.Y:F2},{c.W:F2},{c.H:F2}）"
+            ? Loc.F($"{what}（裁切已同步：{c.X:F2},{c.Y:F2},{c.W:F2},{c.H:F2}）")
             : what;
 
     /// <summary>An odd number of mirrors is in the chain, so a stored quarter turn reads BACKWARDS
@@ -535,7 +535,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _quarterTurns = (_quarterTurns + (Mirrored ? 3 : 1)) & 3;
         if (_cropRect is { } c) _cropRect = RotateCropCw(c);
-        StatusText = OrientationStatus("顺时针 90°");
+        StatusText = OrientationStatus(Loc.T("顺时针 90°"));
         ScheduleRender();
     }
 
@@ -543,7 +543,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _quarterTurns = (_quarterTurns + (Mirrored ? 1 : 3)) & 3;
         if (_cropRect is { } c) _cropRect = RotateCropCcw(c);
-        StatusText = OrientationStatus("逆时针 90°");
+        StatusText = OrientationStatus(Loc.T("逆时针 90°"));
         ScheduleRender();
     }
 
@@ -551,7 +551,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _flipH = !_flipH;
         if (_cropRect is { } c) _cropRect = FlipCropH(c);
-        StatusText = OrientationStatus("水平翻转");
+        StatusText = OrientationStatus(Loc.T("水平翻转"));
         ScheduleRender();
     }
 
@@ -559,7 +559,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _flipV = !_flipV;
         if (_cropRect is { } c) _cropRect = FlipCropV(c);
-        StatusText = OrientationStatus("竖直翻转");
+        StatusText = OrientationStatus(Loc.T("竖直翻转"));
         ScheduleRender();
     }
     /// <summary>
@@ -614,10 +614,10 @@ public partial class MainViewModel : ViewModelBase
     public void SetCrop((double X, double Y, double W, double H) rect)
     {
         _cropRect = rect;
-        StatusText = $"裁切 {rect.X:F2},{rect.Y:F2},{rect.W:F2},{rect.H:F2}";
+        StatusText = Loc.F($"裁切 {rect.X:F2},{rect.Y:F2},{rect.W:F2},{rect.H:F2}");
         ScheduleRender();
     }
-    public void ClearCrop() { _cropRect = null; StatusText = "已清除裁切"; ScheduleRender(); }
+    public void ClearCrop() { _cropRect = null; StatusText = Loc.T("已清除裁切"); ScheduleRender(); }
 
     /// <summary>The 拉直 slider's range, and therefore the ceiling on a straighten measurement.</summary>
     public const double StraightenLimit = 15.0;
@@ -634,15 +634,15 @@ public partial class MainViewModel : ViewModelBase
     {
         double wanted = Rotation + deltaDeg;
         Rotation = Math.Clamp(wanted, -StraightenLimit, StraightenLimit);
-        string measured = $"拉线取直 {deltaDeg:+0.0;-0.0}° → 拉直 {Rotation:F1}°";
+        string measured = Loc.F($"拉线取直 {deltaDeg:+0.0;-0.0}° → 拉直 {Rotation:F1}°");
         StatusText = Math.Abs(wanted - Rotation) > 1e-9
-            ? measured + $"（已到 ±{StraightenLimit:F0}° 上限，如需更多请先用 90° 旋转）"
+            ? measured + Loc.F($"（已到 ±{StraightenLimit:F0}° 上限，如需更多请先用 90° 旋转）")
             : measured;
     }
 
     // ── Sampling state ──────────────────────────────────────────────────────────
     private Bitmap? _savedPositive;                   // positive stashed while showing negative
-    [ObservableProperty] private string _filmBaseText = "片基：默认（未采样）";
+    [ObservableProperty] private string _filmBaseText = Loc.T("片基：默认（未采样）");
 
     // ── Tone curves (gamma-2.2 domain; set by the CurveEditor via SetCurves) ─────
     private List<(double X, double Y)> _curveM = new(), _curveR = new(), _curveG = new(), _curveB = new();
@@ -794,16 +794,16 @@ public partial class MainViewModel : ViewModelBase
     private void TrySample(string what, Action sample)
     {
         try { sample(); }
-        catch (Exception ex) { StatusText = $"{what}失败：{ex.Message}"; }
+        catch (Exception ex) { StatusText = Loc.F($"{what}失败：{ex.Message}"); }
     }
 
     /// <summary>Film-base t_base from a rect over clear film (removes the orange mask).</summary>
-    public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample("片基采样", () =>
+    public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample(Loc.T("片基采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] tb = FilmBase.SampleTBase(src, rect);
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
-        FilmBaseText = $"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}";
+        FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -816,34 +816,34 @@ public partial class MainViewModel : ViewModelBase
         // loose heuristic and box-downsampling barely moves a 99.9th percentile.
         double[] br = ImageIo.BrightReference(src);
         StatusText = tb[0] < br[0] * 0.4 || tb[1] < br[1] * 0.4 || tb[2] < br[2] * 0.4
-            ? "⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采"
+            ? Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采")
             : FilmBaseText;
     });
 
     /// <summary>Shadow-end density offset (wb_offset) from a dark rect.</summary>
-    public void SampleWbOffset((double X, double Y, double W, double H) rect) => TrySample("暗部采样", () =>
+    public void SampleWbOffset((double X, double Y, double W, double H) rect) => TrySample(Loc.T("暗部采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] off = FilmBase.SampleWbOffsetFromRect(src, rect, TBaseArr());
         WbOffR = off[0]; WbOffG = off[1]; WbOffB = off[2];
-        StatusText = $"暗部 wb_offset = {off[0]:F3}, {off[1]:F3}, {off[2]:F3}";
+        StatusText = Loc.F($"暗部 wb_offset = {off[0]:F3}, {off[1]:F3}, {off[2]:F3}");
     });
 
     /// <summary>Highlight-end WB (wb_high) from a neutral highlight rect.</summary>
-    public void SampleWbHigh((double X, double Y, double W, double H) rect) => TrySample("高光采样", () =>
+    public void SampleWbHigh((double X, double Y, double W, double H) rect) => TrySample(Loc.T("高光采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] hi = FilmBase.SampleWbHighFromRect(src, rect, TBaseArr(), WbOffArr());
         WbHighR = hi[0]; WbHighG = hi[1]; WbHighB = hi[2];
-        StatusText = $"高光 wb_high = {hi[0]:F3}, {hi[1]:F3}, {hi[2]:F3}";
+        StatusText = Loc.F($"高光 wb_high = {hi[0]:F3}, {hi[1]:F3}, {hi[2]:F3}");
     });
 
     /// <summary>D-max from the negative's darkest region (= scene highlights = positive white).</summary>
-    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample("D-max 采样", () =>
+    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(Loc.T("D-max 采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         DMax = FilmBase.SampleDMaxFromRect(src, rect, TBaseArr());
-        StatusText = $"D-max = {DMax:F3}（底片最暗区 = 场景高光端）";
+        StatusText = Loc.F($"D-max = {DMax:F3}（底片最暗区 = 场景高光端）");
     });
 
     /// <summary>Apply the import-time sprocket dialog result to the whole roll, then auto-detect film base.</summary>
@@ -879,10 +879,10 @@ public partial class MainViewModel : ViewModelBase
                                                  valueImages: new[] { dec });
             TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
             foreach (RollFrame f in Frames) f.Params.TBase = (double[])tb.Clone();
-            FilmBaseText = $"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）";
-            StatusText = "已自动检测片基" + (sprocketThreshold is null ? "（无齿孔模式）" : "与齿孔阈值");
+            FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）");
+            StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
         }
-        catch (Exception ex) { StatusText = "自动片基检测失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
         RestartThumbnails();
     }
 
@@ -917,7 +917,7 @@ public partial class MainViewModel : ViewModelBase
             norm[b + 2] = (float)(src.Data[b + 2] / tb[2]);
         }
         DMax = FilmBase.DetectDMax(new ImageBuffer(src.Width, src.Height, norm));
-        StatusText = $"自动 D-max = {DMax:F3}";
+        StatusText = Loc.F($"自动 D-max = {DMax:F3}");
     }
 
     /// <summary>Sample the scan-exposure bias so a film-base rect falls to pure black.</summary>
@@ -937,7 +937,7 @@ public partial class MainViewModel : ViewModelBase
             dResid += -Math.Log10(Math.Max(t[c], 1e-6) / tb[c]);
         dResid /= 3.0;
         ScanEv = Math.Clamp(ScanEv - dResid / 0.3010299956639812, -3.0, 3.0);
-        StatusText = $"偏移 scan_ev = {ScanEv:F2}";
+        StatusText = Loc.F($"偏移 scan_ev = {ScanEv:F2}");
     }
 
     /// <summary>
@@ -988,7 +988,7 @@ public partial class MainViewModel : ViewModelBase
         var (temp, tint, _ev) = WbMath.GainsToTempTint(gains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
         Tint = Math.Clamp(tint, -WbMath.WbRange, WbMath.WbRange);
-        StatusText = $"灰点白平衡 → 色温 {Temp:F0} / 色调 {Tint:F0}";
+        StatusText = Loc.F($"灰点白平衡 → 色温 {Temp:F0} / 色调 {Tint:F0}");
     }
 
     /// <summary>
@@ -1015,11 +1015,11 @@ public partial class MainViewModel : ViewModelBase
                 SprocketEnabled ? SprocketThreshold : null,
                 valueImages: ReferenceEquals(raw, val) ? null : new[] { val });
             WbHighR = wh[0]; WbHighG = wh[1]; WbHighB = wh[2];
-            StatusText = $"自动亮部 WB → wb_high = {wh[0]:F3}, {wh[1]:F3}, {wh[2]:F3}";
+            StatusText = Loc.F($"自动亮部 WB → wb_high = {wh[0]:F3}, {wh[1]:F3}, {wh[2]:F3}");
         }
         catch (Exception ex)
         {
-            StatusText = "自动白平衡失败：" + ex.Message;
+            StatusText = Loc.T("自动白平衡失败：") + ex.Message;
         }
     }
 
@@ -1077,7 +1077,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_previewLinear is null) return;
         IsBusy = true;
-        StatusText = "智能白平衡分析中 …";
+        StatusText = Loc.T("智能白平衡分析中 …");
         try
         {
             double grade = Grade, pivot = Pivot;
@@ -1155,16 +1155,16 @@ public partial class MainViewModel : ViewModelBase
                                     $"{logGains[0]:F4},{logGains[1]:F4},{logGains[2]:F4} dev={dev:F4} " +
                                     $"wb_high={wh[0]:F4},{wh[1]:F4},{wh[2]:F4}");
                     int round = it;
-                    Dispatcher.UIThread.Post(() => StatusText = $"智能白平衡 第 {round}/50 轮 · 收敛度 {dev:F4}");
+                    Dispatcher.UIThread.Post(() => StatusText = Loc.F($"智能白平衡 第 {round}/50 轮 · 收敛度 {dev:F4}"));
                     if (dev < 0.01) { conv = true; break; }
                 }
                 return (wh, conv);
             });
 
             WbHighR = wbHigh[0]; WbHighG = wbHigh[1]; WbHighB = wbHigh[2];   // AI only modifies wb_high
-            StatusText = $"智能白平衡{(converged ? "" : "（未收敛，仅供参考）")} → wb_high {wbHigh[0]:F3}, {wbHigh[1]:F3}, {wbHigh[2]:F3}";
+            StatusText = Loc.F($"智能白平衡{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → wb_high {wbHigh[0]:F3}, {wbHigh[1]:F3}, {wbHigh[2]:F3}");
         }
-        catch (Exception ex) { StatusText = "智能白平衡失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("智能白平衡失败：") + ex.Message; }
         finally { IsBusy = false; }
     }
 
@@ -1252,7 +1252,7 @@ public partial class MainViewModel : ViewModelBase
         var mm = MinMaxLumaOfRenderedPositive(rect);
         if (mm is null) return;
         Black = WbMath.BlackPointToSlider(Math.Clamp(mm.Value.Min, 0.0, 0.5));
-        StatusText = $"黑场采样 → {Black:F2}";
+        StatusText = Loc.F($"黑场采样 → {Black:F2}");
     }
 
     /// <summary>Sample the brightest luma in a rect → 白场 slider.</summary>
@@ -1261,7 +1261,7 @@ public partial class MainViewModel : ViewModelBase
         var mm = MinMaxLumaOfRenderedPositive(rect);
         if (mm is null) return;
         White = WbMath.WhitePointToSlider(Math.Clamp(mm.Value.Max, 0.5, 1.0));
-        StatusText = $"白场采样 → {White:F2}";
+        StatusText = Loc.F($"白场采样 → {White:F2}");
     }
 
     /// <summary>Auto black/white points from the 0.1 / 99.9 percentiles across all channels of the
@@ -1276,7 +1276,7 @@ public partial class MainViewModel : ViewModelBase
         if (white - black < 1e-6) white = black + 1e-6;
         Black = WbMath.BlackPointToSlider(Math.Clamp(black, 0.0, 0.5));
         White = WbMath.WhitePointToSlider(Math.Clamp(white, 0.5, 1.0));
-        StatusText = $"自动色阶 → 黑场 {Black:F2} / 白场 {White:F2}";
+        StatusText = Loc.F($"自动色阶 → 黑场 {Black:F2} / 白场 {White:F2}");
     }
 
     /// <summary>Low/high percentiles over all RGB samples via a 4096-bin histogram on [0,1].</summary>
@@ -1349,7 +1349,7 @@ public partial class MainViewModel : ViewModelBase
         _curveM = new(); _curveR = new(); _curveG = new(); _curveB = new(); _curvePreserveHue = true;
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
-        FilmBaseText = "片基：默认（未采样）";
+        FilmBaseText = Loc.T("片基：默认（未采样）");
         ScheduleRender();
     }
 
@@ -1447,7 +1447,7 @@ public partial class MainViewModel : ViewModelBase
     {
         string dir = Path.GetDirectoryName(Path.GetFullPath(paths[0])) ?? "";
         string title = dir.Length > 0 ? new DirectoryInfo(dir).Name : "";
-        if (string.IsNullOrWhiteSpace(title)) title = "未命名卷";
+        if (string.IsNullOrWhiteSpace(title)) title = Loc.T("未命名卷");
 
         _roll = new Catalog.Roll { Title = title, ProjectPath = Catalog.NewProjectPath(dir, title) };
         SyncRollEntry();
@@ -1523,7 +1523,7 @@ public partial class MainViewModel : ViewModelBase
             catch (Exception ex)
             {
                 _rollDirty = true;
-                StatusText = "自动保存失败：" + ex.Message;
+                StatusText = Loc.T("自动保存失败：") + ex.Message;
                 throw;   // RollAutoSave re-dirties and retries on the next idle pause
             }
             SyncRollEntry();
@@ -1539,7 +1539,7 @@ public partial class MainViewModel : ViewModelBase
             catch (Exception ex)
             {
                 _sheetDirty = true;
-                StatusText = "印样封面更新失败：" + ex.Message;
+                StatusText = Loc.T("印样封面更新失败：") + ex.Message;
                 Console.Error.WriteLine("[sheet] " + ex);
             }
         }
@@ -1706,9 +1706,9 @@ public partial class MainViewModel : ViewModelBase
         if (string.IsNullOrEmpty(folder)) return false;
 
         int found = Project.Relink(data, folder);
-        if (found == 0) { StatusText = "所选文件夹里没有找到同名的底片"; return false; }
+        if (found == 0) { StatusText = Loc.T("所选文件夹里没有找到同名的底片"); return false; }
 
-        StatusText = $"已重新定位 {found}/{missing.Count} 个源文件";
+        StatusText = Loc.F($"已重新定位 {found}/{missing.Count} 个源文件");
         return true;   // the new paths have to be written back, or the fix is lost on exit
     }
 
@@ -1717,7 +1717,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (roll.Missing)
         {
-            StatusText = $"工程文件不存在：{roll.ProjectPath}";
+            StatusText = Loc.F($"工程文件不存在：{roll.ProjectPath}");
             return;
         }
         await OpenProjectAsync(roll.ProjectPath);
@@ -1750,9 +1750,9 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             await Task.Run(() => Project.Save(path, data));
-            StatusText = "工程副本已保存：" + Path.GetFileName(path);
+            StatusText = Loc.T("工程副本已保存：") + Path.GetFileName(path);
         }
-        catch (Exception ex) { StatusText = "工程保存失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("工程保存失败：") + ex.Message; }
     }
 
     /// <summary>Open a .ncproj: recompute roll-level ops from the stored calibration source paths,
@@ -1761,11 +1761,11 @@ public partial class MainViewModel : ViewModelBase
     {
         await FlushRollAsync();   // the outgoing roll's pending edit, before anything is replaced
         IsBusy = true;
-        StatusText = "正在打开工程 …";
+        StatusText = Loc.T("正在打开工程 …");
         Project.Data data;
         try { data = await Task.Run(() => Project.Load(path)); }
-        catch (Exception ex) { StatusText = "打开工程失败：" + ex.Message; IsBusy = false; return; }
-        if (data.Frames.Count == 0) { StatusText = "工程为空"; IsBusy = false; return; }
+        catch (Exception ex) { StatusText = Loc.T("打开工程失败：") + ex.Message; IsBusy = false; return; }
+        if (data.Frames.Count == 0) { StatusText = Loc.T("工程为空"); IsBusy = false; return; }
 
         // Before anything reads pixels: the negatives may have moved since this was saved.
         bool relinked = await RelinkIfMissingAsync(data);
@@ -1800,17 +1800,17 @@ public partial class MainViewModel : ViewModelBase
                     (dm, cm) = CalibratePathA(rgb, contentPaths);
                 if (!string.IsNullOrEmpty(_lccSourcePath) && File.Exists(_lccSourcePath))
                 {
-                    ReportBackground("载入平场校正 …");
+                    ReportBackground(Loc.T("载入平场校正 …"));
                     lcc = Lcc.LoadFlatField(_lccSourcePath, tiffIsLinear: true);
                 }
                 ReportBackground("");
             });
         }
-        catch (Exception ex) { StatusText = "工程标定重算失败（按无解耦打开）：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("工程标定重算失败（按无解耦打开）：") + ex.Message; }
 
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
-        if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = "已载入平场（工程）"; }
-        else { _lccFlatField = null; LccAvailable = false; LccStatus = "未载入平场校正"; }
+        if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = Loc.T("已载入平场（工程）"); }
+        else { _lccFlatField = null; LccAvailable = false; LccStatus = Loc.T("未载入平场校正"); }
 
         // Detach from the outgoing roll BEFORE its state is replaced — same reason as in
         // LoadRollAsync. Assigning the notes below fires Notes.PropertyChanged → MarkRollDirty,
@@ -1851,7 +1851,7 @@ public partial class MainViewModel : ViewModelBase
         AdoptProject(path);
         if (relinked) MarkRollDirty();   // the repaired paths, written back on the next idle pause
 
-        StatusText = $"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）";
+        StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
@@ -1862,7 +1862,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (cfg.Paths.Count == 0) return;
         IsBusy = true;
-        StatusText = "正在准备导入 …";
+        StatusText = Loc.T("正在准备导入 …");
         // The roll changes here, not in LoadRollAsync — the prep below already caches previews for
         // the frames it decodes, and a later Clear() would throw that work away.
         _previews.Clear(); ClearTiles(); _fullSlot = null; _regionSlot = null;
@@ -1877,7 +1877,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 if (cfg.PathA && !string.IsNullOrWhiteSpace(cfg.CalDir))
                 {
-                    ReportBackground("识别 R/G/B 校正图 …");
+                    ReportBackground(Loc.T("识别 R/G/B 校正图 …"));
                     var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(cfg.CalDir);
                     calRgb = new[] { rp, gp, bp };
 
@@ -1885,7 +1885,7 @@ public partial class MainViewModel : ViewModelBase
                 }
                 if (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath))
                 {
-                    ReportBackground("载入平场校正 …");
+                    ReportBackground(Loc.T("载入平场校正 …"));
                     lccField = Lcc.LoadFlatField(cfg.LccPath, tiffIsLinear: true);
                     lccName = Path.GetFileName(cfg.LccPath);
                 }
@@ -1894,7 +1894,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = "导入准备失败：" + ex.Message;
+            StatusText = Loc.T("导入准备失败：") + ex.Message;
             ReportBackground(""); IsBusy = false; return;
         }
 
@@ -1906,7 +1906,7 @@ public partial class MainViewModel : ViewModelBase
         // Set roll-level ops BEFORE loading so the sprocket dialog + auto film-base (which run
         // during LoadRollAsync) sample t_base in the DECOUPLED domain and the first render decouples.
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
-        if (lccField is not null) { _lccFlatField = lccField; LccAvailable = true; LccStatus = "已载入平场：" + lccName; }
+        if (lccField is not null) { _lccFlatField = lccField; LccAvailable = true; LccStatus = Loc.T("已载入平场：") + lccName; }
         IsBusy = false;
 
         _configLoad = true;
@@ -1938,8 +1938,8 @@ public partial class MainViewModel : ViewModelBase
         if (lccField is not null) LccEnabled = true;   // triggers a render
         ScheduleRender();
         RestartThumbnails();
-        StatusText = $"导入完成（{Frames.Count} 帧" +
-                     (cfg.PathA ? "，Path A 分光解耦" : "") + (lccField is not null ? "，LCC 平场" : "") + "）";
+        StatusText = Loc.F($"导入完成（{Frames.Count} 帧") +
+                     (cfg.PathA ? Loc.T("，Path A 分光解耦") : "") + (lccField is not null ? Loc.T("，LCC 平场") : "") + "）";
     }
 
     /// <summary>
@@ -1963,7 +1963,7 @@ public partial class MainViewModel : ViewModelBase
         var negs = new ImageBuffer[nF];            // content frames at 720, pre-decouple
         int done = 0, total = 3 + nF;
 
-        ReportBackground($"解码校正图与内容帧 0/{total} …");
+        ReportBackground(Loc.F($"解码校正图与内容帧 0/{total} …"));
         var opts = new ParallelOptions
         {
             MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
@@ -1987,10 +1987,10 @@ public partial class MainViewModel : ViewModelBase
                 _previews.Put(paths[fi], outs[0], srcW, srcH);
                 negs[fi] = outs[1];
             }
-            ReportBackground($"解码校正图与内容帧 {Interlocked.Increment(ref done)}/{total} …");
+            ReportBackground(Loc.F($"解码校正图与内容帧 {Interlocked.Increment(ref done)}/{total} …"));
         });
 
-        ReportBackground("计算解耦矩阵与色度补偿 …");
+        ReportBackground(Loc.T("计算解耦矩阵与色度补偿 …"));
         double[,] dm = DecoupleCalibration.DecoupleMatrixFromRoiMeans(roi[0], roi[1], roi[2]);
 
         // Samples are concatenated in FRAME ORDER: ChromaAxisCompensationMatrix reduces these
@@ -2059,7 +2059,7 @@ public partial class MainViewModel : ViewModelBase
     private async Task SwitchFrameAsync(RollFrame frame)
     {
         IsBusy = true;
-        StatusText = $"正在解码 {frame.FileName} …";
+        StatusText = Loc.F($"正在解码 {frame.FileName} …");
         int tok = ++_switchToken;
         try
         {
@@ -2089,7 +2089,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            if (tok == _switchToken) { StatusText = "打开失败：" + ex.Message; HasImage = false; }
+            if (tok == _switchToken) { StatusText = Loc.T("打开失败：") + ex.Message; HasImage = false; }
         }
         finally { if (tok == _switchToken) IsBusy = false; }
     }
@@ -2128,7 +2128,7 @@ public partial class MainViewModel : ViewModelBase
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
-        FilmBaseText = $"片基 t_base = {p.TBase[0]:F3}, {p.TBase[1]:F3}, {p.TBase[2]:F3}";
+        FilmBaseText = Loc.F($"片基 t_base = {p.TBase[0]:F3}, {p.TBase[1]:F3}, {p.TBase[2]:F3}");
         _suppressRender = false;
 
         FrameParamsLoaded?.Invoke(p);   // view syncs the curve editor
@@ -2241,7 +2241,7 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             int done = 0, total = order.Count;
-            ReportBackground($"后台解码 0/{total} …");
+            ReportBackground(Loc.F($"后台解码 0/{total} …"));
             await Parallel.ForEachAsync(order, opts, async (path, token) =>
             {
                 PreviewCache.Entry entry;
@@ -2264,7 +2264,7 @@ public partial class MainViewModel : ViewModelBase
                 }
 
                 int n = Interlocked.Increment(ref done);
-                ReportBackground(n >= total ? "" : $"后台解码 {n}/{total} …");
+                ReportBackground(n >= total ? "" : Loc.F($"后台解码 {n}/{total} …"));
                 // Each landed decode leaves one more tile behind, so the cover can fill in.
                 await Dispatcher.UIThread.InvokeAsync(MarkSheetDirty);
             });
@@ -2305,30 +2305,30 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _hasSceneClipboard;
 
     /// <summary>Copy Stage-1 calibration (per SyncOptions) from the current frame to every other frame.</summary>
-    public void ApplyCalibrationToRoll() => Broadcast(cal: true, scene: false, onlySelected: false, "标定");
+    public void ApplyCalibrationToRoll() => Broadcast(cal: true, scene: false, onlySelected: false, Loc.T("标定"));
 
     /// <summary>Copy Stage-2 scene adjustments (per SyncOptions) from the current frame to every other frame.</summary>
-    public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, "场景");
+    public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, Loc.T("场景"));
 
-    public void CopyCalibration() { _calClipboard = BuildParams(); HasCalClipboard = true; StatusText = "已复制标定"; }
-    public void CopyScene() { _sceneClipboard = BuildParams(); HasSceneClipboard = true; StatusText = "已复制场景"; }
+    public void CopyCalibration() { _calClipboard = BuildParams(); HasCalClipboard = true; StatusText = Loc.T("已复制标定"); }
+    public void CopyScene() { _sceneClipboard = BuildParams(); HasSceneClipboard = true; StatusText = Loc.T("已复制场景"); }
 
     /// <summary>Paste the copied calibration onto the ticked frames.</summary>
-    public void PasteCalibrationToSelected() => Paste(_calClipboard, cal: true, scene: false, "标定");
-    public void PasteSceneToSelected() => Paste(_sceneClipboard, cal: false, scene: true, "场景");
+    public void PasteCalibrationToSelected() => Paste(_calClipboard, cal: true, scene: false, Loc.T("标定"));
+    public void PasteSceneToSelected() => Paste(_sceneClipboard, cal: false, scene: true, Loc.T("场景"));
 
     /// <summary>
     /// Paste onto the CURRENT frame only — the one-to-one case the roll-wide broadcasts could not
     /// express. Matching one frame to another was otherwise a matter of ticking it in the strip,
     /// pasting to "selected", and then unticking it.
     /// </summary>
-    public void PasteCalibrationToCurrent() => PasteToCurrent(_calClipboard, cal: true, scene: false, "标定");
-    public void PasteSceneToCurrent() => PasteToCurrent(_sceneClipboard, cal: false, scene: true, "场景");
+    public void PasteCalibrationToCurrent() => PasteToCurrent(_calClipboard, cal: true, scene: false, Loc.T("标定"));
+    public void PasteSceneToCurrent() => PasteToCurrent(_sceneClipboard, cal: false, scene: true, Loc.T("场景"));
 
     private void PasteToCurrent(FrameParams? clip, bool cal, bool scene, string what)
     {
         if (CurrentFrame is null) return;
-        if (clip is null) { StatusText = $"尚未复制{what}"; return; }
+        if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
         CommitUndo();   // close the previous edit as its own undo step
 
         // Through BuildParams, not the stored params: the live control values are the truth for
@@ -2339,7 +2339,7 @@ public partial class MainViewModel : ViewModelBase
         CurrentFrame.Params = target;
         LoadParams(target);          // push the result back into the controls
         SetThumbnail(CurrentFrame, null);
-        StatusText = $"已粘贴{what}到当前帧";
+        StatusText = Loc.F($"已粘贴{what}到当前帧");
         MarkEdit();
         ScheduleRender();
         RestartThumbnails();
@@ -2359,14 +2359,14 @@ public partial class MainViewModel : ViewModelBase
             CopyGroups(src, f.Params, cal, scene);
             SetThumbnail(f, null); n++;
         }
-        StatusText = onlySelected ? $"已把{what}应用到选中 {n} 帧" : $"已应用{what}到整卷（{n} 帧）";
+        StatusText = onlySelected ? Loc.F($"已把{what}应用到选中 {n} 帧") : Loc.F($"已应用{what}到整卷（{n} 帧）");
         MarkEdit();
         RestartThumbnails();
     }
 
     private void Paste(FrameParams? clip, bool cal, bool scene, string what)
     {
-        if (clip is null) { StatusText = $"尚未复制{what}"; return; }
+        if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
         CommitUndo();
         int n = 0;
         foreach (RollFrame f in Frames)
@@ -2375,7 +2375,7 @@ public partial class MainViewModel : ViewModelBase
             CopyGroups(clip, f.Params, cal, scene);
             SetThumbnail(f, null); n++;
         }
-        StatusText = n == 0 ? $"没有选中的目标帧（在胶片条勾选帧）" : $"已把{what}粘贴到 {n} 帧";
+        StatusText = n == 0 ? Loc.F($"没有选中的目标帧（在胶片条勾选帧）") : Loc.F($"已把{what}粘贴到 {n} 帧");
         MarkEdit();
         RestartThumbnails();
     }
@@ -2451,7 +2451,7 @@ public partial class MainViewModel : ViewModelBase
         foreach (string p in paths)
             if (RawDecode.IsRawExtension(p) != rollRaw)
             {
-                StatusText = $"类型不匹配：当前卷是 {(rollRaw ? "RAW" : "TIFF")}，无法混入 {Path.GetFileName(p)}";
+                StatusText = Loc.F($"类型不匹配：当前卷是 {(rollRaw ? "RAW" : "TIFF")}，无法混入 {Path.GetFileName(p)}");
                 return;
             }
 
@@ -2459,7 +2459,7 @@ public partial class MainViewModel : ViewModelBase
         var existing = new HashSet<string>(
             Frames.Where(f => !f.IsVirtual).Select(f => f.Path), StringComparer.OrdinalIgnoreCase);
         var toAdd = paths.Where(p => existing.Add(p)).ToList();
-        if (toAdd.Count == 0) { StatusText = "所选文件已在当前卷中"; return; }
+        if (toAdd.Count == 0) { StatusText = Loc.T("所选文件已在当前卷中"); return; }
 
         // Fold the current frame's live edits in, then use its calibration as the template.
         if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
@@ -2471,7 +2471,7 @@ public partial class MainViewModel : ViewModelBase
             Frames.Add(new RollFrame(p) { Params = template.Clone() });
 
         ResetUndoAfterStructural();
-        StatusText = $"已添加 {toAdd.Count} 帧（共 {Frames.Count} 帧）";
+        StatusText = Loc.F($"已添加 {toAdd.Count} 帧（共 {Frames.Count} 帧）");
         RestartThumbnails();
         await Task.CompletedTask;
     }
@@ -2480,7 +2480,7 @@ public partial class MainViewModel : ViewModelBase
     public void CreateVirtualCopyOfCurrent()
     {
         if (CurrentFrame is not { } parent) return;
-        if (parent.IsVirtual) { StatusText = "只能对真实帧创建副本（当前已是副本）"; return; }
+        if (parent.IsVirtual) { StatusText = Loc.T("只能对真实帧创建副本（当前已是副本）"); return; }
 
         CommitUndo();
         parent.Params = BuildParams();   // capture live edits into the parent first
@@ -2489,7 +2489,7 @@ public partial class MainViewModel : ViewModelBase
         Frames.Insert(pos, copy);
         ResetUndoAfterStructural();
         CurrentFrame = copy;             // switch to the copy so it can be adjusted immediately
-        StatusText = "已创建虚拟副本（继承标定、场景已重置）";
+        StatusText = Loc.T("已创建虚拟副本（继承标定、场景已重置）");
         RestartThumbnails();
     }
 
@@ -2497,7 +2497,7 @@ public partial class MainViewModel : ViewModelBase
     public void RemoveCurrentFrame()
     {
         if (CurrentFrame is not { } target) return;
-        if (Frames.Count <= 1) { StatusText = "至少保留一帧，无法移除"; return; }
+        if (Frames.Count <= 1) { StatusText = Loc.T("至少保留一帧，无法移除"); return; }
 
         // Collect victims: the target, plus (if it's a real frame) all its virtual copies.
         var victims = new HashSet<RollFrame> { target };
@@ -2514,8 +2514,8 @@ public partial class MainViewModel : ViewModelBase
         ResetUndoAfterStructural();
         CurrentFrame = Frames[Math.Clamp(targetIdx, 0, Frames.Count - 1)];
         StatusText = victims.Count > 1
-            ? $"已移除该帧及其 {victims.Count - 1} 个副本"
-            : "已从卷中移除该帧";
+            ? Loc.F($"已移除该帧及其 {victims.Count - 1} 个副本")
+            : Loc.T("已从卷中移除该帧");
     }
 
     /// <summary>
@@ -2553,12 +2553,12 @@ public partial class MainViewModel : ViewModelBase
             for (int i = 0; i < frames.Count; i++)
             {
                 RollFrame f = frames[i];
-                StatusText = $"导出 {i + 1}/{frames.Count}：{f.FileName} …";
+                StatusText = Loc.F($"导出 {i + 1}/{frames.Count}：{f.FileName} …");
                 FrameParams p = f.Params;
                 // Virtual copies share the source file name — disambiguate so they don't overwrite.
                 string baseName = Path.GetFileNameWithoutExtension(f.Path);
                 string name = baseName;
-                for (int dup = 2; !usedNames.Add(name); dup++) name = $"{baseName}_副本{dup - 1}";
+                for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{baseName}_副本{dup - 1}");
                 // A roll export names its files after the SCANS and runs unattended, so the folder
                 // may already hold an earlier export or unrelated matching files. What happens
                 // then is the user's call, made in the export dialog — the default being the one
@@ -2571,11 +2571,11 @@ public partial class MainViewModel : ViewModelBase
                                                  outPath, p, opt));
             }
             string detail = "";
-            if (renamed > 0) detail += $"，其中 {renamed} 帧重名已另存";
-            if (skipped > 0) detail += $"，跳过 {skipped} 帧同名";
-            StatusText = $"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}";
+            if (renamed > 0) detail += Loc.F($"，其中 {renamed} 帧重名已另存");
+            if (skipped > 0) detail += Loc.F($"，跳过 {skipped} 帧同名");
+            StatusText = Loc.F($"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}");
         }
-        catch (Exception ex) { StatusText = "整卷导出失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
         finally { IsBusy = false; ReleaseBulkBuffers(); }
     }
 
@@ -2590,7 +2590,7 @@ public partial class MainViewModel : ViewModelBase
         if (Frames.Count == 0) return null;
         if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
         IsBusy = true;
-        StatusText = "正在生成印样 …";
+        StatusText = Loc.T("正在生成印样 …");
         try
         {
             var frames = Frames.ToList();
@@ -2601,7 +2601,7 @@ public partial class MainViewModel : ViewModelBase
             for (int i = 0; i < total; i++)
             {
                 sources[i] = (await PreviewAsync(frames[i].Path)).Preview;
-                ReportBackground($"印样 {++done}/{total} …");
+                ReportBackground(Loc.F($"印样 {++done}/{total} …"));
             }
 
             List<ImageBuffer> thumbs = await Task.Run(() =>
@@ -2611,10 +2611,10 @@ public partial class MainViewModel : ViewModelBase
                     t.Add(Pipeline.ProcessFrame(Resample.Box(sources[i], 900), frames[i].Params));
                 return t;
             });
-            StatusText = $"印样已生成（{total} 帧）";
+            StatusText = Loc.F($"印样已生成（{total} 帧）");
             return thumbs;
         }
-        catch (Exception ex) { StatusText = "印样生成失败：" + ex.Message; return null; }
+        catch (Exception ex) { StatusText = Loc.T("印样生成失败：") + ex.Message; return null; }
         finally { ReportBackground(""); IsBusy = false; ReleaseBulkBuffers(); }
     }
 
@@ -2625,7 +2625,7 @@ public partial class MainViewModel : ViewModelBase
                                               string path)
     {
         IsBusy = true;
-        StatusText = "正在导出印样 …";
+        StatusText = Loc.T("正在导出印样 …");
         try
         {
             var opt = new SheetComposer.Options { Style = style };
@@ -2646,9 +2646,9 @@ public partial class MainViewModel : ViewModelBase
                 else
                     TiffIO.ExportTiff16(outImg, path, TiffIO.CompressionMode.Lzw, ColorSpace.Srgb);
             });
-            StatusText = $"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）";
+            StatusText = Loc.F($"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）");
         }
-        catch (Exception ex) { StatusText = "印样导出失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("印样导出失败：") + ex.Message; }
         finally { IsBusy = false; }
     }
 
@@ -2683,7 +2683,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (CurrentFrame is not { } frame || !HasImage) return;
         IsBusy = true;
-        StatusText = "正在导出 …";
+        StatusText = Loc.T("正在导出 …");
         try
         {
             FrameParams p = BuildParams();
@@ -2692,11 +2692,11 @@ public partial class MainViewModel : ViewModelBase
             // format came from the options dialog rather than being guessed from the extension.
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() => WriteExport(Pipeline.ProcessFrame(LoadFullLinear(srcPath), p), path, p, opt));
-            StatusText = $"已导出：{Path.GetFileName(path)} · {opt.Summary()}";
+            StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
         }
         catch (Exception ex)
         {
-            StatusText = "导出失败：" + ex.Message;
+            StatusText = Loc.T("导出失败：") + ex.Message;
         }
         finally { IsBusy = false; ReleaseBulkBuffers(); }
     }
@@ -2865,7 +2865,7 @@ public partial class MainViewModel : ViewModelBase
 
         bool needsDecode = _fullSlot is null
                            || !string.Equals(_fullSlot.Path, srcPath, StringComparison.OrdinalIgnoreCase);
-        if (needsDecode) ReportBackground("载入全分辨率 …");
+        if (needsDecode) ReportBackground(Loc.T("载入全分辨率 …"));
         try
         {
             int frameW = entry.SourceWidth, frameH = entry.SourceHeight;
@@ -2897,7 +2897,7 @@ public partial class MainViewModel : ViewModelBase
             if (result is not null) { Patch = result; _patchDirty = true; }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { StatusText = "局部全分辨率渲染失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("局部全分辨率渲染失败：") + ex.Message; }
         finally
         {
             _patchRunning = false;
@@ -2978,7 +2978,7 @@ public partial class MainViewModel : ViewModelBase
     // The sampling path already learned this (MainWindow's pointer-released backstop and
     // TrySample); a render is exactly as user-triggered and exactly as fatal. Cancellation
     // stays silent — it is the normal outcome of superseding a queued render.
-    private void ReportRenderFailure(Exception ex) => StatusText = "渲染失败：" + ex.Message;
+    private void ReportRenderFailure(Exception ex) => StatusText = Loc.T("渲染失败：") + ex.Message;
 
     private async void ScheduleRender()
     {

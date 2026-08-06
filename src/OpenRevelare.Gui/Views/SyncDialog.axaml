@@ -1,35 +1,36 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:i18n="using:OpenRevelare.Gui.Markup"
         xmlns:m="using:OpenRevelare.Gui.Models"
         x:Class="OpenRevelare.Gui.Views.SyncDialog"
         x:DataType="m:SyncOptions"
         Width="320" Height="480"
         WindowStartupLocation="CenterOwner"
-        Title="选择同步项">
+        Title="{i18n:T '选择同步项'}">
     <DockPanel Margin="14">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8"
-                   Text="勾选「应用到整卷 / 复制·粘贴到选中」广播哪些项。几何默认不播。" />
+                   Text="{i18n:T '勾选「应用到整卷 / 复制·粘贴到选中」广播哪些项。几何默认不播。'}" />
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
                     Spacing="8" Margin="0,10,0,0">
-            <Button Content="关闭" Click="OnCloseClick" />
+            <Button Content="{i18n:T '关闭'}" Click="OnCloseClick" />
         </StackPanel>
         <ScrollViewer>
             <StackPanel Spacing="4">
-                <TextBlock Text="标定（Stage 1）" FontWeight="Bold" Margin="0,4" />
-                <CheckBox Content="片基 T_base / D_max / 偏移" IsChecked="{Binding CalFilmBase}" />
-                <CheckBox Content="白平衡 wb_high / wb_offset" IsChecked="{Binding CalWb}" />
-                <CheckBox Content="反差 grade / pivot / chroma" IsChecked="{Binding CalGrade}" />
-                <CheckBox Content="镜头 畸变 / 暗角 / LCC" IsChecked="{Binding CalLens}" />
-                <CheckBox Content="齿孔 启用 / 阈值" IsChecked="{Binding CalSprocket}" />
-                <TextBlock Text="场景（Stage 2）" FontWeight="Bold" Margin="0,8,0,4" />
-                <CheckBox Content="白平衡（色温 / 色调）" IsChecked="{Binding SceneWb}" />
-                <CheckBox Content="曝光" IsChecked="{Binding SceneExposure}" />
-                <CheckBox Content="影调（黑白场 / 反差 / 高光阴影 / 饱和度）" IsChecked="{Binding SceneTone}" />
-                <CheckBox Content="色调曲线" IsChecked="{Binding SceneCurves}" />
-                <TextBlock Text="几何（默认不播）" FontWeight="Bold" Margin="0,8,0,4" />
-                <CheckBox Content="翻转 / 90° 旋转" IsChecked="{Binding GeomOrientation}" />
-                <CheckBox Content="拉直角度" IsChecked="{Binding GeomStraighten}" />
-                <CheckBox Content="裁切" IsChecked="{Binding GeomCrop}" />
+                <TextBlock Text="{i18n:T '标定（Stage 1）'}" FontWeight="Bold" Margin="0,4" />
+                <CheckBox Content="{i18n:T '片基 T_base / D_max / 偏移'}" IsChecked="{Binding CalFilmBase}" />
+                <CheckBox Content="{i18n:T '白平衡 wb_high / wb_offset'}" IsChecked="{Binding CalWb}" />
+                <CheckBox Content="{i18n:T '反差 grade / pivot / chroma'}" IsChecked="{Binding CalGrade}" />
+                <CheckBox Content="{i18n:T '镜头 畸变 / 暗角 / LCC'}" IsChecked="{Binding CalLens}" />
+                <CheckBox Content="{i18n:T '齿孔 启用 / 阈值'}" IsChecked="{Binding CalSprocket}" />
+                <TextBlock Text="{i18n:T '场景（Stage 2）'}" FontWeight="Bold" Margin="0,8,0,4" />
+                <CheckBox Content="{i18n:T '白平衡（色温 / 色调）'}" IsChecked="{Binding SceneWb}" />
+                <CheckBox Content="{i18n:T '曝光'}" IsChecked="{Binding SceneExposure}" />
+                <CheckBox Content="{i18n:T '影调（黑白场 / 反差 / 高光阴影 / 饱和度）'}" IsChecked="{Binding SceneTone}" />
+                <CheckBox Content="{i18n:T '色调曲线'}" IsChecked="{Binding SceneCurves}" />
+                <TextBlock Text="{i18n:T '几何（默认不播）'}" FontWeight="Bold" Margin="0,8,0,4" />
+                <CheckBox Content="{i18n:T '翻转 / 90° 旋转'}" IsChecked="{Binding GeomOrientation}" />
+                <CheckBox Content="{i18n:T '拉直角度'}" IsChecked="{Binding GeomStraighten}" />
+                <CheckBox Content="{i18n:T '裁切'}" IsChecked="{Binding GeomCrop}" />
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

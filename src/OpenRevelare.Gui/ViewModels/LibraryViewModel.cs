@@ -46,8 +46,8 @@ public sealed partial class RollCard : ObservableObject
     public bool Missing => Roll?.Missing ?? false;
 
     public string Detail => Roll is null ? ""
-        : Missing ? "文件缺失"
-        : $"{Roll.FrameCount} 帧 · {Roll.ModifiedAt:yyyy-MM-dd HH:mm}";
+        : Missing ? Loc.T("文件缺失")
+        : Loc.F($"{Roll.FrameCount} 帧 · {Roll.ModifiedAt:yyyy-MM-dd HH:mm}");
 
     /// <summary>Re-read the title/detail after a rename or a save.</summary>
     public void RefreshText()
@@ -142,7 +142,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(FilterSummary))]
     private bool _hasActiveFilter;
 
-    public string FilterSummary => HasActiveFilter ? $"已筛选 · 共 {_all.Count} 卷" : $"共 {_all.Count} 卷";
+    public string FilterSummary => HasActiveFilter ? Loc.F($"已筛选 · 共 {_all.Count} 卷") : Loc.F($"共 {_all.Count} 卷");
 
     [ObservableProperty] private RollCard? _selected;
 
@@ -161,9 +161,9 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// <summary>Header count. Excludes the 新建 tile, which is furniture, not a roll. Shows the
     /// filtered count against the total when a filter is on, so a short wall is never mistaken for
     /// a lost catalog.</summary>
-    public string RollCountText => IsEmpty ? "还没有卷"
-        : HasActiveFilter ? $"{Rolls.Count - 1} / {_all.Count} 卷"
-        : $"{_all.Count} 卷";
+    public string RollCountText => IsEmpty ? Loc.T("还没有卷")
+        : HasActiveFilter ? Loc.F($"{Rolls.Count - 1} / {_all.Count} 卷")
+        : Loc.F($"{_all.Count} 卷");
 
     /// <summary>
     /// Reload from the catalog and decode the covers. Ordered by IMPORT time, newest first — so a
@@ -208,11 +208,11 @@ public sealed partial class LibraryViewModel : ObservableObject
         // only ever fills in 胶卷 sees one facet rather than seven empty headings.
         foreach (var (name, selector) in new (string, Func<Catalog.Roll, string>)[]
                  {
-                     ("画幅", r => r.Format),
-                     ("胶卷", r => r.FilmStock),
-                     ("相机", r => r.CameraBody),
-                     ("冲洗店", r => r.DevLab),
-                     ("年份", r => Year(r.DevDate)),
+                     (Loc.T("画幅"), r => r.Format),
+                     (Loc.T("胶卷"), r => r.FilmStock),
+                     (Loc.T("相机"), r => r.CameraBody),
+                     (Loc.T("冲洗店"), r => r.DevLab),
+                     (Loc.T("年份"), r => Year(r.DevDate)),
                  })
         {
             var facet = new FilterFacet(name, selector);
@@ -221,7 +221,7 @@ public sealed partial class LibraryViewModel : ObservableObject
                 .GroupBy(r => selector(r).Trim(), StringComparer.OrdinalIgnoreCase);
             // Commonest first, because that is the order someone scanning the list wants; 年份
             // is the exception — a chronological axis read out of order is just confusing.
-            groups = name == "年份"
+            groups = name == Loc.T("年份")
                 ? groups.OrderByDescending(g => g.Key, StringComparer.Ordinal)
                 : groups.OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.CurrentCulture);
             foreach (IGrouping<string, Catalog.Roll> g in groups)
@@ -392,7 +392,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             ApplyFilter();
             return null;
         }
-        catch (Exception ex) { return "保存卷信息失败：" + ex.Message; }
+        catch (Exception ex) { return Loc.T("保存卷信息失败：") + ex.Message; }
     }
 
     /// <summary>Rename a roll: the catalog title and the project file's name, nothing else. The
@@ -402,7 +402,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     {
         if (card.Roll is not { } roll) return null;
         string clean = Catalog.Sanitize(newTitle).Trim();
-        if (clean.Length == 0) return "卷名不能为空";
+        if (clean.Length == 0) return Loc.T("卷名不能为空");
         if (clean == roll.Title) return null;
 
         try
@@ -411,7 +411,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             card.RefreshText();
             return null;
         }
-        catch (Exception ex) { return "重命名失败：" + ex.Message; }
+        catch (Exception ex) { return Loc.T("重命名失败：") + ex.Message; }
     }
 
     /// <summary>Forget a roll. <paramref name="deleteProject"/> also removes its .ncproj — i.e.

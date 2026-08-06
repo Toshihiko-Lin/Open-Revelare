@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i18n="using:OpenRevelare.Gui.Markup"
              xmlns:ctl="using:OpenRevelare.Gui.Controls"
              x:Class="OpenRevelare.Gui.Controls.CurveEditor">
     <StackPanel Spacing="4">
@@ -14,10 +15,10 @@
                           HorizontalContentAlignment="Center" Foreground="#60CD60" />
             <ToggleButton Name="BtnB" Content="B" Width="30" Padding="0"
                           HorizontalContentAlignment="Center" Foreground="#608CF0" />
-            <Button Name="BtnReset" Content="重置" Margin="8,0,0,0" />
+            <Button Name="BtnReset" Content="{i18n:T '重置'}" Margin="8,0,0,0" />
         </StackPanel>
         <ctl:CurveCanvas Name="Canvas" Height="220" HorizontalAlignment="Stretch" />
-        <CheckBox Name="PreserveChk" Content="白光曲线保留色相" IsChecked="True"
-                  ToolTip.Tip="勾选：W 曲线只改亮度、按比例保持颜色（推荐）；取消：传统 RGB 曲线，会改色相/饱和度。" />
+        <CheckBox Name="PreserveChk" Content="{i18n:T '白光曲线保留色相'}" IsChecked="True"
+                  ToolTip.Tip="{i18n:T '勾选：W 曲线只改亮度、按比例保持颜色（推荐）；取消：传统 RGB 曲线，会改色相/饱和度。'}" />
     </StackPanel>
 </UserControl>

@@ -145,7 +145,7 @@ internal static class DngCache
         {
             if (_roots.Count > 0) return string.Join("、", _roots);
         }
-        return $"跟随源文件：<素材目录>\\{RootName}\\";
+        return Loc.F($"跟随源文件：<素材目录>\\{RootName}\\");
     }
 
     /// <summary>Drop least-recently-used entries until the session fits its budget.</summary>

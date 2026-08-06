@@ -88,10 +88,10 @@ public static class Project
     public static Data Load(string path)
     {
         JsonNode root = JsonNode.Parse(File.ReadAllText(path))
-                        ?? throw new InvalidDataException("空的工程文件");
+                        ?? throw new InvalidDataException(CoreText.T("空的工程文件"));
         int version = (int?)root["version"] ?? 1;
         if (version != FormatVersion)
-            throw new InvalidDataException($"不支持的 .ncproj 版本 {version}（本版本支持 {FormatVersion}）");
+            throw new InvalidDataException(CoreText.F($"不支持的 .ncproj 版本 {version}（本版本支持 {FormatVersion}）"));
 
         var d = new Data { Meta = DesRollMeta(root["roll_meta"]?.AsObject()) };
         if (root["frames"] is JsonArray frames)

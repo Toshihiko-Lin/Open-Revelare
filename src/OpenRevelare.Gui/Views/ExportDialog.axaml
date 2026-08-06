@@ -1,10 +1,11 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ExportDialog"
         Width="520" SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
-        Title="导出选项">
+        Title="{i18n:T '导出选项'}">
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,14,0,0">
             <Border Background="{DynamicResource Panel2Brush}" Padding="10,7" CornerRadius="3">
@@ -12,15 +13,15 @@
                            Foreground="{DynamicResource TextMuteBrush}" />
             </Border>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="取消" Click="OnCancelClick" />
-                <Button Classes="primary" Name="OkBtn" Content="选择位置 →" Click="OnAcceptClick" />
+                <Button Content="{i18n:T '取消'}" Click="OnCancelClick" />
+                <Button Classes="primary" Name="OkBtn" Content="{i18n:T '选择位置 →'}" Click="OnAcceptClick" />
             </StackPanel>
         </StackPanel>
 
         <StackPanel Spacing="14">
             <!-- ── 格式 ─────────────────────────────────────────────── -->
             <StackPanel Spacing="4">
-                <TextBlock Text="格式" FontWeight="SemiBold" />
+                <TextBlock Text="{i18n:T '格式'}" FontWeight="SemiBold" />
                 <StackPanel Orientation="Horizontal" Spacing="16">
                     <RadioButton Name="FmtTiff" GroupName="fmt" Content="16-bit TIFF"
                                  IsCheckedChanged="OnFormatChanged" />
@@ -28,24 +29,24 @@
                                  IsCheckedChanged="OnFormatChanged" />
                 </StackPanel>
                 <TextBlock Classes="groupHint"
-                           Text="16-bit TIFF 保留全部层次，适合存档或转到其他软件继续调；JPEG 适合直接分享。" />
+                           Text="{i18n:T '16-bit TIFF 保留全部层次，适合存档或转到其他软件继续调；JPEG 适合直接分享。'}" />
             </StackPanel>
 
             <!-- Disabled rather than hidden: an option that vanishes reads as a missing
                  feature, one that greys out reads as "not for this format". -->
             <StackPanel Name="TiffGroup" Spacing="4">
-                <TextBlock Text="TIFF 压缩" FontWeight="SemiBold" />
+                <TextBlock Text="{i18n:T 'TIFF 压缩'}" FontWeight="SemiBold" />
                 <ComboBox Name="CompressBox" HorizontalAlignment="Stretch"
                           SelectionChanged="OnAnyChanged">
-                    <ComboBoxItem Content="LZW（无损，推荐）" />
-                    <ComboBoxItem Content="Deflate（无损，文件更小、更慢）" />
-                    <ComboBoxItem Content="不压缩（最快、最大）" />
+                    <ComboBoxItem Content="{i18n:T 'LZW（无损，推荐）'}" />
+                    <ComboBoxItem Content="{i18n:T 'Deflate（无损，文件更小、更慢）'}" />
+                    <ComboBoxItem Content="{i18n:T '不压缩（最快、最大）'}" />
                 </ComboBox>
             </StackPanel>
 
             <StackPanel Name="JpegGroup" Spacing="4">
                 <Grid ColumnDefinitions="Auto,*,Auto">
-                    <TextBlock Grid.Column="0" Text="JPEG 品质" FontWeight="SemiBold"
+                    <TextBlock Grid.Column="0" Text="{i18n:T 'JPEG 品质'}" FontWeight="SemiBold"
                                VerticalAlignment="Center" />
                     <Slider Grid.Column="1" Name="QualitySlider" Minimum="40" Maximum="100"
                             TickFrequency="1" IsSnapToTickEnabled="True" Margin="12,0"
@@ -57,11 +58,11 @@
 
             <!-- ── 尺寸 ─────────────────────────────────────────────── -->
             <StackPanel Spacing="4">
-                <TextBlock Text="尺寸" FontWeight="SemiBold" />
-                <CheckBox Name="DownsampleChk" Content="缩小到指定长边"
+                <TextBlock Text="{i18n:T '尺寸'}" FontWeight="SemiBold" />
+                <CheckBox Name="DownsampleChk" Content="{i18n:T '缩小到指定长边'}"
                           IsCheckedChanged="OnDownsampleToggled" />
                 <Grid Name="LongEdgeRow" ColumnDefinitions="Auto,Auto,*" Margin="20,2,0,0">
-                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="长边不超过"
+                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边不超过'}"
                                VerticalAlignment="Center" Margin="0,0,8,0" />
                     <NumericUpDown Grid.Column="1" Name="LongEdgeBox" Width="130"
                                    Minimum="256" Maximum="20000" Increment="256"
@@ -70,29 +71,29 @@
                                VerticalAlignment="Center" Margin="6,0,0,0" />
                 </Grid>
                 <TextBlock Classes="groupHint"
-                           Text="按整数倍做盒式降采样，因此实际长边会落在这个值以下、而不是正好等于它。永不放大。" />
+                           Text="{i18n:T '按整数倍做盒式降采样，因此实际长边会落在这个值以下、而不是正好等于它。永不放大。'}" />
             </StackPanel>
 
             <!-- ── 色彩 ─────────────────────────────────────────────── -->
             <StackPanel Spacing="4">
-                <TextBlock Text="色彩" FontWeight="SemiBold" />
-                <CheckBox Name="IccChk" Content="嵌入 sRGB ICC 配置文件"
+                <TextBlock Text="{i18n:T '色彩'}" FontWeight="SemiBold" />
+                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 sRGB ICC 配置文件'}"
                           IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
-                           Text="输出意图为 NONE（线性）时不写入任何配置文件——手上这份数据不是 sRGB，贴上标签只会误导下游。" />
+                           Text="{i18n:T '输出意图为 NONE（线性）时不写入任何配置文件——手上这份数据不是 sRGB，贴上标签只会误导下游。'}" />
             </StackPanel>
 
             <!-- ── 重名 ─────────────────────────────────────────────── -->
             <StackPanel Name="ConflictGroup" Spacing="4">
-                <TextBlock Text="目标已有同名文件时" FontWeight="SemiBold" />
+                <TextBlock Text="{i18n:T '目标已有同名文件时'}" FontWeight="SemiBold" />
                 <RadioButton Name="ConflictUnique" GroupName="conflict"
-                             Content="另存为新名（原文件保持不动）" IsCheckedChanged="OnAnyChanged" />
+                             Content="{i18n:T '另存为新名（原文件保持不动）'}" IsCheckedChanged="OnAnyChanged" />
                 <RadioButton Name="ConflictOverwrite" GroupName="conflict"
-                             Content="覆盖" IsCheckedChanged="OnAnyChanged" />
+                             Content="{i18n:T '覆盖'}" IsCheckedChanged="OnAnyChanged" />
                 <RadioButton Name="ConflictSkip" GroupName="conflict"
-                             Content="跳过该帧" IsCheckedChanged="OnAnyChanged" />
+                             Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
-                           Text="整卷导出是按扫描文件名批量落盘的，不会像单张那样逐个问你。无论选哪项，同一批次内部撞名都会另存。" />
+                           Text="{i18n:T '整卷导出是按扫描文件名批量落盘的，不会像单张那样逐个问你。无论选哪项，同一批次内部撞名都会另存。'}" />
             </StackPanel>
         </StackPanel>
     </DockPanel>

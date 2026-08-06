@@ -507,7 +507,7 @@ public static class RawDecode
     private static void ConvertToLinearDng(string sourcePath, string destPath)
     {
         string? converter = FindDngConverter()
-            ?? throw new FileNotFoundException("未找到 Adobe DNG Converter，请安装或改用 LibRaw 后端。");
+            ?? throw new FileNotFoundException(CoreText.T("未找到 Adobe DNG Converter，请安装或改用 LibRaw 后端。"));
 
         string stem = Path.GetFileNameWithoutExtension(sourcePath);
         string tmpDir = Path.Combine(Path.GetTempPath(), "revelare_dng_" + Guid.NewGuid().ToString("N"));
@@ -517,9 +517,9 @@ public static class RawDecode
             string preDng = Path.Combine(tmpDir, stem + "_pre.dng");
             string linearDng = Path.Combine(tmpDir, stem + ".dng");
             RunConverter(converter, new[] { "-u", "-p0", "-cr5.4", "-d", tmpDir, "-o", Path.GetFileName(preDng), sourcePath });
-            if (!File.Exists(preDng)) throw new InvalidOperationException("DNG Converter 第一步失败");
+            if (!File.Exists(preDng)) throw new InvalidOperationException(CoreText.T("DNG Converter 第一步失败"));
             RunConverter(converter, new[] { "-u", "-l", "-p0", "-dng1.1", "-d", tmpDir, "-o", Path.GetFileName(linearDng), preDng });
-            if (!File.Exists(linearDng)) throw new InvalidOperationException("DNG Converter 第二步失败");
+            if (!File.Exists(linearDng)) throw new InvalidOperationException(CoreText.T("DNG Converter 第二步失败"));
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             File.Move(linearDng, destPath, overwrite: true);
         }
@@ -539,7 +539,7 @@ public static class RawDecode
             return read(cached);
 
         string? converter = FindDngConverter()
-            ?? throw new FileNotFoundException("未找到 Adobe DNG Converter，请安装或改用 LibRaw 后端。");
+            ?? throw new FileNotFoundException(CoreText.T("未找到 Adobe DNG Converter，请安装或改用 LibRaw 后端。"));
 
         string stem = Path.GetFileNameWithoutExtension(path);
         string tmpDir = Path.Combine(Path.GetTempPath(), "revelare_dng_" + Guid.NewGuid().ToString("N"));
@@ -551,11 +551,11 @@ public static class RawDecode
 
             // Pass 1: RAW → uncompressed DNG (mosaic preserved).
             RunConverter(converter, new[] { "-u", "-p0", "-cr5.4", "-d", tmpDir, "-o", Path.GetFileName(preDng), path });
-            if (!File.Exists(preDng)) throw new InvalidOperationException("DNG Converter 第一步失败");
+            if (!File.Exists(preDng)) throw new InvalidOperationException(CoreText.T("DNG Converter 第一步失败"));
 
             // Pass 2: mosaic DNG → linear DNG (Adobe demosaic).
             RunConverter(converter, new[] { "-u", "-l", "-p0", "-dng1.1", "-d", tmpDir, "-o", Path.GetFileName(linearDng), preDng });
-            if (!File.Exists(linearDng)) throw new InvalidOperationException("DNG Converter 第二步失败");
+            if (!File.Exists(linearDng)) throw new InvalidOperationException(CoreText.T("DNG Converter 第二步失败"));
 
             return read(linearDng);
         }
@@ -578,9 +578,9 @@ public static class RawDecode
         };
         foreach (string a in args) psi.ArgumentList.Add(a);
         using var proc = System.Diagnostics.Process.Start(psi)
-            ?? throw new InvalidOperationException("无法启动 DNG Converter");
-        if (!proc.WaitForExit(120_000)) { try { proc.Kill(true); } catch { } throw new TimeoutException("DNG Converter 超时"); }
-        if (proc.ExitCode != 0) throw new InvalidOperationException($"DNG Converter 退出码 {proc.ExitCode}");
+            ?? throw new InvalidOperationException(CoreText.T("无法启动 DNG Converter"));
+        if (!proc.WaitForExit(120_000)) { try { proc.Kill(true); } catch { } throw new TimeoutException(CoreText.T("DNG Converter 超时")); }
+        if (proc.ExitCode != 0) throw new InvalidOperationException(CoreText.F($"DNG Converter 退出码 {proc.ExitCode}"));
     }
 
     /// <summary>Decode honouring a backend preference. AUTO uses DNG Converter on Windows when

@@ -42,12 +42,12 @@ public partial class SprocketDialog : Window
         if (board > 0)
         {
             double gap = board - filmbase;
-            string warn = gap < 0.08 ? "  ⚠ 间隙较窄，请仔细微调" : "";
-            RefLbl.Text = $"参考：灯板亮度≈{board:F3}，片基亮端≈{filmbase:F3}，间隙≈{gap:F3}{warn}";
+            string warn = gap < 0.08 ? Loc.T("  ⚠ 间隙较窄，请仔细微调") : "";
+            RefLbl.Text = Loc.F($"参考：灯板亮度≈{board:F3}，片基亮端≈{filmbase:F3}，间隙≈{gap:F3}{warn}");
         }
         else
         {
-            RefLbl.Text = "提示：未检测到灯板（这帧可能没有齿孔，或灯板未过曝）";
+            RefLbl.Text = Loc.T("提示：未检测到灯板（这帧可能没有齿孔，或灯板未过曝）");
         }
 
         ResultThreshold = Sprocket.EstimateSprocketThreshold(preview);

@@ -339,8 +339,8 @@ public static class DecoupleCalibration
         int ir = Argmax(0), ig = Argmax(1), ib = Argmax(2);
         if (new HashSet<int> { ir, ig, ib }.Count < 3)
             throw new ArgumentException(
-                "自动识别失败：三个通道的最强图像指向同一张或高度重叠，无法可靠区分 R/G/B 光源。\n" +
-                "请检查校正图是否在纯红、纯绿、纯蓝光下分别拍摄，且目录内不含无关 RAW 文件。");
+                CoreText.T("自动识别失败：三个通道的最强图像指向同一张或高度重叠，无法可靠区分 R/G/B 光源。\n" +
+                           "请检查校正图是否在纯红、纯绿、纯蓝光下分别拍摄，且目录内不含无关 RAW 文件。"));
         return (ir, ig, ib);
     }
 
@@ -367,8 +367,7 @@ public static class DecoupleCalibration
             .ToArray();
         if (rawFiles.Length < 3)
             throw new ArgumentException(
-                $"校正图目录 {calDir} 中 RAW 文件不足 3 张（找到 {rawFiles.Length} 张）。\n" +
-                "请确保目录内有且仅有拍摄红、绿、蓝光源的三张校正图。");
+                CoreText.F($"校正图目录 {calDir} 中 RAW 文件不足 3 张（找到 {rawFiles.Length} 张）。\n请确保目录内有且仅有拍摄红、绿、蓝光源的三张校正图。"));
 
         var vecs = new double[rawFiles.Length][];
         // A few workers, NOT one per core. Each probe holds a live LibRaw context (unpacked

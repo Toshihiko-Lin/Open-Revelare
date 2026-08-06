@@ -90,15 +90,15 @@ public static class SheetInfoBar
         // Column 1 = the shot; column 2 = the lab and the occasion. 备注 spans both underneath.
         (string Label, string Value)[] col1 =
         {
-            ("相机", n.CameraBody),
-            ("胶卷", n.FilmStock),
-            ("卷号", n.RollNumber),
+            (Loc.T("相机"), n.CameraBody),
+            (Loc.T("胶卷"), n.FilmStock),
+            (Loc.T("卷号"), n.RollNumber),
         };
         (string Label, string Value)[] col2 =
         {
-            ("冲洗店", n.DevLab),
-            ("日期", n.DevDate),
-            ("地点", n.Location),
+            (Loc.T("冲洗店"), n.DevLab),
+            (Loc.T("日期"), n.DevDate),
+            (Loc.T("地点"), n.Location),
         };
 
         double fieldsTop = top + (height - (m.Rows * m.RowH)) / 2;
@@ -114,7 +114,7 @@ public static class SheetInfoBar
 
         // 备注 runs across both columns — it is the one field that runs long.
         double noteY = fieldsTop + col1.Length * m.RowH;
-        DrawPair(ctx, m, col1X, noteY, "备注", n.RollNote, m.ColW * 2 - m.Gutter, theme);
+        DrawPair(ctx, m, col1X, noteY, Loc.T("备注"), n.RollNote, m.ColW * 2 - m.Gutter, theme);
     }
 
     /// <summary>One label + value on a baseline, value ellipsised to <paramref name="maxW"/>.</summary>

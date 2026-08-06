@@ -26,8 +26,8 @@ public sealed class PromptDialog : Window
 
         _input.Text = initial;
 
-        var ok = new Button { Content = "确定", IsDefault = true, Margin = new Thickness(0, 0, 6, 0) };
-        var cancel = new Button { Content = "取消", IsCancel = true };
+        var ok = new Button { Content = Loc.T("确定"), IsDefault = true, Margin = new Thickness(0, 0, 6, 0) };
+        var cancel = new Button { Content = Loc.T("取消"), IsCancel = true };
         ok.Click += (_, _) => { _result = _input.Text; Close(_result); };
         cancel.Click += (_, _) => Close(null);
 

@@ -64,9 +64,8 @@ public partial class LibraryView : UserControl
         if (card.Roll is not { } roll) return;
         if (card.Missing)
         {
-            await new InfoDialog("卷不可用",
-                    $"找不到工程文件：\n{roll.ProjectPath}\n\n"
-                    + "如果只是移动了位置，可以用「文件 → 打开工程…」重新指向它。")
+            await new InfoDialog(Loc.T("卷不可用"),
+                    Loc.F($"找不到工程文件：\n{roll.ProjectPath}\n\n如果只是移动了位置，可以用「文件 → 打开工程…」重新指向它。"))
                 .ShowDialog(Root());
             return;
         }
@@ -76,10 +75,10 @@ public partial class LibraryView : UserControl
     private async void OnRenameClick(object? sender, RoutedEventArgs e)
     {
         if (CardOf(sender) is not { } card || Vm is not { } vm) return;
-        string? name = await new PromptDialog("重命名卷", "卷名", card.Title).ShowDialog<string?>(Root());
+        string? name = await new PromptDialog(Loc.T("重命名卷"), Loc.T("卷名"), card.Title).ShowDialog<string?>(Root());
         if (name is null) return;
         if (vm.Rename(card, name) is { } error)
-            await new InfoDialog("重命名失败", error).ShowDialog(Root());
+            await new InfoDialog(Loc.T("重命名失败"), error).ShowDialog(Root());
     }
 
     private async void OnInfoClick(object? sender, RoutedEventArgs e)
@@ -87,14 +86,14 @@ public partial class LibraryView : UserControl
         if (CardOf(sender) is not { } card || Vm is not { } vm) return;
         if (vm.LoadNotes(card) is not { } current)
         {
-            await new InfoDialog("读不到卷信息", "无法读取该卷的工程文件。").ShowDialog(Root());
+            await new InfoDialog(Loc.T("读不到卷信息"), Loc.T("无法读取该卷的工程文件。")).ShowDialog(Root());
             return;
         }
         var edited = await new RollInfoDialog(card.Title, current)
             .ShowDialog<OpenRevelare.Gui.Models.RollNotes?>(Root());
         if (edited is null) return;
         if (vm.SaveNotes(card, edited) is { } error)
-            await new InfoDialog("保存失败", error).ShowDialog(Root());
+            await new InfoDialog(Loc.T("保存失败"), error).ShowDialog(Root());
     }
 
     /// <summary>
@@ -109,20 +108,20 @@ public partial class LibraryView : UserControl
         string source = SheetStore.PathFor(roll.Id);
         if (!File.Exists(source))
         {
-            await new InfoDialog("还没有印样",
-                    "这一卷还没有生成过印样封面。打开它一次，封面会自动生成。").ShowDialog(Root());
+            await new InfoDialog(Loc.T("还没有印样"),
+                    Loc.T("这一卷还没有生成过印样封面。打开它一次，封面会自动生成。")).ShowDialog(Root());
             return;
         }
         var file = await Root().StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "导出印样",
+            Title = Loc.T("导出印样"),
             DefaultExtension = "jpg",
             SuggestedFileName = card.Title,
             FileTypeChoices = new[] { new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } } },
         });
         if (file?.TryGetLocalPath() is not { } target) return;
         try { File.Copy(source, target, overwrite: true); }
-        catch (Exception ex) { await new InfoDialog("导出失败", ex.Message).ShowDialog(Root()); }
+        catch (Exception ex) { await new InfoDialog(Loc.T("导出失败"), ex.Message).ShowDialog(Root()); }
     }
 
     /// <summary>Point a moved roll at its project file's new location. Keeps the entry (and so
@@ -132,11 +131,11 @@ public partial class LibraryView : UserControl
         if (CardOf(sender) is not { } card || card.Roll is not { } roll || Vm is not { } vm) return;
         var files = await Root().StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = $"「{roll.Title}」的工程文件现在在哪",
+            Title = Loc.F($"「{roll.Title}」的工程文件现在在哪"),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("OpenRevelare 工程 (.ncproj)") { Patterns = new[] { "*.ncproj" } },
+                new FilePickerFileType(Loc.T("OpenRevelare 工程 (.ncproj)")) { Patterns = new[] { "*.ncproj" } },
             },
         });
         if (files.FirstOrDefault()?.TryGetLocalPath() is not { } path) return;
@@ -165,9 +164,8 @@ public partial class LibraryView : UserControl
     private async void OnForgetClick(object? sender, RoutedEventArgs e)
     {
         if (CardOf(sender) is not { } card || Vm is not { } vm) return;
-        if (!await Confirm("从目录移除",
-                $"「{card.Title}」将从目录中移除。\n\n"
-                + "工程文件与照片都不会被删除——重新用「打开工程…」指向它即可回到目录。"))
+        if (!await Confirm(Loc.T("从目录移除"),
+                Loc.F($"「{card.Title}」将从目录中移除。\n\n工程文件与照片都不会被删除——重新用「打开工程…」指向它即可回到目录。")))
             return;
         vm.Remove(card, deleteProject: false);
     }
@@ -175,9 +173,8 @@ public partial class LibraryView : UserControl
     private async void OnDeleteClick(object? sender, RoutedEventArgs e)
     {
         if (CardOf(sender) is not { } card || card.Roll is not { } roll || Vm is not { } vm) return;
-        if (!await Confirm("删除工程文件",
-                $"将删除「{card.Title}」的工程文件：\n{roll.ProjectPath}\n\n"
-                + "这一卷的全部调整都会丢失，且无法撤销。照片本身不会被删除。"))
+        if (!await Confirm(Loc.T("删除工程文件"),
+                Loc.F($"将删除「{card.Title}」的工程文件：\n{roll.ProjectPath}\n\n这一卷的全部调整都会丢失，且无法撤销。照片本身不会被删除。")))
             return;
         vm.Remove(card, deleteProject: true);
     }
@@ -187,7 +184,7 @@ public partial class LibraryView : UserControl
     private async Task<bool> Confirm(string title, string body)
     {
         bool ok = false;
-        await new InfoDialog(title, body).WithAction("继续", "取消", () => ok = true).ShowDialog(Root());
+        await new InfoDialog(title, body).WithAction(Loc.T("继续"), Loc.T("取消"), () => ok = true).ShowDialog(Root());
         return ok;
     }
 
