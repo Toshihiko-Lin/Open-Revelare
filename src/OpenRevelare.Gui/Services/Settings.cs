@@ -31,6 +31,19 @@ public static class Settings
         /// <summary>Override directory; empty = beside each source file.</summary>
         public string CacheDirectory { get; set; } = "";
 
+        /// <summary>
+        /// Keep converted linear DNGs ACROSS runs instead of deleting them on exit.
+        ///
+        /// Session scope was the safe default when the cache had no ceiling: 349 MB a frame with
+        /// nothing to reclaim it is how a disk fills up. It has had an LRU and a GB budget for a
+        /// while now, and paying the Adobe round trip again on every launch is expensive in a way
+        /// that is very visible — 6.1 s per frame uncached against 418 ms cached, so reopening a
+        /// 36-frame roll after a restart spends minutes redoing work whose result was on disk
+        /// until the moment the app closed. Off by default so nobody's disk usage changes without
+        /// them asking; the DNG backend is the only thing that reads it.
+        /// </summary>
+        public bool CachePersistent { get; set; }
+
         /// <summary>Ceiling in GB; least-recently-used entries are dropped past it.</summary>
         public int CacheBudgetGb { get; set; } = 5;
 
@@ -62,6 +75,10 @@ public static class Settings
         /// want on paper has nothing to do with the chrome you edit in.</summary>
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public SheetStyle SheetStyle { get; set; } = SheetStyle.Light;
+
+        /// <summary>Last confirmed export settings. An export preset is picked once and wanted
+        /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
+        public Models.ExportOptions Export { get; set; } = new();
     }
 
     /// <summary>Per-user config directory — settings and the roll catalog both live here,

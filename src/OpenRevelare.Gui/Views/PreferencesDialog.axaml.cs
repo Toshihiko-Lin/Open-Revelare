@@ -25,7 +25,8 @@ public sealed class PreferencesDialog : Window
     private readonly ComboBox _concurrency = new();
     private readonly TextBlock _dngNote = new() { Foreground = Brushes.Gray, FontSize = 11, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _concurrencyNote = new() { Foreground = Brushes.Gray, FontSize = 11, TextWrapping = TextWrapping.Wrap };
-    private readonly CheckBox _cacheOn = new() { Content = "启用 DNG 转换磁盘缓存（仅本次会话，退出自动删除）" };
+    private readonly CheckBox _cacheOn = new() { Content = "启用 DNG 转换磁盘缓存" };
+    private readonly CheckBox _cachePersist = new() { Content = "跨会话保留（退出不删除，下次启动直接命中）" };
     private readonly TextBox _cacheDir = new() { Watermark = "留空 = 和源文件同目录", MinWidth = 250 };
     private readonly ComboBox _cacheBudget = new();
     private readonly TextBlock _cacheNote = new() { Foreground = Brushes.Gray, FontSize = 11, TextWrapping = TextWrapping.Wrap };
@@ -67,8 +68,10 @@ public sealed class PreferencesDialog : Window
         int bi = Array.IndexOf(CacheBudgets, s.CacheBudgetGb);
         _cacheBudget.SelectedIndex = bi >= 0 ? bi : Array.IndexOf(CacheBudgets, 5);
         _cacheOn.IsChecked = s.CacheEnabled;
+        _cachePersist.IsChecked = s.CachePersistent;
         _cacheDir.Text = s.CacheDirectory;
         _cacheOn.IsCheckedChanged += (_, _) => UpdateCacheNote();
+        _cachePersist.IsCheckedChanged += (_, _) => UpdateCacheNote();
         _cacheBudget.SelectionChanged += (_, _) => UpdateCacheNote();
         _cacheDir.TextChanged += (_, _) => UpdateCacheNote();
         UpdateCacheNote();
@@ -103,6 +106,7 @@ public sealed class PreferencesDialog : Window
         panel.Children.Add(new TextBlock { Text = "磁盘缓存", FontWeight = FontWeight.SemiBold,
                                            Margin = new Thickness(0, 14, 0, 2) });
         panel.Children.Add(_cacheOn);
+        panel.Children.Add(_cachePersist);
         panel.Children.Add(dirRow);
         panel.Children.Add(Row("缓存上限", _cacheBudget));
         panel.Children.Add(_cacheNote);
@@ -174,11 +178,16 @@ public sealed class PreferencesDialog : Window
         string where = string.IsNullOrWhiteSpace(_cacheDir.Text)
             ? @"跟随源文件：<素材目录>\.revelare-cache\（不会写系统盘）"
             : _cacheDir.Text!.Trim() + @"\.revelare-cache\";
+        bool persist = _cachePersist.IsChecked == true;
         _cacheNote.Text =
             $"位置：{where}" + Environment.NewLine +
             $"每帧约 349 MB（60MP）；上限 {gb} GB ≈ {gb * 1024 / 349} 帧，超出按最近最少使用淘汰。" + Environment.NewLine +
-            $"本次会话当前占用 {DngCache.CurrentBytes() / 1048576.0:F0} MB。退出时自动删除；" +
-            "异常退出留下的目录会在下次启动时清掉。";
+            $"当前占用 {DngCache.CurrentBytes() / 1048576.0:F0} MB。" + Environment.NewLine +
+            (persist
+                ? "跨会话保留：重开应用直接命中缓存（命中 418 毫秒 vs 未命中 6.1 秒/帧），"
+                + "上限与淘汰照常生效，随时可关掉或手动删除 .revelare-cache 目录。"
+                : "仅本次会话：退出时自动删除，异常退出留下的目录会在下次启动时清掉——"
+                + "代价是每次重开应用、重开卷都要重付一遍 Adobe 转换。");
     }
 
     private static readonly int[] SheetBudgets = { 1, 2, 5, 10 };
@@ -218,6 +227,7 @@ public sealed class PreferencesDialog : Window
         s.Theme = _theme.SelectedIndex == 1 ? "light" : "dark";
         s.DecodeConcurrency = Math.Max(0, _concurrency.SelectedIndex);
         s.CacheEnabled = _cacheOn.IsChecked ?? true;
+        s.CachePersistent = _cachePersist.IsChecked ?? false;
         s.CacheDirectory = (_cacheDir.Text ?? "").Trim();
         s.CacheBudgetGb = CacheBudgets[Math.Clamp(_cacheBudget.SelectedIndex, 0, CacheBudgets.Length - 1)];
         s.SheetCacheDirectory = (_sheetDir.Text ?? "").Trim();

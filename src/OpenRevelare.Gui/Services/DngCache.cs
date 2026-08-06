@@ -18,18 +18,32 @@ namespace OpenRevelare.Gui.Services;
 /// default — the photos are on E:, so the cache is too. A linear DNG of a 60 MP frame is
 /// ~349 MB, so an unattended cache on C: would be a way to silently fill it.
 ///
-/// LIFETIME: this session only. The session owns a subdirectory named after its process id, so
-/// a previous run that crashed leaves an identifiable orphan rather than an anonymous pile —
-/// <see cref="SweepOrphans"/> removes those on first use, and <see cref="Cleanup"/> removes
-/// ours on exit. Both are best-effort: a cache that cannot be deleted must never be a cache
-/// that stops the app.
+/// LIFETIME: this session by default. The session owns a subdirectory named after its process
+/// id, so a previous run that crashed leaves an identifiable orphan rather than an anonymous
+/// pile — <see cref="SweepOrphans"/> removes those on first use, and <see cref="Cleanup"/>
+/// removes ours on exit. Both are best-effort: a cache that cannot be deleted must never be a
+/// cache that stops the app.
+///
+/// With <see cref="Settings.Model.CachePersistent"/> the entries live in one shared directory
+/// instead and survive the process, so a restart reads 418 ms files rather than re-paying 6.1 s
+/// a frame. The LRU and the GB budget are what make that safe to offer — they already bound the
+/// directory, which is the only reason session scope was ever load-bearing.
 /// </summary>
 internal static class DngCache
 {
     private const string RootName = ".revelare-cache";
 
-    private static readonly string SessionTag =
+    /// <summary>Shared across runs, so it deliberately carries no process identity — and it does
+    /// not match the "s-*" pattern <see cref="SweepOrphans"/> reclaims, which is what stops one
+    /// session from deleting the persistent store out from under another.</summary>
+    private const string SharedTag = "shared";
+
+    private static readonly string ProcessTag =
         $"s-{Environment.ProcessId}-{Process.GetCurrentProcess().StartTime.Ticks:x}";
+
+    /// <summary>Read once per call rather than cached: toggling the preference mid-session should
+    /// take effect on the next decode, not on the next launch.</summary>
+    private static string SessionTag => Settings.Current.CachePersistent ? SharedTag : ProcessTag;
 
     private static readonly object Gate = new();
     private static bool _swept;
@@ -73,8 +87,10 @@ internal static class DngCache
                 }
 
                 // Convert to a temp name first so a crash mid-write cannot leave a truncated
-                // DNG that later looks like a valid cache hit.
-                string partial = target + ".part";
+                // DNG that later looks like a valid cache hit. The process id is in the name
+                // because a persistent cache is shared: two instances converting the same frame
+                // must not be writing the same staging file.
+                string partial = $"{target}.{Environment.ProcessId}.part";
                 convert(partial);
                 if (!File.Exists(partial)) return null;
                 File.Move(partial, target, overwrite: true);
@@ -168,7 +184,14 @@ internal static class DngCache
         }
     }
 
-    /// <summary>Delete this session's cache. Called on shutdown.</summary>
+    /// <summary>
+    /// Delete this session's cache. Called on shutdown.
+    ///
+    /// Only ever this PROCESS's directory — never the shared one, which is the whole point of the
+    /// persistent mode and may be in use by another instance right now. The process directory is
+    /// removed regardless, so toggling persistence on mid-session still cleans up what was written
+    /// before the toggle.
+    /// </summary>
     public static void Cleanup()
     {
         try
@@ -177,7 +200,7 @@ internal static class DngCache
             {
                 foreach (string root in _roots)
                 {
-                    string dir = Path.Combine(root, SessionTag);
+                    string dir = Path.Combine(root, ProcessTag);
                     if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
                     // Remove the container too when we were the only tenant.
                     try { if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any())
