@@ -1487,7 +1487,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// Background update check, 3 s after the window appears — the same shape as the Python
     /// build's <c>QTimer.singleShot(3000, _run_update_check)</c>: delayed so it never slows
-    /// startup, and silent unless the manifest advertises something newer.
+    /// startup, and silent unless one of the two channels advertises something newer.
     /// </summary>
     private async void StartBackgroundUpdateCheck()
     {
@@ -1515,10 +1515,12 @@ public partial class MainWindow : Window
         await ShowUpdateDialogAsync(info);
     }
 
-    /// <summary>The 发现新版本 notice — 前往下载 opens the manifest's URL, 稍后再说 dismisses.</summary>
+    /// <summary>The 发现新版本 notice — 前往下载 opens the download URL, 稍后再说 dismisses.</summary>
     private async Task ShowUpdateDialogAsync(Services.Updater.UpdateInfo info)
     {
-        string changelog = StripHtml(info.Changelog);
+        // Already plain text whichever channel it came from — Updater flattens the manifest's
+        // HTML and GitHub's Markdown, because only it knows which one it just read.
+        string changelog = info.Changelog;
         string body = Loc.F($"OpenRevelare {info.Version} 已发布") +
             (string.IsNullOrEmpty(info.ReleaseDate) ? "" : $"（{info.ReleaseDate}）") +
             Loc.F($"，当前 {AppVersion}。\n\n") +
@@ -1536,15 +1538,5 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(info.DownloadUrl))
             dlg.WithAction(Loc.T("前往下载"), Loc.T("稍后再说"), () => Services.Updater.OpenUrl(info.DownloadUrl));
         await dlg.ShowDialog(this);
-    }
-
-    /// <summary>Minimal HTML→text for the manifest changelog (it uses &lt;b&gt;/&lt;br&gt;).</summary>
-    private static string StripHtml(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        s = System.Text.RegularExpressions.Regex.Replace(s, @"<br\s*/?>", "\n",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        s = System.Text.RegularExpressions.Regex.Replace(s, "<[^>]+>", "");
-        return s.Trim();
     }
 }
