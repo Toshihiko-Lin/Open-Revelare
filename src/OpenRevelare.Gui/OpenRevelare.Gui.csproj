@@ -4,7 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <!-- Single source of the app version (Services/AppInfo). Read by the About box, the update
          check and open-revelare.iss, and checked against the git tag by release.yml's guard job. -->
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <!-- Also the assembly name, hence the avares://OpenRevelare/ resource URIs. -->
     <AssemblyName>OpenRevelare</AssemblyName>
     <AssemblyTitle>OpenRevelare</AssemblyTitle>

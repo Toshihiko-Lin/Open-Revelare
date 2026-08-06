@@ -53,7 +53,7 @@ OpenRevelare 把彩色负片的橙色片基**解算**掉，而不是靠拉曲线
 
 C# / .NET 8 + Avalonia，**纯 CPU**，Windows / Linux / macOS 三平台同一份代码。
 本地优先、非破坏性：源文件永不改动，参数存在随片放置的 `.ncproj` 工程里，
-不需要联网，不需要账号。
+不需要联网，不需要账号。**界面中英双语**，跟随系统或手动锁定。
 
 ## 这个工具适合谁
 
@@ -68,7 +68,6 @@ C# / .NET 8 + Avalonia，**纯 CPU**，Windows / Linux / macOS 三平台同一�
 - 只想一键出片、不打算理解任何参数的人：程序有自动标定，但它的价值在于**可以被检查和修正**
 - 追求绝对严谨的场景——文物翻拍、商业存档、科研用途：
   OpenRevelare 不做逐卷色卡标定，这类需求请用 [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
-- 只看得懂英文的人：界面与内置文档目前只有中文（见 [English](#english)）
 
 对 Gold 200 这类标准 C-41，默认参数与逐卷标定的差别小到屏幕上略可察觉、打印几乎分辨不出；
 染料特性偏离基准较远的卷差得多一些，但改一下标定或在 SceneBase 阶段微调就能补回大部分。
@@ -318,14 +317,15 @@ moved into the log-density domain, white-balanced and inverted on top of the Cin
 and written out as a positive. Every parameter is named, physically meaningful and reproducible:
 the same roll gives the same result next year, on another machine.
 
-Built with C# / .NET 8 and Avalonia. **CPU only.** Local-first and non-destructive — source files
-are never modified, parameters live in a `.ncproj` next to the images, and nothing requires an
-account or a network connection.
+Built with C# / .NET 8 and Avalonia. **CPU only. Bilingual UI (Chinese/English)** — follows
+system locale or can be locked manually. Local-first and non-destructive — source files are never
+modified, parameters live in a `.ncproj` next to the images, and nothing requires an account or
+a network connection.
 
 > [!NOTE]
-> **The application UI and in-app documentation are currently Chinese-only**, as is most of this
-> README. Code and comments are mixed English/Chinese. Translations are very welcome — please
-> open an issue or a pull request.
+> **The application UI is now available in both Chinese and English.** Most of this README and the
+> in-app help documentation are still Chinese-only. Code and comments are mixed English/Chinese.
+> Further translations and documentation are welcome — please open an issue or a pull request.
 
 - **Website** — [revelare.netlify.app](https://revelare.netlify.app/) (Chinese), with screenshots
   of the library, develop and contact-sheet views.
