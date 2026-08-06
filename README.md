@@ -305,6 +305,14 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 反馈与 bug 请开 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues)，
 附上系统版本、相机或扫描仪型号、输入格式与错误信息。请不要上传含隐私内容的原片。
 
+## 打赏
+
+软件免费、开源、无广告。如果觉得有用，可以请我喝杯咖啡。
+
+<p align="center">
+  <img src="docs/assets/donate-wechat.png" width="220" alt="微信支付">
+</p>
+
 ---
 
 <a id="english"></a>
@@ -342,3 +350,4 @@ a network connection.
   CC BY-NC-SA 4.0 and is therefore **not** covered by the GPL grant. Delete `models/` before any
   commercial redistribution; everything but the "smart white balance" feature keeps working.
   See [models/README.md](models/README.md) and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+- **Donate** — Free, open-source, no ads. If it's been useful, a coffee is always welcome (WeChat Pay QR in the Chinese section above).
