@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Single source of the app version (Services/AppInfo). Read by the About box, the update
+         check and open-revelare.iss, and checked against the git tag by release.yml's guard job. -->
+    <Version>1.0.0</Version>
+    <!-- Also the assembly name, hence the avares://OpenRevelare/ resource URIs. -->
+    <AssemblyName>OpenRevelare</AssemblyName>
+    <AssemblyTitle>OpenRevelare</AssemblyTitle>
+    <Product>OpenRevelare</Product>
+    <Company>Toshihiko-Lin</Company>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Windows shell icon (Explorer / taskbar pin / Alt-Tab). The .ico carries the whole
+         16→256 ladder; the window icon at runtime comes from the PNG next to it. -->
+    <ApplicationIcon>Assets\icons\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <!-- The .ico is a build input for ApplicationIcon and the .svg is the vector master;
+         neither is loadable by Avalonia, so keep them out of the embedded resources. -->
+    <AvaloniaResource Remove="Assets\icons\app.ico" />
+    <AvaloniaResource Remove="Assets\icons\app.svg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <!--
+    macOS 的 LibRaw 原生库（packaging/macos/bundle-libraw.sh 生成）。
+    Sdcb 的加载器在 mac 上按 libraw.23.dylib 这个确切文件名 NativeLibrary.Load，走 assembly
+    重载 → 搜程序目录，所以复制到输出根目录即可。
+
+    **必须放在这个项目里，不能放 OpenRevelare.Core**：.NET 8 不把 RuntimeIdentifier 传给被引用
+    的类库（publish 日志里 Core 输出到 bin/Release/net8.0/ 而不是 .../osx-arm64/ 就是证据），
+    Core 里的 $(RuntimeIdentifier) 是空的，按 RID 挑文件的条件永远不成立 —— 编译不报错、
+    包照打，直到 mac 上导入 RAW 才抛 DllNotFoundException。v1.0.0 第 4、5 次 CI 栽在这儿。
+    本机 `dotnet publish src/OpenRevelare.Gui -r osx-arm64` + 一个假 dylib 就能复现，别靠 CI 试。
+
+    Content 而不是 None：None 的 CopyToOutputDirectory 不跨项目引用传递，与
+    models/net_awb.onnx 保持同一种写法。
+  -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <Content Include="$(MSBuildThisFileDirectory)../../native/$(RuntimeIdentifier)/*.dylib"
+             Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingMacLibRaw" BeforeTargets="Build"
+          Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <Warning Condition="!Exists('$(MSBuildThisFileDirectory)../../native/$(RuntimeIdentifier)/libraw.23.dylib')"
+             Text="native/$(RuntimeIdentifier)/libraw.23.dylib 不存在 —— 包能打出来，但 RAW 解码会在运行时抛 DllNotFoundException（TIFF 不受影响）。先跑 packaging/macos/bundle-libraw.sh。" />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
+    <!-- Deep-WB backend. Brings onnxruntime (and the net_awb.onnx Content item) with it, so the
+         GUI no longer names the package or the model itself: there is ONE implementation of
+         IDeepWbCorrector and ONE copy of the weights. The GUI used to carry a private second
+         corrector plus its own embedded copy of the 17 MB model — which also meant the CLI's
+         parity harness was verifying a resampler the GUI did not use. -->
+    <ProjectReference Include="..\OpenRevelare.DeepWb.Onnx\OpenRevelare.DeepWb.Onnx.csproj" />
+  </ItemGroup>
+</Project>

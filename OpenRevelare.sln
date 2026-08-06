@@ -1,0 +1,48 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Core", "src\OpenRevelare.Core\OpenRevelare.Core.csproj", "{D77D6A71-423F-401A-BE09-A180EDA74627}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Cli", "src\OpenRevelare.Cli\OpenRevelare.Cli.csproj", "{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.DeepWb.Onnx", "src\OpenRevelare.DeepWb.Onnx\OpenRevelare.DeepWb.Onnx.csproj", "{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Gui", "src\OpenRevelare.Gui\OpenRevelare.Gui.csproj", "{EC17BAE3-5AB7-45E7-9311-026DF1479E68}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D77D6A71-423F-401A-BE09-A180EDA74627}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D77D6A71-423F-401A-BE09-A180EDA74627}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D77D6A71-423F-401A-BE09-A180EDA74627}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D77D6A71-423F-401A-BE09-A180EDA74627}.Release|Any CPU.Build.0 = Release|Any CPU
+		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{D77D6A71-423F-401A-BE09-A180EDA74627} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+		{EC17BAE3-5AB7-45E7-9311-026DF1479E68} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+	EndGlobalSection
+EndGlobal

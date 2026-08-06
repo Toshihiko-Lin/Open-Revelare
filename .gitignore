@@ -1,0 +1,35 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+# Rider / VS / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch
+/scratch/
+*.log
+
+# 发版产物：publish = dotnet publish 输出（含 .app / AppDir 装配现场），
+# installer = 安装包（Inno 的 setup.exe / AppImage / dmg）
+/publish/
+/installer/
+
+# macOS 的 LibRaw dylib：NuGet 没有 mac runtime 包，由 packaging/macos/bundle-libraw.sh
+# 从源码编译装配而来。是构建输入不是源码，换机重跑脚本即可。
+/native/
+
+# AppImage 打包工具（appimagetool / 静态 runtime），由 build-appimage.sh 下载
+/tools/
+
+# NuGet
+*.nupkg

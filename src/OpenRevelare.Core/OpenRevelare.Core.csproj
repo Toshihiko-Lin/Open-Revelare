@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.660" />
+    <PackageReference Include="Sdcb.LibRaw" Version="0.21.1.7" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
+  </ItemGroup>
+
+  <!--
+    RAW 原生库：Sdcb 只发 win/linux 两个 runtime 包，按目标平台挑一个，别三份都塞进产物。
+    没有 RuntimeIdentifier 时（普通 dotnet build / 跑对拍）默认给 Windows，本机开发照旧。
+    linux64 包是 Ubuntu 22.04 上编的（glibc 2.35 起），见 packaging/linux/build-appimage.sh。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Sdcb.LibRaw.runtime.win64" Version="0.21.1"
+                      Condition="'$(RuntimeIdentifier)' == '' Or $(RuntimeIdentifier.StartsWith('win'))" />
+    <PackageReference Include="Sdcb.LibRaw.runtime.linux64" Version="0.21.1"
+                      Condition="$(RuntimeIdentifier.StartsWith('linux'))" />
+  </ItemGroup>
+
+  <!--
+    macOS 没有 runtime 包（NuGet 上就是没有），dylib 得自己备：跑
+    packaging/macos/bundle-libraw.sh 生成 native/osx-arm64/ 或 native/osx-x64/。
+    Sdcb 的加载器在 mac 上按 libraw.23.dylib 这个确切文件名 NativeLibrary.Load，走 assembly
+    重载 → 会搜程序目录，所以复制到输出根目录即可被找到。
+
+    **把那份 dylib 复制进产物的 ItemGroup 在 OpenRevelare.Gui.csproj 里，不在这里** ——
+    .NET 8 不把 RuntimeIdentifier 传给被引用的类库（publish 时 Core 输出到
+    bin/Release/net8.0/ 而不是 .../osx-arm64/），这里的 $(RuntimeIdentifier) 是空的，
+    按 RID 挑文件的条件永远不成立。上面那两个 PackageReference 不受影响是因为
+    条件在 **restore** 期求值，那时 NuGet 的图里有 RID。
+  -->
+
+</Project>

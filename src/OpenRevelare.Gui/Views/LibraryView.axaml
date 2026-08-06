@@ -1,0 +1,130 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:OpenRevelare.Gui.Controls"
+             xmlns:vm="clr-namespace:OpenRevelare.Gui.ViewModels"
+             x:DataType="vm:LibraryViewModel"
+             x:Class="OpenRevelare.Gui.Views.LibraryView">
+
+    <UserControl.Styles>
+        <!-- Everything on this wall is clickable, so everything on it has to react to the
+             pointer. Border only — a background change would fight the contact sheet's paper. -->
+        <Style Selector="Border.tile:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <!-- Selected reads as a filled-in border, not a colour wash: the card is mostly a
+             photograph, and tinting it would lie about the print. -->
+        <Style Selector="Border.tile.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="Padding" Value="9" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- The 图库 module: one card per roll, the card's picture is that roll's contact sheet.
+         Nothing here decodes a negative — a card is one JPEG read straight to card width. -->
+    <Grid RowDefinitions="Auto,*" Background="{DynamicResource BgBrush}">
+
+        <Border Grid.Row="0" Padding="18,14,18,10">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="图库" FontSize="17" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding RollCountText}" FontSize="12"
+                           Foreground="{DynamicResource TextMuteBrush}" VerticalAlignment="Bottom"
+                           Margin="0,0,0,2" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Padding="12,0,12,16">
+            <ItemsControl ItemsSource="{Binding Rolls}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RollCard">
+                      <Panel>
+
+                        <!-- 新建卷 tile: same footprint as a roll card so the wall stays a grid,
+                             and it leads the row it is in. One click, not two — it is a button. -->
+                        <Border Classes="tile" IsVisible="{Binding IsNewTile}" Margin="6" Width="272"
+                                Background="{DynamicResource Panel2Brush}"
+                                BorderBrush="{DynamicResource BorderSoftBrush}"
+                                BorderThickness="1" CornerRadius="3" Padding="10"
+                                Cursor="Hand" Tapped="OnNewTileTapped">
+                            <StackPanel Spacing="8">
+                                <Border Height="150" CornerRadius="2"
+                                        Background="{DynamicResource ChromeBrush}">
+                                    <TextBlock Text="＋" FontSize="40"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextMuteBrush}" />
+                                </Border>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="新建卷…" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                    <TextBlock Text="选择一张或多张负片（多选 = 整卷）" FontSize="11"
+                                               Foreground="{DynamicResource TextMuteBrush}" />
+                                    <TextBlock Text=" " FontSize="11" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Name="Card" Classes="tile" Classes.selected="{Binding IsSelected}"
+                                Margin="6" Width="272" Cursor="Hand"
+                                IsVisible="{Binding !IsNewTile}"
+                                Background="{DynamicResource PanelBrush}"
+                                BorderBrush="{DynamicResource BorderSoftBrush}"
+                                BorderThickness="1" CornerRadius="3" Padding="10"
+                                DoubleTapped="OnCardDoubleTapped"
+                                PointerPressed="OnCardPressed">
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="打开这一卷" Click="OnOpenClick" />
+                                    <MenuItem Header="重命名…" Click="OnRenameClick" />
+                                    <MenuItem Header="卷信息…" Click="OnInfoClick"
+                                              ToolTip.Tip="相机 / 胶卷 / 卷号 / 冲洗 …，会烧在印样标识条上" />
+                                    <MenuItem Header="导出印样…" Click="OnExportSheetClick"
+                                              ToolTip.Tip="另存这一卷的印样封面（不需要重新解码整卷）" />
+                                    <MenuItem Header="重新定位工程…" Click="OnRelocateClick"
+                                              ToolTip.Tip="工程文件被移动过时，指向它的新位置" />
+                                    <Separator />
+                                    <MenuItem Header="在资源管理器中显示" Click="OnRevealClick" />
+                                    <Separator />
+                                    <MenuItem Header="从目录移除（保留工程文件）" Click="OnForgetClick" />
+                                    <MenuItem Header="删除工程文件…" Click="OnDeleteClick" />
+                                </ContextMenu>
+                            </Border.ContextMenu>
+
+                            <StackPanel Spacing="8">
+                                <Border Height="150" Background="{DynamicResource ChromeBrush}"
+                                        CornerRadius="2" ClipToBounds="True">
+                                    <Panel>
+                                        <TextBlock Text="（暂无印样）" FontSize="11"
+                                                   IsVisible="{Binding HasNoCover}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextMuteBrush}" />
+                                        <Image Source="{Binding Cover}" Stretch="Uniform" />
+                                    </Panel>
+                                </Border>
+
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                    <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               IsVisible="{Binding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                               Foreground="{DynamicResource TextDimBrush}" />
+                                    <TextBlock Text="{Binding Detail}" FontSize="11"
+                                               Foreground="{DynamicResource TextMuteBrush}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                      </Panel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
