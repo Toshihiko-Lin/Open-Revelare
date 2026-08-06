@@ -26,6 +26,11 @@ public sealed partial class RollFrame : ObservableObject
     /// <summary>Film-strip caption: the file name, marked when this is a virtual copy.</summary>
     public string Label => IsVirtual ? FileName + Loc.T(" · 副本") : FileName;
 
+    /// <summary>Re-resolve <see cref="Label"/> after a language switch — the 副本 marker is the
+    /// only translated part of it, and it sits in the film strip for as long as the roll is open.
+    /// Driven from MainViewModel, which is what owns the frames.</summary>
+    public void RefreshText() => OnPropertyChanged(nameof(Label));
+
     /// <summary>Per-frame parameters — the single source of truth for this frame's edit.</summary>
     public FrameParams Params { get; set; } = new();
 

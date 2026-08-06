@@ -644,6 +644,12 @@ public partial class MainViewModel : ViewModelBase
     private Bitmap? _savedPositive;                   // positive stashed while showing negative
     [ObservableProperty] private string _filmBaseText = Loc.T("片基：默认（未采样）");
 
+    /// <summary>Whether <see cref="FilmBaseText"/> is reporting a measured t_base rather than
+    /// standing at its default. Only the default is re-translated on a language switch — a
+    /// measured one is three numbers with a translated prefix, and the prefix is not worth
+    /// keeping the sample around for. See <see cref="RetranslateText"/>.</summary>
+    private bool _filmBaseSampled;
+
     // ── Tone curves (gamma-2.2 domain; set by the CurveEditor via SetCurves) ─────
     private List<(double X, double Y)> _curveM = new(), _curveR = new(), _curveG = new(), _curveB = new();
     private bool _curvePreserveHue = true;
@@ -804,6 +810,7 @@ public partial class MainViewModel : ViewModelBase
         double[] tb = FilmBase.SampleTBase(src, rect);
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
         FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
+        _filmBaseSampled = true;
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -880,6 +887,7 @@ public partial class MainViewModel : ViewModelBase
             TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
             foreach (RollFrame f in Frames) f.Params.TBase = (double[])tb.Clone();
             FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）");
+            _filmBaseSampled = true;
             StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
         }
         catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
@@ -1350,6 +1358,7 @@ public partial class MainViewModel : ViewModelBase
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
         FilmBaseText = Loc.T("片基：默认（未采样）");
+        _filmBaseSampled = false;
         ScheduleRender();
     }
 
@@ -1381,6 +1390,27 @@ public partial class MainViewModel : ViewModelBase
         // Roll notes feed both the .ncproj and the roll list's subtitle, so editing them in the
         // contact-sheet dialog has to dirty the roll like any other change.
         Notes.PropertyChanged += (_, _) => MarkRollDirty();
+        Loc.Changed += RetranslateText;
+    }
+
+    /// <summary>
+    /// Re-resolve this view model's text after a language switch. One of these exists per run, so
+    /// the static subscription in the constructor never needs unhooking.
+    ///
+    /// Only the IDLE text moves. A status line that reports something — 「已导出 12 帧」,
+    /// 「自动 D-max = 2.031」, an exception message — describes an event that happened while the
+    /// old language was in effect; restating it in the new one would be rewriting history, and
+    /// half of these carry a number or a file name that no longer has a source to be rebuilt
+    /// from. What must follow the switch is the text that is merely sitting there saying nothing
+    /// has happened yet: those three labels are on screen from launch until the user acts, and in
+    /// the empty-editor state they are most of what the window says.
+    /// </summary>
+    private void RetranslateText()
+    {
+        if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
+        if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
+        if (!_filmBaseSampled) FilmBaseText = Loc.T("片基：默认（未采样）");
+        foreach (RollFrame f in Frames) f.RefreshText();
     }
 
     /// <summary>The catalog entry for the open roll; null until something is imported.</summary>
@@ -2129,6 +2159,7 @@ public partial class MainViewModel : ViewModelBase
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
         FilmBaseText = Loc.F($"片基 t_base = {p.TBase[0]:F3}, {p.TBase[1]:F3}, {p.TBase[2]:F3}");
+        _filmBaseSampled = true;
         _suppressRender = false;
 
         FrameParamsLoaded?.Invoke(p);   // view syncs the curve editor

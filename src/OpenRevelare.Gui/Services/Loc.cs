@@ -25,6 +25,14 @@ namespace OpenRevelare.Gui.Services;
 /// </list>
 /// XAML goes through <see cref="Markup.TExtension"/>, which binds instead of resolving once, so a
 /// language switch repaints every window that is already open.
+///
+/// <see cref="T(string)"/> and <see cref="F"/> called from C# do NOT: they hand back a string, and
+/// a string does not know where it came from. That is right for the text this app produces most of
+/// — a status line reporting what just happened, a dialog built at the moment it is shown — but
+/// wrong for text that goes on screen and STAYS there. Whoever owns such a label subscribes to
+/// <see cref="Changed"/> and re-resolves it; see <c>LibraryViewModel.RetranslateText</c> and
+/// <c>MainViewModel.RetranslateText</c>, which between them cover every persistent label the code
+/// (as opposed to the XAML) puts up.
 /// </summary>
 public static class Loc
 {
