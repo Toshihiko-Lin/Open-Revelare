@@ -307,6 +307,11 @@ static int Run(string[] args)
                     ? rv.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadLinear).ToList()
                     : null;
                 double? thr = opts.TryGetValue("fb-sprocket-threshold", out var ft) ? ParseD(ft) : null;
+                // ⚠ Both t_base_roll lines are NO LONGER a Python parity check: the per-frame
+                // pick is now co-sited (one physical patch supplies all three channels), which
+                // the reference's three independent per-channel percentiles are not. Treat them
+                // as regression baselines against a previous OpenRevelare build instead — the
+                // reasoning is on FilmBase.EstimateTBaseFromRoll.
                 Console.WriteLine("t_base_roll " + Fmt3(FilmBase.EstimateTBaseFromRoll(frames, thr, vals)));
                 // No threshold → the pure-brightness branch (p99.99, values from the
                 // frames themselves). Different percentile AND different code path.
