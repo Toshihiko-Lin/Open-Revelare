@@ -24,7 +24,7 @@ public sealed partial class RollFrame : ObservableObject
     public bool IsVirtual { get; }
 
     /// <summary>Film-strip caption: the file name, marked when this is a virtual copy.</summary>
-    public string Label => IsVirtual ? FileName + " · 副本" : FileName;
+    public string Label => IsVirtual ? FileName + Loc.T(" · 副本") : FileName;
 
     /// <summary>Per-frame parameters — the single source of truth for this frame's edit.</summary>
     public FrameParams Params { get; set; } = new();

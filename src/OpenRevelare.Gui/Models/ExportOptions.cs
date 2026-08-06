@@ -63,14 +63,14 @@ public sealed class ExportOptions
     public string Summary()
     {
         string format = Format == ExportFormat.Jpeg
-            ? $"JPEG 品质 {JpegQuality}"
-            : $"16-bit TIFF · {TiffCompression switch
+            ? Loc.F($"JPEG 品质 {JpegQuality}")
+            : Loc.F($"16-bit TIFF · {TiffCompression switch
             {
-                TiffIO.CompressionMode.None => "不压缩",
+                TiffIO.CompressionMode.None => Loc.T("不压缩"),
                 TiffIO.CompressionMode.Deflate => "Deflate",
                 _ => "LZW",
-            }}";
-        string size = Downsample ? $"长边 ≤ {MaxLongEdge}px" : "原始尺寸";
-        return $"{format} · {size}" + (EmbedIcc ? " · 嵌 sRGB" : "");
+            }}");
+        string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
+        return $"{format} · {size}" + (EmbedIcc ? Loc.T(" · 嵌 sRGB") : "");
     }
 }

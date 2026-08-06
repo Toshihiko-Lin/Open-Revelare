@@ -1,25 +1,26 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.SprocketDialog"
         Width="720" Height="640"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
-        Title="齿孔遮罩确认">
+        Title="{i18n:T '齿孔遮罩确认'}">
     <DockPanel Margin="14">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextDimBrush}" Margin="0,0,0,8"
-                   Text="拖动阈值滑块，让绿色覆盖齿孔和灯板（胶片边缘最透光的部分），但不要覆盖片基（橙色底版）和画面内容。若本卷无齿孔且无光源露出，点「这卷无齿孔(跳过)」。" />
+                   Text="{i18n:T '拖动阈值滑块，让绿色覆盖齿孔和灯板（胶片边缘最透光的部分），但不要覆盖片基（橙色底版）和画面内容。若本卷无齿孔且无光源露出，点「这卷无齿孔(跳过)」。'}" />
 
         <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,10,0,0">
             <TextBlock Name="RefLbl" Foreground="{DynamicResource TextMuteBrush}" FontSize="11" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="Auto,*,56">
-                <TextBlock Grid.Column="0" Text="阈值" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBlock Grid.Column="0" Text="{i18n:T '阈值'}" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <Slider Grid.Column="1" Name="Thr" Minimum="0" Maximum="1" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Name="ValLbl" VerticalAlignment="Center" HorizontalAlignment="Right"
                            FontFamily="JetBrains Mono, Consolas, monospace" />
             </Grid>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="这卷无齿孔(跳过)" Click="OnSkipClick" />
-                <Button Content="确认并继续" Click="OnConfirmClick" />
+                <Button Content="{i18n:T '这卷无齿孔(跳过)'}" Click="OnSkipClick" />
+                <Button Content="{i18n:T '确认并继续'}" Click="OnConfirmClick" />
             </StackPanel>
         </StackPanel>
 

@@ -31,8 +31,8 @@ public partial class ExportDialog : Window
         _rollMode = rollMode;
         InitializeComponent();
 
-        Title = rollMode ? "整卷导出选项" : "导出选项";
-        OkBtn.Content = rollMode ? "选择目录 →" : "选择位置 →";
+        Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
+        OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
         ConflictGroup.IsVisible = rollMode;
 
         Load(Settings.Current.Export);

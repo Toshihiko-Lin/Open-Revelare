@@ -765,56 +765,56 @@ public partial class MainWindow : Window
     // ── Sampling button handlers ────────────────────────────────────────────────
     private void OnSampleFilmBaseClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.FilmBase,
-            "采样片基：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。",
+            Loc.T("采样片基：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleShadowClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.WbOffset,
-            "采样暗部 WB（wb_offset）：在正片的暗部拖框，松开即采样。按 Esc 取消。",
+            Loc.T("采样暗部 WB（wb_offset）：在正片的暗部拖框，松开即采样。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleHighlightWbClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.WbHigh,
-            "采样亮部 WB（wb_high）：在正片的【高光中性区】（应为白/灰的最亮处）拖框，松开即采样。按 Esc 取消。",
+            Loc.T("采样亮部 WB（wb_high）：在正片的【高光中性区】（应为白/灰的最亮处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DMax,
-            "采样 D_max：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。",
+            Loc.T("采样 D_max：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleScanEvClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.ScanEv,
-            "采样偏移：预览已切到负片。框选一块应为纯片基的区域，松开后自动校正零点。按 Esc 取消。",
+            Loc.T("采样偏移：预览已切到负片。框选一块应为纯片基的区域，松开后自动校正零点。按 Esc 取消。"),
             useNegative: true);
 
     private void OnGreyPointClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.GreyPoint,
-            "灰点白平衡：在正片中应为【中性灰/白】的区域拖框，松开即把该区域中和为灰。按 Esc 取消。",
+            Loc.T("灰点白平衡：在正片中应为【中性灰/白】的区域拖框，松开即把该区域中和为灰。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleBlackClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.Black,
-            "采样黑场：在正片【最暗有效区】拖框，松开即把该处设为黑场端点。按 Esc 取消。",
+            Loc.T("采样黑场：在正片【最暗有效区】拖框，松开即把该处设为黑场端点。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleWhiteClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.White,
-            "采样白场：在正片【最亮有效区】拖框，松开即把该处设为白场端点。按 Esc 取消。",
+            Loc.T("采样白场：在正片【最亮有效区】拖框，松开即把该处设为白场端点。按 Esc 取消。"),
             useNegative: false);
 
     private void OnCropClick(object? sender, RoutedEventArgs e) =>
-        ToggleSampling(sender, SampleMode.Crop, "裁切：拖动框内移动位置，拖角/拖边改变大小（选了预设则锁定比例）。回车应用，Esc 取消。",
+        ToggleSampling(sender, SampleMode.Crop, Loc.T("裁切：拖动框内移动位置，拖角/拖边改变大小（选了预设则锁定比例）。回车应用，Esc 取消。"),
             useNegative: false);
 
     private void OnStraightenHClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.StraightenH,
-            "取水平：沿画面中【应当水平】的边（地平线、水面、桌沿）拖一条线，松开即转正。按 Esc 取消。",
+            Loc.T("取水平：沿画面中【应当水平】的边（地平线、水面、桌沿）拖一条线，松开即转正。按 Esc 取消。"),
             useNegative: false);
 
     private void OnStraightenVClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.StraightenV,
-            "取垂直：沿画面中【应当垂直】的边（门框、旗杆、墙角）拖一条线，松开即转正。按 Esc 取消。",
+            Loc.T("取垂直：沿画面中【应当垂直】的边（门框、旗杆、墙角）拖一条线，松开即转正。按 Esc 取消。"),
             useNegative: false);
 
     private void OnAutoLevelsClick(object? sender, RoutedEventArgs e) => Vm?.AutoLevels();
@@ -980,7 +980,7 @@ public partial class MainWindow : Window
             ToggleButton? btn = ToggleFor(SampleMode.Crop);
             SetTogglesExcept(btn);
             if (btn is not null) btn.IsChecked = true;
-            EnterMode(SampleMode.Crop, "裁切：拖动框内移动位置，拖角/拖边改变大小（选了预设则锁定比例）。回车应用，Esc 取消。", useNegative: false);
+            EnterMode(SampleMode.Crop, Loc.T("裁切：拖动框内移动位置，拖角/拖边改变大小（选了预设则锁定比例）。回车应用，Esc 取消。"), useNegative: false);
         }
         BeginCropDraft();   // re-seed at the new ratio
     }
@@ -1109,7 +1109,7 @@ public partial class MainWindow : Window
             ExitMode();
             double? deg = StraightenAngle(_dragStart, end, vertical: mode == SampleMode.StraightenV);
             if (deg is double d && Vm is not null) Vm.ApplyStraightenAngle(d);
-            else if (Vm is not null) Vm.StatusText = "拉线太短，未取到角度——请沿参考边拉长一些。";
+            else if (Vm is not null) Vm.StatusText = Loc.T("拉线太短，未取到角度——请沿参考边拉长一些。");
             return;
         }
 
@@ -1135,7 +1135,7 @@ public partial class MainWindow : Window
                 case SampleMode.White: Vm.SampleWhite(rect.Value); break;
             }
         }
-        catch (Exception ex) { Vm.StatusText = "采样失败：" + ex.Message; }
+        catch (Exception ex) { Vm.StatusText = Loc.T("采样失败：") + ex.Message; }
     }
 
     /// <summary>
@@ -1224,11 +1224,9 @@ public partial class MainWindow : Window
             && !existing.Missing)
         {
             bool makeNew = false;
-            await new InfoDialog("这个文件夹已经有一卷了",
-                    $"「{existing.Title}」（{existing.FrameCount} 帧）的工程就在这个文件夹里。\n\n"
-                    + "打开它可以接着上次的调整继续；仍然新建会得到一卷全新的、参数从头开始的卷，"
-                    + "两者互不影响。")
-                .WithAction("仍然新建", "打开已有的卷", () => makeNew = true)
+            await new InfoDialog(Loc.T("这个文件夹已经有一卷了"),
+                    Loc.F($"「{existing.Title}」（{existing.FrameCount} 帧）的工程就在这个文件夹里。\n\n打开它可以接着上次的调整继续；仍然新建会得到一卷全新的、参数从头开始的卷，两者互不影响。"))
+                .WithAction(Loc.T("仍然新建"), Loc.T("打开已有的卷"), () => makeNew = true)
                 .ShowDialog(this);
             if (!makeNew)
             {
@@ -1272,17 +1270,15 @@ public partial class MainWindow : Window
     private async Task<string?> AskRelinkFolderAsync(int missing, string firstName)
     {
         bool go = false;
-        await new InfoDialog("底片不在原来的位置",
-                $"这一卷有 {missing} 个源文件找不到了，例如「{firstName}」。\n\n"
-                + "如果只是整体移动了文件夹，选中新位置即可按文件名重新对上；"
-                + "调整不会丢失。也可以先跳过，稍后再处理。")
-            .WithAction("选择文件夹…", "跳过", () => go = true)
+        await new InfoDialog(Loc.T("底片不在原来的位置"),
+                Loc.F($"这一卷有 {missing} 个源文件找不到了，例如「{firstName}」。\n\n如果只是整体移动了文件夹，选中新位置即可按文件名重新对上；调整不会丢失。也可以先跳过，稍后再处理。"))
+            .WithAction(Loc.T("选择文件夹…"), Loc.T("跳过"), () => go = true)
             .ShowDialog(this);
         if (!go) return null;
 
         var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "底片现在在哪个文件夹", AllowMultiple = false,
+            Title = Loc.T("底片现在在哪个文件夹"), AllowMultiple = false,
         });
         return dirs.FirstOrDefault()?.TryGetLocalPath();
     }
@@ -1292,14 +1288,14 @@ public partial class MainWindow : Window
     {
         var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "扫描此文件夹下的工程（含子文件夹）", AllowMultiple = false,
+            Title = Loc.T("扫描此文件夹下的工程（含子文件夹）"), AllowMultiple = false,
         });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } root) return;
 
         int added = await Task.Run(() => Services.Catalog.Scan(root));
         if (Vm is not null && Vm.IsLibraryMode) await Vm.Library.RefreshAsync();
-        await new InfoDialog("扫描完成",
-                added > 0 ? $"已加入 {added} 卷。" : "没有找到尚未登记的工程文件（.ncproj）。")
+        await new InfoDialog(Loc.T("扫描完成"),
+                added > 0 ? Loc.F($"已加入 {added} 卷。") : Loc.T("没有找到尚未登记的工程文件（.ncproj）。"))
             .ShowDialog(this);
     }
 
@@ -1320,10 +1316,10 @@ public partial class MainWindow : Window
         {
             var item = new MenuItem
             {
-                Header = roll.Missing ? roll.Title + "（文件缺失）" : roll.Title,
+                Header = roll.Missing ? roll.Title + Loc.T("（文件缺失）") : roll.Title,
                 IsEnabled = !roll.Missing,
             };
-            ToolTip.SetTip(item, $"{roll.Subtitle}\n{roll.FrameCount} 帧 · {roll.ProjectPath}".TrimStart());
+            ToolTip.SetTip(item, Loc.F($"{roll.Subtitle}\n{roll.FrameCount} 帧 · {roll.ProjectPath}").TrimStart());
             item.Click += async (_, _) =>
             {
                 if (Vm is null) return;
@@ -1336,14 +1332,14 @@ public partial class MainWindow : Window
 
     // ── Project open / save (.ncproj) ───────────────────────────────────────────
     private static readonly FilePickerFileType NcProjType =
-        new("OpenRevelare 工程 (.ncproj)") { Patterns = new[] { "*.ncproj" } };
+        new(Loc.T("OpenRevelare 工程 (.ncproj)")) { Patterns = new[] { "*.ncproj" } };
 
     private async void OnOpenProjectClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "打开工程", AllowMultiple = false,
+            Title = Loc.T("打开工程"), AllowMultiple = false,
             FileTypeFilter = new[] { NcProjType },
         });
         string? path = files.FirstOrDefault()?.TryGetLocalPath();
@@ -1357,7 +1353,7 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "另存工程副本", DefaultExtension = "ncproj",
+            Title = Loc.T("另存工程副本"), DefaultExtension = "ncproj",
             SuggestedFileName = Vm.CurrentRoll?.Title ?? "project",
             FileTypeChoices = new[] { NcProjType },
         });
@@ -1371,11 +1367,11 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "添加图像到当前卷",
+            Title = Loc.T("添加图像到当前卷"),
             AllowMultiple = true,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("负片 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
             },
         });
         var paths = files.Select(f => f.TryGetLocalPath()).Where(p => p != null).Cast<string>().ToList();
@@ -1397,7 +1393,7 @@ public partial class MainWindow : Window
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "导出正片",
+            Title = Loc.T("导出正片"),
             DefaultExtension = opt.Extension,
             FileTypeChoices = new List<FilePickerFileType>
             {
@@ -1415,11 +1411,11 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "选择 LCC 平场参考图（RAW / TIFF）",
+            Title = Loc.T("选择 LCC 平场参考图（RAW / TIFF）"),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("平场图 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
             },
         });
         string? path = files.FirstOrDefault()?.TryGetLocalPath();
@@ -1435,7 +1431,7 @@ public partial class MainWindow : Window
 
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = $"选择整卷导出目录（{opt.Summary()}）",
+            Title = Loc.F($"选择整卷导出目录（{opt.Summary()}）"),
             AllowMultiple = false,
         });
         string? dir = folders.FirstOrDefault()?.TryGetLocalPath();
@@ -1460,7 +1456,7 @@ public partial class MainWindow : Window
 
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "导出印样",
+            Title = Loc.T("导出印样"),
             DefaultExtension = "jpg",
             SuggestedFileName = "contactsheet",
             FileTypeChoices = new List<FilePickerFileType>
@@ -1506,14 +1502,14 @@ public partial class MainWindow : Window
 
     private async void OnCheckUpdateClick(object? sender, RoutedEventArgs e)
     {
-        if (Vm is not null) Vm.StatusText = "正在检查更新 …";
+        if (Vm is not null) Vm.StatusText = Loc.T("正在检查更新 …");
         // Manual check uses Python's longer 8 s timeout: the user is watching, so waiting is
         // preferable to a false "已是最新版本".
         Services.Updater.UpdateInfo? info = await Services.Updater.CheckAsync(AppVersion, 8);
         if (Vm is not null) Vm.StatusText = "";
         if (info is null)
         {
-            await new InfoDialog("检查更新", $"当前已是最新版本（{AppVersion}）。").ShowDialog(this);
+            await new InfoDialog(Loc.T("检查更新"), Loc.F($"当前已是最新版本（{AppVersion}）。")).ShowDialog(this);
             return;
         }
         await ShowUpdateDialogAsync(info);
@@ -1523,24 +1519,22 @@ public partial class MainWindow : Window
     private async Task ShowUpdateDialogAsync(Services.Updater.UpdateInfo info)
     {
         string changelog = StripHtml(info.Changelog);
-        string body = $"OpenRevelare {info.Version} 已发布" +
+        string body = Loc.F($"OpenRevelare {info.Version} 已发布") +
             (string.IsNullOrEmpty(info.ReleaseDate) ? "" : $"（{info.ReleaseDate}）") +
-            $"，当前 {AppVersion}。\n\n" +
-            (string.IsNullOrEmpty(changelog) ? "" : $"更新说明：\n{changelog}\n\n") +
-            (string.IsNullOrEmpty(info.DownloadUrl) ? "" : $"下载地址：\n{info.DownloadUrl}\n\n") +
+            Loc.F($"，当前 {AppVersion}。\n\n") +
+            (string.IsNullOrEmpty(changelog) ? "" : Loc.F($"更新说明：\n{changelog}\n\n")) +
+            (string.IsNullOrEmpty(info.DownloadUrl) ? "" : Loc.F($"下载地址：\n{info.DownloadUrl}\n\n")) +
             // 三个平台的「怎么装」完全不同，别只写 Windows 的。链接本身也是按平台挑的，
             // 见 Updater.PlatformDownloadUrl。
             (OperatingSystem.IsMacOS()
-                ? "下载后打开 dmg，把 OpenRevelare 拖进「应用程序」覆盖旧版即可。"
-                  + "首次打开若提示「已损坏」，在终端执行 "
-                  + "xattr -dr com.apple.quarantine /Applications/OpenRevelare.app。"
+                ? Loc.T("下载后打开 dmg，把 OpenRevelare 拖进「应用程序」覆盖旧版即可。首次打开若提示「已损坏」，在终端执行 xattr -dr com.apple.quarantine /Applications/OpenRevelare.app。")
                 : OperatingSystem.IsLinux()
-                ? "下载后给新的 AppImage 加上可执行权限（chmod +x）替换旧文件即可。"
-                : "安装包会直接覆盖当前版本，无需先卸载。")
-            + "偏好设置与卷目录都保留在原处。";
-        var dlg = new InfoDialog("发现新版本", body);
+                ? Loc.T("下载后给新的 AppImage 加上可执行权限（chmod +x）替换旧文件即可。")
+                : Loc.T("安装包会直接覆盖当前版本，无需先卸载。"))
+            + Loc.T("偏好设置与卷目录都保留在原处。");
+        var dlg = new InfoDialog(Loc.T("发现新版本"), body);
         if (!string.IsNullOrEmpty(info.DownloadUrl))
-            dlg.WithAction("前往下载", "稍后再说", () => Services.Updater.OpenUrl(info.DownloadUrl));
+            dlg.WithAction(Loc.T("前往下载"), Loc.T("稍后再说"), () => Services.Updater.OpenUrl(info.DownloadUrl));
         await dlg.ShowDialog(this);
     }
 

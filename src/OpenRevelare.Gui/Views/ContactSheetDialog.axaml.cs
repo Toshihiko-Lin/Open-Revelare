@@ -84,7 +84,7 @@ public partial class ContactSheetDialog : Window
 
         // Report the size the export will be, not the preview's — planning only, no pixels.
         Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048);
-        InfoLbl.Text = $"{_thumbs.Count} 帧 · 导出 {size.Width}×{size.Height}";
+        InfoLbl.Text = Loc.F($"{_thumbs.Count} 帧 · 导出 {size.Width}×{size.Height}");
     }
 
     protected override void OnClosed(System.EventArgs e)

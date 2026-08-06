@@ -21,6 +21,13 @@
     <ApplicationIcon>Assets\icons\app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Loc.T / Loc.F are reached from nearly every file that puts text on screen, and a
+       per-file `using OpenRevelare.Gui.Services;` would also drag Settings, Catalog, ImageIo …
+       into scope wherever a single string needed translating. An alias imports the one name. -->
+  <ItemGroup>
+    <Using Include="OpenRevelare.Gui.Services.Loc" Alias="Loc" />
+  </ItemGroup>
+
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <!-- The .ico is a build input for ApplicationIcon and the .svg is the vector master;

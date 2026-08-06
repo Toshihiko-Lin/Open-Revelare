@@ -48,7 +48,11 @@ public partial class InfoDialog : Window
 
     private static string Version => Services.AppInfo.Version;
 
-    public static InfoDialog Help() => new("使用帮助",
+    // ONE translation entry, not thirty: the compiler folds these adjacent literals into a single
+    // constant before Loc.T ever sees them, so the table key is the whole page. Wrapping them
+    // line by line would ask a translator to render "· 胶片条 ——" with no idea what follows it,
+    // and would forbid an English version from breaking its lines anywhere else.
+    public static InfoDialog Help() => new(Loc.T("使用帮助"), Loc.T(
         "OpenRevelare — 彩色负片去色罩工具（复刻 NegativeConvert）。\n\n" +
         "基本流程：\n" +
         "1. 文件 → 新建卷…（Ctrl+N）选择一张或多张负片（多选 = 整卷），左侧胶片条切换帧。\n" +
@@ -73,7 +77,7 @@ public partial class InfoDialog : Window
         "Ctrl+Shift+T 切换浅色/深色主题 · Ctrl+, 偏好设置\n\n" +
         "采样操作：点亮采样按钮（带虚线方框图标）后在预览上拖框；按 Esc 取消。\n" +
         "滑条：双击标签重置为默认值。\n" +
-        "缩放后左键拖动可平移；滚轮缩放。");
+        "缩放后左键拖动可平移；滚轮缩放。"));
 
     /// <summary>Reveals the app mark in the header — About only.</summary>
     private InfoDialog WithLogo()
@@ -82,8 +86,8 @@ public partial class InfoDialog : Window
         return this;
     }
 
-    public static InfoDialog About() => new InfoDialog("关于 OpenRevelare",
-        $"OpenRevelare v{Version}\n\n" +
+    public static InfoDialog About() => new InfoDialog(Loc.T("关于 OpenRevelare"),
+        $"OpenRevelare v{Version}\n\n" + Loc.T(
         "彩色负片去色罩工具，C# / .NET 8 + Avalonia。\n\n" +
         "自由软件，以 GNU GPL v3 授权发布，随包附有完整许可文本。\n" +
         "源码：https://github.com/Toshihiko-Lin/Open-Revelare\n\n" +
@@ -99,5 +103,5 @@ public partial class InfoDialog : Window
         // OpenRevelare.app/Contents/Resources）。这一行是指路牌，别删。
         "完整第三方声明见随附的 THIRD_PARTY_NOTICES.txt。\n\n" +
         "「智能白平衡」用到的 net_awb.onnx 权重（Deep White-Balance Editing,\n" +
-        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。").WithLogo();
+        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。")).WithLogo();
 }

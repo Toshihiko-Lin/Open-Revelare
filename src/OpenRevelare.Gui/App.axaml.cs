@@ -46,6 +46,7 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        Services.Loc.Apply();       // language first: the main window resolves its text as it loads
         ApplyTheme();               // honour the saved theme before the window shows
         ApplyViewerBackground();    // …and the saved photo backdrop
         // Let Core reach the session DNG cache without depending on it (see

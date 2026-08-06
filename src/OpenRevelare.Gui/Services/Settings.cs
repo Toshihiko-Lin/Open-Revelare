@@ -22,6 +22,13 @@ public static class Settings
         public RawDecode.FbddMode FbddMode { get; set; } = RawDecode.FbddMode.Off;
         public string Theme { get; set; } = "dark";     // "dark" | "light"
 
+        /// <summary>UI language: "auto" (follow the OS), "zh" or "en". See <see cref="Loc"/>.
+        ///
+        /// Defaults to auto rather than to zh so a machine running an English Windows gets an
+        /// English UI on first launch without having to find the setting that fixes it — which is
+        /// the one setting a user cannot look up in a language they do not read.</summary>
+        public string Language { get; set; } = "auto";
+
         // ── Disk cache for Adobe-converted linear DNGs ──────────────────────────
         // Session-scoped, so it never accumulates across runs. Location follows the SOURCE file
         // by default rather than %LOCALAPPDATA% — a 60 MP frame converts to ~349 MB, and a cache

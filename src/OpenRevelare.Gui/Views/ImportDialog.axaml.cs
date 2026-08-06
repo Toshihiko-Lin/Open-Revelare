@@ -41,7 +41,7 @@ public partial class ImportDialog : Window
         FormatCombo.ItemsSource = FormatPresets;
         Files.CollectionChanged += (_, _) =>
         {
-            CountLbl.Text = $"{Files.Count} 张";
+            CountLbl.Text = Loc.F($"{Files.Count} 张");
             OkBtn.IsEnabled = Files.Count > 0;
         };
     }
@@ -50,12 +50,12 @@ public partial class ImportDialog : Window
     {
         var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "添加底片文件",
+            Title = Loc.T("添加底片文件"),
             AllowMultiple = true,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("负片 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns },
-                new FilePickerFileType("所有文件") { Patterns = new[] { "*" } },
+                new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
         foreach (var f in picked)
@@ -64,7 +64,7 @@ public partial class ImportDialog : Window
 
     private async void OnAddFolder(object? sender, RoutedEventArgs e)
     {
-        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "添加文件夹（扫描 RAW/TIFF）" });
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("添加文件夹（扫描 RAW/TIFF）") });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
         foreach (string p in Directory.EnumerateFiles(dir).Where(f => RawTiffExt.Contains(Path.GetExtension(f))).OrderBy(f => f))
             if (!Files.Contains(p)) Files.Add(p);
@@ -81,16 +81,16 @@ public partial class ImportDialog : Window
 
     private async void OnPickCal(object? sender, RoutedEventArgs e)
     {
-        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "选择 R/G/B 校正图目录" });
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("选择 R/G/B 校正图目录") });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
         CalEdit.Text = dir;
-        CalDetect.Text = "识别中 …";
+        CalDetect.Text = Loc.T("识别中 …");
         try
         {
             var r = await Task.Run(() => DecoupleCalibration.AutoIdentifyRgbFiles(dir));
-            CalDetect.Text = $"识别到  R: {Path.GetFileName(r.R)}   G: {Path.GetFileName(r.G)}   B: {Path.GetFileName(r.B)}";
+            CalDetect.Text = Loc.F($"识别到  R: {Path.GetFileName(r.R)}   G: {Path.GetFileName(r.G)}   B: {Path.GetFileName(r.B)}");
         }
-        catch (Exception ex) { CalDetect.Text = "识别失败：" + ex.Message; }
+        catch (Exception ex) { CalDetect.Text = Loc.T("识别失败：") + ex.Message; }
     }
 
     private void OnLccToggled(object? sender, RoutedEventArgs e) => LccRow.IsVisible = LccChk.IsChecked == true;
@@ -99,9 +99,9 @@ public partial class ImportDialog : Window
     {
         var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "选择 LCC 平场参考图",
+            Title = Loc.T("选择 LCC 平场参考图"),
             AllowMultiple = false,
-            FileTypeFilter = new[] { new FilePickerFileType("平场图 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns } },
+            FileTypeFilter = new[] { new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns } },
         });
         if (picked.FirstOrDefault()?.TryGetLocalPath() is { } p) LccEdit.Text = p;
     }

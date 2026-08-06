@@ -78,11 +78,8 @@ public static class FilmBase
             // more transmissive than the film base everywhere — on Path A that points at a t_base
             // sampled in the wrong place (or one whose channels the decouple matrix pushed down),
             // not at the rectangle. mean T per channel = t_base · 10^(−D).
-            throw new ArgumentException(
-                "采样区比片基还透光（三通道密度全 ≤ 0） · " +
-                $"D = {meanD[0]:F3}, {meanD[1]:F3}, {meanD[2]:F3} · " +
-                $"t_base = {tBase[0]:F4}, {tBase[1]:F4}, {tBase[2]:F4} · " +
-                "若框的已是画面内容，多半是 t_base 偏暗，请重采片基");
+            throw new ArgumentException(CoreText.F(
+                $"采样区比片基还透光（三通道密度全 ≤ 0） · D = {meanD[0]:F3}, {meanD[1]:F3}, {meanD[2]:F3} · t_base = {tBase[0]:F4}, {tBase[1]:F4}, {tBase[2]:F4} · 若框的已是画面内容，多半是 t_base 偏暗，请重采片基"));
 
         double[] off = wbOffset ?? new double[3];
         double target = Math.Max(Math.Max(meanD[0] + off[0], meanD[1] + off[1]), meanD[2] + off[2]);
