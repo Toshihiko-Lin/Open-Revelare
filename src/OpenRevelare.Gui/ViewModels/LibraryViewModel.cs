@@ -84,9 +84,21 @@ public sealed partial class FilterOption : ObservableObject
 }
 
 /// <summary>One filterable column of the catalog — 胶卷, 相机, 年份.</summary>
-public sealed class FilterFacet
+public sealed partial class FilterFacet : ObservableObject
 {
-    public string Name { get; }
+    /// <summary>
+    /// The Chinese source string, and this facet's identity: which ticks to restore across a
+    /// rebuild is decided by it, and so is the 年份 ordering special case.
+    ///
+    /// Identity has to be the untranslated string. Keyed on <see cref="Name"/> instead, a facet
+    /// would stop matching its own ticks the instant the user switched language — the heading
+    /// would still read 胶卷 while the ticks it was holding were filed under "Film".
+    /// </summary>
+    public string Key { get; }
+
+    /// <summary>Heading as shown. Resolved on read, not stored, so
+    /// <see cref="LibraryViewModel"/> only has to re-raise it on a language switch.</summary>
+    public string Name => Loc.T(Key);
 
     /// <summary>Which field of the roll's annotation this facet groups by. Carried on the facet
     /// rather than switched on its name, so adding one is a single line in the table below and
@@ -95,11 +107,13 @@ public sealed class FilterFacet
 
     public ObservableCollection<FilterOption> Options { get; } = new();
 
-    public FilterFacet(string name, Func<Catalog.Roll, string> selector)
+    public FilterFacet(string key, Func<Catalog.Roll, string> selector)
     {
-        Name = name;
+        Key = key;
         Selector = selector;
     }
+
+    public void RefreshText() => OnPropertyChanged(nameof(Name));
 }
 
 /// <summary>
@@ -120,6 +134,30 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// <summary>Cover width to decode at. The card is ~260 px wide; decoding straight to that
     /// (rather than full size then shrinking) is what makes a wall of covers cheap.</summary>
     private const int CoverWidth = 320;
+
+    /// <summary>
+    /// Re-resolve the wall's text after a language switch.
+    ///
+    /// XAML looks after itself — <see cref="Markup.TExtension"/> binds rather than resolves, so
+    /// every literal in LibraryView.axaml repaints on its own. What does not is the text a C#
+    /// expression produced: the counts, the facet headings and each card's frame tally all came
+    /// out of Loc.T/Loc.F once and stayed. Left alone they are what makes a switch land on a
+    /// half-translated wall — 图库 next to "1 rolls", 胶卷 above cards reading "5 frames".
+    ///
+    /// The subscription is never unhooked because there is nothing to unhook it from: one of
+    /// these exists per run, owned by <see cref="MainViewModel.Library"/> for the app's lifetime.
+    /// </summary>
+    public LibraryViewModel() => Loc.Changed += RetranslateText;
+
+    private void RetranslateText()
+    {
+        OnPropertyChanged(nameof(FilterSummary));
+        OnPropertyChanged(nameof(RollCountText));
+        foreach (FilterFacet f in Facets) f.RefreshText();
+        // _all, not Rolls: a card the filter is hiding right now still has to be right when the
+        // filter is cleared, and re-raising a property on a card nobody is drawing costs nothing.
+        foreach (RollCard c in _all) c.RefreshText();
+    }
 
     /// <summary>What the wall currently SHOWS — the 新建 tile plus whatever survives the filter.</summary>
     public ObservableCollection<RollCard> Rolls { get; } = new();
@@ -197,7 +235,7 @@ public sealed partial class LibraryViewModel : ObservableObject
     private void RebuildFacets(IReadOnlyList<Catalog.Roll> rolls)
     {
         var ticked = Facets
-            .SelectMany(f => f.Options.Where(o => o.IsChecked).Select(o => (f.Name, o.Value)))
+            .SelectMany(f => f.Options.Where(o => o.IsChecked).Select(o => (f.Key, o.Value)))
             .ToHashSet();
 
         _rebuilding = true;
@@ -206,28 +244,30 @@ public sealed partial class LibraryViewModel : ObservableObject
         // so a facet built on it is a list of one-item buckets; the search box covers it instead.
         // A facet whose values are all blank adds nothing and is dropped below, so a user who
         // only ever fills in 胶卷 sees one facet rather than seven empty headings.
-        foreach (var (name, selector) in new (string, Func<Catalog.Roll, string>)[]
+        //
+        // Untranslated on purpose: these are keys, and FilterFacet.Name does the translating.
+        foreach (var (key, selector) in new (string, Func<Catalog.Roll, string>)[]
                  {
-                     (Loc.T("画幅"), r => r.Format),
-                     (Loc.T("胶卷"), r => r.FilmStock),
-                     (Loc.T("相机"), r => r.CameraBody),
-                     (Loc.T("冲洗店"), r => r.DevLab),
-                     (Loc.T("年份"), r => Year(r.DevDate)),
+                     ("画幅", r => r.Format),
+                     ("胶卷", r => r.FilmStock),
+                     ("相机", r => r.CameraBody),
+                     ("冲洗店", r => r.DevLab),
+                     ("年份", r => Year(r.DevDate)),
                  })
         {
-            var facet = new FilterFacet(name, selector);
+            var facet = new FilterFacet(key, selector);
             IEnumerable<IGrouping<string, Catalog.Roll>> groups = rolls
                 .Where(r => !string.IsNullOrWhiteSpace(selector(r)))
                 .GroupBy(r => selector(r).Trim(), StringComparer.OrdinalIgnoreCase);
             // Commonest first, because that is the order someone scanning the list wants; 年份
             // is the exception — a chronological axis read out of order is just confusing.
-            groups = name == Loc.T("年份")
+            groups = key == "年份"
                 ? groups.OrderByDescending(g => g.Key, StringComparer.Ordinal)
                 : groups.OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.CurrentCulture);
             foreach (IGrouping<string, Catalog.Roll> g in groups)
                 facet.Options.Add(new FilterOption(g.Key, g.Count(), ApplyFilter)
                 {
-                    IsChecked = ticked.Contains((name, g.Key)),
+                    IsChecked = ticked.Contains((key, g.Key)),
                 });
             if (facet.Options.Count > 0) Facets.Add(facet);
         }
