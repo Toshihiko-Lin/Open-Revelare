@@ -300,7 +300,7 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 
 - [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)（MIT）—— 窄带 RGB 解耦（Path A）的做法出自这里
 - [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)（MIT）—— 密度域色彩模型的参照
-- darktable 的 `negadoctor` 模块 —— 只参照其数学模型 `D_corr = D × wb_high + wb_offset`，未复制任何代码
+- darktable 的 `negadoctor` 模块 —— 参照其数学模型 `D_corr = D × wb_high + wb_offset`
 
 反馈与 bug 请开 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues)，
 附上系统版本、相机或扫描仪型号、输入格式与错误信息。请不要上传含隐私内容的原片。
