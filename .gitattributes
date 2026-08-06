@@ -1,0 +1,24 @@
+# Normalise line endings: let Git store LF, check out native.
+* text=auto
+
+# Explicit text types
+*.cs        text
+*.csproj    text
+*.sln       text
+*.md        text
+*.json      text
+*.gitignore text
+
+# 打包脚本一律 LF —— 这些文件只在 Linux / macOS 上执行，签出成 CRLF 会让
+# `#!/usr/bin/env bash\r` 直接 "bad interpreter"。plist 同理保持 Unix 风格。
+*.sh        text eol=lf
+*.plist     text eol=lf
+*.plist.in  text eol=lf
+
+# Binary assets (never touch)
+*.tiff  binary
+*.tif   binary
+*.png   binary
+*.jpg   binary
+*.onnx  binary
+*.ico   binary

@@ -1,0 +1,159 @@
+name: release
+
+# 打 tag 就出三个平台的包，收进一个 draft release 里等人工写说明后再发布。
+#   git tag v1.0.0 && git push origin v1.0.0
+# 也可以在 Actions 页面手动跑（workflow_dispatch），那种情况下只上传构建产物、不建 release。
+#
+# 公开仓库的 Actions 分钟数不计费，但 macOS runner 一次要跑约 9 分钟（编 LibRaw 占大头），
+# 所以仍然只挂在 tag 上，别挂 push —— 每次推代码都编三个平台没有意义。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  # tag 与 csproj 的 <Version> 必须一致 —— 这两处对不上，发出去的包就会带错版本号，
+  # 而更新检测是按版本号比较的。先失败在这里，比失败在用户机器上便宜得多。
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' \
+            src/OpenRevelare.Gui/OpenRevelare.Gui.csproj | head -1)
+          [ -n "$version" ] || { echo "读不到 csproj 的 <Version>"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "csproj 版本：$version"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            [ "$tag" = "$version" ] || {
+              echo "::error::tag ($tag) 与 csproj 的 <Version> ($version) 不一致"; exit 1; }
+          fi
+
+  windows:
+    needs: guard
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: publish
+        run: dotnet publish src/OpenRevelare.Gui -c Release -r win-x64 --self-contained true -o publish/win-x64
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          # 固定路径优先；choco 也会往 PATH 放一个 ISCC shim，留作后备，
+          # 免得哪天 Inno 7 换了目录名就整条发版链断掉。
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC).Source }
+          & $iscc open-revelare.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 失败（$LASTEXITCODE）" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: installer/*.exe
+          if-no-files-found: error
+
+  linux:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: 取 appimagetool 与静态 runtime
+        run: |
+          mkdir -p tools
+          curl -fL --retry 3 -o tools/appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x tools/appimagetool-x86_64.AppImage
+          curl -fL --retry 3 -o tools/runtime-x86_64 \
+            https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+      - name: 打 AppImage
+        run: ./packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: installer/*.AppImage
+          if-no-files-found: error
+
+  # **只出 Apple Silicon 一个包**（用户 2026-08-04 决定）。Intel runner 是 macOS ×10 倍率
+  # 里最贵的一格（约 80 计费分钟/次），而 Intel Mac 已是 2020 年前的机型、目前 mac 用户为零。
+  # Intel 用户拿 arm64 包走不了 Rosetta（Rosetta 只能反过来：x64 包在 arm64 上跑），
+  # 所以这等于暂时不支持 Intel Mac —— 真有人要，把这个 job 复制一份改成
+  # `runs-on: macos-13` 就行，两个脚本都按 uname 自己认架构，不用传参。
+  macos:
+    needs: guard
+    runs-on: macos-latest      # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: LibRaw 编译依赖 + 图标矢量渲染
+        # librsvg 只为把 app.svg 渲成 1024 母版；没有它脚本会拿 512 的 png 放大，
+        # @2x 那两档会糊一点。装它约 30 秒，值。
+        run: brew install jpeg-turbo little-cms2 librsvg
+      - name: 编 + 装配 libraw.23.dylib
+        run: ./packaging/macos/bundle-libraw.sh
+      - name: 打 .app / .dmg（ad-hoc 签名）
+        # ad-hoc 是**定下来的路线**，不是临时凑合：用户 2026-08-04 决定不买 Apple
+        # Developer Program（99 美元/年）。代价是用户首次打开要自己绕 Gatekeeper，
+        # 所以 release 正文里那段说明不能删。脚本的 --sign/--notarize 保留着，
+        # 哪天真买了证书直接能用。
+        run: ./packaging/macos/build-app.sh --dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: installer/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [guard, windows, linux, macos]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: 建 draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.guard.outputs.version }}
+        run: |
+          find dist -type f | sort
+          # 正文用 --notes-file 而不是 --notes：内容里有反引号、引号和换行，
+          # 塞进命令行迟早被 shell 或 YAML 咬一口（已经咬过一次）。
+          cat > notes.md <<'MD'
+          见 `CHANGELOG.md`。macOS / Linux 为 **Beta**，欢迎回报问题。
+
+          ### macOS 首次打开
+
+          本软件未经 Apple 公证，系统会提示「已损坏」或「无法验证开发者」——**不是文件损坏**。
+          拖进「应用程序」后任选一种：
+
+          1. 终端执行 `xattr -dr com.apple.quarantine /Applications/OpenRevelare.app`
+          2. 双击一次被拦后 → 系统设置 → 隐私与安全性 → 「仍要打开」
+
+          （macOS 15 起「右键 → 打开」这个入口已被 Apple 取消，请用上面两条。）
+          MD
+          # draft：网盘镜像链接要人工补，version.json 也得等链接定了才能推。
+          gh release create "v$V" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "OpenRevelare v$V" --notes-file notes.md \
+            $(find dist -type f | tr '\n' ' ')

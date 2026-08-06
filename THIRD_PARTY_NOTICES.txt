@@ -1,0 +1,197 @@
+OpenRevelare — Third-Party Notices
+================================
+
+This file lists the third-party components redistributed with OpenRevelare
+(C# / .NET 8 build), along with their licenses and required attribution.
+
+All native libraries are loaded dynamically and are shipped unmodified.
+Where a component is licensed under the LGPL, users may replace it with a
+compatible (including modified) version by substituting the corresponding
+file in the installation directory.
+
+Platform note: the exact set of native libraries differs per platform —
+Windows ships raw_r.dll, Linux libraw_r.so.23, macOS libraw.23.dylib
+(built from LibRaw 0.21.4 source, see packaging/macos/bundle-libraw.sh).
+The licenses below apply to all of them.
+
+-------------------------------------------------------------------------------
+1. LibRaw
+   License  : GNU Lesser General Public License v2.1 (LGPL-2.1-only)
+              OR Common Development and Distribution License 1.0 (CDDL-1.0)
+   Source   : https://www.libraw.org/
+
+   OpenRevelare uses LibRaw under LGPL-2.1. It is loaded dynamically as a shared
+   library and is not modified. Users may replace it with a modified version
+   subject to LGPL-2.1 terms.
+
+   On Windows and Linux the binary comes from the Sdcb.LibRaw runtime
+   packages; on macOS it is compiled from unmodified LibRaw 0.21.4 sources.
+
+   Full LGPL-2.1 text: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+   Full CDDL-1.0 text: https://opensource.org/license/cddl-1-0
+
+-------------------------------------------------------------------------------
+2. Sdcb.LibRaw (managed .NET bindings for LibRaw)
+   License  : MIT License
+   Author   : sdcb (Zhou Jie)
+   Source   : https://github.com/sdcb/Sdcb.LibRaw
+
+-------------------------------------------------------------------------------
+3. libjpeg-turbo  (bundled with LibRaw)
+   License  : IJG License AND BSD 3-Clause AND zlib License
+   Source   : https://libjpeg-turbo.org/
+
+-------------------------------------------------------------------------------
+4. Little CMS (lcms2)  (bundled with LibRaw)
+   License  : MIT License
+   Author   : Marti Maria Saguer
+   Source   : https://www.littlecms.com/
+
+-------------------------------------------------------------------------------
+5. GNU OpenMP runtime (libgomp, Linux build only)
+   License  : GNU General Public License v3.0 WITH GCC Runtime Library
+              Exception 3.1
+   Source   : https://gcc.gnu.org/
+
+   Shipped as a dependency of the Linux LibRaw binary. The GCC Runtime
+   Library Exception permits distribution of programs linked against it
+   without imposing GPL terms on those programs.
+
+-------------------------------------------------------------------------------
+6. Avalonia UI
+   License  : MIT License
+   Source   : https://github.com/AvaloniaUI/Avalonia
+
+   Includes Avalonia.Desktop, Avalonia.Themes.Fluent, Avalonia.Skia,
+   Avalonia.Native (libAvaloniaNative.dylib), Avalonia.X11, Avalonia.Win32
+   and MicroCom.Runtime.
+
+-------------------------------------------------------------------------------
+7. Inter (typeface, via Avalonia.Fonts.Inter)
+   License  : SIL Open Font License 1.1 (OFL-1.1)
+   Author   : Rasmus Andersson
+   Source   : https://rsms.me/inter/
+
+   Copyright (c) 2016 The Inter Project Authors.
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   Full OFL-1.1 text: https://openfontlicense.org/
+
+-------------------------------------------------------------------------------
+8. SkiaSharp / Skia
+   SkiaSharp bindings : MIT License — Copyright (c) Microsoft Corporation
+   Skia               : BSD 3-Clause License — Copyright (c) Google LLC
+   Source             : https://github.com/mono/SkiaSharp
+                        https://skia.org/
+
+-------------------------------------------------------------------------------
+9. HarfBuzzSharp / HarfBuzz
+   HarfBuzzSharp bindings : MIT License
+   HarfBuzz               : MIT License ("Old MIT") — Copyright (c) 2010-2023
+                            Google, Inc.; Behdad Esfahbod and others
+   Source                 : https://github.com/harfbuzz/harfbuzz
+
+-------------------------------------------------------------------------------
+10. BitMiracle.LibTiff.NET
+    License  : BSD 3-Clause License
+    Author   : Bit Miracle
+    Source   : https://github.com/BitMiracle/libtiff.net
+
+-------------------------------------------------------------------------------
+11. SixLabors.ImageSharp (v3.1)
+    License  : Six Labors Split License 1.0
+    Source   : https://github.com/SixLabors/ImageSharp
+
+    ImageSharp 3.x is dual-licensed: the Apache License 2.0 terms apply to
+    qualifying users (open-source projects, and individuals/organisations
+    below the revenue threshold stated in the license); otherwise a
+    commercial license is required.
+
+    Full license text: https://github.com/SixLabors/ImageSharp/blob/main/LICENSE
+
+-------------------------------------------------------------------------------
+12. ONNX Runtime
+    License  : MIT License
+    Author   : Microsoft Corporation
+    Source   : https://github.com/microsoft/onnxruntime
+
+-------------------------------------------------------------------------------
+13. Deep White Balance  (models/net_awb.onnx)
+    ⚠ NOT COVERED BY THIS PROGRAM'S GPL-3.0 LICENCE — SEPARATE TERMS BELOW
+    License  : Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+               International (CC BY-NC-SA 4.0). The upstream README further
+               states: "This software is provided for research purposes only
+               and CAN NOT be used for commercial purposes."
+    Authors  : Mahmoud Afifi, Konstantinos G. Derpanis, Björn Ommer,
+               Michael S. Brown
+    Paper    : "Deep White-Balance Editing", CVPR 2020
+    Source   : https://github.com/mahmoudnafifi/Deep_White_Balance
+
+    These weights are a third-party asset shipped alongside OpenRevelare, not
+    a part of it. OpenRevelare's own GPL-3.0 grant does not extend to this
+    file and could not: the copyright is the authors', and the terms above
+    are theirs. OpenRevelare is distributed free of charge, with no sale,
+    subscription or in-app purchase, so the distribution itself is not for
+    commercial advantage.
+
+    Whoever receives this file is bound by CC BY-NC-SA 4.0 independently of
+    the GPL-3.0 rights they hold over the program's source code. In
+    particular, the GPL-3.0 right to redistribute OpenRevelare commercially
+    does NOT extend to these weights — delete the models/ directory first.
+    Everything except 智能白平衡 works without it. The authors also ask that
+    the paper above be cited.
+
+    Full licence text:
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+    See also: models/README.md
+
+-------------------------------------------------------------------------------
+14. .NET Community Toolkit (CommunityToolkit.Mvvm)
+    License  : MIT License
+    Author   : .NET Foundation and Contributors
+    Source   : https://github.com/CommunityToolkit/dotnet
+
+-------------------------------------------------------------------------------
+15. .NET Runtime (shipped self-contained)
+    License  : MIT License
+    Author   : .NET Foundation and Contributors
+    Source   : https://github.com/dotnet/runtime
+
+    Includes Tmds.DBus.Protocol (MIT) on the Linux build.
+
+-------------------------------------------------------------------------------
+
+The MIT License (referenced above)
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+ACKNOWLEDGEMENTS (no code incorporated)
+
+  LightSourceDecouple — Toshihiko-Lin, karasuyasabou (MIT)
+    https://github.com/karasuyasabou/LightSourceDecouple
+    The narrow-band RGB decoupling approach (Path A) originates here.
+
+  DiVERE — flipswitchingmonkey (MIT)
+    https://github.com/flipswitchingmonkey/DiVERE
+    Reference for the density-domain colour model.
+
+  darktable "negadoctor" module — Philippe Fremy and darktable contributors
+    darktable is distributed under GPL-3.0. OpenRevelare references only the
+    mathematical model (D_corr = D × wb_high + wb_offset) described by that
+    module. No source code from darktable has been copied or incorporated.

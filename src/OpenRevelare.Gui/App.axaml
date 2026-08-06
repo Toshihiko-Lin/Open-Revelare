@@ -1,0 +1,447 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="OpenRevelare.Gui.App"
+             xmlns:local="using:OpenRevelare.Gui"
+             xmlns:ctl="using:OpenRevelare.Gui.Controls"
+             RequestedThemeVariant="Dark">
+
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://OpenRevelare/Styles/Icons.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!--
+              ══ Palette ═══════════════════════════════════════════════════════════
+              Graphite + a restrained cyan-blue accent. Both variants are defined, so
+              偏好设置 → 界面主题 actually repaints the app (it used to only re-tint
+              Fluent's own controls while every custom surface stayed dark).
+
+              Every consumer must bind these with {DynamicResource} — a StaticResource
+              is resolved once at load and would freeze the app in one variant.
+
+              ViewerBrush is deliberately NOT a theme colour: it is the backdrop the
+              photo is judged against, so it is a user setting (预览区右键 → 背景色),
+              overwritten at runtime by App.ApplyViewerBackground.
+            -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="BgBrush">#1C1E20</SolidColorBrush>
+                    <SolidColorBrush x:Key="ChromeBrush">#212327</SolidColorBrush>
+                    <SolidColorBrush x:Key="PanelBrush">#232529</SolidColorBrush>
+                    <SolidColorBrush x:Key="Panel2Brush">#1D1F22</SolidColorBrush>
+                    <SolidColorBrush x:Key="ElevatedBrush">#2B2E33</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextBrush">#DCE0E4</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextDimBrush">#A8AEB5</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#7E848B</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderBrush2">#34373C</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderSoftBrush">#2A2D31</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#15171A</SolidColorBrush>
+                    <!-- Instrument grey: sliders and meters read as measurement, not decoration. -->
+                    <SolidColorBrush x:Key="TrackFillBrush">#7C838B</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentBrush">#6E8CA6</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentHoverBrush">#849FB6</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentSoftBrush">#246E8CA6</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentFgBrush">#101214</SolidColorBrush>
+                    <SolidColorBrush x:Key="HoverSoftBrush">#14FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="PressSoftBrush">#0AFFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="WarnBrush">#C09A52</SolidColorBrush>
+                    <Color x:Key="SystemAccentColor">#6E8CA6</Color>
+                    <Color x:Key="SystemAccentColorDark1">#6E8CA6</Color>
+                    <Color x:Key="SystemAccentColorDark2">#5D7890</Color>
+                    <Color x:Key="SystemAccentColorDark3">#4D657A</Color>
+                    <Color x:Key="SystemAccentColorLight1">#849FB6</Color>
+                </ResourceDictionary>
+
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="BgBrush">#EDEEF0</SolidColorBrush>
+                    <SolidColorBrush x:Key="ChromeBrush">#FAFBFC</SolidColorBrush>
+                    <SolidColorBrush x:Key="PanelBrush">#F5F6F8</SolidColorBrush>
+                    <SolidColorBrush x:Key="Panel2Brush">#E9EBEE</SolidColorBrush>
+                    <SolidColorBrush x:Key="ElevatedBrush">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextBrush">#1C1E20</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextDimBrush">#4C5157</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#787E85</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderBrush2">#D3D6DA</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderSoftBrush">#E2E5E8</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#DCDFE3</SolidColorBrush>
+                    <SolidColorBrush x:Key="TrackFillBrush">#6B727A</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentBrush">#47698A</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentHoverBrush">#587C9F</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentSoftBrush">#2447698A</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentFgBrush">#FFFFFF</SolidColorBrush>
+                    <SolidColorBrush x:Key="HoverSoftBrush">#0E000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="PressSoftBrush">#16000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="WarnBrush">#8A6A18</SolidColorBrush>
+                    <Color x:Key="SystemAccentColor">#47698A</Color>
+                    <Color x:Key="SystemAccentColorDark1">#3E5D7B</Color>
+                    <Color x:Key="SystemAccentColorDark2">#35506A</Color>
+                    <Color x:Key="SystemAccentColorDark3">#2C4358</Color>
+                    <Color x:Key="SystemAccentColorLight1">#587C9F</Color>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- Photo backdrop. Default = a Lightroom-style neutral mid grey; replaced at
+                 startup from Settings.ViewerBackground (预览区右键 → 背景色). -->
+            <SolidColorBrush x:Key="ViewerBrush">#5E5E5E</SolidColorBrush>
+
+            <!-- ══ Thin flat slider (Lightroom-style) ═════════════════════════════ -->
+            <ControlTheme x:Key="SliderThumb" TargetType="Thumb">
+                <Setter Property="Background" Value="{DynamicResource TextDimBrush}" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="{TemplateBinding Background}" CornerRadius="7"
+                                BorderBrush="{DynamicResource PanelBrush}" BorderThickness="2" />
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:pointerover /template/ Border">
+                    <Setter Property="Background" Value="{DynamicResource TextBrush}" />
+                </Style>
+                <Style Selector="^:pressed /template/ Border">
+                    <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+                </Style>
+            </ControlTheme>
+
+            <ControlTheme x:Key="SliderFill" TargetType="RepeatButton">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="{DynamicResource TrackFillBrush}" Height="3" CornerRadius="1.5"
+                                VerticalAlignment="Center" />
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+            <ControlTheme x:Key="SliderEmpty" TargetType="RepeatButton">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type Slider}" TargetType="Slider">
+                <Setter Property="Background" Value="{DynamicResource GrooveBrush}" />
+                <Setter Property="MinHeight" Value="20" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Grid x:Name="HorizontalTemplate" MinHeight="20">
+                            <Border x:Name="TrackBackground" Height="3" CornerRadius="1.5"
+                                    VerticalAlignment="Center" Background="{TemplateBinding Background}" />
+                            <Track x:Name="PART_Track" Orientation="Horizontal"
+                                   Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                                   Value="{TemplateBinding Value, Mode=TwoWay}"
+                                   IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                                <Track.DecreaseButton>
+                                    <RepeatButton x:Name="PART_DecreaseButton" Focusable="False"
+                                                  Theme="{StaticResource SliderFill}" />
+                                </Track.DecreaseButton>
+                                <Track.IncreaseButton>
+                                    <RepeatButton x:Name="PART_IncreaseButton" Focusable="False"
+                                                  Theme="{StaticResource SliderEmpty}" />
+                                </Track.IncreaseButton>
+                                <Thumb x:Name="thumb" Width="13" Height="13" Padding="0"
+                                       Theme="{StaticResource SliderThumb}" />
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <!-- ══ Flat Expander section (hairline caption, no box) ═══════════════ -->
+            <ControlTheme x:Key="SectionHeader" TargetType="ToggleButton">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Padding" Value="0,8" />
+                <Setter Property="Cursor" Value="Hand" />
+                <!-- Background/Margin are literal, NOT TemplateBindings: the global
+                     `Style Selector="ToggleButton"` below wins over a ControlTheme setter,
+                     so binding them would drag the ordinary button face (raised fill,
+                     12,6 padding) onto every section caption. -->
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="Transparent"
+                                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
+                            <Grid ColumnDefinitions="18,*" Margin="0,8">
+                                <ctl:Icon x:Name="chev" Grid.Column="0" Width="12" Height="12"
+                                          Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
+                                          Foreground="{DynamicResource TextMuteBrush}"
+                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%" />
+                                <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
+                                                  VerticalAlignment="Center"
+                                                  FontWeight="SemiBold" FontSize="12"
+                                                  Foreground="{DynamicResource TextBrush}" />
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:checked /template/ ctl|Icon#chev">
+                    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+                </Style>
+                <Style Selector="^:pointerover /template/ ctl|Icon#chev">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                </Style>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <StackPanel>
+                            <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
+                                          IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
+                                          Content="{TemplateBinding Header}" />
+                            <ContentPresenter x:Name="PART_ContentPresenter"
+                                              IsVisible="{TemplateBinding IsExpanded}"
+                                              Content="{TemplateBinding Content}"
+                                              Margin="6,8,0,12" />
+                        </StackPanel>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+
+        <!-- ── Global tone ──────────────────────────────────────────────────── -->
+        <Style Selector="Window">
+            <Setter Property="Background" Value="{DynamicResource BgBrush}" />
+            <Setter Property="FontFamily" Value="Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" />
+            <Setter Property="FontSize" Value="13" />
+            <!-- Title-bar / taskbar icon for *every* window, main and modal alike — set here
+                 rather than per-Window so a new dialog can never ship icon-less. -->
+            <Setter Property="Icon" Value="/Assets/icons/app-128.png" />
+        </Style>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+        <Style Selector="Expander">
+            <Setter Property="Margin" Value="0,2" />
+        </Style>
+
+        <!-- ══ Menu bar ═══════════════════════════════════════════════════════ -->
+        <Style Selector="Menu">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Menu > MenuItem">
+            <Setter Property="Padding" Value="11,6" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        </Style>
+        <Style Selector="Menu > MenuItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+        </Style>
+        <Style Selector="MenuItem">
+            <Setter Property="FontSize" Value="12.5" />
+        </Style>
+        <Style Selector="MenuFlyoutPresenter, ContextMenu">
+            <Setter Property="Background" Value="{DynamicResource ChromeBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="4" />
+        </Style>
+
+        <!-- ══ Buttons ════════════════════════════════════════════════════════
+             Three weights only — that is the whole button system:
+               (default)  a quiet raised chip           …ordinary actions
+               .primary   accent-filled                 …the terminal action (导出)
+               .icon      square, chrome-less           …toolbar glyphs
+             ════════════════════════════════════════════════════════════════ -->
+        <Style Selector="Button">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource PressSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentFgBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentFgBrush}" />
+        </Style>
+
+        <!-- Chrome-less square glyph button (menu-bar tools, preview tools). -->
+        <Style Selector="Button.icon, ToggleButton.icon">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+
+        <!-- ══ Toggles ════════════════════════════════════════════════════════ -->
+        <Style Selector="ToggleButton">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="ToggleButton:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="ToggleButton:checked">
+            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="ToggleButton:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <!-- Sampling tools sit quieter than ordinary buttons until armed. -->
+        <Style Selector="ToggleButton.sampling">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="MinHeight" Value="28" />
+        </Style>
+        <Style Selector="ToggleButton.icon:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        </Style>
+
+        <!-- ══ Tabs: flat, accent underline on the selected one ═══════════════ -->
+        <Style Selector="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TabItem">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
+            <Setter Property="Padding" Value="16,9" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="TabItem:selected">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+        <Style Selector="TabItem:selected /template/ Border#PART_SelectedPipe">
+            <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="TabItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+        </Style>
+
+        <!-- ══ Inputs ═════════════════════════════════════════════════════════ -->
+        <Style Selector="NumericUpDown">
+            <Setter Property="Background" Value="{DynamicResource GrooveBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="FontFamily" Value="JetBrains Mono, Consolas, monospace" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="MinHeight" Value="26" />
+        </Style>
+        <Style Selector="NumericUpDown /template/ TextBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="7,2" />
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <!-- ══ Film strip ═════════════════════════════════════════════════════ -->
+        <Style Selector="ListBox.filmstrip">
+            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        </Style>
+        <Style Selector="ListBox.filmstrip ListBoxItem">
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="CornerRadius" Value="7" />
+        </Style>
+        <Style Selector="ListBox.filmstrip ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="ListBox.filmstrip ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+        </Style>
+
+        <!-- ══ Text roles ═════════════════════════════════════════════════════ -->
+        <Style Selector="TextBlock.groupHint">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <!-- Small all-caps rubric above a stack of related controls. -->
+        <Style Selector="TextBlock.fieldLabel">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Separator">
+            <Setter Property="Background" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="Height" Value="1" />
+        </Style>
+    </Application.Styles>
+</Application>

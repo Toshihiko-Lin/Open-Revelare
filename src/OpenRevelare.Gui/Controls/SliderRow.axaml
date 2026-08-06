@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="using:OpenRevelare.Gui.Controls"
+             x:Class="OpenRevelare.Gui.Controls.SliderRow"
+             x:DataType="ctl:SliderRow"
+             x:Name="Root">
+    <!-- 标签（双击重置）| 滑条 | 数字框 —— 复刻 Python _make_row 布局 -->
+    <Grid ColumnDefinitions="44,*,64" Margin="0,2">
+        <TextBlock Name="LabelText"
+                   Grid.Column="0"
+                   Text="{Binding Label, ElementName=Root}"
+                   VerticalAlignment="Center" FontSize="12"
+                   Foreground="{DynamicResource TextDimBrush}"
+                   ToolTip.Tip="双击重置"
+                   DoubleTapped="OnLabelDoubleTapped" />
+        <Slider Name="Sld"
+                Grid.Column="1"
+                Minimum="{Binding Minimum, ElementName=Root}"
+                Maximum="{Binding Maximum, ElementName=Root}"
+                Value="{Binding Value, ElementName=Root, Mode=TwoWay}"
+                VerticalAlignment="Center" Margin="6,0" />
+        <NumericUpDown Name="Spin"
+                       Grid.Column="2"
+                       Minimum="{Binding Minimum, ElementName=Root}"
+                       Maximum="{Binding Maximum, ElementName=Root}"
+                       Value="{Binding SpinValue, ElementName=Root, Mode=TwoWay}"
+                       Increment="{Binding Increment, ElementName=Root}"
+                       FormatString="{Binding FormatString, ElementName=Root}"
+                       ShowButtonSpinner="False"
+                       VerticalAlignment="Center"
+                       HorizontalContentAlignment="Right" />
+    </Grid>
+</UserControl>

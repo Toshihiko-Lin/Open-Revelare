@@ -1,0 +1,116 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
+using OpenRevelare.Core;
+using OpenRevelare.Gui.Models;
+using OpenRevelare.Gui.Services;
+
+namespace OpenRevelare.Gui.Views;
+
+/// <summary>
+/// New-project / import dialog — port of Python gui/import_dialog.py. Collects the negative
+/// files, the copy-stand light path (Path A 窄谱 RGB / Path B 宽谱白光, with Path A needing a
+/// R/G/B calibration folder for the decouple matrix), and an optional LCC flat field.
+/// </summary>
+public partial class ImportDialog : Window
+{
+    private static readonly HashSet<string> RawTiffExt = new(StringComparer.OrdinalIgnoreCase)
+    { ".arw", ".nef", ".cr2", ".cr3", ".dng", ".raf", ".rw2", ".orf", ".pef", ".srw", ".tif", ".tiff" };
+
+    public ObservableCollection<string> Files { get; } = new();
+    public ImportConfig? Result { get; private set; }
+
+    public ImportDialog()
+    {
+        InitializeComponent();
+        FileList.ItemsSource = Files;
+        Files.CollectionChanged += (_, _) =>
+        {
+            CountLbl.Text = $"{Files.Count} 张";
+            OkBtn.IsEnabled = Files.Count > 0;
+        };
+    }
+
+    private async void OnAddFiles(object? sender, RoutedEventArgs e)
+    {
+        var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "添加底片文件",
+            AllowMultiple = true,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("负片 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType("所有文件") { Patterns = new[] { "*" } },
+            },
+        });
+        foreach (var f in picked)
+            if (f.TryGetLocalPath() is { } p && !Files.Contains(p)) Files.Add(p);
+    }
+
+    private async void OnAddFolder(object? sender, RoutedEventArgs e)
+    {
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "添加文件夹（扫描 RAW/TIFF）" });
+        if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
+        foreach (string p in Directory.EnumerateFiles(dir).Where(f => RawTiffExt.Contains(Path.GetExtension(f))).OrderBy(f => f))
+            if (!Files.Contains(p)) Files.Add(p);
+    }
+
+    private void OnRemoveSelected(object? sender, RoutedEventArgs e)
+    {
+        foreach (var s in FileList.SelectedItems?.Cast<string>().ToList() ?? new()) Files.Remove(s);
+    }
+
+    private void OnClear(object? sender, RoutedEventArgs e) => Files.Clear();
+
+    private void OnSourceChanged(object? sender, RoutedEventArgs e) => CalRow.IsVisible = SrcA.IsChecked == true;
+
+    private async void OnPickCal(object? sender, RoutedEventArgs e)
+    {
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "选择 R/G/B 校正图目录" });
+        if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
+        CalEdit.Text = dir;
+        CalDetect.Text = "识别中 …";
+        try
+        {
+            var r = await Task.Run(() => DecoupleCalibration.AutoIdentifyRgbFiles(dir));
+            CalDetect.Text = $"识别到  R: {Path.GetFileName(r.R)}   G: {Path.GetFileName(r.G)}   B: {Path.GetFileName(r.B)}";
+        }
+        catch (Exception ex) { CalDetect.Text = "识别失败：" + ex.Message; }
+    }
+
+    private void OnLccToggled(object? sender, RoutedEventArgs e) => LccRow.IsVisible = LccChk.IsChecked == true;
+
+    private async void OnPickLcc(object? sender, RoutedEventArgs e)
+    {
+        var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "选择 LCC 平场参考图",
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType("平场图 (RAW / TIFF)") { Patterns = ImageIo.OpenPatterns } },
+        });
+        if (picked.FirstOrDefault()?.TryGetLocalPath() is { } p) LccEdit.Text = p;
+    }
+
+    private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
+
+    private void OnAcceptClick(object? sender, RoutedEventArgs e)
+    {
+        var cfg = new ImportConfig
+        {
+            PathA = SrcA.IsChecked == true,
+            CalDir = SrcA.IsChecked == true ? CalEdit.Text : null,
+            LccEnabled = LccChk.IsChecked == true,
+            LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
+        };
+        cfg.Paths.AddRange(Files);
+        Result = cfg;
+        Close(true);
+    }
+}

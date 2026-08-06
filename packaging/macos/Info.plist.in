@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- build-app.sh 会把 @VERSION@ 换成 csproj 的 <Version>。 -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>                 <string>OpenRevelare</string>
+  <key>CFBundleDisplayName</key>          <string>OpenRevelare</string>
+  <!-- 反写域名，一经发布不要再改：Gatekeeper、公证记录、用户的偏好设置域都认它。 -->
+  <key>CFBundleIdentifier</key>           <string>com.toshihiko-lin.openrevelare</string>
+  <key>CFBundleExecutable</key>           <string>OpenRevelare</string>
+  <key>CFBundleIconFile</key>             <string>open-revelare</string>
+  <key>CFBundlePackageType</key>          <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key>   <string>@VERSION@</string>
+  <key>CFBundleVersion</key>              <string>@VERSION@</string>
+  <key>NSHumanReadableCopyright</key>     <string>Copyright © 2026 Toshihiko-Lin. All Rights Reserved.</string>
+  <key>LSApplicationCategoryType</key>    <string>public.app-category.photography</string>
+  <!-- .NET 8 的下限。产物是 self-contained，用户无需装 .NET 运行时。 -->
+  <key>LSMinimumSystemVersion</key>       <string>12.0</string>
+  <key>NSHighResolutionCapable</key>      <true/>
+
+  <!-- 双击 .ncproj 直接开那一卷（与 Windows 上「.ncproj 作启动参数即重开该卷」同一条路径）。 -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>         <string>OpenRevelare 工程</string>
+      <key>CFBundleTypeRole</key>         <string>Editor</string>
+      <key>LSHandlerRank</key>            <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array><string>com.toshihiko-lin.openrevelare.ncproj</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>         <string>com.toshihiko-lin.openrevelare.ncproj</string>
+      <key>UTTypeDescription</key>        <string>OpenRevelare 工程</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>ncproj</string></array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

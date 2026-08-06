@@ -1,0 +1,66 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OpenRevelare.Gui.Views.ImportDialog"
+        Width="560" Height="620"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgBrush}"
+        Title="新建项目 / 导入">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,12,0,0">
+            <Button Content="取消" Click="OnCancelClick" />
+            <Button Name="OkBtn" Content="打开 →" Click="OnAcceptClick" IsEnabled="False" />
+        </StackPanel>
+
+        <ScrollViewer>
+            <StackPanel Spacing="12">
+                <!-- ── 文件 ─────────────────────────────────────────── -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="底片文件" FontWeight="SemiBold" />
+                    <ListBox Name="FileList" Height="140" SelectionMode="Multiple"
+                             Background="{DynamicResource Panel2Brush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Content="添加文件…" Click="OnAddFiles" />
+                        <Button Content="添加文件夹…" Click="OnAddFolder" />
+                        <Button Content="移除选中" Click="OnRemoveSelected" />
+                        <Button Content="清空" Click="OnClear" />
+                        <TextBlock Name="CountLbl" Text="0 张" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Classes="groupHint" Text="支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。" />
+                </StackPanel>
+
+                <!-- ── 翻拍光源 ─────────────────────────────────────── -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="翻拍光源（仅相机 RAW）" FontWeight="SemiBold" />
+                    <RadioButton Name="SrcB" GroupName="src" Content="宽谱光源（白光）— Path B" IsChecked="True" />
+                    <RadioButton Name="SrcA" GroupName="src" Content="窄谱光源（RGB 合成）— Path A，需校正图"
+                                 Checked="OnSourceChanged" Unchecked="OnSourceChanged"
+                                 ToolTip.Tip="RGB LED 灯板翻拍：分别拍纯红/绿/蓝光的三张空白灯板 RAW（放同一文件夹，自动识别），据此计算分光解耦矩阵，更精确还原色彩。" />
+                    <StackPanel Name="CalRow" IsVisible="False" Spacing="4" Margin="20,2,0,0">
+                        <TextBlock Text="校正图目录（含红/绿/蓝三张空白灯板 RAW）" Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Name="CalEdit" Grid.Column="0" IsReadOnly="True" Margin="0,0,6,0"
+                                     Watermark="选择含 R/G/B 校正图的文件夹" />
+                            <Button Grid.Column="1" Content="选择…" Click="OnPickCal" />
+                        </Grid>
+                        <TextBlock Name="CalDetect" Classes="groupHint" Text="" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- ── LCC 平场校正 ─────────────────────────────────── -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="LCC 平场校正（可选）" FontWeight="SemiBold" />
+                    <CheckBox Name="LccChk" Content="启用 LCC 平场校正"
+                              IsCheckedChanged="OnLccToggled"
+                              ToolTip.Tip="拍一张均匀光的平场参考图，逐像素/逐通道修正本翻拍镜头的暗角与角落偏色。" />
+                    <Grid Name="LccRow" ColumnDefinitions="*,Auto" IsVisible="False" Margin="20,2,0,0">
+                        <TextBox Name="LccEdit" Grid.Column="0" IsReadOnly="True" Margin="0,0,6,0"
+                                 Watermark="均匀光的平场参考图（RAW 或 TIFF）" />
+                        <Button Grid.Column="1" Content="选择…" Click="OnPickLcc" />
+                    </Grid>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

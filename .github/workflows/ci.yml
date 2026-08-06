@@ -1,0 +1,36 @@
+name: ci
+
+# 只做「还能不能编」这一件事，跑在最便宜的 Linux runner 上。
+#
+# 真正只有 CI 能验的是「Linux 产物齐不齐」—— Core 的 LibRaw runtime 包是按 RID 条件挑的，
+# 挑错了本机 Windows 构建看不出来。发版时 release.yml 的 linux job 也会做同样的事。
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      # -warnaserror：本仓库长期保持 0 警告，退化了应当在这里就红
+      - run: dotnet build -c Release -warnaserror
+      # 跨平台 publish 能力本身也要守住：Core 的 runtime 包是按 RID 条件挑的，
+      # 挑错了在这一步就会缺原生库。
+      - run: dotnet publish src/OpenRevelare.Gui -c Release -r linux-x64 --self-contained true -o /tmp/pub
+      - name: 产物自检
+        run: |
+          test -f /tmp/pub/OpenRevelare          || { echo "缺主程序"; exit 1; }
+          test -f /tmp/pub/libraw_r.so.23    || { echo "缺 LibRaw 原生库"; exit 1; }
+          test -f /tmp/pub/models/net_awb.onnx || { echo "缺 Deep-WB 模型"; exit 1; }
+          ls /tmp/pub/*.dll > /dev/null

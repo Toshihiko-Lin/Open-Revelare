@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Cross-platform: this package carries the native runtime for win/linux/osx, so no
+         per-platform discovery is needed — the CLI/GUI just reference it and inject the
+         corrector. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <!-- Already a solution dependency (JPEG); reused here for the Lanczos resampler. -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
+  </ItemGroup>
+
+  <!-- Deep-WB 权重。⚠ 这个文件**不在本项目的 GPL-3.0 授权范围内** —— 它按原作者的
+       CC BY-NC-SA 4.0 分发，见 models/README.md 与 THIRD_PARTY_NOTICES.txt 第 13 条。
+       条件判断是为了让「把模型删掉」仍然能编：只有「智能白平衡」一个功能会因此报错。 -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../../models/net_awb.onnx')">
+    <Content Include="..\..\models\net_awb.onnx" Link="models\net_awb.onnx"
+             CopyToOutputDirectory="PreserveNewest" />
+    <!-- 许可声明必须跟着权重走到每一个产物里，否则装机的人手上只有一个没有出处的 .onnx。 -->
+    <Content Include="..\..\models\README.md" Link="models\README.md"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

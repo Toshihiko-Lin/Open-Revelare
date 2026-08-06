@@ -1,0 +1,70 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="using:OpenRevelare.Gui.Models"
+        x:Class="OpenRevelare.Gui.Views.ContactSheetDialog"
+        x:DataType="m:RollNotes"
+        Width="1180" Height="860"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgBrush}"
+        Title="印样预览">
+    <DockPanel Margin="14">
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextDimBrush}" Margin="0,0,0,8"
+                   Text="整卷印样预览。卷信息会随印样一起烧进图里（不写入 EXIF）——确认无误后再导出；若某帧不对，先关闭本窗口调整该帧，再重新生成。" />
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Spacing="8" Margin="0,10,0,0">
+            <TextBlock Name="InfoLbl" VerticalAlignment="Center" HorizontalAlignment="Left"
+                       Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
+            <Button Content="关闭" Click="OnCloseClick" />
+            <Button Classes="primary" Content="导出印样…" Click="OnExportClick" />
+        </StackPanel>
+
+        <!-- ══ 卷信息 ════════════════════════════════════════════════════════
+             These fields used to live in a 卷注释 tab on the main window and feed EXIF.
+             They belong here: the only place they surface is the sheet itself, and you
+             want to be typing them while looking at the roll they describe.
+             ═══════════════════════════════════════════════════════════════════ -->
+        <Border DockPanel.Dock="Right" Width="300" Margin="12,0,0,0" Padding="12,4,0,0"
+                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1,0,0,0">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="3">
+                    <TextBlock Text="印样样式" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
+                        <RadioButton Name="StyleLight" GroupName="SheetStyle" Content="浅色"
+                                     IsCheckedChanged="OnStyleChanged" />
+                        <RadioButton Name="StyleDark" GroupName="SheetStyle" Content="深色"
+                                     IsCheckedChanged="OnStyleChanged" />
+                    </StackPanel>
+
+                    <TextBlock Text="卷信息" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
+                    <TextBlock Classes="groupHint" Text="印在页眉与底部标识条上；留空显示为「—」。" />
+                    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="相机" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding CameraBody}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="胶卷" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding FilmStock}" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="ISO/ASA" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding FilmIso}" Margin="0,3" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="卷号" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding RollNumber}" Margin="0,3" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Classes="fieldLabel" Text="冲洗店" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding DevLab}" Margin="0,3" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Classes="fieldLabel" Text="工艺" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding DevProcess}" Margin="0,3" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Classes="fieldLabel" Text="日期" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding DevDate}" Margin="0,3" />
+                        <TextBlock Grid.Row="7" Grid.Column="0" Classes="fieldLabel" Text="地点" Margin="0,3,10,3" />
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Location}" Margin="0,3" />
+                    </Grid>
+                    <TextBlock Classes="fieldLabel" Text="备注" Margin="0,8,0,2" />
+                    <TextBox Text="{Binding RollNote}" AcceptsReturn="True" Height="66" TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- The preview is the composed sheet itself, not a stand-in: same renderer, smaller. -->
+        <Border Background="{DynamicResource ViewerBrush}" Padding="6">
+            <Image Name="Disp" Stretch="Uniform" StretchDirection="DownOnly" />
+        </Border>
+    </DockPanel>
+</Window>
