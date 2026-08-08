@@ -26,7 +26,9 @@
   <a href="https://revelare.netlify.app/">官网</a> ·
   <a href="#这是什么">简介</a> ·
   <a href="#为什么做这个">故事</a> ·
+  <a href="#三条原则">原则</a> ·
   <a href="#适合谁">适合谁</a> ·
+  <a href="#和主流方案的区别">对比</a> ·
   <a href="#界面">界面</a> ·
   <a href="#下载与安装">下载</a> ·
   <a href="#快速上手">上手</a> ·
@@ -60,6 +62,12 @@ OpenRevelare 的想法很简单：把去色罩从「调出来的」变成「算�
 
 项目从自用工具起步，做了付费验证（买断制，8 位用户付费支持），再根据用户反馈用 C# 重构底层——速度提升约 13 倍、补齐三平台、老用户处理结果逐像素不变。2026 年 8 月开源，免费，希望也能帮到其他胶片玩家。
 
+## 三条原则
+
+1. **色罩是物理，不是审美**——片基染料的吸收特性是测量对象：采样、扣除、算完，不靠肉眼猜
+2. **密度域是负片的母语**——在 log 密度域里，色罩是常量偏移、白平衡和反转是线性操作，结果可复现；在非线性域里这些操作互相纠缠，只能凭手感
+3. **还原与创作分开**——物理还原（FilmBase）整卷共用，审美调整（SceneBase）每帧独立，互不污染
+
 ## 适合谁
 
 **适合**
@@ -74,6 +82,18 @@ OpenRevelare 的想法很简单：把去色罩从「调出来的」变成「算�
 - 要求严格色彩还原的场景——文物翻拍、商业存档、科研用途：OpenRevelare 不做逐卷色卡标定，这类需求请用 [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
 
 对 Gold 200 这类标准 C-41 负片，默认参数与逐卷标定的差别在屏幕上略可察觉、打印几乎分辨不出；染料特性偏离基准较远的卷差别大一些，但改一下标定或在 SceneBase 阶段微调就能补回大部分。
+
+## 和主流方案的区别
+
+| | 生态插件（NLP / ColorPerfect 等） | 硬件校正（DiVERE） | OpenRevelare |
+|---|---|---|---|
+| 形态 | Lightroom/PS 插件 | 独立软件 | 独立软件 |
+| 生态 | 锁死 Adobe，$99+ | 免费开源 | 免费开源 |
+| 处理 | 黑盒，不可解释 | 物理可解释 | 物理可解释 |
+| 门槛 | 低 | 需色卡 + 窄谱光源 | 零门槛，翻拍直出 |
+| 结果 | 不可复现 | 可复现 | 可复现（每参数有物理含义） |
+
+一句话：生态插件把去色罩当滤镜卖，硬件校正把精度建立在额外器材上，OpenRevelare 走的是「免硬件 + 可解释 + 可复现」的路。
 
 ## 界面
 
@@ -193,6 +213,30 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 彩色负片的信号天然是密度。透射率 T 取负对数——`D = -log10(T)`——得到对数密度，这正是 Cineon 胶片扫描标准采用的域。在这个域里，R/G/B 三通道的关系是线性的、可预测的：片基色罩近似一个常量偏移，扣除它只需一次减法；白平衡、反转都是线性操作。在非线性域里这些操作互相纠缠，只能靠手感试——这就是「玄学」的来源，也是 OpenRevelare 选择密度域的根因。
 
+### 核心公式
+
+从采样到正片，关键步骤都可以写成一行：
+
+**片基归一化**——每通道除以采样的片基透射率，橙色色罩一步扣掉：
+
+$$T_\text{norm} = T / T_\text{base}$$
+
+**转入密度域**——透射率取负对数（下限截断防溢出）：
+
+$$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
+
+**密度域白平衡**——阴影端加法项 + 高光端乘法项（Negadoctor 双端模型）：
+
+$$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
+
+**反转**——亮度与色度分离后分别控制（grade 管对比度，chroma_grade 管色度还原）：
+
+$$D_\text{adj} = \text{pivot} + (D_\text{mean} - \text{pivot}) \times \text{grade} + D_\text{chroma} \times \frac{\text{chroma\_grade}}{\text{chroma\_amp}} - D_\text{max}$$
+
+$$T_\text{pos} = 10^{D_\text{adj}}$$
+
+每个参数的完整推导见应用内「帮助 → 技术原理」。
+
 ### 两个阶段：FilmBase 与 SceneBase
 
 |  | **FilmBase · 物理还原** | **SceneBase · 审美调整** |
@@ -293,6 +337,19 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 
 反馈与 bug 请开 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues)，附上系统版本、相机或扫描仪型号、输入格式与错误信息。请不要上传含隐私内容的原片。
 
+## Roadmap 与已知限制
+
+**规划中**
+
+- ECN-2 电影负片的独立标定数据（基于 ColorChecker 24，当前用 C-41 基准近似）
+- macOS 真机验证与 `SystemMemory` 实现（macOS 版从未在真机运行，解码并发为保守固定档）
+
+**已知限制**
+
+- 不做逐卷色卡标定：追求严格色彩精度（文物翻拍、商业存档、科研）请用 DiVERE
+- 8-bit TIFF 输入暗部可能出现轻微色带，建议扫描时导出 16-bit
+- Lensfun 镜头库未收录的镜头需手动指定型号
+
 ## 打赏
 
 Revelare 最早是自己做着玩的小工具。当时开发花了不少成本，就把大部分功能开放，只给几个进阶的翻拍工作流定价，补贴一点。后来真的有人愿意购买支持——非常感谢。
@@ -332,6 +389,12 @@ The idea behind OpenRevelare is simple: make mask removal *computed* instead of 
 
 The project started as a self-use tool, was validated with real paying users (8 paid, buy-once), then rewritten in C# based on user feedback — roughly 13× faster, three platforms, pixel-identical results for existing users. Open-sourced in August 2026, free, in the hope that it helps other film shooters too.
 
+## Three principles
+
+1. **The mask is physics, not taste** — the base dyes' absorption is something you measure: sample it, subtract it, done. Not something you eyeball
+2. **Density is the negative's native language** — in the log-density domain the mask is a constant offset and white balance/inversion are linear operations, so results reproduce; in a non-linear domain those operations interfere and you can only tune by feel
+3. **Restoration and creation are separate** — physical restoration (FilmBase) is shared by the roll; aesthetic edits (SceneBase) are per-frame; neither pollutes the other
+
 ## Who it's for
 
 **Good fit**
@@ -346,6 +409,18 @@ The project started as a self-use tool, was validated with real paying users (8 
 - Strict colour-accurate work — heritage copying, commercial archiving, research: OpenRevelare does not do per-roll colour-chart calibration. For that, use [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
 
 For standard C-41 stocks like Gold 200, the difference between the defaults and a per-roll calibration is barely visible on screen and essentially indistinguishable in print; stocks further from the reference need a calibration tweak or a SceneBase touch-up to close most of the gap.
+
+## How it compares to the mainstream
+
+| | Ecosystem plugins (NLP / ColorPerfect …) | Hardware calibration (DiVERE) | OpenRevelare |
+|---|---|---|---|
+| Form | Lightroom/PS plugin | Standalone app | Standalone app |
+| Ecosystem | Locked to Adobe, $99+ | Free, open-source | Free, open-source |
+| Processing | Black box, unexplainable | Physically explainable | Physically explainable |
+| Barrier | Low | Needs colour chart + narrowband light | None — copy and go |
+| Reproducibility | No | Yes | Yes (every parameter has a physical meaning) |
+
+In one line: plugins sell mask removal as a filter, hardware calibration builds precision on extra gear, OpenRevelare goes "no hardware, explainable, reproducible".
 
 ## Interface
 
@@ -465,6 +540,30 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 
 A colour negative's signal is density by nature. Taking the negative log of transmittance — `D = -log10(T)` — gives log density, the domain of the Cineon film-scanning standard. In this domain the R/G/B channels behave linearly and predictably: the mask is close to a constant offset (one subtraction removes it), and white balance and inversion are linear operations. In a non-linear domain those operations interfere with each other and you can only tune by feel — that is where the "dark magic" comes from, and why OpenRevelare works in density.
 
+### Core formulas
+
+The path from sample to positive, in a few lines:
+
+**Base normalisation** — divide each channel by the sampled base transmittance; the orange mask is gone in one step:
+
+$$T_\text{norm} = T / T_\text{base}$$
+
+**Into density** — negative log of transmittance (clamped to avoid overflow):
+
+$$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
+
+**Density-domain white balance** — a shadow-side additive term plus a highlight-side multiplicative term (the Negadoctor two-end model):
+
+$$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
+
+**Inversion** — luminance and chroma separated and controlled independently (grade = contrast, chroma_grade = chroma recovery):
+
+$$D_\text{adj} = \text{pivot} + (D_\text{mean} - \text{pivot}) \times \text{grade} + D_\text{chroma} \times \frac{\text{chroma\_grade}}{\text{chroma\_amp}} - D_\text{max}$$
+
+$$T_\text{pos} = 10^{D_\text{adj}}$$
+
+The full derivation of every parameter lives in the in-app **Help → Theory**.
+
 ### Two stages: FilmBase and SceneBase
 
 |  | **FilmBase · physical restoration** | **SceneBase · aesthetic edits** |
@@ -564,6 +663,19 @@ Third-party components shipped with the binaries and their licences are listed i
 - darktable's `negadoctor` module — its model `D_corr = D × wb_high + wb_offset`
 
 Feedback and bugs: open an [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues) with OS version, camera or scanner model, input format and error message. Please don't upload original photos containing private content.
+
+## Roadmap & known limitations
+
+**Planned**
+
+- Independent ECN-2 calibration data (ColorChecker 24-based; currently approximated from the C-41 baseline)
+- Real-hardware macOS validation and a `SystemMemory` implementation (the macOS build has never been run on a real machine; decode concurrency is a conservative fixed value)
+
+**Known limitations**
+
+- No per-roll colour-chart calibration: for strict colour-accurate work (heritage copying, commercial archiving, research) use DiVERE
+- 8-bit TIFF input may show slight banding in shadows; export 16-bit from the scanner when possible
+- Lenses missing from the Lensfun database must be specified manually
 
 ## Donate
 
