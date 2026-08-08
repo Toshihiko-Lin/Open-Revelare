@@ -111,7 +111,7 @@ puts the project into **roll mode**, where the FilmBase parameters are shared.
 
 - **Broadband source (white light)**: for copying on a tungsten or daylight light box. Goes
   straight into the density pipeline, with no calibration shots. Recommended for most users.
-- **Narrowband source (RGB mix)** (paid version): for a monochromatic RGB LED light box; a folder
+- **Narrowband source (RGB mix)**: for a monochromatic RGB LED light box; a folder
   holding the three calibration shots must be supplied as well. See
   "[Path A: the narrowband light-source workflow](#path-a-the-narrowband-light-source-workflow)".
 
@@ -313,11 +313,9 @@ Click "Export" (or File → Export in the menu).
 
 **Format**:
 - **TIFF (16-bit, AdobeRGB)**: the highest quality, for grading afterwards or for archiving.
-  Requires the paid version.
-- **JPEG (sRGB)**: ready to use, smaller, for sharing and publishing on the web. Available in the
-  free version.
+- **JPEG (sRGB)**: ready to use, smaller, for sharing and publishing on the web.
 
-**Resolution**: the free version limits the long edge to 6000 px; the paid version has no limit.
+**Resolution**: unlimited.
 
 **Output folder**: it can be named at import time, or picked when you export. A roll export writes
 every frame into one folder, named automatically after the original files.
