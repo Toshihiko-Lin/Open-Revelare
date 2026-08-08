@@ -220,6 +220,16 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 
 A colour negative's signal is density by nature. Taking the negative log of transmittance — `D = -log10(T)` — gives log density, the domain of the Cineon film-scanning standard. In this domain the R/G/B channels behave linearly and predictably: the mask is close to a constant offset (one subtraction removes it), and white balance and inversion are linear operations. In a non-linear domain those operations interfere with each other and you can only tune by feel — that is where the "dark magic" comes from, and why OpenRevelare works in density.
 
+### Two stages: FilmBase and SceneBase
+
+|  | **FilmBase · physical restoration** | **SceneBase · aesthetic edits** |
+|---|---|---|
+| Describes | The roll's objective physical properties: base colour & density, maximum density, channel balance, inversion contrast, chroma-recovery coefficient | Colour-temperature preference, exposure, contrast style, final saturation |
+| Nature | Not a taste decision — a measurement. Shared by the whole roll | The same negative can have completely different settings, per frame |
+| Changes | The *inputs* of the inversion equation — recompute the restoration | The *output* of the inversion equation — adjust on top of the restoration |
+
+The point of separating the two: get the physical restoration right once and the whole roll shares it; everything you do later cannot corrupt the physics underneath. Here "physical restoration" means the mask-removal result computed only from the roll's own information (base, maximum density, channel balance), with no subjective adjustment.
+
 ### Core formulas
 
 The path from sample to positive, in a few lines:
@@ -244,16 +254,6 @@ $$T_\text{pos} = 10^{D_\text{adj}}$$
 
 The full derivation of every parameter lives in the in-app **Help → Theory**.
 
-### Two stages: FilmBase and SceneBase
-
-|  | **FilmBase · physical restoration** | **SceneBase · aesthetic edits** |
-|---|---|---|
-| Describes | The roll's objective physical properties: base colour & density, maximum density, channel balance, inversion contrast, chroma-recovery coefficient | Colour-temperature preference, exposure, contrast style, final saturation |
-| Nature | Not a taste decision — a measurement. Shared by the whole roll | The same negative can have completely different settings, per frame |
-| Changes | The *inputs* of the inversion equation — recompute the restoration | The *output* of the inversion equation — adjust on top of the restoration |
-
-The point of separating the two: get the physical restoration right once and the whole roll shares it; everything you do later cannot corrupt the physics underneath. Here "physical restoration" means the mask-removal result computed only from the roll's own information (base, maximum density, channel balance), with no subjective adjustment.
-
 ### The per-frame pipeline
 
 1. **Back to light** — camera-copied RAW is decoded by LibRaw with all in-camera beautification disabled, to linear; display-gamma scans are linearised in one click. Both inputs meet at the same linear-light starting line
@@ -265,18 +265,6 @@ The point of separating the two: get the physical restoration right once and the
 7. **Output** — a physically correct positive, ready for a grading suite or for direct export after Stage 2
 
 The in-app **Help → Guide / Theory** has the full usage instructions and derivations.
-
-## Smart white balance model — separate licence, please read
-
-"Smart white balance" uses the Deep White-Balance Editing (CVPR 2020) network weights `models/net_awb.onnx`, distributed with the repo and the installers — but:
-
-> [!IMPORTANT]
-> **This file is NOT covered by the project's GPL-3.0 grant.**
-> It is distributed under the original author's **CC BY-NC-SA 4.0** (Attribution — NonCommercial — ShareAlike).
-
-OpenRevelare is free, unsold, no subscription or in-app purchases, so redistribution itself is non-commercial and consistent with the NC clause. But the **right you get from GPL-3.0 to redistribute commercially does not extend to this file** — for commercial use, delete the `models/` directory first. The app still builds and runs; only "smart white balance" reports a missing model. Manual white balance, auto highlight white balance and Path A decoupling do not depend on it.
-
-Details in [models/README.md](models/README.md) and item 13 of [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). The authors require citation of their paper.
 
 ## Where your data lives
 
@@ -327,6 +315,18 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{ver
 `dotnet publish -r linux-x64` / `-r osx-arm64` also works on Windows, but `appimagetool`, `codesign` and `hdiutil` must run on their own OS. All three platform artifacts are built automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml) on tag.
 
 > **macOS must pin LibRaw to 0.21.x**: Sdcb.LibRaw 0.21.1.7 marshals against the 0.21 `libraw_data_t` layout; the 0.22 shipped by brew adds fields and shifts every offset. `bundle-libraw.sh` therefore builds 0.21.4 from source.
+
+## Smart white balance model — separate licence, please read
+
+"Smart white balance" uses the Deep White-Balance Editing (CVPR 2020) network weights `models/net_awb.onnx`, distributed with the repo and the installers — but:
+
+> [!IMPORTANT]
+> **This file is NOT covered by the project's GPL-3.0 grant.**
+> It is distributed under the original author's **CC BY-NC-SA 4.0** (Attribution — NonCommercial — ShareAlike).
+
+OpenRevelare is free, unsold, no subscription or in-app purchases, so redistribution itself is non-commercial and consistent with the NC clause. But the **right you get from GPL-3.0 to redistribute commercially does not extend to this file** — for commercial use, delete the `models/` directory first. The app still builds and runs; only "smart white balance" reports a missing model. Manual white balance, auto highlight white balance and Path A decoupling do not depend on it.
+
+Details in [models/README.md](models/README.md) and item 13 of [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). The authors require citation of their paper.
 
 ## Licence
 
