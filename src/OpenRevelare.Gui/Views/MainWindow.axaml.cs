@@ -148,6 +148,12 @@ public partial class MainWindow : Window
     private Point _dragStart;
     private bool _dragging;
 
+    // Set once the user closes a tool banner. The hint sits pinned at the top of the picture and
+    // a tall crop frame (a vertical strip, a 3:4) reaches right up under it, so the text can end
+    // up covering the very handles it is describing. Dismissing is therefore about reclaiming
+    // that space, and it holds for the rest of the session rather than resetting on every re-arm.
+    private bool _bannerHintDismissed;
+
     // Crop aspect presets (index-aligned with CropPresetCombo); null = free / no lock.
     private static readonly double?[] CropAspects =
     {
@@ -592,13 +598,12 @@ public partial class MainWindow : Window
         if (leavingCrop) DiscardCropDraft();   // after _mode, so the frame actually hides
         Overlay.Cursor = new Cursor(StandardCursorType.Cross);
         BannerText.Text = banner;
-        Banner.IsVisible = true;
-        if (useNegative) { Vm?.ShowNegativeView(); _negativeShown = true; }
 
         bool crop = mode == SampleMode.Crop;
         CropApplyBtn.IsVisible = crop;
         CropCancelBtn.IsVisible = crop;
-        Banner.IsHitTestVisible = crop;   // only the crop banner has anything to click
+        ApplyBannerVisibility(crop);
+        if (useNegative) { Vm?.ShowNegativeView(); _negativeShown = true; }
         if (crop)
         {
             // Show the whole frame while the crop is being placed, and start from the crop
@@ -615,6 +620,35 @@ public partial class MainWindow : Window
 
     private void OnCropApplyClick(object? sender, RoutedEventArgs e) => CommitCrop();
     private void OnCropCancelClick(object? sender, RoutedEventArgs e) => CancelCropDraft();
+
+    /// <summary>
+    /// Show the banner for the mode being armed, honouring a dismissal.
+    ///
+    /// Dismissing hides the HINT, not the controls: in crop mode 应用/取消 have no other home, so
+    /// the banner stays up as a compact button bar (with the × still there, since a bar that could
+    /// not be re-dismissed would be a trap after the hint comes back on a later session). Modes
+    /// that are pure text lose the banner entirely, which is the whole point — the picture is
+    /// what the user came to look at.
+    /// </summary>
+    private void ApplyBannerVisibility(bool crop)
+    {
+        bool showText = !_bannerHintDismissed;
+        BannerText.IsVisible = showText;
+        Banner.IsVisible = showText || crop;
+        BannerCloseBtn.IsVisible = Banner.IsVisible;
+        // Unchanged rule: the banner itself is hit-testable only for crop, so the strip never eats
+        // a sampling drag. The × is a sibling, not a child, so it stays clickable regardless.
+        Banner.IsHitTestVisible = crop;
+    }
+
+    private void OnBannerCloseClick(object? sender, RoutedEventArgs e)
+    {
+        _bannerHintDismissed = true;
+        ApplyBannerVisibility(_mode == SampleMode.Crop);
+        // The crop tool drives its shortcuts off the overlay; closing the hint moved focus onto
+        // this button, and Enter/Esc would have gone to it instead of applying the crop.
+        if (_mode == SampleMode.Crop) Overlay.Focus();
+    }
 
     /// <summary>Drop the in-progress crop frame and hand the preview back to the applied crop.
     /// The draft is deliberately NOT kept for a later re-entry: it is normalised against one
@@ -639,6 +673,7 @@ public partial class MainWindow : Window
         UpdatePanCursor();          // back to hand/arrow depending on zoom
         SelLine.IsVisible = false;
         Banner.IsVisible = false;
+        BannerCloseBtn.IsVisible = false;   // sibling of the banner, so it needs hiding too
         SetTogglesExcept(null);   // programmatic uncheck does not re-fire Click
         if (_negativeShown) { Vm?.ShowPositiveView(); _negativeShown = false; }
     }

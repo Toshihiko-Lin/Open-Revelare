@@ -53,6 +53,7 @@
 
     <!-- ── Structural ──────────────────────────────────────────────────────── -->
     <StreamGeometry x:Key="IcoChevron">M6 3.5L10.5 8L6 12.5</StreamGeometry>
+    <StreamGeometry x:Key="IcoClose">M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5</StreamGeometry>
 
     <!-- ══ The Icon control template ═══════════════════════════════════════════ -->
     <ControlTheme x:Key="{x:Type ctl:Icon}" TargetType="ctl:Icon">

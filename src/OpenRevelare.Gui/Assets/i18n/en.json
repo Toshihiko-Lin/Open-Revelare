@@ -145,6 +145,7 @@
   "印样预览": "Contact sheet preview",
   "整卷印样预览。卷信息会随印样一起烧进图里（不写入 EXIF）——确认无误后再导出；若某帧不对，先关闭本窗口调整该帧，再重新生成。": "The whole roll as one sheet. The roll info is burned into the image along with it (never into EXIF) — check it before exporting; if a frame looks wrong, close this window, fix that frame and build the sheet again.",
   "关闭": "Close",
+  "关闭提示": "Dismiss hint",
   "导出印样…": "Export contact sheet…",
   "印样样式": "Sheet style",
   "浅色": "Light",

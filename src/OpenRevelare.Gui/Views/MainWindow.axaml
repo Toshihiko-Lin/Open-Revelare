@@ -517,27 +517,46 @@
                                       Stroke="#FF5A50" StrokeThickness="2" />
                             </Canvas>
                         </Grid>
-                        <!-- Hit-testable ONLY when it carries buttons (crop): a banner that eats
-                             clicks would block sampling drags underneath it. -->
-                        <Border Name="Banner" IsVisible="False" VerticalAlignment="Top"
-                                HorizontalAlignment="Center" Margin="0,10,0,0"
-                                IsHitTestVisible="False" CornerRadius="8"
-                                Background="{DynamicResource ChromeBrush}"
-                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
-                                Padding="12,8" MaxWidth="620">
-                            <StackPanel Orientation="Horizontal" Spacing="10">
-                                <TextBlock Name="BannerText" Text="" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource TextBrush}"
-                                           TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
-                                <!-- Explicit buttons, not just the Enter/Esc shortcuts: after
-                                     picking a preset the keyboard focus is still in the combo,
-                                     so a hidden key is not a reliable way to apply a crop. -->
-                                <Button Name="CropApplyBtn" Content="{i18n:T '应用'}" Classes="primary"
-                                        IsVisible="False" Click="OnCropApplyClick" />
-                                <Button Name="CropCancelBtn" Content="{i18n:T '取消'}"
-                                        IsVisible="False" Click="OnCropCancelClick" />
-                            </StackPanel>
-                        </Border>
+                        <!-- Banner + its dismiss button, side by side. The row itself must stay
+                             hit-testable: hit-testing is inherited DOWNWARD and cannot be
+                             re-enabled by a child, so a dead wrapper here would make the banner's
+                             own 应用/取消 unclickable too. The row therefore has no Background
+                             (nothing to hit between the children) and each child decides for
+                             itself — the banner only in crop mode, the × always. -->
+                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                    VerticalAlignment="Top" HorizontalAlignment="Center"
+                                    Margin="0,10,0,0">
+                            <Border Name="Banner" IsVisible="False" CornerRadius="8"
+                                    VerticalAlignment="Top"
+                                    Background="{DynamicResource ChromeBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                    Padding="12,8" MaxWidth="620">
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <TextBlock Name="BannerText" Text="" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextBrush}"
+                                               TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
+                                    <!-- Explicit buttons, not just the Enter/Esc shortcuts: after
+                                         picking a preset the keyboard focus is still in the combo,
+                                         so a hidden key is not a reliable way to apply a crop. -->
+                                    <Button Name="CropApplyBtn" Content="{i18n:T '应用'}" Classes="primary"
+                                            IsVisible="False" Click="OnCropApplyClick" />
+                                    <Button Name="CropCancelBtn" Content="{i18n:T '取消'}"
+                                            IsVisible="False" Click="OnCropCancelClick" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Dismisses the HINT, never the Apply/Cancel pair: a tall crop frame
+                                 (a vertical strip, a 3:4) reaches up under this banner and the
+                                 text is what covers the handles. -->
+                            <Button Name="BannerCloseBtn" IsVisible="False" Classes="icon"
+                                    Width="24" Height="24" MinHeight="24" VerticalAlignment="Top"
+                                    IsHitTestVisible="True" Click="OnBannerCloseClick"
+                                    CornerRadius="12"
+                                    Background="{DynamicResource ChromeBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                        </StackPanel>
                     </Grid>
                 </Border>
 
