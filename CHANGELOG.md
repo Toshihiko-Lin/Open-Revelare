@@ -1,6 +1,8 @@
 # OpenRevelare — 更新日志
 
-## 未发布
+## v1.1.2（2026-08-10）
+
+扫描件色彩修复。1.0 至 1.1.1 期间导入的扫描件颜色不正确，建议重新导入。
 
 **修复**
 
@@ -12,9 +14,15 @@
 - **扫描件色度补偿回到 1.0**：承上，ICC 矩阵已展开通道间色度差值，扫描件不再
   套用为相机 sensor 串扰标定的 `chroma_grade = 3.05`（RAW 仍为 3.05）。
   1.0 至 1.1.1 期间导入的扫描件色彩偏浓
-
+- **导出的 ICC Profile 曲线方向反了**：写入的 sRGB TRC 存的是「线性→编码」，
+  而 ICC 规范中该曲线是「编码→线性」。像素数据本身没错，但色彩管理软件读到
+  的曲线是反的，会把画面判读得过亮。AdobeRGB 一档用的是 gamma 形式，方向本就
+  正确，不受影响
 
 ---
+
+A scan-colour fix. Scans imported between 1.0 and 1.1.1 came out with the wrong
+colour and are worth re-importing.
 
 **Fixed**
 
@@ -30,6 +38,11 @@
   no longer take `chroma_grade = 3.05`, which is calibrated for camera sensor
   crosstalk (RAW still uses 3.05). Scans imported between 1.0 and 1.1.1 came out
   oversaturated
+- **Exported ICC profiles had their curve the wrong way round** — the sRGB TRC was
+  written as linear→encoded, whereas an ICC curve is encoded→linear. The pixel data
+  was always correct, but colour-managed software read the inverted curve and showed
+  the image far too light. The AdobeRGB profile uses the gamma form, which was
+  already in the right direction, and is unaffected
 
 ---
 
