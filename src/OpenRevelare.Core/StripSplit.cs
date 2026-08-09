@@ -75,7 +75,8 @@ public static class StripSplit
         bool[] gutter = GutterMask(sd, mean, out bool[] blank);
         if (gutter is null) return Array.Empty<Rect>();
 
-        var spans = FrameSpans(gutter, blank, length, minFrameFraction);
+        var (f0, f1) = FilmExtent(sd, length);
+        var spans = FrameSpans(gutter, blank, length, minFrameFraction, f0, f1);
         return ToRects(spans, vertical, c0, c1, length, across);
     }
 
@@ -228,14 +229,61 @@ public static class StripSplit
         return mask;
     }
 
+    /// <summary>
+    /// How far the FILM runs along the strip: the dark surround before it and the blank scanner
+    /// output after it are not part of any photograph.
+    ///
+    /// This is <see cref="StripBounds"/> turned ninety degrees, and it exists because without it
+    /// the outermost frames are declared to run to the file edge whatever is there. Measured over
+    /// the sample scans that was the detector's one systematic error — interior dividers land on
+    /// real film base almost every time, while the two ends were pinned to row 0 and row length-1:
+    /// eight of fifteen scans began the first frame in the black surround and four ended the last
+    /// one in blank white, on one file leaving 25% of the strip outside the box.
+    ///
+    /// Judged on VARIANCE alone, deliberately. Both non-film regions are machine-flat — the
+    /// surround at level ≈0.05 and the blank at 1.00 both measure σ≈0.0000 — while real film never
+    /// is: even bare base carries grain at σ≈0.002, an order of magnitude up. A brightness rule
+    /// cannot express that (the two regions sit at opposite ends of the scale, with the film
+    /// between them), and a brightness PERCENTILE is worse still: picture rows dominate the
+    /// distribution, so the cut lands mid-picture and truncates the film. That was tried first and
+    /// collapsed 3.tif from six frames to two.
+    /// </summary>
+    private static (int Lo, int Hi) FilmExtent(double[] sd, int length)
+    {
+        // Absolute, not a percentile: this separates "a machine wrote this" from "light passed
+        // through film", and that boundary does not move with the content of the scan.
+        const double dead = 5e-4;
+
+        int bestLo = 0, bestHi = 0, curLo = -1;
+        for (int i = 0; i <= length; i++)
+        {
+            bool isFilm = i < length && sd[i] > dead;
+            if (isFilm) { if (curLo < 0) curLo = i; }
+            else if (curLo >= 0)
+            {
+                if (i - curLo > bestHi - bestLo) { bestLo = curLo; bestHi = i; }
+                curLo = -1;
+            }
+        }
+
+        // Widest run, not the first: a speck in the surround or a sliver of leader must not claim
+        // the strip. Nothing separable (a scan trimmed flush to the film, which is common) leaves
+        // the whole image, which is the old behaviour and correct for that case.
+        return bestHi - bestLo < length / 20 ? (0, length) : (bestLo, bestHi);
+    }
+
     /// <summary>Frames are what lies between gutters, after pitch-based repair.</summary>
+    /// <param name="filmLo">First row of film — where the first frame starts, rather than row 0.</param>
+    /// <param name="filmHi">One past the last row of film — where the last frame ends.</param>
     private static List<(int Lo, int Hi)> FrameSpans(bool[] gutter, bool[] blank, int length,
-                                                     double minFrameFraction)
+                                                     double minFrameFraction, int filmLo, int filmHi)
     {
         int minGutter = Math.Max(3, length / 250);
-        var cuts = new List<int> { 0 };
+        var cuts = new List<int> { filmLo };
         int runLo = -1;
-        for (int i = 0; i < length; i++)
+        // Confined to the film: a flat, bright run out in the blank tail is not a boundary between
+        // two photographs, and treating it as one is what produced a final "frame" of pure white.
+        for (int i = filmLo; i < filmHi; i++)
         {
             if (gutter[i]) { if (runLo < 0) runLo = i; }
             else if (runLo >= 0)
@@ -244,8 +292,8 @@ public static class StripSplit
                 runLo = -1;
             }
         }
-        if (runLo >= 0 && length - runLo >= minGutter) cuts.Add((runLo + length) / 2);
-        cuts.Add(length);
+        if (runLo >= 0 && filmHi - runLo >= minGutter) cuts.Add((runLo + filmHi) / 2);
+        cuts.Add(filmHi);
 
         int minLen = (int)(minFrameFraction * length);
         var spans = new List<(int Lo, int Hi)>();
