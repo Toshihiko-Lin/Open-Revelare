@@ -1271,8 +1271,75 @@ public partial class MainWindow : Window
             }
         }
 
+        if (!await RunSplitPrePassAsync(cfg)) return;
+
         await Vm.LoadRollWithConfigAsync(cfg);
         Vm.EnterDevelop();
+    }
+
+    /// <summary>
+    /// Offer to cut scanner strips into frames before the roll is built.
+    ///
+    /// This runs to completion first and hands the load a finished set of crops, so the main
+    /// window only ever sees a settled frame list — there is no half-split roll to reason about
+    /// downstream. Camera RAW skips the whole pass: one file is one frame there, and the dialog
+    /// would have nothing to say. Returns false only if the user cancelled the import outright.
+    /// </summary>
+    private async Task<bool> RunSplitPrePassAsync(Models.ImportConfig cfg)
+    {
+        if (Vm is null) return true;
+        var scans = cfg.Paths.Where(ImportDialog.IsScan).ToList();
+        if (scans.Count == 0) { Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>()); return true; }
+
+        Vm.StatusText = Loc.T("正在识别底片分割 …");
+        List<(Models.StripPlan Plan, OpenRevelare.Core.ImageBuffer Preview)> detected;
+        try
+        {
+            detected = await Task.Run(() => scans.Select(p =>
+            {
+                // Detection reads the same downsampled preview the dialog shows, so what the
+                // user sees and what was measured cannot drift apart. The rects are normalised,
+                // so they still apply at full resolution.
+                var (preview, _, _) = Services.ImageIo.LoadPreview(p, 1200);
+                return (Models.StripPlan.Detect(p, preview), preview);
+            }).ToList());
+        }
+        catch (Exception ex)
+        {
+            // A failed pre-pass must not block the import: fall through with no splits and let
+            // the roll load one frame per file, which is what it did before this feature.
+            Vm.StatusText = Loc.T("分割识别失败，按整张导入：") + ex.Message;
+            Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>());
+            return true;
+        }
+        Vm.StatusText = "";
+        var plans = detected.Select(d => d.Plan).ToList();
+
+        // Nothing to decide when every scan holds a single frame.
+        if (plans.All(p => p.FrameCount <= 1))
+        {
+            Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>());
+            return true;
+        }
+
+        // The negative is shown as-is, un-inverted: no film-base calibration has happened yet, so
+        // a positive rendering would be a guess. The gutters — the thing being cut on — are
+        // unmistakable either way. The buffer is linear light and BitmapConvert expects sRGB, so
+        // it gets the display TRC first; without it the strip renders far too dark to judge.
+        foreach (var (plan, preview) in detected)
+        {
+            var shown = new OpenRevelare.Core.ImageBuffer(
+                preview.Width, preview.Height, (float[])preview.Data.Clone());
+            OpenRevelare.Core.Srgb.ApplyForwardInPlace(shown.Data);
+            plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
+        }
+
+        var dlg = new SplitDialog(plans);
+        bool ok = await dlg.ShowDialog<bool>(this);
+        if (!ok) return false;
+
+        Vm.SetSplitPlans((dlg.Result ?? plans).Select(p => (p.Path, p.ToCropRects())));
+        return true;
     }
 
     // ── Module switch: 图库 ↔ 修片 ──────────────────────────────────────────────

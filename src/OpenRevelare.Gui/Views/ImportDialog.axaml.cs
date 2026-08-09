@@ -24,6 +24,14 @@ public partial class ImportDialog : Window
     private static readonly HashSet<string> RawTiffExt = new(StringComparer.OrdinalIgnoreCase)
     { ".arw", ".nef", ".cr2", ".cr3", ".dng", ".raf", ".rw2", ".orf", ".pef", ".srw", ".tif", ".tiff" };
 
+    /// <summary>Scanner output — the inputs that may hold several negatives in one file and so
+    /// go through the split pre-pass. Camera RAW is one frame per file and skips it.</summary>
+    private static readonly HashSet<string> ScanExt = new(StringComparer.OrdinalIgnoreCase)
+    { ".tif", ".tiff" };
+
+    /// <summary>True when <paramref name="path"/> is a scanner TIFF rather than a camera RAW.</summary>
+    public static bool IsScan(string path) => ScanExt.Contains(System.IO.Path.GetExtension(path));
+
     internal static readonly string[] FormatPresets =
     {
         "135", "135 Half-frame", "APS",
@@ -108,8 +116,21 @@ public partial class ImportDialog : Window
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
-    private void OnAcceptClick(object? sender, RoutedEventArgs e)
+    private async void OnAcceptClick(object? sender, RoutedEventArgs e)
     {
+        // Scans and camera RAW take different routes through the pipeline — a scan may hold a
+        // whole strip and gets the split pre-pass, a RAW is one frame and does not — and a roll
+        // mixing them would be half-processed either way. Rejecting the mix here is clearer than
+        // silently treating one kind as the other.
+        int scans = Files.Count(IsScan);
+        if (scans > 0 && scans < Files.Count)
+        {
+            await new InfoDialog(Loc.T("不能混合扫描件和 RAW"),
+                    Loc.T("这一批里既有扫描 TIFF 又有相机 RAW，两者的处理管线不同（扫描件可能一个文件装着整条底片，需要先分割）。请分成两卷分别导入。"))
+                .ShowDialog(this);
+            return;
+        }
+
         var cfg = new ImportConfig
         {
             PathA = SrcA.IsChecked == true,

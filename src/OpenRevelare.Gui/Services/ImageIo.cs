@@ -215,4 +215,33 @@ public static class ImageIo
         var (outs, w, h) = LoadPreviews(path, maxEdge);
         return (outs[0], w, h);
     }
+
+    /// <summary>
+    /// Preview of ONE normalised sub-rectangle, cropped from the source BEFORE downsampling —
+    /// what a frame that shares its file with other negatives needs to look sharp on screen.
+    ///
+    /// The reported source size is the RECTANGLE's size in source pixels, not the file's: it is
+    /// what the caller means by "how big is this frame really", and the crop-overlay maths reads
+    /// it that way.
+    /// </summary>
+    public static (ImageBuffer Preview, int SourceWidth, int SourceHeight) LoadPreviewRegion(
+        string path, (double X, double Y, double W, double H) rect, int maxEdge) => Gated(() =>
+    {
+        if (RawDecode.IsRawExtension(path))
+        {
+            // RAW never reaches here today — only scanner TIFFs are split — but falling back to
+            // the whole-frame preview is correct rather than merely safe: the pipeline still
+            // applies the crop afterwards, so the frame is right, just softer.
+            var (outs, fw, fh) = LoadPreviews(path, maxEdge);
+            return (outs[0], fw, fh);
+        }
+
+        ImageBuffer region = TiffIO.LoadTiffRegion(path, rect, inputIsSrgb: false, maxEdge);
+        // Taken from the file's own dimensions rather than back-computed from the returned
+        // buffer: the box factor truncates, so that route loses up to a factor's worth of pixels.
+        var (fullW, fullH) = TiffIO.ReadTiffSize(path);
+        int rw = Math.Max(1, (int)Math.Round(rect.W * fullW));
+        int rh = Math.Max(1, (int)Math.Round(rect.H * fullH));
+        return (region, rw, rh);
+    });
 }

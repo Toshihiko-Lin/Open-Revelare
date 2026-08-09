@@ -104,6 +104,115 @@ public static class TiffIO
         return new ImageBuffer(w, h, data);
     }
 
+    /// <summary>Pixel dimensions from the header alone — no image data is decoded.</summary>
+    public static (int Width, int Height) ReadTiffSize(string path)
+    {
+        using Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF: {path}");
+        return (tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt(),
+                tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt());
+    }
+
+    /// <summary>
+    /// Load ONE normalised sub-rectangle of a TIFF, box-averaged down to
+    /// <paramref name="maxEdge"/> — the path a scan holding several negatives needs.
+    ///
+    /// A strip cut into six frames would otherwise be previewed by decoding the whole file to a
+    /// 1600 px preview and cropping a sixth out of it, leaving each frame about 260 px and
+    /// visibly soft on screen. Cropping FIRST and downsampling after gives each frame the full
+    /// preview budget from the source pixels it actually covers.
+    ///
+    /// Only the rows the rectangle covers are read, and each is folded into the accumulator as it
+    /// arrives, so peak memory is the OUTPUT plus one scanline rather than the whole image.
+    /// Reading is still sequential from row 0 because a TIFF's strips are not randomly
+    /// addressable in general; the skipped rows are decoded but never converted or kept.
+    /// </summary>
+    /// <param name="rect">(x, y, w, h) in [0,1] of the full image, origin top-left.</param>
+    /// <param name="maxEdge">Long edge of the result. 0 or less means no downsampling.</param>
+    public static ImageBuffer LoadTiffRegion(string path, (double X, double Y, double W, double H) rect,
+                                             bool inputIsSrgb, int maxEdge)
+    {
+        using Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF: {path}");
+
+        int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+        int h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+        int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+        int spp = tif.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt();
+
+        var planarField = tif.GetField(TiffTag.PLANARCONFIG);
+        var planar = planarField != null ? (PlanarConfig)planarField[0].ToInt() : PlanarConfig.CONTIG;
+        if (planar != PlanarConfig.CONTIG)
+            throw new NotSupportedException("only chunky (CONTIG) TIFF is supported");
+        if (bps != 8 && bps != 16)
+            throw new NotSupportedException($"unsupported BitsPerSample {bps} (need 8 or 16)");
+
+        int x0 = Math.Clamp((int)Math.Round(rect.X * w), 0, Math.Max(0, w - 1));
+        int y0 = Math.Clamp((int)Math.Round(rect.Y * h), 0, Math.Max(0, h - 1));
+        int x1 = Math.Clamp((int)Math.Round((rect.X + rect.W) * w), x0 + 1, w);
+        int y1 = Math.Clamp((int)Math.Round((rect.Y + rect.H) * h), y0 + 1, h);
+        int cw = x1 - x0, ch = y1 - y0;
+
+        // One integer box factor, matching Resample.Box, so a region preview and a whole-frame
+        // preview of the same pixels land on the same grid.
+        int factor = 1;
+        if (maxEdge > 0)
+            while (Math.Max(cw, ch) / (factor + 1) >= maxEdge) factor++;
+        int outW = Math.Max(1, cw / factor), outH = Math.Max(1, ch / factor);
+
+        var acc = new float[outW * outH * 3];
+        var counts = new int[outW * outH];
+        int scanlineSize = tif.ScanlineSize();
+        byte[] buf = new byte[scanlineSize];
+        float inv = bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+
+        for (int y = y0; y < y1; y++)
+        {
+            if (!tif.ReadScanline(buf, y))
+                throw new IOException($"failed reading TIFF scanline {y}");
+
+            int oy = (y - y0) / factor;
+            if (oy >= outH) continue;          // trailing rows outside the integer box
+            for (int x = x0; x < x1; x++)
+            {
+                int ox = (x - x0) / factor;
+                if (ox >= outW) continue;
+
+                float r, g, b;
+                if (spp >= 3)
+                {
+                    r = Sample(buf, x * spp + 0, bps) * inv;
+                    g = Sample(buf, x * spp + 1, bps) * inv;
+                    b = Sample(buf, x * spp + 2, bps) * inv;
+                }
+                else
+                {
+                    float grey = Sample(buf, x * spp, bps) * inv;
+                    r = g = b = grey;
+                }
+                if (inputIsSrgb)
+                {
+                    r = Srgb.SrgbToLinear(r);
+                    g = Srgb.SrgbToLinear(g);
+                    b = Srgb.SrgbToLinear(b);
+                }
+
+                int p = oy * outW + ox, j = p * 3;
+                acc[j] += r; acc[j + 1] += g; acc[j + 2] += b;
+                counts[p]++;
+            }
+        }
+
+        for (int p = 0; p < counts.Length; p++)
+        {
+            int n = counts[p];
+            if (n <= 1) continue;
+            int j = p * 3;
+            acc[j] /= n; acc[j + 1] /= n; acc[j + 2] /= n;
+        }
+        return new ImageBuffer(outW, outH, acc);
+    }
+
     /// <summary>Compression choice for 16-bit TIFF export.</summary>
     public enum CompressionMode { None, Lzw, Deflate }
 

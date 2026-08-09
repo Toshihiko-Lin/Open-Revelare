@@ -49,24 +49,92 @@ public partial class MainViewModel : ViewModelBase
     /// else, or decoded now. Deliberately NOT cancellable: if the switch that asked for it is
     /// superseded, the warm-up still wants the result, and throwing it away would mean decoding
     /// the same file again a moment later.</summary>
-    private Task<PreviewCache.Entry> PreviewAsync(string path)
+    private Task<PreviewCache.Entry> PreviewAsync(string path) => PreviewAsync(path, null);
+
+    /// <summary>True when <see cref="_previewLinear"/> has already had the frame's crop applied
+    /// by the decoder, so the render must not apply it a second time.</summary>
+    private bool _previewPreCropped;
+
+    /// <summary>
+    /// The crop to cut from the source before downsampling, or null to preview the whole file.
+    ///
+    /// Only SPLIT frames qualify — those sharing their source with other negatives, which is what
+    /// the import's split pre-pass produces. A crop the user drew by hand in the crop tool must
+    /// NOT be pre-applied: it is still being adjusted, and baking it into the cached preview
+    /// would make every nudge a fresh decode and would leave nothing outside the rect to drag
+    /// against. Split crops are structural and fixed for the life of the frame, so they are safe
+    /// to bake in.
+    /// </summary>
+    private (double X, double Y, double W, double H)? SplitCropOf(RollFrame frame)
     {
-        if (_previews.Get(path) is { } hit) { CaptureTile(path, hit.Preview); return Task.FromResult(hit); }
+        if (frame.Params.CropRect is not { } rect) return null;
+        if (!_splitPaths.Contains(frame.Path)) return null;
+        // A full-frame rect gains nothing from the region path and would only bypass the cache
+        // entry the rest of the roll shares.
+        if (rect.W >= 0.999 && rect.H >= 0.999) return null;
+        return rect;
+    }
+
+    /// <summary>
+    /// Sources that more than one frame draws on — the split scans.
+    ///
+    /// Rebuilt from the frame list rather than remembered from the import, so a roll REOPENED
+    /// from its .ncproj gets the sharp region previews too. The project file stores each frame's
+    /// path and crop, which is all this needs; nothing extra had to be persisted.
+    /// </summary>
+    private readonly HashSet<string> _splitPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Recompute <see cref="_splitPaths"/> from the current frames.</summary>
+    private void RefreshSplitPaths()
+    {
+        _splitPaths.Clear();
+        foreach (var group in Frames.GroupBy(f => f.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (group.Count() < 2) continue;
+            // Virtual copies of a WHOLE frame share every pixel and must keep sharing one cache
+            // entry; only frames carrying different crops are separate images.
+            var crops = group.Select(f => f.Params.CropRect).Distinct().ToList();
+            if (crops.Count > 1) _splitPaths.Add(group.Key);
+        }
+    }
+
+    /// <summary>
+    /// As above, but for a frame that owns only part of its source file.
+    ///
+    /// A split scan holds several negatives, and previewing one by downsampling the whole strip
+    /// and cropping a slice out of it spends the preview budget on the other frames: a strip cut
+    /// six ways leaves each frame about 260 px of the 1600, which is visibly soft. When
+    /// <paramref name="preCrop"/> is given the region is cut from the source FIRST and
+    /// downsampled after, so the frame gets the whole budget. Such previews are cached under a
+    /// key that includes the rect — six frames of one file are six different images, and sharing
+    /// one entry between them (which is right for virtual copies of a whole frame) would serve
+    /// each of them the first one's pixels.
+    /// </summary>
+    private Task<PreviewCache.Entry> PreviewAsync(string path,
+                                                  (double X, double Y, double W, double H)? preCrop)
+    {
+        string key = preCrop is { } pc
+            ? $"{path}|{pc.X:F6},{pc.Y:F6},{pc.W:F6},{pc.H:F6}"
+            : path;
+
+        if (_previews.Get(key) is { } hit) { CaptureTile(path, hit.Preview); return Task.FromResult(hit); }
         lock (_decoding)
         {
-            if (_decoding.TryGetValue(path, out Task<PreviewCache.Entry>? running)) return running;
+            if (_decoding.TryGetValue(key, out Task<PreviewCache.Entry>? running)) return running;
             Task<PreviewCache.Entry> task = Task.Run(() =>
             {
                 // Straight to preview size: the full-resolution float frame this used to decode
                 // and immediately throw away is the biggest allocation in the program.
-                var (preview, srcW, srcH) = ImageIo.LoadPreview(path, PreviewMaxEdge);
+                var (preview, srcW, srcH) = preCrop is { } rect
+                    ? ImageIo.LoadPreviewRegion(path, rect, PreviewMaxEdge)
+                    : ImageIo.LoadPreview(path, PreviewMaxEdge);
                 var e = new PreviewCache.Entry(preview, srcW, srcH);
-                _previews.Put(path, e.Preview, e.SourceWidth, e.SourceHeight);
+                _previews.Put(key, e.Preview, e.SourceWidth, e.SourceHeight);
                 CaptureTile(path, e.Preview);
                 return e;
             });
-            _decoding[path] = task;
-            _ = task.ContinueWith(_ => { lock (_decoding) _decoding.Remove(path); },
+            _decoding[key] = task;
+            _ = task.ContinueWith(_ => { lock (_decoding) _decoding.Remove(key); },
                                   TaskScheduler.Default);
             return task;
         }
@@ -376,11 +444,45 @@ public partial class MainViewModel : ViewModelBase
     partial void OnSprocketThresholdChanged(double value) { ScheduleRender(); if (ShowSprocketMask) UpdateSprocketOverlay(); }
     partial void OnShowSprocketMaskChanged(bool value) => UpdateSprocketOverlay();
 
+    /// <summary>
+    /// Rebuild the red diagnostic overlay showing which pixels the sprocket threshold catches.
+    ///
+    /// The mask is measured on the NEGATIVE — sprocket holes and the light board are the brightest
+    /// raw pixels, which is the whole basis of the threshold — but it is displayed stretched over
+    /// the finished preview, and that preview has been through the geometry stage. So the mask has
+    /// to make the same journey: orient, straighten, crop. Skipping it lines a whole-strip mask up
+    /// against a single cropped frame, and every hole sits somewhere it does not belong. The
+    /// mismatch is worst on a split scan, where the preview is one sixth of what the mask covers,
+    /// but a plain rotation or crop misplaces it just as surely.
+    /// </summary>
     private void UpdateSprocketOverlay()
     {
         if (!ShowSprocketMask || _previewLinear is null) { SprocketMaskOverlay = null; return; }
-        bool[] mask = Sprocket.MakeMask(_previewLinear.Data, _previewLinear.PixelCount, (float)SprocketThreshold);
-        SprocketMaskOverlay = BitmapConvert.ToMaskOverlay(mask, _previewLinear.Width, _previewLinear.Height);
+
+        // Carry the mask as an image so the existing geometry operators can move it: they resample
+        // pixels, and a bool[] has no resampler. 1 = masked.
+        var flags = new ImageBuffer(_previewLinear.Width, _previewLinear.Height);
+        bool[] raw = Sprocket.MakeMask(_previewLinear.Data, _previewLinear.PixelCount,
+                                       (float)SprocketThreshold);
+        for (int p = 0; p < raw.Length; p++)
+        {
+            if (!raw[p]) continue;
+            int b = p * 3;
+            flags.Data[b] = flags.Data[b + 1] = flags.Data[b + 2] = 1.0f;
+        }
+
+        if (_quarterTurns != 0 || _flipH || _flipV)
+            flags = Geometry.ApplyOrientation(flags, _quarterTurns, _flipH, _flipV);
+        if (Rotation != 0.0)
+            flags = Geometry.ApplyRotation(flags, Rotation, fill: 0.0f);   // rotated-in corners are not mask
+        // A pre-cropped preview already IS the frame, so cropping the mask again would cut a
+        // second time — the same trap RenderPreviewAsync avoids.
+        if (!_previewPreCropped && _cropRect is { } rect && !_cropEditing)
+            flags = Geometry.ApplyCrop(flags, rect);
+
+        var shaped = new bool[flags.PixelCount];
+        for (int p = 0; p < shaped.Length; p++) shaped[p] = flags.Data[p * 3] > 0.5f;
+        SprocketMaskOverlay = BitmapConvert.ToMaskOverlay(shaped, flags.Width, flags.Height);
     }
 
     // 输出意图：0=基础（sRGB gamma + Stage 2），1=线性（跳过 Stage 2 与 sRGB）
@@ -1872,6 +1974,7 @@ public partial class MainViewModel : ViewModelBase
             Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
         }
         LccEnabled = lcc is not null;
+        RefreshSplitPaths();        // reopened split rolls get the sharp region previews too
         IsBusy = false;
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync → decode + LoadParams + render
 
@@ -2073,7 +2176,8 @@ public partial class MainViewModel : ViewModelBase
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
         Frames.Clear();
-        foreach (string p in paths) Frames.Add(new RollFrame(p));
+        foreach (string p in paths) AddFramesForPath(p);
+        RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
 
@@ -2083,6 +2187,50 @@ public partial class MainViewModel : ViewModelBase
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Frames contributed by one source file: normally one, but a scan that the split pre-pass
+    /// cut into a strip contributes one per negative.
+    ///
+    /// The first is the real frame and the rest are virtual copies of it, which is the shape the
+    /// rest of the app already expects from a shared source file — the project writer, the
+    /// catalog's frame count and the missing-file relink all key off exactly one non-virtual
+    /// entry per path. Each carries its own crop, so they are independent photographs that merely
+    /// happen to be stored together.
+    /// </summary>
+    private void AddFramesForPath(string path)
+    {
+        if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
+        {
+            var single = new RollFrame(path);
+            if (rects is { Count: 1 }) single.Params.CropRect = rects[0];
+            Frames.Add(single);
+            return;
+        }
+
+        var parent = new RollFrame(path);
+        parent.Params.CropRect = rects[0];
+        Frames.Add(parent);
+        for (int i = 1; i < rects.Count; i++)
+        {
+            RollFrame copy = RollFrame.MakeVirtualCopy(parent);
+            copy.Params.CropRect = rects[i];
+            Frames.Add(copy);
+        }
+    }
+
+    /// <summary>Crops agreed in the split dialog, by source path. Consumed by the next
+    /// <see cref="LoadRollAsync"/> and cleared with the roll.</summary>
+    private readonly Dictionary<string, IReadOnlyList<(double X, double Y, double W, double H)>>
+        _splitPlans = new();
+
+    /// <summary>Hand the split dialog's decisions to the load that follows.</summary>
+    public void SetSplitPlans(
+        IEnumerable<(string Path, IReadOnlyList<(double X, double Y, double W, double H)> Rects)> plans)
+    {
+        _splitPlans.Clear();
+        foreach (var (path, rects) in plans) _splitPlans[path] = rects;
     }
 
     /// <summary>Decode the selected frame, load its params into the UI, render.</summary>
@@ -2096,9 +2244,15 @@ public partial class MainViewModel : ViewModelBase
             // Cache hit → no decode at all; otherwise join whoever is already decoding this file.
             // Re-selecting a frame (or a virtual copy, which shares its parent's path) must never
             // pay for LibRaw again.
-            PreviewCache.Entry entry = await PreviewAsync(frame.Path);
+            // A frame that owns only part of its file gets its slice cut from the source before
+            // the downsample, so it keeps the full preview budget instead of the fraction its
+            // share of the strip would leave it. The returned buffer IS the crop, so the render
+            // below must not crop again — see _previewPreCropped.
+            var pre = SplitCropOf(frame);
+            PreviewCache.Entry entry = await PreviewAsync(frame.Path, pre);
             if (tok != _switchToken) return;   // superseded by a newer switch
             _previewLinear = entry.Preview;
+            _previewPreCropped = pre is not null;
             // Release the export buffer when we leave its frame: it is ~288 MB at 24 MP and close
             // to a gigabyte at 80 MP, and nothing but an export of THAT frame will ever read it.
             // Staying on one frame still exports → tweak → re-exports on a single decode.
@@ -3018,6 +3172,10 @@ public partial class MainViewModel : ViewModelBase
         // leaving it up would show a stale rectangle pasted over a freshly rendered preview.
         // The view re-requests once the new render lands, if still zoomed in far enough.
         ClearSharpPatch();
+        // The sprocket overlay is drawn in the FINISHED preview's geometry, so a rotation, a flip
+        // or a crop moves it too. Refreshing here catches all of them at once — they each land in
+        // this method, and hooking them individually is how one gets missed.
+        if (ShowSprocketMask) UpdateSprocketOverlay();
         if (!_restoring) MarkEdit();   // a real, user-driven param change → undo-committable
         if (_interacting) { RenderInteractive(); return; }
         _renderCts?.Cancel();
@@ -3064,6 +3222,14 @@ public partial class MainViewModel : ViewModelBase
     private async Task RenderPreviewAsync(FrameParams p, CancellationToken ct)
     {
         ImageBuffer src = _previewLinear!;
+        // The decoder already cut this frame's slice out of the strip, so the pipeline's own crop
+        // stage would cut a second time — a sixth of a sixth. Clear it for the preview only; the
+        // stored params keep the rect, and export re-reads it from full resolution.
+        if (_previewPreCropped && p.CropRect is not null)
+        {
+            p = p.Clone();
+            p.CropRect = null;
+        }
         // Captured now, not read at apply time: if the user switches frames while this render is
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
         RollFrame? frame = CurrentFrame;

@@ -1,0 +1,62 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:i18n="using:OpenRevelare.Gui.Markup"
+        xmlns:models="clr-namespace:OpenRevelare.Gui.Models"
+        x:Class="OpenRevelare.Gui.Views.SplitDialog"
+        Width="1000" Height="700"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BgBrush}"
+        Title="{i18n:T '底片分割'}">
+    <DockPanel Margin="14">
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextDimBrush}" Margin="0,0,0,8"
+                   Text="{i18n:T '扫描件通常一个文件装着一整条底片。下面是自动识别的分割结果：拖动分隔线可微调，双击分隔线删除，双击画面空白处新增。识别不准时改「格数」重新等分即可。'}" />
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+            <TextBlock Name="TotalLbl" VerticalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />
+            <Panel Width="1" />
+            <Button Content="{i18n:T '全部不分割'}" Click="OnSkipAllClick" HorizontalAlignment="Left" />
+            <Panel Width="420" />
+            <Button Content="{i18n:T '取消导入'}" Click="OnCancelClick" />
+            <Button Content="{i18n:T '按此导入'}" Click="OnAcceptClick" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="200,10,*">
+            <Border Grid.Column="0" Background="{DynamicResource PanelBrush}" CornerRadius="4">
+                <ListBox Name="FileList" Background="Transparent" SelectionChanged="OnFileSelected">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:StripPlan">
+                            <Grid ColumnDefinitions="*,Auto" Margin="2">
+                                <TextBlock Grid.Column="0" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1" Text="{Binding Summary}" Margin="6,0,0,0"
+                                           Foreground="{DynamicResource TextMuteBrush}"
+                                           FontFamily="JetBrains Mono, Consolas, monospace" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <DockPanel Grid.Column="2">
+                <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" Margin="0,10,0,0">
+                    <TextBlock Grid.Column="0" Text="{i18n:T '格数'}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button Grid.Column="1" Content="−" Click="OnFewerClick" Width="32" />
+                    <TextBlock Grid.Column="2" Name="CountLbl" VerticalAlignment="Center" MinWidth="36"
+                               HorizontalAlignment="Center" TextAlignment="Center"
+                               FontFamily="JetBrains Mono, Consolas, monospace" />
+                    <Button Grid.Column="3" Content="+" Click="OnMoreClick" Width="32" />
+                    <CheckBox Grid.Column="5" Name="SkipChk" Content="{i18n:T '这条不分割'}" Click="OnSkipToggled" />
+                </Grid>
+
+                <TextBlock DockPanel.Dock="Bottom" Name="HintLbl" Margin="0,8,0,0" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
+
+                <Border Background="{DynamicResource ViewerBrush}" Padding="6" CornerRadius="4">
+                    <Canvas Name="Stage" ClipToBounds="True"
+                            PointerPressed="OnStagePressed"
+                            PointerMoved="OnStageMoved"
+                            PointerReleased="OnStageReleased" />
+                </Border>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>
