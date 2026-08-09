@@ -61,13 +61,39 @@ public partial class MainViewModel : ViewModelBase
     /// other extreme — it spends the preview budget on the neighbours (a strip cut six ways leaves
     /// each frame ~265 of 1600 px, visibly soft) which is what the region decode existed to fix.
     ///
-    /// 15% each side is the compromise: it costs ~30% linear resolution against an exact cut and
-    /// still leaves each frame far sharper than its share of a whole-strip preview, while covering
-    /// the misdetections that actually happen (the split lands on a bright band INSIDE the frame,
-    /// off by a fraction of a frame, not by a whole one). A miss bigger than the margin is a bad
-    /// split rather than a bad crop, and 重新分割 is the tool for it.
+    /// 15% each side is the default compromise: it costs ~30% linear resolution against an exact
+    /// cut and still leaves each frame far sharper than its share of a whole-strip preview, while
+    /// covering the misdetections that actually happen (the split lands on a bright band INSIDE the
+    /// frame, off by a fraction of a frame, not by a whole one).
+    ///
+    /// Set from the split dialog, where the user is deciding how much to trust these dividers in
+    /// the first place — a clean strip wants 0 and the full resolution back, a strip the detector
+    /// kept clipping wants room to drag into. Raising it is not free (the frame keeps a 1/(1+2m)
+    /// share of the preview budget), which is why that dialog states the cost rather than
+    /// presenting the choice as neutral. A miss bigger than the margin is a bad split rather than a
+    /// bad crop, and re-splitting is the tool for that.
     /// </summary>
-    private const double SplitMargin = 0.15;
+    [ObservableProperty] private double _splitMargin = 0.15;
+
+    /// <summary>
+    /// A new margin changes which pixels every split frame needs, so the current preview (decoded
+    /// against the OLD box) is stale and the tiles are keyed by boxes nobody will ask for again.
+    ///
+    /// Normally a no-op in practice: the import sets this BEFORE the roll loads, so there is
+    /// nothing decoded yet to invalidate. It is written to survive being set later anyway — the
+    /// tiles are the sheet's and the film strip's source, and one keyed to a superseded box would
+    /// keep drawing the old framing for the rest of the roll's life. The preview cache is left
+    /// alone: it is an LRU that evicts itself, and its old entries are still valid images should
+    /// the margin come back.
+    /// </summary>
+    partial void OnSplitMarginChanged(double value)
+    {
+        if (_splitPaths.Count == 0) return;   // nothing on this roll decodes by region
+        ClearTiles();
+        foreach (RollFrame f in Frames) SetThumbnail(f, null);
+        if (!ResyncSplitPreview()) ScheduleRender();
+        RestartThumbnails();
+    }
 
     /// <summary>The margin box actually decoded for the current frame, in SOURCE-FILE coordinates,
     /// or null when <see cref="_previewLinear"/> is a plain whole-file preview. Paired with
@@ -94,7 +120,7 @@ public partial class MainViewModel : ViewModelBase
     /// sit against the file edge and get slack on one side only. Everything downstream therefore
     /// derives the frame's position from the two rects rather than assuming a fixed inset.
     /// </summary>
-    private static (double X, double Y, double W, double H) WithMargin(
+    private (double X, double Y, double W, double H) WithMargin(
         (double X, double Y, double W, double H) r)
     {
         double mx = r.W * SplitMargin, my = r.H * SplitMargin;
@@ -240,8 +266,12 @@ public partial class MainViewModel : ViewModelBase
     /// This is the frame's rect plus <see cref="SplitMargin"/> on each side. The slack is decoded
     /// unconditionally — including when the crop tool is closed — because it is what the tool needs
     /// the moment it opens, and re-decoding on entry would put a visible stall in front of every
-    /// crop. It costs ~30% linear resolution against an exact cut, which is still far sharper than
-    /// this frame's share of a whole-strip preview.
+    /// crop. At the 0.15 default it costs ~30% linear resolution against an exact cut, which is
+    /// still far sharper than this frame's share of a whole-strip preview.
+    ///
+    /// At a margin of 0 the box collapses onto the frame and the crop below becomes a whole-buffer
+    /// copy. That is the correct reading of "cut exactly, keep every pixel of resolution, and give
+    /// up expanding" — not a case to special-case away.
     /// </summary>
     private (double X, double Y, double W, double H)? SplitCropOf(RollFrame frame)
         => SplitRectOf(frame) is { } rect ? WithMargin(rect) : null;
