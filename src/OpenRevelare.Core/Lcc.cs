@@ -25,6 +25,24 @@ public static class Lcc
     private const double Truncate = 4.0;
 
     /// <summary>
+    /// Long-edge cap the flat field is decoded and stored at.
+    ///
+    /// The field is a SMOOTH signal by construction: <see cref="LoadFlatField"/> deliberately
+    /// low-passes it at σ = 0.5% of the short edge to stop the per-pixel divide amplifying grain,
+    /// so nothing above ~1/60 cycles/px survives anyway. Keeping 60 MP of it stores a fraction of
+    /// a percent of real information and costs the load its entire runtime: at full resolution
+    /// σ ≈ 32 px → a 255-tap kernel over 60 M pixels × 3 channels × 2 passes ≈ 9·10^10 multiply-
+    /// adds, i.e. minutes. Decoding to 2048 px first cuts that by ~100× (σ and the kernel shrink
+    /// with the image, so the work falls with the SQUARE of the scale, times the tap count) while
+    /// the blurred result is unchanged to well inside float noise — the downsample is low-passing
+    /// a signal already band-limited far below the reduced Nyquist.
+    ///
+    /// Used on EVERY path including export: <see cref="Apply"/> bilinearly upsamples back to the
+    /// frame, which is exactly what a mismatched-resolution flat field has always done here.
+    /// </summary>
+    public const int MaxEdge = 2048;
+
+    /// <summary>
     /// Decode a flat-field reference file to a mean-normalised (H, W, 3) field.
     ///
     /// RAW inputs decode on the UniWB baseline (matching decode_raw(no_wb=True));
@@ -32,19 +50,39 @@ public static class Lcc
     /// Gaussian-blurred (σ ≈ 0.5% of the short edge, min 1 px) to remove sensor/grain
     /// noise so the divide is smooth, then each channel is divided by its own mean →
     /// a mean-1 field encoding only the non-uniformity. Values floor at 1e-3.
+    ///
+    /// The result is capped at <see cref="MaxEdge"/> on the long edge — see there for why that
+    /// is lossless in practice and what it buys. <see cref="Apply"/> upsamples back to whatever
+    /// frame it is handed, so callers still just pass the returned field and nothing downstream
+    /// needs to know what resolution it was stored at.
     /// </summary>
     /// <param name="tiffIsLinear">For TIFF inputs: true = already linear, false = sRGB-gamma
     /// (inverse-TRC on load). Ignored for RAW.</param>
     public static ImageBuffer LoadFlatField(string path, bool tiffIsLinear)
     {
-        ImageBuffer ff = RawDecode.IsRawExtension(path)
-            ? RawDecode.DecodeRaw(path)                       // UniWB baseline
-            : TiffIO.LoadTiff(path, inputIsSrgb: !tiffIsLinear);
+        // Decode straight to <= MaxEdge. RAW never materialises the full-resolution float frame
+        // (the box average is taken off LibRaw's 16-bit buffer); PPG rather than AHD because a
+        // featureless diffuse field has no edges for an edge-adaptive demosaic to protect, and
+        // this one is about to be blurred and downsampled regardless.
+        ImageBuffer ff;
+        if (RawDecode.IsRawExtension(path))
+        {
+            var (outs, _, _) = RawDecode.DecodeRawDownsampled(             // UniWB baseline
+                path, RawDecode.FbddMode.Off, new[] { MaxEdge }, RawDecode.Demosaic.Preview);
+            ff = outs[0];
+        }
+        else
+        {
+            ff = Resample.Box(TiffIO.LoadTiff(path, inputIsSrgb: !tiffIsLinear), MaxEdge);
+        }
 
         int w = ff.Width, h = ff.Height;
 
         // Smooth away noise so the per-pixel divide doesn't amplify grain/read noise.
-        // σ scales with the short side (resolution-independent), floored at 1 px.
+        // σ scales with the short side, so it covers the same FRACTION of the frame whatever
+        // resolution the field is stored at: the box downsample above shrank the image and σ
+        // shrinks with it, leaving the blur's physical extent — and so the corrected result —
+        // unchanged, while the tap count falls with it. Floored at 1 px.
         double sigma = Math.Max(1.0, Math.Min(h, w) * 0.005);
         BlurEachChannel(ff.Data, w, h, sigma);
 
@@ -72,8 +110,11 @@ public static class Lcc
     /// <summary>
     /// Divide a linear (H, W, 3) image in place by a mean-normalised flat field.
     /// The flat field is bilinearly resized to the image dimensions when they differ
-    /// (content and flat may be shot/cropped at different resolutions). A perfectly
-    /// even flat field (all ones) is an exact pass-through.
+    /// (content and flat may be shot/cropped at different resolutions, and the stored
+    /// field is capped at <see cref="MaxEdge"/>, so this is the normal case rather than
+    /// the exception). Resizes are memoised per (field, size) — a preview render would
+    /// otherwise rebuild the same buffer on every frame. A perfectly even flat field
+    /// (all ones) is an exact pass-through.
     /// </summary>
     public static void Apply(float[] data, int w, int h, ImageBuffer ffNorm)
         => Apply(data, w, h, ffNorm, FrameRegion.Whole(w, h));
@@ -87,7 +128,7 @@ public static class Lcc
         // The field is matched to the FRAME, then indexed at this buffer's offset.
         float[] ff = (ffNorm.Width == fw && ffNorm.Height == fh)
             ? ffNorm.Data
-            : ResizeFlatField(ffNorm, fw, fh);
+            : ResizeCached(ffNorm, fw, fh);
 
         if (region.IsWhole(w, h))
         {
@@ -110,6 +151,49 @@ public static class Lcc
         });
     }
 
+    // ── Resize memoisation ───────────────────────────────────────────────────────
+    //
+    // The stored field is capped at MaxEdge, so it is now SMALLER than essentially every frame it
+    // is applied to and the resize path runs on every single call. A preview render at 1600 px
+    // would otherwise rebuild a 7.7 M-float buffer per frame — per slider tick, during a drag.
+    //
+    // Keyed on the field instance AND the target size: a roll can hold one field but render at
+    // several sizes (1600 px preview, 320 px tile), and a project reload swaps the instance.
+    // ConditionalWeakTable ties each cache to its field's lifetime, so dropping the field (LCC
+    // unloaded, project closed) releases the resizes with it — no eviction policy needed and no
+    // leak across rolls.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ImageBuffer,
+        Dictionary<(int, int), float[]>> ResizeCache = new();
+
+    // Only PREVIEW-scale resizes are worth keeping. The region renderer asks for the field at the
+    // WHOLE FRAME's size even when correcting one small slice, so caching without a bound would
+    // pin ~700 MB for a 60 MP export — and an export asks once per frame, so there is nothing to
+    // amortise there anyway. Above this, build transiently and let it be collected, exactly as
+    // the pre-cache code did. 4096 keeps every interactive size (1600 preview, 320 tile, and
+    // headroom) while excluding full-resolution frames.
+    private const int MaxCachedEdge = 4096;
+
+    private static float[] ResizeCached(ImageBuffer ffNorm, int W, int H)
+    {
+        if (Math.Max(W, H) > MaxCachedEdge) return ResizeFlatField(ffNorm, W, H);
+
+        Dictionary<(int, int), float[]> bySize = ResizeCache.GetOrCreateValue(ffNorm);
+        lock (bySize)
+        {
+            if (bySize.TryGetValue((W, H), out float[]? hit)) return hit;
+        }
+        // Built OUTSIDE the lock: exports run frames in parallel, and two sizes must not
+        // serialise on each other. A duplicate build under a race is wasted work, never a wrong
+        // result — the resize is pure — so the insert simply keeps whichever arrived first.
+        float[] built = ResizeFlatField(ffNorm, W, H);
+        lock (bySize)
+        {
+            if (bySize.TryGetValue((W, H), out float[]? raced)) return raced;
+            bySize[(W, H)] = built;
+            return built;
+        }
+    }
+
     // ── scipy-compatible separable Gaussian (mode='reflect', truncate=4.0) ────────
     private static void BlurEachChannel(float[] data, int w, int h, double sigma)
     {
@@ -121,10 +205,31 @@ public static class Lcc
         {
             for (int i = 0; i < plane.Length; i++) plane[i] = data[i * 3 + c];
             // Horizontal pass → tmp, then vertical pass → plane.
+            //
+            // Each pass splits into edge | interior | edge. Only the edges can read outside the
+            // image, so only they pay Reflect() (a modulo plus branches, per tap); the interior —
+            // all but 2r of each row/column — indexes straight into the buffer. Same arithmetic,
+            // same order, same results; it just stops multiplying the tap count by a modulo.
             Parallel.For(0, h, y =>
             {
                 int row = y * w;
-                for (int x = 0; x < w; x++)
+                int lo = Math.Min(r, w), hi = Math.Max(lo, w - r);
+                for (int x = 0; x < lo; x++)
+                {
+                    double acc = 0;
+                    for (int t = -r; t <= r; t++)
+                        acc += plane[row + Reflect(x + t, w)] * kernel[t + r];
+                    tmp[row + x] = (float)acc;
+                }
+                for (int x = lo; x < hi; x++)
+                {
+                    double acc = 0;
+                    int b = row + x - r;
+                    for (int t = 0; t < kernel.Length; t++)
+                        acc += plane[b + t] * kernel[t];
+                    tmp[row + x] = (float)acc;
+                }
+                for (int x = hi; x < w; x++)
                 {
                     double acc = 0;
                     for (int t = -r; t <= r; t++)
@@ -134,7 +239,23 @@ public static class Lcc
             });
             Parallel.For(0, w, x =>
             {
-                for (int y = 0; y < h; y++)
+                int lo = Math.Min(r, h), hi = Math.Max(lo, h - r);
+                for (int y = 0; y < lo; y++)
+                {
+                    double acc = 0;
+                    for (int t = -r; t <= r; t++)
+                        acc += tmp[Reflect(y + t, h) * w + x] * kernel[t + r];
+                    plane[y * w + x] = (float)acc;
+                }
+                for (int y = lo; y < hi; y++)
+                {
+                    double acc = 0;
+                    int b = (y - r) * w + x;
+                    for (int t = 0; t < kernel.Length; t++)
+                        acc += tmp[b + t * w] * kernel[t];
+                    plane[y * w + x] = (float)acc;
+                }
+                for (int y = hi; y < h; y++)
                 {
                     double acc = 0;
                     for (int t = -r; t <= r; t++)
