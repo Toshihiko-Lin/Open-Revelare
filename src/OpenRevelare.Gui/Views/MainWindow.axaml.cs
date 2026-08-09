@@ -600,8 +600,10 @@ public partial class MainWindow : Window
         BannerText.Text = banner;
 
         bool crop = mode == SampleMode.Crop;
-        CropApplyBtn.IsVisible = crop;
-        CropCancelBtn.IsVisible = crop;
+        // A dismissal applies to the banner the user dismissed, not to every future one: arming a
+        // tool is a fresh request for its instructions, and in crop mode the hint is now the only
+        // place 回车/Esc are stated. ApplyBannerVisibility owns the buttons.
+        _bannerHintDismissed = false;
         ApplyBannerVisibility(crop);
         if (useNegative) { Vm?.ShowNegativeView(); _negativeShown = true; }
         if (crop)
@@ -624,18 +626,25 @@ public partial class MainWindow : Window
     /// <summary>
     /// Show the banner for the mode being armed, honouring a dismissal.
     ///
-    /// Dismissing hides the HINT, not the controls: in crop mode 应用/取消 have no other home, so
-    /// the banner stays up as a compact button bar (with the × still there, since a bar that could
-    /// not be re-dismissed would be a trap after the hint comes back on a later session). Modes
-    /// that are pure text lose the banner entirely, which is the whole point — the picture is
-    /// what the user came to look at.
+    /// Dismissing closes the banner OUTRIGHT, crop mode included — 应用/取消 go with it. The hint
+    /// it replaces already states the keyboard equivalents (回车应用，Esc 取消), so nothing becomes
+    /// unreachable; what the user wanted was the picture, and a crop frame on a tall negative
+    /// reaches up under a bar that used to linger there with no way to get rid of it.
+    ///
+    /// The dismissal lasts only as long as the mode: <see cref="EnterMode"/> clears it, so arming
+    /// the tool again brings the hint back rather than dropping the user into a bare picture with
+    /// no statement of what the keys do.
     /// </summary>
     private void ApplyBannerVisibility(bool crop)
     {
-        bool showText = !_bannerHintDismissed;
-        BannerText.IsVisible = showText;
-        Banner.IsVisible = showText || crop;
-        BannerCloseBtn.IsVisible = Banner.IsVisible;
+        bool show = !_bannerHintDismissed;
+        BannerText.IsVisible = show;
+        Banner.IsVisible = show;
+        BannerCloseBtn.IsVisible = show;
+        // The buttons live inside the banner, so they follow it. Enter/Esc remain wired in
+        // OnKeyDown and are what the hint pointed at.
+        CropApplyBtn.IsVisible = crop && show;
+        CropCancelBtn.IsVisible = crop && show;
         // Unchanged rule: the banner itself is hit-testable only for crop, so the strip never eats
         // a sampling drag. The × is a sibling, not a child, so it stays clickable regardless.
         Banner.IsHitTestVisible = crop;
@@ -645,8 +654,9 @@ public partial class MainWindow : Window
     {
         _bannerHintDismissed = true;
         ApplyBannerVisibility(_mode == SampleMode.Crop);
-        // The crop tool drives its shortcuts off the overlay; closing the hint moved focus onto
-        // this button, and Enter/Esc would have gone to it instead of applying the crop.
+        // The crop tool drives its shortcuts off the overlay, and the banner that had focus just
+        // disappeared — without this, Enter/Esc (now the ONLY way to apply or cancel) would go
+        // nowhere.
         if (_mode == SampleMode.Crop) Overlay.Focus();
     }
 
