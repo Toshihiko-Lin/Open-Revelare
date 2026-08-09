@@ -1348,6 +1348,9 @@ public partial class MainWindow : Window
         bool ok = await dlg.ShowDialog<bool>(this);
         if (!ok) return false;
 
+        // Before SetSplitPlans, so the first decode of the roll already uses the chosen margin
+        // rather than decoding at the default and re-decoding everything a moment later.
+        Vm.SplitMargin = dlg.SplitMargin;
         Vm.SetSplitPlans((dlg.Result ?? plans).Select(p => (p.Path, p.ToCropRects())));
         return true;
     }

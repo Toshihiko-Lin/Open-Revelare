@@ -147,13 +147,46 @@ public sealed partial class StripPlan : ObservableObject
         Notify();
     }
 
+    private const double MinGap = 0.005;
+
     /// <summary>Move divider <paramref name="index"/>, kept strictly between its neighbours so
     /// frames can never invert or collapse to nothing.</summary>
     public void MoveDivider(int index, double position)
     {
         if (index <= 0 || index >= Edges.Count - 1) return;
-        const double minGap = 0.005;
-        Edges[index] = Math.Clamp(position, Edges[index - 1] + minGap, Edges[index + 1] - minGap);
+        Edges[index] = Math.Clamp(position, Edges[index - 1] + MinGap, Edges[index + 1] - MinGap);
+        Notify();
+    }
+
+    /// <summary>
+    /// Move the strip's own END — the first or last edge, which bound the outermost frames.
+    ///
+    /// These are as fallible as any interior divider and were previously fixed for the life of the
+    /// plan: detection derives them from where the film reads as film, which lands inside the
+    /// picture whenever the frame runs to the very edge of the strip (nothing bright and flat marks
+    /// where it stops) or when the scan's blank tail is mistaken for the end of the last frame. The
+    /// user could see the box clipping the photograph and had no way to say so.
+    /// </summary>
+    public void MoveEnd(bool last, double position)
+    {
+        if (Edges.Count < 2) return;
+        if (last) Edges[^1] = Math.Clamp(position, Edges[^2] + MinGap, 1.0);
+        else Edges[0] = Math.Clamp(position, 0.0, Edges[1] - MinGap);
+        Notify();
+    }
+
+    /// <summary>
+    /// Move one of the strip's SIDE edges — the frames' shared long edges, across the strip.
+    ///
+    /// Shared by every frame on the strip by construction: they are all the same width, cut from
+    /// the same piece of film. Detection reads them off the film/surround boundary, which is a
+    /// different measurement from the frame's own edge — on a scan trimmed close, or one where the
+    /// carrier overlaps the image, the two do not coincide and the box eats into the picture.
+    /// </summary>
+    public void MoveSide(bool high, double position)
+    {
+        if (high) CrossHi = Math.Clamp(position, CrossLo + MinGap, 1.0);
+        else CrossLo = Math.Clamp(position, 0.0, CrossHi - MinGap);
         Notify();
     }
 

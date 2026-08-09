@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -35,14 +37,49 @@ public partial class SplitDialog : Window
     /// <summary>Confirmed plans; null while the dialog is open or if it was cancelled.</summary>
     public IReadOnlyList<StripPlan>? Result { get; private set; }
 
+    /// <summary>
+    /// Slack the region decode keeps around each frame, as a fraction of the frame's own size on
+    /// every side. Read by the caller after the dialog closes.
+    ///
+    /// It belongs to this dialog because it belongs to the SPLIT: it is the answer to "how sure am
+    /// I about these dividers", which is exactly the question the user is answering on this screen
+    /// and nowhere else. Decided here, it is also decided BEFORE the decode that consumes it, so
+    /// no frame is ever decoded against a margin the user has already changed their mind about.
+    ///
+    /// One value for the whole import rather than per strip: the dividers a user distrusts are the
+    /// ones the detector guessed on, and that is a property of the batch (a low-contrast roll, a
+    /// scanner that leaves bright bands) far more often than of one strip among them.
+    /// </summary>
+    /// <remarks>Deliberately NOT called Margin: <see cref="Layoutable.Margin"/> already means the
+    /// control's own layout inset, and shadowing it would be resolvable from XAML.</remarks>
+    public double SplitMargin => MarginSlider.Value;
+
     private StripPlan? _current;
-    private int _dragIndex = -1;
     private Rect _imageRect;    // where the preview is drawn inside the stage
+
+    /// <summary>
+    /// What a drag is moving. The strip's four outer edges are grabbable as well as the interior
+    /// dividers — they are ordinary measurements that detection can get wrong, and until they were
+    /// draggable a box clipping the photograph was simply unfixable here.
+    /// </summary>
+    private enum Grab
+    {
+        None,
+        Divider,    // interior boundary, _dragIndex says which
+        FirstEnd,   // the strip's start along its length
+        LastEnd,    // the strip's end along its length
+        SideLo,     // the frames' shared low side edge, across the strip
+        SideHi,     // ... and the high one
+    }
+
+    private Grab _grab = Grab.None;
+    private int _dragIndex = -1;
 
     public SplitDialog()
     {
         InitializeComponent();
         FileList.ItemsSource = Plans;
+        UpdateMarginLabel();
         // The preview is letterboxed into the stage, so the layout has to be redone whenever
         // the stage resizes — including the first time it is measured, which happens after
         // the constructor and would otherwise leave the canvas empty until the first click.
@@ -103,14 +140,17 @@ public partial class SplitDialog : Window
             // Double-click ON a divider removes it, anywhere else adds one. Deleting is the
             // common repair (a frame reported as two), so it gets the easier target.
             int hit = NearestDivider(pt, out double distPx);
-            if (hit > 0 && distPx <= HitTolerance * 2) _current.RemoveDividerNear(_current.Edges[hit]);
+            if (hit > 0 && distPx <= HitTolerance * 2) { _current.RemoveDividerNear(_current.Edges[hit]); }
+            // ... but not on an outer edge. Those cannot be added or removed, only moved, so a
+            // double-click there is someone missing the edge they meant to drag — dropping a new
+            // divider a hair inside the strip's end is never what they wanted.
+            else if (HitTest(pt).What != Grab.None) return;
             else _current.AddDivider(pos);
             AfterEdit();
             return;
         }
 
-        int grab = NearestDivider(pt, out double d);
-        if (grab > 0 && d <= HitTolerance) _dragIndex = grab;
+        (_grab, _dragIndex) = HitTest(pt);
     }
 
     private void OnStageMoved(object? sender, PointerEventArgs e)
@@ -118,23 +158,85 @@ public partial class SplitDialog : Window
         if (_current is null) return;
         Point pt = e.GetPosition(Stage);
 
-        if (_dragIndex <= 0)
+        if (_grab == Grab.None)
         {
-            // Cursor feedback so the (thin) dividers are discoverable.
-            int near = NearestDivider(pt, out double d);
-            Cursor = new Cursor(near > 0 && d <= HitTolerance
-                ? (_current.Vertical ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast)
-                : StandardCursorType.Arrow);
+            // Cursor feedback so the (thin) edges are discoverable — including the outer ones,
+            // which look like a static frame outline and would otherwise never invite a drag.
+            var (what, _) = HitTest(pt);
+            Cursor = new Cursor(what switch
+            {
+                Grab.None => StandardCursorType.Arrow,
+                Grab.SideLo or Grab.SideHi =>
+                    _current.Vertical ? StandardCursorType.SizeWestEast : StandardCursorType.SizeNorthSouth,
+                _ => _current.Vertical ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast,
+            });
             return;
         }
 
-        _current.MoveDivider(_dragIndex, ToNormalised(pt));
+        switch (_grab)
+        {
+            case Grab.Divider: _current.MoveDivider(_dragIndex, ToNormalised(pt)); break;
+            case Grab.FirstEnd: _current.MoveEnd(last: false, ToNormalised(pt)); break;
+            case Grab.LastEnd: _current.MoveEnd(last: true, ToNormalised(pt)); break;
+            case Grab.SideLo: _current.MoveSide(high: false, ToCross(pt)); break;
+            case Grab.SideHi: _current.MoveSide(high: true, ToCross(pt)); break;
+        }
         Redraw();
     }
 
     private void OnStageReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_dragIndex > 0) { _dragIndex = -1; AfterEdit(); }
+        if (_grab == Grab.None) return;
+        _grab = Grab.None;
+        _dragIndex = -1;
+        AfterEdit();
+    }
+
+    /// <summary>
+    /// What lies under the pointer, nearest first.
+    ///
+    /// Interior dividers win ties against the outer edges: they are the ones the user came to
+    /// adjust, they are far more numerous, and where an end divider sits close to the strip's end
+    /// grabbing the wrong one silently reshapes a frame.
+    /// </summary>
+    private (Grab What, int Index) HitTest(Point pt)
+    {
+        if (_current is null || _current.Skipped || _imageRect.Width <= 0) return (Grab.None, -1);
+
+        int div = NearestDivider(pt, out double dd);
+        if (div > 0 && dd <= HitTolerance) return (Grab.Divider, div);
+
+        double along = _current.Vertical ? pt.Y : pt.X;
+        double aOrigin = _current.Vertical ? _imageRect.Y : _imageRect.X;
+        double aExtent = _current.Vertical ? _imageRect.Height : _imageRect.Width;
+        double cross = _current.Vertical ? pt.X : pt.Y;
+        double cOrigin = _current.Vertical ? _imageRect.X : _imageRect.Y;
+        double cExtent = _current.Vertical ? _imageRect.Width : _imageRect.Height;
+
+        var cands = new (Grab What, double Px, double Value)[]
+        {
+            (Grab.FirstEnd, aOrigin + _current.Edges[0] * aExtent, along),
+            (Grab.LastEnd, aOrigin + _current.Edges[^1] * aExtent, along),
+            (Grab.SideLo, cOrigin + _current.CrossLo * cExtent, cross),
+            (Grab.SideHi, cOrigin + _current.CrossHi * cExtent, cross),
+        };
+
+        var best = (What: Grab.None, D: double.MaxValue);
+        foreach (var (what, px, v) in cands)
+        {
+            double d = Math.Abs(px - v);
+            if (d < best.D) best = (what, d);
+        }
+        return best.D <= HitTolerance ? (best.What, -1) : (Grab.None, -1);
+    }
+
+    /// <summary>Pointer position → position ACROSS the strip, in [0,1] of the source image.</summary>
+    private double ToCross(Point pt)
+    {
+        if (_current is null || _imageRect.Width <= 0) return 0;
+        return _current.Vertical
+            ? Math.Clamp((pt.X - _imageRect.X) / _imageRect.Width, 0, 1)
+            : Math.Clamp((pt.Y - _imageRect.Y) / _imageRect.Height, 0, 1);
     }
 
     private void AfterEdit()
@@ -203,8 +305,10 @@ public partial class SplitDialog : Window
             return;
         }
 
+        DrawMarginBoxes();   // under the frame outlines, so the solid edge stays readable
         DrawFrameBoxes();
         DrawDividers();
+        DrawEndHandles();
 
         HintLbl.Text = _current.IsFallback
             ? Loc.T("未能自动识别这条的画幅边界，下面是等分的猜测——请手动调整。")
@@ -245,6 +349,54 @@ public partial class SplitDialog : Window
         }
     }
 
+    /// <summary>
+    /// Short tick marks on the strip's four outer edges, at their midpoints.
+    ///
+    /// The frame outlines already draw those edges, but as a plain rectangle they read as a static
+    /// annotation — nothing distinguishes them from a label, and a user who can see the box cutting
+    /// into their photograph will not think to try dragging it. The ticks borrow the dividers'
+    /// colour, which is the dialog's existing vocabulary for "this one moves".
+    /// </summary>
+    private void DrawEndHandles()
+    {
+        if (_current is null) return;
+        var brush = new SolidColorBrush(Color.FromRgb(0xFF, 0xC1, 0x07));
+        double aOrigin = _current.Vertical ? _imageRect.Y : _imageRect.X;
+        double aExtent = _current.Vertical ? _imageRect.Height : _imageRect.Width;
+        double cOrigin = _current.Vertical ? _imageRect.X : _imageRect.Y;
+        double cExtent = _current.Vertical ? _imageRect.Width : _imageRect.Height;
+
+        // Centre of the strip on each axis, so a tick sits in the middle of the edge it marks.
+        double aMid = aOrigin + (_current.Edges[0] + _current.Edges[^1]) / 2 * aExtent;
+        double cMid = cOrigin + (_current.CrossLo + _current.CrossHi) / 2 * cExtent;
+        const double len = 22, thick = 3;
+
+        void Tick(double alongPx, double crossPx, bool acrossStrip)
+        {
+            // acrossStrip: the tick lies along the strip's short axis (marks an END);
+            // otherwise it lies along its length (marks a SIDE).
+            bool horizontalBar = _current!.Vertical ? acrossStrip : !acrossStrip;
+            var bar = new Border
+            {
+                Background = brush,
+                Width = horizontalBar ? len : thick,
+                Height = horizontalBar ? thick : len,
+                CornerRadius = new CornerRadius(1.5),
+                IsHitTestVisible = false,
+            };
+            double x = _current.Vertical ? crossPx : alongPx;
+            double y = _current.Vertical ? alongPx : crossPx;
+            Canvas.SetLeft(bar, x - (horizontalBar ? len : thick) / 2);
+            Canvas.SetTop(bar, y - (horizontalBar ? thick : len) / 2);
+            Stage.Children.Add(bar);
+        }
+
+        Tick(aOrigin + _current.Edges[0] * aExtent, cMid, acrossStrip: true);
+        Tick(aOrigin + _current.Edges[^1] * aExtent, cMid, acrossStrip: true);
+        Tick(aMid, cOrigin + _current.CrossLo * cExtent, acrossStrip: false);
+        Tick(aMid, cOrigin + _current.CrossHi * cExtent, acrossStrip: false);
+    }
+
     /// <summary>The draggable interior dividers, drawn over the boxes.</summary>
     private void DrawDividers()
     {
@@ -263,6 +415,79 @@ public partial class SplitDialog : Window
             Canvas.SetLeft(bar, _current.Vertical ? _imageRect.X : _imageRect.X + t * _imageRect.Width - 1.5);
             Canvas.SetTop(bar, _current.Vertical ? _imageRect.Y + t * _imageRect.Height - 1.5 : _imageRect.Y);
             Stage.Children.Add(bar);
+        }
+    }
+
+    private void OnMarginChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        // Slider raises PropertyChanged for everything it owns; only Value matters here.
+        if (e.Property != RangeBase.ValueProperty) return;
+        UpdateMarginLabel();
+        Redraw();     // the dashed band follows the number
+    }
+
+    /// <summary>
+    /// State the cost, not just the setting.
+    ///
+    /// The margin is a trade — every extra bit of room to drag into is preview resolution the frame
+    /// does not get, at exactly 1/(1+2m) of an exact cut. A bare "0.15" hides that; the percentage
+    /// is what lets someone choose, and it is why 0 reads as a complete answer rather than as off.
+    /// </summary>
+    private void UpdateMarginLabel()
+    {
+        double m = MarginSlider.Value;
+        MarginLbl.Text = $"{m * 100:F0}%";
+        MarginHintLbl.Text = m <= 0.0005
+            ? Loc.T("精确切：预览最清晰，但裁切时无法把边往外拉")
+            : Loc.F($"裁切时每边可外扩 {m * 100:F0}%，预览分辨率为精确切的 {100.0 / (1 + 2 * m):F0}%");
+    }
+
+    /// <summary>
+    /// The margin drawn as a dashed box outside each frame — what the crop tool will have to work
+    /// with later, shown at the moment the dividers are being decided.
+    ///
+    /// Clipped to the image, which is not cosmetic: the outermost frames sit against the file edge
+    /// and genuinely get less slack (or none) on that side, and a band drawn past the picture would
+    /// promise room that will not exist.
+    /// </summary>
+    private void DrawMarginBoxes()
+    {
+        if (_current is null || MarginSlider.Value <= 0.0005) return;
+        double m = MarginSlider.Value;
+        var stroke = new SolidColorBrush(Color.FromRgb(0x3D, 0xD5, 0x98), 0.45);
+        for (int i = 0; i < _current.Edges.Count - 1; i++)
+        {
+            double lo = _current.Edges[i], hi = _current.Edges[i + 1];
+            double span = hi - lo, pad = span * m;
+            double alo = Math.Max(0.0, lo - pad), ahi = Math.Min(1.0, hi + pad);
+            double clo = _current.CrossLo, chi = _current.CrossHi;
+            double cpad = (chi - clo) * m;
+            double aclo = Math.Max(0.0, clo - cpad), achi = Math.Min(1.0, chi + cpad);
+
+            Rect r = _current.Vertical
+                ? new Rect(_imageRect.X + aclo * _imageRect.Width,
+                           _imageRect.Y + alo * _imageRect.Height,
+                           (achi - aclo) * _imageRect.Width,
+                           (ahi - alo) * _imageRect.Height)
+                : new Rect(_imageRect.X + alo * _imageRect.Width,
+                           _imageRect.Y + aclo * _imageRect.Height,
+                           (ahi - alo) * _imageRect.Width,
+                           (achi - aclo) * _imageRect.Height);
+
+            // Rectangle, not Border: only a Shape carries StrokeDashArray, and the dashes are what
+            // distinguish "room available" from the solid frame edge itself.
+            var box = new Avalonia.Controls.Shapes.Rectangle
+            {
+                Width = Math.Max(1, r.Width),
+                Height = Math.Max(1, r.Height),
+                Stroke = stroke,
+                StrokeThickness = 1,
+                StrokeDashArray = new AvaloniaList<double>(4, 3),
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(box, r.X);
+            Canvas.SetTop(box, r.Y);
+            Stage.Children.Add(box);
         }
     }
 

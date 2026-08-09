@@ -9,7 +9,7 @@
         Title="{i18n:T '底片分割'}">
     <DockPanel Margin="14">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{DynamicResource TextDimBrush}" Margin="0,0,0,8"
-                   Text="{i18n:T '扫描件通常一个文件装着一整条底片。下面是自动识别的分割结果：拖动分隔线可微调，双击分隔线删除，双击画面空白处新增。识别不准时改「格数」重新等分即可。'}" />
+                   Text="{i18n:T '扫描件通常一个文件装着一整条底片。下面是自动识别的分割结果：拖动分隔线可微调，双击分隔线删除，双击画面空白处新增。外框四条边同样可以拖动——识别切进画面时把它拉回来。识别不准时改「格数」重新等分即可。'}" />
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
             <TextBlock Name="TotalLbl" VerticalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />
@@ -45,6 +45,21 @@
                                FontFamily="JetBrains Mono, Consolas, monospace" />
                     <Button Grid.Column="3" Content="+" Click="OnMoreClick" Width="32" />
                     <CheckBox Grid.Column="5" Name="SkipChk" Content="{i18n:T '这条不分割'}" Click="OnSkipToggled" />
+                </Grid>
+
+                <!-- Margin: applies to the WHOLE import, not the selected strip, so it sits on its
+                     own row rather than beside the per-strip 格数 controls. -->
+                <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,Auto,Auto,Auto,*" Margin="0,8,0,0">
+                    <TextBlock Grid.Column="0" Text="{i18n:T '裁切余量'}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Slider Grid.Column="1" Name="MarginSlider" Width="180" VerticalAlignment="Center"
+                            Minimum="0" Maximum="0.5" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                            Value="0.15" PropertyChanged="OnMarginChanged" />
+                    <TextBlock Grid.Column="2" Name="MarginLbl" VerticalAlignment="Center" MinWidth="46"
+                               TextAlignment="Right" Margin="6,0,0,0"
+                               FontFamily="JetBrains Mono, Consolas, monospace" />
+                    <TextBlock Grid.Column="4" Name="MarginHintLbl" VerticalAlignment="Center" Margin="12,0,0,0"
+                               Foreground="{DynamicResource TextMuteBrush}" FontSize="11"
+                               TextTrimming="CharacterEllipsis" />
                 </Grid>
 
                 <TextBlock DockPanel.Dock="Bottom" Name="HintLbl" Margin="0,8,0,0" TextWrapping="Wrap"
