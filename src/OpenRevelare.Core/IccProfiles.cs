@@ -57,6 +57,11 @@ public static class IccProfiles
     /// 'curv' with a single u8Fixed8 gamma. AdobeRGB's 563/256 is exactly representable
     /// there (563/256 × 256 = 563) — which is precisely why the spec picked that odd
     /// number rather than a round 2.2.
+    ///
+    /// The exponent is stored as-is, NOT reciprocated: a count-1 'curv' means
+    /// linear = encoded^g, the encoded→linear direction (see <see cref="SrgbTrcTag"/>).
+    /// The reference AdobeRGB1998.icc carries the same 2.199 in the equivalent 'para'
+    /// type-0 form, so this matches it.
     /// </summary>
     private static byte[] AdobeTrcTag()
     {
@@ -71,6 +76,14 @@ public static class IccProfiles
     /// <summary>
     /// 'curv' as a 1024-entry table. sRGB's TRC is a linear toe spliced to a power
     /// segment, which a single gamma cannot express — the toe is the whole point.
+    ///
+    /// DIRECTION: a 'curv' table is sampled uniformly over the DEVICE value and stores
+    /// the PCS (linear) value — i.e. encoded → linear, the same direction the matrix
+    /// that follows it expects. Writing the forward (linear → encoded) curve here
+    /// inverts the profile: a reader linearising with it lands on x^(1/2.2)-ish instead
+    /// of x^2.2, roughly 0.73 where 0.21 was meant, and every colour-managed consumer of
+    /// the export sees a badly lifted image. Cross-checked against Rec709.icc, whose
+    /// sampled curv maps encoded 0.5 to 0.260 — the encoded→linear direction.
     /// </summary>
     private static byte[] SrgbTrcTag()
     {
@@ -81,8 +94,8 @@ public static class IccProfiles
         t.AddRange(UInt32Be(N));
         for (int i = 0; i < N; i++)
         {
-            double x = i / (N - 1.0);
-            double y = x <= 0.0031308 ? x * 12.92 : 1.055 * Math.Pow(x, 1.0 / 2.4) - 0.055;
+            double x = i / (N - 1.0);   // device (sRGB-encoded)
+            double y = Srgb.SrgbToLinear((float)x);
             t.AddRange(UInt16Be((ushort)Math.Round(Math.Clamp(y, 0.0, 1.0) * 65535.0)));
         }
         return t.ToArray();
