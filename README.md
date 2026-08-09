@@ -187,7 +187,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 ### 成像
 
-- **密度域六步反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数）、色度补偿，六个参数全部可调，每个都有明确的物理含义
+- **密度域六步反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数）、色度补偿，每个都有明确的物理含义。前五项在界面中可调，色度补偿按输入类型取标定值（RAW 3.05、扫描件 1.0），可经工程文件或 CLI 修改
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
 - **智能白平衡**——DeepWB 神经网络一键估算白点（模型单独授权，[见下](#智能白平衡模型--单独授权请读一下)）

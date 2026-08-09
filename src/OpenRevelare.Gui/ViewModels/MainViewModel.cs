@@ -229,6 +229,15 @@ public partial class MainViewModel : ViewModelBase
     private bool _paramsLoaded;
 
     /// <summary>
+    /// The current frame's chroma_grade. No control binds to it — it is set per input type at
+    /// import (1.0 for scans, whose ICC matrix has already corrected the inter-channel
+    /// differences; 3.05 for RAW, to undo camera CFA crosstalk) and thereafter only carried:
+    /// <see cref="LoadParams"/> reads it off the frame and BuildParams writes it back, so a
+    /// render of a scan never silently reverts to the RAW-calibrated default.
+    /// </summary>
+    private double _chromaGrade = 3.05;
+
+    /// <summary>
     /// The frame's own rect within its source file, or null when the frame owns the whole file.
     /// Split frames only — on an ordinary frame the file IS the frame.
     ///
@@ -1137,6 +1146,7 @@ public partial class MainViewModel : ViewModelBase
         TBase = TBaseArr(),
         WbOffset = WbOffArr(),
         WbHigh = WbHighArr(),
+        ChromaGrade = _chromaGrade,
         ScanExposureEv = ScanEv,
         Grade = Grade,
         Pivot = Pivot,
@@ -1517,7 +1527,13 @@ public partial class MainViewModel : ViewModelBase
         WbOffset = WbOffArr(),
         ScanExposureEv = ScanEv,
         Grade = Grade, Pivot = Pivot, DMax = iterDMax,   // adaptive d_max (highlight just touches 1)
-        // ChromaGrade left default (3.05) → full colour restoration, as the worker uses.
+        // The frame's own value, NOT the 3.05 default — the worker's nn_cal is a `replace()` on the
+        // frame's calibration that resets Stage 2 only, so chroma_grade survives it. It must match
+        // BuildParams for the same reason DecoupleMatrix does: the net judges a rendered positive
+        // and its gains are folded into wb_high, which then feeds a pipeline rendering at THIS
+        // value. On a scan (1.0) a hard-coded 3.05 would solve wb_high in a colour basis the
+        // renderer never produces.
+        ChromaGrade = _chromaGrade,
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
@@ -2575,15 +2591,23 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void AddFramesForPath(string path)
     {
+        // Scanner TIFF: the ICC matrix applied on load already corrects the inter-channel
+        // differences, so the sensor-crosstalk boost chroma_grade = 3.05 exists to undo is
+        // not wanted on top of it — that would be a double amplification. 3.05 is calibrated
+        // against a camera CFA and belongs to the RAW path only.
+        double chromaGrade = RawDecode.IsRawExtension(path) ? 3.05 : 1.0;
+
         if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
         {
             var single = new RollFrame(path);
+            single.Params.ChromaGrade = chromaGrade;
             if (rects is { Count: 1 }) single.Params.CropRect = rects[0];
             Frames.Add(single);
             return;
         }
 
         var parent = new RollFrame(path);
+        parent.Params.ChromaGrade = chromaGrade;
         parent.Params.CropRect = rects[0];
         Frames.Add(parent);
         for (int i = 1; i < rects.Count; i++)
@@ -2672,6 +2696,9 @@ public partial class MainViewModel : ViewModelBase
         GradePresetIndex = WbMath.GradeToPresetIndex(p.Grade);
         IsManualGrade = GradePresetIndex == WbMath.GradePresets.Length - 1;
         Grade = p.Grade; Pivot = p.Pivot;
+        // Not a control — carried through so BuildParams can write back the per-input value
+        // chosen at import (1.0 for scans, 3.05 for RAW) instead of the dataclass default.
+        _chromaGrade = p.ChromaGrade;
         // Stage 2
         var (temp, tint, _) = WbMath.GainsToTempTint(p.WbGains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);

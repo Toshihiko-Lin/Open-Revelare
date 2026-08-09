@@ -152,9 +152,13 @@ domain:
   oversaturation.
 
 So `chroma_grade` defaults to **1.0** on a TIFF import (passthrough, no extra chroma
-amplification). It remains adjustable in the FilmBase panel to taste — 1.0 is the physically
-correct starting point, of the same nature as the RAW path's 3.05: a default calibrated against the
-characteristics of the input signal.
+amplification). 1.0 is the physically correct starting point, of the same nature as the RAW path's
+3.05: a default calibrated against the characteristics of the input signal.
+
+When a file carries no ICC profile, its samples are taken as already linear (no TRC inverse, no
+matrix); when the profile is LUT-only and has no rXYZ/gXYZ/bXYZ tags, the matrix step is skipped.
+In both cases the scanner's channel differences go uncorrected, so pull back any resulting cast
+with SceneBase's saturation and white balance.
 
 Scanner TIFF goes down Path B (the white-light path); Lensfun and RGB decoupling are not used.
 
@@ -527,11 +531,19 @@ standard deviation around 0.34. That spread itself says something: no single val
 stock to the same saturation — keeping the difference is physically reasonable, and it is
 OpenRevelare's design intent.
 
-**chroma_grade is adjustable**: the preferences expose three presets — "light" (about 2.6, for
-Portra and low-saturation tastes), "standard" (3.05, the Gold 200 reference) and "heavy" (about
-3.5, for Ektar and other high-saturation dye stocks) — plus a custom value. Changing chroma_grade
-changes the baseline strength of the chroma reconstruction; it does not change the relative
-differences in look between stocks.
+**chroma_grade is not exposed in the GUI**: as of 1.0 the preferences no longer offer presets or a
+custom value for chroma_grade; the value follows the input type instead (3.05 for RAW, 1.0 for a
+scan). The parameter itself is
+still there — it is the `chroma_grade` field in the project file and `--chroma-grade` on the CLI,
+and either route can change it.
+
+Withdrawing the GUI entry point was deliberate, for two reasons. First, chroma_grade is not a
+general-purpose saturation knob: what it calibrates is the strength of chroma reconstruction *with
+Gold 200 as the reference*, so changing it moves the reference stock the whole calibration is built
+on, whereas the "make it richer or lighter" most people are after belongs on the SceneBase
+saturation slider. Second, compensating for chroma loss with a single global scalar is an
+engineering trade-off rather than what I consider the final answer (see the next section); until it
+is replaced, it should not become a public interface users depend on.
 
 **On how chroma_grade is calibrated: why not a colour chart per roll**
 
@@ -553,8 +565,7 @@ point plus a saturation trim in SceneBase is enough for the overwhelming majorit
 negative, the difference between OpenRevelare's preset and a per-roll chart calibration is usually
 within ΔE 2–4 (averaged over 18 patches) — perceptible on screen, all but invisible in print. For
 stocks whose dye characteristics depart further from the reference (Ektar 100, Cinestill 800T) it
-can widen to ΔE 5–8, and changing the chroma_grade preset or trimming saturation in SceneBase makes
-up most of it.
+can widen to ΔE 5–8, and trimming saturation in SceneBase makes up most of it.
 
 **If you need absolute rigour**: for a workflow that needs traceable colour accuracy — copying
 cultural artefacts, commercial archives, scientific use — use DiVERE directly.
@@ -592,7 +603,8 @@ C-41), and how far the grade parameter should adjust contrast needs reassessing 
 differ from C-41's, and motion-picture film's logic for handling saturation comes from theatrical
 print standards, not C-41's consumer-photography logic. In measurement, ECN-2 stocks at
 chroma_grade = 3.05 often come out either oversaturated or weak (depending on the brand), needing
-compensation on the SceneBase saturation slider or a different chroma_grade preset. Separate
+compensation on the SceneBase saturation slider; to change the coefficient directly, use the
+project file or the CLI. Separate
 calibration data based on ECN-2 + ColorChecker 24 is planned for a future version.
 
 ---

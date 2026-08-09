@@ -190,7 +190,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 
 ### Imaging
 
-- **Six-step density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade, chroma compensation; all adjustable, each with a clear physical meaning
+- **Six-step density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade, chroma compensation; each with a clear physical meaning. The first five are adjustable in the UI; chroma compensation takes its calibrated value from the input type (3.05 for RAW, 1.0 for scans) and is changeable via the project file or the CLI
 - **Narrowband source decoupling (Path A)** — for LED / fluorescent light-box copying, inter-channel crosstalk is solved out with a 3×3 matrix from a set of R/G/B calibration frames. Method from [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **Auto-calibration** — estimates base, sprocket threshold, dark-end valley, `d_max`, highlight white balance from the roll
 - **Smart white balance** — DeepWB neural network estimates the white point in one click (model separately licensed, [see below](#smart-white-balance-model--separate-licence-read-this))

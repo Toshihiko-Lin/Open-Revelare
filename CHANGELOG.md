@@ -1,5 +1,38 @@
 # OpenRevelare — 更新日志
 
+## 未发布
+
+**修复**
+
+- **扫描件 ICC 色彩管理**：载入扫描件时重新按其嵌入的 ICC Profile 处理色彩——
+  先用 Profile 自带的三条 TRC 曲线逐通道线性化（扫描仪各通道 gamma 往往不等，
+  统一按 sRGB 逆变换会留下随亮度反向的色偏，任何线性白平衡都纠不回来），
+  再用 rXYZ/gXYZ/bXYZ 矩阵映射到 sRGB 线性光。无 ICC 或只有 LUT 的 Profile
+  相应跳过。这套处理在 1.0 重写时缺失
+- **扫描件色度补偿回到 1.0**：承上，ICC 矩阵已展开通道间色度差值，扫描件不再
+  套用为相机 sensor 串扰标定的 `chroma_grade = 3.05`（RAW 仍为 3.05）。
+  1.0 至 1.1.1 期间导入的扫描件色彩偏浓
+
+
+---
+
+**Fixed**
+
+- **ICC colour management for scans** — loading a scan again honours its embedded
+  ICC profile: the profile's own three TRC curves linearise each channel (scanner
+  channel gammas are often unequal, and a blanket sRGB inverse leaves a cast that
+  reverses with luminance, which no linear white balance can undo), then the
+  rXYZ/gXYZ/bXYZ matrix maps the result into linear sRGB. Files without an ICC,
+  and LUT-only profiles, skip the corresponding step. This handling was lost in
+  the 1.0 rewrite
+- **Chroma compensation back to 1.0 for scans** — following from the above, the
+  ICC matrix has already unfolded the inter-channel chroma differences, so scans
+  no longer take `chroma_grade = 3.05`, which is calibrated for camera sensor
+  crosstalk (RAW still uses 3.05). Scans imported between 1.0 and 1.1.1 came out
+  oversaturated
+
+---
+
 ## v1.1.1（2026-08-09）
 
 **新增**

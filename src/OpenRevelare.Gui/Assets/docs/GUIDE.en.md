@@ -17,7 +17,7 @@ pictures. For the algorithms behind it, see [THEORY.en.md](THEORY.en.md).
     - [3. Sample the highlight white balance (wb\_high, optional)](#3-sample-the-highlight-white-balance-wb_high-optional)
     - [4. Sample D\_max](#4-sample-d_max)
     - [5. Sample the exposure offset (scan\_exposure\_ev, optional)](#5-sample-the-exposure-offset-scan_exposure_ev-optional)
-    - [6. Adjust grade and chroma\_grade (optional)](#6-adjust-grade-and-chroma_grade-optional)
+    - [6. Adjust grade (optional)](#6-adjust-grade-optional)
   - [Preview and crop](#preview-and-crop)
   - [SceneBase adjustments](#scenebase-adjustments)
   - [Working on a whole roll](#working-on-a-whole-roll)
@@ -83,10 +83,16 @@ result applied to the whole roll (same scanner, same settings, same parameters).
 
 **chroma_grade on the TIFF path**
 
-The ICC matrix has already unfolded the chroma differences between the scanner's channels, so
-`chroma_grade` defaults to **1.0** on a TIFF import (no extra chroma amplification), against 3.05
-for a RAW import (which compensates for camera sensor crosstalk). If the colour comes out weak or
-heavy after inversion, adjust it by hand in the FilmBase panel.
+Loading a scan reads its embedded ICC profile: first the profile's own three TRC curves linearise
+each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB. That unfolds the
+chroma differences between channels, so `chroma_grade` defaults to **1.0** on a TIFF import (no
+extra chroma amplification) against 3.05 for a RAW import (which compensates for camera sensor
+crosstalk).
+
+When a file has no ICC, or the profile is LUT-only with no matrix tags, the corresponding step is
+skipped and the scanner's channel differences go uncorrected; pull back any resulting cast with
+SceneBase's saturation and white balance. To change the coefficient itself, use the `chroma_grade`
+field in the project file or the CLI's `--chroma-grade`.
 
 > Note: with an 8-bit TIFF, the log-density arithmetic behind the inversion has only a limited
 > number of levels to work with in the shadows, and slight banding is possible. Export 16-bit from
@@ -216,21 +222,22 @@ positive value pushes the overall density up (compensating for a base that reads
 negative value pulls it down. It is usually close to 0; reach for this step when the base area in
 the positive still reads grey.
 
-### 6. Adjust grade and chroma_grade (optional)
+### 6. Adjust grade (optional)
 
 - **grade**: controls the contrast of the positive, by analogy with paper grade in a traditional
   darkroom. The default of 1.65 suits standard C-41 consumer colour negative; ECN-2 motion-picture
   negative may want it lowered to 1.4–1.6.
-- **chroma_grade**: controls the strength of the chroma reconstruction. It was calibrated against
-  Kodak Gold 200 as the reference stock, one variable at a time — the default of 3.05 is what makes
-  Gold 200's chroma land closest to the real scene, and the stylistic differences of other stocks
-  (Portra softer, Ektar heavier) then show through on that basis rather than being flattened out.
-  Adjustable in the preferences:
-  - **Light (≈ 2.6)**: for the Kodak Portra family, or a preference for lower saturation
-  - **Standard (3.05)**: the Gold 200 reference, for most C-41 consumer colour negative
-  - **Heavy (≈ 3.5)**: for Kodak Ektar and other high-saturation dye stocks
-  - For ECN-2 motion-picture negative, choose between standard and heavy on what you measure, or
-    set your own value
+- **chroma_grade**: controls the strength of the chroma reconstruction. Not exposed in the GUI; the
+  value follows the input type — 3.05 for a RAW import, 1.0 for a scan (see "chroma_grade on the
+  TIFF path" above). The 3.05 was calibrated against Kodak Gold 200 as the reference stock, one
+  variable at a time: it is what makes Gold 200's chroma land closest to the real scene, and the
+  stylistic differences of other stocks (Portra softer, Ektar heavier) then show through on that
+  basis rather than being flattened out.
+
+  Changing it moves the reference stock the whole calibration is built on, rather than simply making
+  the picture richer or lighter — so for everyday "more" or "less", use the SceneBase **saturation**
+  slider. When you genuinely need to change the coefficient, two routes are open: the `chroma_grade`
+  field in the project file, or `--chroma-grade` on the CLI.
 
 ---
 
@@ -371,8 +378,8 @@ darkest area of the picture again, or lower D_max a little.
 **Colour comes out weak (ECN-2 motion-picture film)**
 
 ECN-2's chroma characteristics differ from C-41's, and the default chroma_grade of 3.05 may not be
-enough. Try switching the chroma_grade preset to "heavy", or nudge the SceneBase saturation slider
-to the right.
+enough. Nudge the SceneBase saturation slider to the right; to change the coefficient directly, use
+the `chroma_grade` field in the project file or the CLI's `--chroma-grade`.
 
 **The export looks weaker than the preview**
 

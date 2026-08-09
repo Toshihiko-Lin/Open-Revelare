@@ -43,6 +43,82 @@ public static class TiffIO
         });
     }
 
+    /// <summary>Raw ICC profile bytes embedded in the TIFF (tag 34675), or null.</summary>
+    public static byte[]? ReadIccBytes(Tiff tif)
+    {
+        try
+        {
+            var f = tif.GetField(TiffTag.ICCPROFILE);
+            // LibTiff hands back [count, bytes] for this tag.
+            if (f is { Length: >= 2 })
+            {
+                byte[] icc = f[1].ToByteArray();
+                if (icc.Length >= 132) return icc;
+            }
+        }
+        catch (Exception) { /* absent or unreadable profile → caller assumes linear */ }
+        return null;
+    }
+
+    /// <summary>
+    /// Colour handling for a scanner TIFF, resolved once per file from its ICC profile
+    /// and then applied per pixel. See <see cref="IccRead"/> for why both steps matter.
+    /// </summary>
+    private readonly struct IccTransform
+    {
+        /// <summary>Per-channel encoded→linear LUTs; null when the file is already linear.</summary>
+        public float[][]? Luts { get; init; }
+
+        /// <summary>Device→sRGB linear matrix; null on LUT-only profiles (step skipped).</summary>
+        public double[,]? Matrix { get; init; }
+
+        public bool IsIdentity => Luts is null && Matrix is null;
+    }
+
+    /// <summary>
+    /// Resolve the ICC transform for a file. <paramref name="inputIsSrgb"/> forces the
+    /// plain sRGB inverse and bypasses the profile entirely, preserving the old
+    /// caller contract; otherwise the profile's own curves and matrix are used.
+    /// </summary>
+    private static IccTransform ResolveIcc(Tiff tif, bool inputIsSrgb)
+    {
+        if (inputIsSrgb) return default;
+        byte[]? icc = ReadIccBytes(tif);
+        if (icc is null) return default;
+
+        // Step 1 — per-channel TRC. Skipped when every channel is already identity,
+        // so a genuinely linear scan keeps its exact sample values.
+        float[][]? luts = IccRead.BuildTrcLuts(icc, out bool allLinear);
+        if (allLinear) luts = null;
+
+        // Step 2 — device→sRGB primaries. Null (skipped) on LUT-only profiles.
+        return new IccTransform { Luts = luts, Matrix = IccRead.ReadMatrix(icc) };
+    }
+
+    /// <summary>Apply the resolved ICC transform to one pixel, in place.</summary>
+    private static void ApplyIcc(in IccTransform t, ref float r, ref float g, ref float b)
+    {
+        if (t.Luts is { } luts)
+        {
+            r = luts[0][Lut16Index(r)];
+            g = luts[1][Lut16Index(g)];
+            b = luts[2][Lut16Index(b)];
+        }
+        if (t.Matrix is { } m)
+        {
+            double nr = m[0, 0] * r + m[0, 1] * g + m[0, 2] * b;
+            double ng = m[1, 0] * r + m[1, 1] * g + m[1, 2] * b;
+            double nb = m[2, 0] * r + m[2, 1] * g + m[2, 2] * b;
+            // Out-of-gamut scanner primaries can send a channel negative; clip low only.
+            r = (float)Math.Max(nr, 0.0);
+            g = (float)Math.Max(ng, 0.0);
+            b = (float)Math.Max(nb, 0.0);
+        }
+    }
+
+    private static int Lut16Index(float v)
+        => (int)(Math.Clamp(v, 0.0f, 1.0f) * 65535.0f + 0.5f);
+
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
     {
@@ -62,6 +138,8 @@ public static class TiffIO
             throw new NotSupportedException($"unsupported BitsPerSample {bps} (need 8 or 16)");
         if (spp < 1)
             throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
+
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb);
 
         var data = new float[w * h * 3];
         int scanlineSize = tif.ScanlineSize();
@@ -94,6 +172,10 @@ public static class TiffIO
                     r = Srgb.SrgbToLinear(r);
                     g = Srgb.SrgbToLinear(g);
                     b = Srgb.SrgbToLinear(b);
+                }
+                else if (!icc.IsIdentity)
+                {
+                    ApplyIcc(icc, ref r, ref g, ref b);
                 }
 
                 int j = o + x * 3;
@@ -160,6 +242,8 @@ public static class TiffIO
             while (Math.Max(cw, ch) / (factor + 1) >= maxEdge) factor++;
         int outW = Math.Max(1, cw / factor), outH = Math.Max(1, ch / factor);
 
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb);
+
         var acc = new float[outW * outH * 3];
         var counts = new int[outW * outH];
         int scanlineSize = tif.ScanlineSize();
@@ -195,6 +279,10 @@ public static class TiffIO
                     r = Srgb.SrgbToLinear(r);
                     g = Srgb.SrgbToLinear(g);
                     b = Srgb.SrgbToLinear(b);
+                }
+                else if (!icc.IsIdentity)
+                {
+                    ApplyIcc(icc, ref r, ref g, ref b);
                 }
 
                 int p = oy * outW + ox, j = p * 3;
