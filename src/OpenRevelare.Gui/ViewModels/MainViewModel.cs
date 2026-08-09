@@ -51,18 +51,86 @@ public partial class MainViewModel : ViewModelBase
     /// the same file again a moment later.</summary>
     private Task<PreviewCache.Entry> PreviewAsync(string path) => PreviewAsync(path, null);
 
-    /// <summary>True when <see cref="_previewLinear"/> has already had the frame's crop applied
-    /// by the decoder, so the render must not apply it a second time.</summary>
-    private bool _previewPreCropped;
+    /// <summary>
+    /// How much slack the region decode leaves around a split frame, as a fraction of the frame's
+    /// own size on each side.
+    ///
+    /// The split is a coarse first guess and routinely clips into the picture, so the crop tool has
+    /// to be able to push an edge back OUT. Decoding the frame exactly would make that impossible:
+    /// there would be no pixels beyond the edge to reveal. Decoding the WHOLE strip instead is the
+    /// other extreme — it spends the preview budget on the neighbours (a strip cut six ways leaves
+    /// each frame ~265 of 1600 px, visibly soft) which is what the region decode existed to fix.
+    ///
+    /// 15% each side is the compromise: it costs ~30% linear resolution against an exact cut and
+    /// still leaves each frame far sharper than its share of a whole-strip preview, while covering
+    /// the misdetections that actually happen (the split lands on a bright band INSIDE the frame,
+    /// off by a fraction of a frame, not by a whole one). A miss bigger than the margin is a bad
+    /// split rather than a bad crop, and 重新分割 is the tool for it.
+    /// </summary>
+    private const double SplitMargin = 0.15;
+
+    /// <summary>The margin box actually decoded for the current frame, in SOURCE-FILE coordinates,
+    /// or null when <see cref="_previewLinear"/> is a plain whole-file preview. Paired with
+    /// <see cref="_previewFrameRect"/>, which locates the frame inside it.</summary>
+    private (double X, double Y, double W, double H)? _previewMargin;
+
+    /// <summary>
+    /// Where the frame sits inside <see cref="_previewLinear"/>, normalised against that buffer, or
+    /// null when the buffer is not a margin decode.
+    ///
+    /// This is what the pipeline's crop stage must use in place of the stored rect: the stored rect
+    /// is normalised against the WHOLE scan, and the buffer on hand is a small window onto it.
+    /// </summary>
+    private (double X, double Y, double W, double H)? _previewFrameRect;
+
+    /// <summary>True when <see cref="_previewLinear"/> is a region decode rather than the whole
+    /// file, so the stored crop rect does not describe it.</summary>
+    private bool _previewPreCropped => _previewMargin is not null;
+
+    /// <summary>
+    /// Expand a frame's rect by <see cref="SplitMargin"/> on each side, clamped to the file.
+    ///
+    /// Clamping is why the margin cannot be assumed symmetric: the first and last frame of a strip
+    /// sit against the file edge and get slack on one side only. Everything downstream therefore
+    /// derives the frame's position from the two rects rather than assuming a fixed inset.
+    /// </summary>
+    private static (double X, double Y, double W, double H) WithMargin(
+        (double X, double Y, double W, double H) r)
+    {
+        double mx = r.W * SplitMargin, my = r.H * SplitMargin;
+        double x0 = Math.Max(0.0, r.X - mx), y0 = Math.Max(0.0, r.Y - my);
+        double x1 = Math.Min(1.0, r.X + r.W + mx), y1 = Math.Min(1.0, r.Y + r.H + my);
+        return (x0, y0, x1 - x0, y1 - y0);
+    }
+
+    /// <summary>
+    /// Re-express <paramref name="inner"/> (normalised against the whole file) relative to
+    /// <paramref name="box"/> (likewise), i.e. as a rect of the decoded margin buffer.
+    /// </summary>
+    private static (double X, double Y, double W, double H) Relative(
+        (double X, double Y, double W, double H) inner,
+        (double X, double Y, double W, double H) box)
+        => ((inner.X - box.X) / box.W, (inner.Y - box.Y) / box.H, inner.W / box.W, inner.H / box.H);
+
+    /// <summary>The inverse of <see cref="Relative"/>: a rect of the margin buffer back to
+    /// whole-file coordinates. This is how a crop drawn on screen becomes a storable rect.</summary>
+    private static (double X, double Y, double W, double H) Absolute(
+        (double X, double Y, double W, double H) inner,
+        (double X, double Y, double W, double H) box)
+        => (box.X + inner.X * box.W, box.Y + inner.Y * box.H, inner.W * box.W, inner.H * box.H);
 
     /// <summary>
     /// Params as they should be run against <see cref="_previewLinear"/> (or anything derived from
     /// it, such as the drag-resolution copy).
     ///
-    /// The decoder may already have cut this frame's slice out of a split scan, in which case the
-    /// buffer IS the frame and the pipeline's crop stage would cut a second time — a sixth of a
-    /// sixth. The stored params keep the rect untouched; export re-reads it and cuts from full
-    /// resolution, which is the only place the crop should actually happen.
+    /// On a split frame the decoder cut a MARGIN BOX out of the strip — the frame plus ~15% slack
+    /// on each side — so the buffer is neither the whole scan (which the stored rect is normalised
+    /// against) nor the frame itself. The rect is therefore rewritten into the buffer's own
+    /// coordinates rather than dropped: dropping it would show the slack as part of the picture,
+    /// and leaving it alone would cut a fraction of a fraction.
+    ///
+    /// While the crop tool is open the rect is suppressed entirely, which is what puts the slack on
+    /// screen and lets a clipped edge be dragged back out.
     ///
     /// EVERY path that feeds _previewLinear to the pipeline goes through here. The rule lived
     /// inline in the debounced render for a while and the interactive drag path did not have it,
@@ -70,10 +138,63 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private FrameParams ForPreview(FrameParams p)
     {
-        if (!_previewPreCropped || p.CropRect is null) return p;
+        if (_previewMargin is null) return p;                  // plain whole-file preview
+        if (p.CropRect is null && _previewFrameRect is null) return p;
         p = p.Clone();
-        p.CropRect = null;
+        // Oriented to match the pixels: ApplyCrop runs AFTER orientation, and _previewFrameRect is
+        // measured in the raw file's axes.
+        p.CropRect = _cropEditing ? null : OrientRect(_previewFrameRect, p);
         return p;
+    }
+
+    /// <summary>
+    /// Carry a raw-space rect through the orientation the pipeline will have applied by the time it
+    /// crops, so the two agree.
+    ///
+    /// <see cref="Pipeline.ProcessFrame"/> orients first and crops second, and a quarter turn swaps
+    /// the buffer's axes underneath the rect. The straighten rotation is not applied here: it
+    /// preserves the buffer's size, so a normalised rect survives it unchanged — the same reason
+    /// <see cref="CropFrameSize"/> ignores it.
+    /// </summary>
+    private static (double X, double Y, double W, double H)? OrientRect(
+        (double X, double Y, double W, double H)? rect, FrameParams p)
+    {
+        if (rect is not { } r) return null;
+        for (int i = 0; i < (((p.QuarterTurns % 4) + 4) % 4); i++) r = RotateCropCw(r);
+        if (p.FlipH) r = FlipCropH(r);
+        if (p.FlipV) r = FlipCropV(r);
+        return r;
+    }
+
+    /// <summary>
+    /// <see cref="ForPreview"/> for an ARBITRARY frame rendered off a region decode of its own —
+    /// the film strip, the sheet tiles, the contact sheet. Same rule, but the frame's position in
+    /// its box is derived from the arguments instead of the current-frame fields.
+    /// </summary>
+    /// <param name="margin">The box that was decoded, in file coordinates, or null for a whole-file
+    /// buffer (in which case the params are already right and come back untouched).</param>
+    private static FrameParams ForRegion(FrameParams p, RollFrame f,
+                                         (double X, double Y, double W, double H)? margin)
+    {
+        if (margin is not { } box || f.Params.CropRect is not { } rect) return p;
+        p = p.Clone();
+        // Down to file space, in against the box, back out to oriented space — the box itself is a
+        // file-space rect, so the middle step cannot happen in the oriented frame.
+        p.CropRect = OrientRect(Relative(UnorientRect(rect, f.Params)!.Value, box), p);
+        return p;
+    }
+
+    /// <summary>The inverse of <see cref="OrientRect"/>: an oriented-frame rect back into the raw
+    /// file's axes. Undoes the flips first, then the turns, because the forward order is turns
+    /// then flips.</summary>
+    private static (double X, double Y, double W, double H)? UnorientRect(
+        (double X, double Y, double W, double H)? rect, FrameParams p)
+    {
+        if (rect is not { } r) return null;
+        if (p.FlipV) r = FlipCropV(r);
+        if (p.FlipH) r = FlipCropH(r);
+        for (int i = 0; i < (((p.QuarterTurns % 4) + 4) % 4); i++) r = RotateCropCcw(r);
+        return r;
     }
 
     /// <summary>True once <see cref="LoadParams"/> has pushed the current frame's params into the
@@ -82,37 +203,48 @@ public partial class MainViewModel : ViewModelBase
     private bool _paramsLoaded;
 
     /// <summary>
-    /// The crop to cut from the source before downsampling, or null to preview the whole file.
+    /// The frame's own rect within its source file, or null when the frame owns the whole file.
+    /// Split frames only — on an ordinary frame the file IS the frame.
     ///
-    /// Only SPLIT frames qualify — those sharing their source with other negatives, which is what
-    /// the import's split pre-pass produces. On an ordinary frame the whole file IS the frame, so
-    /// there is nothing to gain and a cache entry to lose.
-    ///
-    /// A crop must not be pre-applied WHILE it is being adjusted: baking it in would make every
-    /// nudge a fresh decode and, worse, leave nothing outside the rect to drag against. Hence the
-    /// <see cref="_cropEditing"/> gate — the tool shows the whole strip, and the settled rect is
-    /// baked back in on the way out.
+    /// UN-oriented on the way out. CropRect is stored against the ORIENTED frame (that is what
+    /// makes RotateCropCw and friends correct, and the whole reason the crop travels with a quarter
+    /// turn), but the region decoder addresses the raw file. The two coincide at import, when
+    /// orientation is identity — which is why this went unnoticed — and diverge the moment the user
+    /// rotates a split frame: the decoder would then cut a sideways box out of the strip.
     /// </summary>
-    private (double X, double Y, double W, double H)? SplitCropOf(RollFrame frame)
+    private (double X, double Y, double W, double H)? SplitRectOf(RollFrame frame)
     {
         if (!_splitPaths.Contains(frame.Path)) return null;
-        // While the crop tool is open the frame is shown WHOLE-STRIP on purpose, so that the split
-        // edges can be dragged back out over the picture — see CropEditing.
-        if (_cropEditing) return null;
         // The current frame's crop lives in _cropRect and is only written back to Params when the
         // frame is left, so a crop the user just committed is not in Params yet — the resync that
-        // follows SetCrop would re-bake the slice the user just replaced. Read the live rect, but
+        // follows SetCrop would re-bake the region the user just replaced. Read the live rect, but
         // only once _paramsLoaded says _cropRect actually belongs to this frame: during a frame
         // SWITCH it still holds the outgoing frame's crop.
-        var live = ReferenceEquals(frame, CurrentFrame) && _paramsLoaded
-                       ? _cropRect
-                       : frame.Params.CropRect;
+        bool current = ReferenceEquals(frame, CurrentFrame) && _paramsLoaded;
+        var live = current ? _cropRect : frame.Params.CropRect;
         if (live is not { } rect) return null;
         // A full-frame rect gains nothing from the region path and would only bypass the cache
-        // entry the rest of the roll shares.
+        // entry the rest of the roll shares. Checked before un-orienting: a turn permutes the
+        // rect's components but not its full-frame-ness.
         if (rect.W >= 0.999 && rect.H >= 0.999) return null;
-        return rect;
+        // The live orientation for the current frame, the stored one otherwise — matching whichever
+        // rect was just read, since the two travel together.
+        return UnorientRect(rect, current
+            ? new FrameParams { QuarterTurns = _quarterTurns, FlipH = _flipH, FlipV = _flipV }
+            : frame.Params);
     }
+
+    /// <summary>
+    /// The box to cut from the source before downsampling, or null to preview the whole file.
+    ///
+    /// This is the frame's rect plus <see cref="SplitMargin"/> on each side. The slack is decoded
+    /// unconditionally — including when the crop tool is closed — because it is what the tool needs
+    /// the moment it opens, and re-decoding on entry would put a visible stall in front of every
+    /// crop. It costs ~30% linear resolution against an exact cut, which is still far sharper than
+    /// this frame's share of a whole-strip preview.
+    /// </summary>
+    private (double X, double Y, double W, double H)? SplitCropOf(RollFrame frame)
+        => SplitRectOf(frame) is { } rect ? WithMargin(rect) : null;
 
     /// <summary>
     /// Sources that more than one frame draws on — the split scans.
@@ -532,9 +664,11 @@ public partial class MainViewModel : ViewModelBase
             flags = Geometry.ApplyOrientation(flags, _quarterTurns, _flipH, _flipV);
         if (Rotation != 0.0)
             flags = Geometry.ApplyRotation(flags, Rotation, fill: 0.0f);   // rotated-in corners are not mask
-        // A pre-cropped preview already IS the frame, so cropping the mask again would cut a
-        // second time — the same trap RenderPreviewAsync avoids.
-        if (!_previewPreCropped && _cropRect is { } rect && !_cropEditing)
+        // Exactly the crop the PICTURE gets, taken from the same place the picture takes it: on a
+        // split frame that is the frame's box-relative rect, not the stored whole-scan one, and
+        // while the crop tool is open it is no crop at all. Deriving it independently here is how
+        // the mask and the picture drift apart.
+        if (ForPreview(BuildParams()).CropRect is { } rect)
             flags = Geometry.ApplyCrop(flags, rect);
 
         var shaped = new bool[flags.PixelCount];
@@ -737,11 +871,10 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// The cache is consulted under the SAME key the current preview was decoded under, not the
-    /// bare path. On a split frame those are two different images — the whole strip and this
-    /// frame's slice — and the crop rect is normalised against whichever one is on screen: the
-    /// strip while the tool is open (see <see cref="CropEditing"/>), the slice once it closes.
-    /// Reading the bare path would hand an aspect-ratio preset the strip's ≈7:2 while the user is
-    /// looking at a single 3:2 negative.
+    /// bare path — on a split frame the file holds the whole strip while the buffer on screen is
+    /// this frame's margin box, and it is the box the view's rect is normalised against (see the
+    /// coordinate-bridge note above <see cref="CurrentCrop"/>). Reading the bare path would hand an
+    /// aspect-ratio preset the strip's ≈6:1 while the user is looking at a single 3:2 negative.
     /// </remarks>
     public (int W, int H)? CropFrameSize
     {
@@ -769,20 +902,13 @@ public partial class MainViewModel : ViewModelBase
     private bool _cropEditing;
 
     /// <summary>
-    /// Entering the tool un-bakes a split frame's preview; leaving it bakes the slice back in.
+    /// Opening the tool reveals the decoded slack; closing it hides it again.
     ///
-    /// For a normal frame "render uncropped" is enough, because the crop only ever lived in the
-    /// pipeline and suppressing it hands back the whole picture. A split frame is different: its
-    /// slice was cut by the DECODER, so <see cref="_previewLinear"/> holds nothing but the slice
-    /// and there is no outside left to suppress. The tool would then let the user draw only
-    /// INWARD — never dragging a mis-split edge back out over the picture — and worse, the drawn
-    /// rect is normalised against whatever the preview shows, so it would be stored as if it were
-    /// measured against the full scan.
-    ///
-    /// So the tool re-decodes the whole strip on the way in and the slice on the way out. That is
-    /// one decode per entry (the whole-strip preview is the cache's ordinary path-keyed entry, so
-    /// it is usually already resident from the import) in exchange for the crop frame behaving
-    /// identically on split and unsplit frames.
+    /// No decode either way: the margin box is already in <see cref="_previewLinear"/>, so this is
+    /// a pure render toggle — <see cref="ForPreview"/> stops applying the frame rect and the ~15%
+    /// beyond each edge comes into view, which is exactly the material a too-tight split needs to
+    /// be dragged back over. That is the whole reason the slack is decoded up front rather than
+    /// fetched on entry: a re-decode here would stall the start of every crop.
     /// </summary>
     public bool CropEditing
     {
@@ -791,26 +917,26 @@ public partial class MainViewModel : ViewModelBase
         {
             if (_cropEditing == value) return;
             _cropEditing = value;
-            if (!ResyncSplitPreview()) ScheduleRender();
+            OnPropertyChanged(nameof(CropFrameSize));   // the space the rect is normalised against
+            ScheduleRender();
         }
     }
 
     /// <summary>
-    /// Make <see cref="_previewLinear"/> match the region the current frame should be showing, and
-    /// say whether a reload was needed (the caller renders itself if not).
+    /// Re-decode when the current frame's REGION changes — a committed crop moves the margin box,
+    /// so the buffer on hand no longer covers the right part of the strip. Returns whether a reload
+    /// was started (the caller renders itself if not).
     ///
-    /// Called whenever the answer can change: entering or leaving the crop tool, and committing a
-    /// new crop — a split frame that gets a NEW rect has to be re-decoded against that rect, or the
-    /// preview keeps showing the slice the user just replaced. Comparing against the key the
-    /// current buffer was loaded under makes it a no-op in every other case, so it is safe to call
-    /// on any crop change.
+    /// Comparing against the key the current buffer was loaded under makes it a no-op in every
+    /// other case, so it is safe to call on any crop change.
     /// </summary>
     private bool ResyncSplitPreview()
     {
         if (CurrentFrame is not { } f || !_splitPaths.Contains(f.Path)) return false;
-        string want = PreviewKey(f.Path, SplitCropOf(f));
+        var pre = SplitCropOf(f);
+        string want = PreviewKey(f.Path, pre);
         if (want == _previewKey) return false;
-        _ = ReloadForCropAsync(f, want);
+        _ = ReloadRegionAsync(f, pre, want);
         return true;
     }
 
@@ -819,24 +945,21 @@ public partial class MainViewModel : ViewModelBase
     private string? _previewKey;
 
     /// <summary>
-    /// Swap <see cref="_previewLinear"/> between the whole strip and this frame's slice.
+    /// Point <see cref="_previewLinear"/> at a different region of the same file.
     ///
     /// Guarded by the frame-switch token for the same reason <see cref="SwitchFrameAsync"/> is: the
     /// decode is awaited, and a user who leaves the frame mid-decode must not have the outgoing
     /// frame's pixels land on the incoming one.
     /// </summary>
-    private async Task ReloadForCropAsync(RollFrame frame, string key)
+    private async Task ReloadRegionAsync(RollFrame frame,
+                                         (double X, double Y, double W, double H)? pre, string key)
     {
         int tok = _switchToken;
         try
         {
-            // Editing → whole strip (SplitCropOf returns null then). Done → back to the sharp slice.
-            var pre = SplitCropOf(frame);
             PreviewCache.Entry entry = await PreviewAsync(frame.Path, pre);
             if (tok != _switchToken) return;
-            _previewLinear = entry.Preview;
-            _previewPreCropped = pre is not null;
-            _previewKey = key;
+            AdoptPreview(frame, entry, pre, key);
             _dragSmall = null;               // belongs to the buffer we just replaced
             OnPropertyChanged(nameof(CropFrameSize));
             ScheduleRender();
@@ -844,16 +967,66 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex) { if (tok == _switchToken) ReportRenderFailure(ex); }
     }
 
+    /// <summary>
+    /// Install a decoded preview as the current one, recording which region of the file it is.
+    ///
+    /// The frame's position INSIDE the margin box is computed here, once, rather than re-derived at
+    /// each render: the margin is clamped at the file edges, so the first and last frame of a strip
+    /// are not centred in their box and no fixed inset describes them.
+    /// </summary>
+    private void AdoptPreview(RollFrame frame, PreviewCache.Entry entry,
+                              (double X, double Y, double W, double H)? margin, string key)
+    {
+        _previewLinear = entry.Preview;
+        _previewMargin = margin;
+        _previewFrameRect = margin is { } box && SplitRectOf(frame) is { } rect
+                                ? Relative(rect, box)
+                                : null;
+        _previewKey = key;
+    }
+
+    // ── The crop tool's coordinate bridge ───────────────────────────────────────
+    //
+    // The view speaks DISPLAYED-FRAME coordinates: whatever is on screen while the tool is open,
+    // normalised 0..1. The model stores WHOLE-FILE coordinates. On an ordinary frame those are the
+    // same space and both conversions are the identity, which is why this never had to exist.
+    //
+    // On a split frame the screen is showing the margin box — the frame plus ~15% slack — so the
+    // two differ by that box, and by the orientation between the raw file and the display. Getting
+    // this wrong does not look like an error: the crop simply frames the wrong part of the picture,
+    // which is precisely the class of bug the orientation comment above records.
+
+    /// <summary>A stored (whole-file) rect as the view should draw it, or null if there is none.</summary>
+    private (double X, double Y, double W, double H)? ToDisplay(
+        (double X, double Y, double W, double H)? rect)
+        => _previewMargin is { } box && rect is { } r
+               ? OrientRect(Relative(r, box), BuildParams())
+               : OrientRect(rect, BuildParams());
+
+    /// <summary>The inverse of <see cref="ToDisplay"/>: what the view drew, as a storable rect.</summary>
+    private (double X, double Y, double W, double H) FromDisplay(
+        (double X, double Y, double W, double H) rect)
+    {
+        FrameParams p = BuildParams();
+        // Undo the orientation in reverse order: the forward direction is turns then flips.
+        if (p.FlipV) rect = FlipCropV(rect);
+        if (p.FlipH) rect = FlipCropH(rect);
+        for (int i = 0; i < (((p.QuarterTurns % 4) + 4) % 4); i++) rect = RotateCropCcw(rect);
+        return _previewMargin is { } box ? Absolute(rect, box) : rect;
+    }
+
     /// <summary>The stored crop, so re-entering the crop tool ADJUSTS the existing frame instead
-    /// of starting over.</summary>
-    public (double X, double Y, double W, double H)? CurrentCrop => _cropRect;
+    /// of starting over. In the view's coordinates — on a split frame the stored rect describes the
+    /// whole scan, but the tool is drawing over the margin box.</summary>
+    public (double X, double Y, double W, double H)? CurrentCrop => ToDisplay(_cropRect);
 
     public void SetCrop((double X, double Y, double W, double H) rect)
     {
-        _cropRect = rect;
-        StatusText = Loc.F($"裁切 {rect.X:F2},{rect.Y:F2},{rect.W:F2},{rect.H:F2}");
-        // A split frame's new rect is a new region to decode; ResyncSplitPreview renders for us
-        // when it takes that path, and is a no-op for everyone else.
+        _cropRect = FromDisplay(rect);
+        var s = _cropRect.Value;
+        StatusText = Loc.F($"裁切 {s.X:F2},{s.Y:F2},{s.W:F2},{s.H:F2}");
+        // A split frame's new rect moves its margin box, so the region on hand is the wrong part of
+        // the strip; ResyncSplitPreview re-decodes and renders. No-op for everyone else.
         if (!ResyncSplitPreview()) ScheduleRender();
     }
     public void ClearCrop()
@@ -1139,12 +1312,16 @@ public partial class MainViewModel : ViewModelBase
         RestartThumbnails();
     }
 
-    /// <summary>The crop to apply when isolating the kept picture out of the preview, or null when
-    /// the preview already IS the kept picture (a split frame's slice came pre-cut from the
-    /// decoder). Applying the rect there would analyse a sliver of the negative instead of the
-    /// negative, skewing every auto-detection on a split scan.</summary>
+    /// <summary>
+    /// The crop that isolates the kept picture inside <see cref="_previewLinear"/>.
+    ///
+    /// On a split frame the buffer is the margin box, so the frame sits at
+    /// <see cref="_previewFrameRect"/> within it — the stored rect describes the whole scan and
+    /// would select a sliver, skewing every auto-detection on a split scan. NOT oriented: the
+    /// callers work in the raw sampling domain, before the geometry stage.
+    /// </summary>
     private (double X, double Y, double W, double H)? AutoCrop
-        => _previewPreCropped ? null : _cropRect;
+        => _previewMargin is not null ? _previewFrameRect : _cropRect;
 
     /// <summary>The RAW preview restricted to the current crop (else the whole frame) — auto-detections
     /// analyse only the kept picture so sprockets / film edges / borders don't skew D-max or WB.
@@ -1323,9 +1500,14 @@ public partial class MainViewModel : ViewModelBase
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
         SprocketEnabled = SprocketEnabled, SprocketThreshold = SprocketThreshold,
-        // AutoCrop, not _cropRect: this renders _previewLinear, which on a split frame is already
-        // the slice, and re-cropping it would have the net judge a sliver of the negative.
-        CropRect = AutoCrop, Rotation = Rotation, QuarterTurns = _quarterTurns, FlipH = _flipH, FlipV = _flipV,
+        // AutoCrop, not _cropRect: this renders _previewLinear, which on a split frame is the
+        // margin box, and the stored rect would have the net judge a sliver of the negative.
+        // Oriented, because ProcessFrame crops after the geometry stage.
+        CropRect = OrientRect(AutoCrop, new FrameParams
+        {
+            QuarterTurns = _quarterTurns, FlipH = _flipH, FlipV = _flipV,
+        }),
+        Rotation = Rotation, QuarterTurns = _quarterTurns, FlipH = _flipH, FlipV = _flipV,
         // Stage 2 reset to defaults (the WB decision must not be polluted by artistic edits).
     };
 
@@ -1900,12 +2082,10 @@ public partial class MainViewModel : ViewModelBase
         var cells = new List<(ImageBuffer? Tile, FrameParams Params)>(Frames.Count);
         foreach (RollFrame f in Frames)
         {
-            FrameParams p = f.Params.Clone();
-            // A split frame's tile was cut from the source as that frame's region, so it already IS
-            // the frame — the crop stage would cut a second time and put a crop of the crop on the
-            // cover. Same rule as RenderPreviewAsync and RenderThumbnailAsync.
-            if (SplitCropOf(f) is not null) p.CropRect = null;
-            cells.Add((TileFor(f), p));
+            // A split frame's tile was cut from the source as that frame's region PLUS its margin,
+            // so the stored whole-scan rect does not describe it — re-expressed against the box, or
+            // the cover gets a crop of a crop. Same rule as RenderPreviewAsync / RenderThumbnailAsync.
+            cells.Add((TileFor(f), ForRegion(f.Params.Clone(), f, SplitCropOf(f))));
         }
         return cells.Any(c => c.Tile is not null) ? cells : null;   // nothing decoded yet
     }
@@ -2409,16 +2589,15 @@ public partial class MainViewModel : ViewModelBase
             // Cache hit → no decode at all; otherwise join whoever is already decoding this file.
             // Re-selecting a frame (or a virtual copy, which shares its parent's path) must never
             // pay for LibRaw again.
-            // A frame that owns only part of its file gets its slice cut from the source before
+            // A frame that owns only part of its file gets its region cut from the source before
             // the downsample, so it keeps the full preview budget instead of the fraction its
-            // share of the strip would leave it. The returned buffer IS the crop, so the render
-            // below must not crop again — see _previewPreCropped.
+            // share of the strip would leave it. What comes back is the frame PLUS the split
+            // margin, so the render still crops — but against the box, not the whole scan. See
+            // ForPreview.
             var pre = SplitCropOf(frame);
             PreviewCache.Entry entry = await PreviewAsync(frame.Path, pre);
             if (tok != _switchToken) return;   // superseded by a newer switch
-            _previewLinear = entry.Preview;
-            _previewPreCropped = pre is not null;
-            _previewKey = PreviewKey(frame.Path, pre);
+            AdoptPreview(frame, entry, pre, PreviewKey(frame.Path, pre));
             // Release the export buffer when we leave its frame: it is ~288 MB at 24 MP and close
             // to a gigabyte at 80 MP, and nothing but an export of THAT frame will ever read it.
             // Staying on one frame still exports → tweak → re-exports on a single decode.
@@ -2521,7 +2700,7 @@ public partial class MainViewModel : ViewModelBase
                 ImageBuffer source = TileFor(f)
                                      ?? _previews.Get(PreviewKey(f.Path, pre))?.Preview
                                      ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Preview;
-                await RenderThumbnailAsync(f, source, pre is not null, ct);
+                await RenderThumbnailAsync(f, source, pre, ct);
             }
             catch (OperationCanceledException) { return; }
             catch { /* skip undecodable frame */ }
@@ -2531,15 +2710,15 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Render one frame's thumbnail off an already-decoded preview. Never decodes: every
     /// caller resolves the preview through <see cref="PreviewAsync"/> first, so the strip and the
     /// main view are guaranteed to be looking at the same pixels.</summary>
-    /// <param name="preCropped">True when <paramref name="preview"/> was decoded as this frame's
-    /// region and so already IS the frame. The pipeline's crop stage must then be skipped, exactly
-    /// as <see cref="RenderPreviewAsync"/> skips it — otherwise the rect cuts a second time and the
-    /// strip shows a crop of the crop, at the wrong aspect ratio.</param>
-    private async Task RenderThumbnailAsync(RollFrame f, ImageBuffer preview, bool preCropped,
+    /// <param name="margin">The region of the file <paramref name="preview"/> was decoded from, or
+    /// null if it is the whole file. The stored rect is normalised against the whole scan, so on a
+    /// region decode it has to be re-expressed against the box — left alone it cuts a fraction of a
+    /// fraction and the strip shows a sliver at the wrong aspect ratio.</param>
+    private async Task RenderThumbnailAsync(RollFrame f, ImageBuffer preview,
+                                            (double X, double Y, double W, double H)? margin,
                                             CancellationToken ct)
     {
-        FrameParams p = f.Params;
-        if (preCropped && p.CropRect is not null) { p = p.Clone(); p.CropRect = null; }
+        FrameParams p = ForRegion(f.Params, f, margin);
         Bitmap bmp = await Task.Run(() =>
         {
             ImageBuffer small = Resample.Box(preview, ThumbMaxEdge);
@@ -2553,9 +2732,8 @@ public partial class MainViewModel : ViewModelBase
     private void RefreshThumbnail(RollFrame frame)
     {
         if (_previewLinear is null) return;
-        FrameParams p = frame.Params;
-        // _previewLinear may already be this frame's slice — same rule as RenderPreviewAsync.
-        if (_previewPreCropped && p.CropRect is not null) { p = p.Clone(); p.CropRect = null; }
+        // _previewLinear may be a region decode — same rule as RenderPreviewAsync.
+        FrameParams p = ForRegion(frame.Params, frame, _previewMargin);
         ImageBuffer prev = Resample.Box(_previewLinear, ThumbMaxEdge);
         SetThumbnail(frame, BitmapConvert.ToBitmap(Pipeline.ProcessFrame(prev, p)));
     }
@@ -2631,7 +2809,7 @@ public partial class MainViewModel : ViewModelBase
                 foreach (RollFrame f in targets)
                 {
                     if (token.IsCancellationRequested) return;
-                    try { await RenderThumbnailAsync(f, entry.Preview, pre is not null, token); }
+                    try { await RenderThumbnailAsync(f, entry.Preview, pre, token); }
                     catch (OperationCanceledException) { return; }
                     catch { /* one bad thumbnail must not stop the roll */ }
                 }
@@ -2975,13 +3153,11 @@ public partial class MainViewModel : ViewModelBase
             for (int i = 0; i < total; i++)
             {
                 // Each frame's OWN region: on a split scan the bare path would give every cell the
-                // strip's first negative. A region preview already is the frame, so its crop must
-                // not run again in the pipeline below.
+                // strip's first negative. The region is the frame plus its margin, so the crop
+                // still runs below — against the box rather than the whole scan.
                 var pre = SplitCropOf(frames[i]);
                 sources[i] = (await PreviewAsync(frames[i].Path, pre)).Preview;
-                FrameParams p = frames[i].Params;
-                if (pre is not null && p.CropRect is not null) { p = p.Clone(); p.CropRect = null; }
-                cellParams[i] = p;
+                cellParams[i] = ForRegion(frames[i].Params, frames[i], pre);
                 ReportBackground(Loc.F($"印样 {++done}/{total} …"));
             }
 
@@ -3232,7 +3408,7 @@ public partial class MainViewModel : ViewModelBase
         // at full resolution and applies p.CropRect itself, so the geometry it needs is the whole
         // scan's. A split frame may have no path-keyed entry, though — the switch decodes it under
         // a region key — and returning early there silently disabled the sharp patch on every split
-        // scan, so fall back to the region entry and scale its slice dimensions back up.
+        // scan, so fall back to the region entry and scale the margin box back up to the file.
         var splitPre = SplitCropOf(frame);
         if (_previews.Get(srcPath) is { } full) (frameW, frameH) = (full.SourceWidth, full.SourceHeight);
         else if (splitPre is { } sp && _previews.Get(PreviewKey(srcPath, sp)) is { } part)
