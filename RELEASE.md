@@ -1,16 +1,22 @@
 # 发版清单
 
-发一个版本要动**两条通道**，而且第二条是手工的。只做第一条，仓库里看得见新版本，
-但大陆用户——也就是绝大多数用户——不会收到任何通知。
+发一个版本要动**三条通道**，而且只有第一条是自动的。只做第一条，仓库里看得见新版本，
+但大陆用户——也就是绝大多数用户——不会收到任何通知，官网也还在推上一版的包。
 
 | 通道 | 谁在读 | 更新方式 |
 |---|---|---|
 | GitHub Releases API | 新版（≥1.0.0）能连上 github.com 的用户 | 打 tag，CI 自动建 draft，**人工点发布** |
 | Gitee Releases API | 新版（≥1.0.0）所有用户（race 模式，谁先回谁赢） | **人工**把 GitHub release 搬到 `Toshihiko-Lin/revelare-release` |
-| `version.json` | 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
+| `version.json` | **官网**（版号 + 6 个下载按钮）<br>+ 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
 
 新版客户端 (≥1.0.0) 两条 Release API 并发查、谁先响应谁赢，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
 旧版 (0.8.0) 仍走 `version.json`。
+
+> **`version.json` 不是只给 0.8.0 的。** `revelare.netlify.app` 的首页和 `/download` 页
+> 都在运行时 `fetch('/version.json')`，页面上的版号和全部 6 个下载按钮
+> （Gitee ×3 + GitHub ×3）都由它驱动。不推它，官网就一直挂着上一版的号和上一版的包链接。
+> 取不到时页面回落到 HTML 里写死的兜底值——也是上一版。所以这一步**每次发版都要做**，
+> 与还管不管 0.8.0 无关。
 
 > **Gitee 侧只认 `Toshihiko-Lin/revelare-release` 这一个仓库。** 客户端查的是
 > [`GiteeRepo`](src/OpenRevelare.Gui/Services/Updater.cs)，Release 和 `version.json` 都在它里面。
@@ -63,11 +69,12 @@ git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <
       不匹配产品名——Gitee 为每个 tag 自动生成的 `v1.1.0.zip` / `.tar.gz` 源码包因此会被跳过。
       一个平台都匹配不上时，「前往下载」会退回到 release 页面，不会是死按钮。
 
-## 四、推 manifest —— **仅当还要照顾旧版 0.8.0 用户**
+## 四、推 manifest —— 官网靠它，**别忘了这步**
 
-这一步和 ≥1.0.0 的更新检测**完全无关**，跳过它不影响任何新版客户端：
-`Updater` 不读 `version.json`，新版的更新说明来自 release 正文（见第三步）。
-只有旧版 Python 构建 (0.8.0) 还在轮询它。哪天不再管 0.8.0，这一节就可以整节删掉。
+这一步不影响 ≥1.0.0 的更新弹窗（那个走 Release API，见第三步），但**官网整个跟着它走**：
+首页和 `/download` 页运行时 `fetch('/version.json')`，版号和 6 个下载按钮都由它填。
+漏了这步，客户端能弹「发现新版本」，用户点到官网却下到上一版的包。
+旧版 Python 构建 (0.8.0) 也还在轮询同一个文件。
 
 Gitee 仓库 `Toshihiko-Lin/revelare-release` 的 `version.json`（`main` 分支根目录）：
 
@@ -75,17 +82,36 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 的 `version.json`（`main` 分支
 {
   "version": "1.1.0",
   "release_date": "2026-08-06",
-  "download_url": "https://gitee.com/Toshihiko-Lin/revelare-release/releases/download/v1.1.0/OpenRevelare-1.1.0-setup.exe",
-  "changelog": "<b>v1.1.0</b><br><br>…"
+  "download_url": "https://revelare.netlify.app/download",
+  "changelog": "<b>v1.1.0</b><br><br>…",
+  "downloads": {
+    "windows": "https://gitee.com/Toshihiko-Lin/revelare-release/releases/download/v1.1.0/OpenRevelare-1.1.0-setup.exe",
+    "macos":   "https://gitee.com/Toshihiko-Lin/revelare-release/releases/download/v1.1.0/OpenRevelare-1.1.0-arm64.dmg",
+    "linux":   "https://gitee.com/Toshihiko-Lin/revelare-release/releases/download/v1.1.0/OpenRevelare-1.1.0-x86_64.AppImage"
+  },
+  "downloads_github": {
+    "windows": "https://github.com/Toshihiko-Lin/Open-Revelare/releases/download/v1.1.0/OpenRevelare-1.1.0-setup.exe",
+    "macos":   "https://github.com/Toshihiko-Lin/Open-Revelare/releases/download/v1.1.0/OpenRevelare-1.1.0-arm64.dmg",
+    "linux":   "https://github.com/Toshihiko-Lin/Open-Revelare/releases/download/v1.1.0/OpenRevelare-1.1.0-x86_64.AppImage"
+  }
 }
 ```
 
-- [ ] `version` 与 csproj、与 tag 一致。**旧版客户端 (0.8.0)** 按它跟自己的版本比大小，
-      写小了或者忘了改，等于这次发版对那条通道不存在。新版 (≥1.0.0) 不再读这个文件。
-- [ ] `download_url` 指向能直连的镜像（Gitee / 网盘），不要指向 GitHub——
-      这条通道存在的理由就是旧版 0.8.0 用户中有人连不上 GitHub。
+- [ ] **`downloads` / `downloads_github` 两组六个链接全部更新**，别只改 `version`。
+      官网按 `downloads.*`（Gitee，主按钮）和 `downloads_github.*`（次按钮）分别填；
+      **某个平台的键缺了或为空，那个按钮就变成灰的「即将发布」**，不是回落到旧链接。
+      三个平台的文件名见第三步。
+- [ ] `download_url` 是**给旧版 0.8.0 和首页用的单一入口**，指向 `https://revelare.netlify.app/download`
+      这个落地页而不是某个 exe——首页的「下载」按钮和 0.8.0 的更新弹窗都用它，
+      落地页再按平台分流。分平台的精确链接在上面两组里。
+      不管填落地页还是具体包，都得是国内能直连的（Netlify / Gitee / 网盘），别指向 GitHub——
+      这条通道存在的理由就是有人连不上 GitHub。
+- [ ] `version` 与 csproj、与 tag 一致。**官网的版号直接显示它**，
+      旧版客户端 (0.8.0) 也按它跟自己的版本比大小。写小了或者忘了改，
+      官网就还是上一版的号，0.8.0 那条通道也等于这次没发。
 - [ ] `changelog` 是 **HTML**（`<b>` / `<br>`），不是 Markdown——
       注意与第三步的 release 正文相反，那边是 Markdown。旧版客户端会摊平成纯文本再显示。
+      官网不读它，≥1.0.0 也不读，所以这个字段现在只影响 0.8.0 用户看到的弹窗。
 - [ ] 目前它只有中文，英文界面下弹出的更新通知正文也是中文。
 
 `https://revelare.netlify.app/version.json` 302 到这个文件，缓存 60 秒，
@@ -105,9 +131,23 @@ curl -s https://gitee.com/api/v5/repos/Toshihiko-Lin/revelare-release/releases/l
   | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tag_name']); [print(' -',a['name']) for a in d['assets']]"
 ```
 
-- [ ] **旧版 (0.8.0) 通道**（跳过了第四步就不用看）：
-      `curl -sL https://revelare.netlify.app/version.json` 读到的是新版本号。
+- [ ] **官网 + 旧版 (0.8.0) 通道**——同一个 manifest，一起验：
+
+```bash
+# 版号对不对，6 个下载链接在不在、指没指向新 tag
+curl -sL https://revelare.netlify.app/version.json | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+print('version:', d['version'], '| download_url:', d['download_url'])
+for k in ('downloads','downloads_github'):
+    for p,u in (d.get(k) or {}).items(): print(f'  {k}.{p}:', u)
+    if not d.get(k): print(f'  !! {k} 整组缺失，官网那三个按钮会变「即将发布」')
+"
+```
+
+- [ ] 开 `https://revelare.netlify.app/download` 看一眼：标题版号是新的，
+      6 个按钮都可点、没有灰的「即将发布」。页面有 HTML 兜底值，
+      **manifest 没推成功时页面不会报错，只会安静地显示上一版**——所以必须眼看。
 - [ ] 拿上一个版本的安装包装一台干净机器，等 3 秒看有没有弹「发现新版本」。
-      **两条通道任何一条通就会弹**——在能连 GitHub 的机器上这一步必过，
+      **两条 Release API 任何一条通就会弹**——在能连 GitHub 的机器上这一步必过，
       它证明不了 Gitee 那条通了。国内通道只能靠上面的 curl 或断网/墙内环境验。
 - [ ] 弹窗里「更新说明：」显示的是这一版的要点，不是「见 CHANGELOG.md」。
