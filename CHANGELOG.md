@@ -1,5 +1,48 @@
 # OpenRevelare — 更新日志
 
+## v1.1.1（2026-08-09）
+
+**新增**
+
+- **扫描件自动分割**：一张扫描件装着一整条底片时，导入即自动切成单帧，
+  每格是独立的帧。弹窗里可双击增删分隔线、拖动外框四条边，也可调裁切
+  余量（0~50%，默认 15%）——留出的余量供之后在裁切工具里把画面往外拉回。
+  检测失败时给等分猜测。扫描件与 RAW 不能混选导入
+- **工具提示框可关闭**：裁切/取样提示固定在画面顶部，会挡住高幅裁切框的
+  手柄，现在可以关掉（回车应用、Esc 取消依然可用），重新进入工具时提示回来
+
+**修复**
+
+- 齿孔遮罩在旋转或裁切过的帧上不再错位
+
+**性能**
+
+- LCC 平场载入快约 275×（60 MP 实测 ~126 s → 456 ms）
+
+
+---
+
+**Added**
+
+- **Automatic scan splitting** — when one scan holds a whole strip of film, it is
+  split into individual frames on import. In the dialog you can double-click to
+  add or remove dividers, drag any of the four outer edges, and set the crop
+  margin (0–50%, default 15%) — that margin is what lets you pull the picture
+  back out later in the crop tool. Falls back to an even guess if detection
+  fails. Scans and RAW files cannot be imported in the same selection
+- **Dismissible tool hint** — the crop/sampling hint sits at the top of the image
+  and covered the handles of tall crop boxes; it can now be closed (Enter to
+  apply and Esc to cancel still work), and returns when you re-enter the tool
+
+**Fixed**
+
+- Sprocket mask alignment on rotated or cropped frames
+
+**Performance**
+
+- LCC flat-field loading ~275× faster (~126 s → 456 ms at 60 MP)
+
+
 ## v1.1.0（2026-08-06）
 
 首个开源版本，基于 Revelare 1.0.0 重命名并开放全部功能。
