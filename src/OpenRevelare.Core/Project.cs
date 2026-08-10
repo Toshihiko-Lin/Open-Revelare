@@ -202,7 +202,10 @@ public static class Project
             ["wb_offset"] = Arr(p.WbOffset),
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
             ["scan_exposure_ev"] = p.ScanExposureEv,
-            ["chroma_grade"] = p.ChromaGrade,
+            // chroma_grade is retired — the concept is gone, not merely defaulted away. It is
+            // still WRITTEN, equal to grade, so a file stays readable by older builds and by the
+            // Python original, both of which expect the key.
+            ["chroma_grade"] = p.Grade,
             // Input colour space. Written only when it departs from the sRGB default, so a
             // project that never touched it stays byte-identical to one from an older build.
             ["input_primaries"] = p.InputPrimaries is { } ip
@@ -262,7 +265,9 @@ public static class Project
             WbOffset = Vec3(d, "wb_offset", 0, 0, 0),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
             ScanExposureEv = Dbl(d, "scan_exposure_ev", 0.0),
-            ChromaGrade = Dbl(d, "chroma_grade", 3.05),
+            // Deliberately not read back. A stored 3.05 described a chroma boost compensating for
+            // a colour-space conversion the pipeline was missing; that conversion now exists
+            // (InputTransform / OutputRender), so honouring the old number would double up.
             InputPrimaries = Xy3(d, "input_primaries"),
             InputWhitePoint = d["input_white_point"] is JsonArray wa && wa.Count == 2
                 ? new[] { wa[0]!.GetValue<double>(), wa[1]!.GetValue<double>() }

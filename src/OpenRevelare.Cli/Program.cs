@@ -33,7 +33,6 @@ static int Run(string[] args)
             case "--d-max": opts["d-max"] = Next(args, ref i, a); break;
             case "--grade": opts["grade"] = Next(args, ref i, a); break;
             case "--pivot": opts["pivot"] = Next(args, ref i, a); break;
-            case "--chroma-grade": opts["chroma-grade"] = Next(args, ref i, a); break;
             case "--scan-exposure-ev": opts["scan-exposure-ev"] = Next(args, ref i, a); break;
             case "--wb-gains": opts["wb-gains"] = Next(args, ref i, a); break;
             case "--exposure": opts["exposure"] = Next(args, ref i, a); break;
@@ -104,7 +103,6 @@ static int Run(string[] args)
     if (opts.TryGetValue("d-max", out var dm)) cal.DMax = ParseD(dm);
     if (opts.TryGetValue("grade", out var gr)) cal.Grade = ParseD(gr);
     if (opts.TryGetValue("pivot", out var pv)) cal.Pivot = ParseD(pv);
-    if (opts.TryGetValue("chroma-grade", out var cg)) cal.ChromaGrade = ParseD(cg);
     if (opts.TryGetValue("scan-exposure-ev", out var se)) cal.ScanExposureEv = ParseD(se);
     if (opts.TryGetValue("wb-gains", out var wg)) cal.WbGains = ParseTriple(wg);
     if (opts.TryGetValue("exposure", out var exv)) cal.ExposureEv = ParseD(exv);
@@ -247,7 +245,7 @@ static int Run(string[] args)
             ImageBuffer inSrgb = LoadLinear(opts["input"]);
             ImageBuffer targetSrgb = LoadLinear(opts["wb-target"]);
             double grade = cal.Grade, pivot = cal.Pivot, dMax = cal.DMax;
-            double cgrade = cal.ChromaGrade;
+            double cgrade = cal.Grade;   // chroma follows grade (Cineon single gamma)
             double[] ccs = cal.ChromaChannelScale;
 
             double[][] dSimple = WhiteBalance.SrgbToPreStep4Density(inSrgb, grade, pivot, dMax);
@@ -584,7 +582,6 @@ static void PrintUsage()
         "  --d-max <v>                 physical max density\n" +
         "  --grade <v>                 density-domain contrast (paper grade)\n" +
         "  --pivot <v>                 mid-tone anchor\n" +
-        "  --chroma-grade <v>          density-domain chroma scale\n" +
         "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
         "  --lcc <path>                LCC flat-field reference (RAW/TIFF); per-channel divide\n" +
         "  --lcc-linear                treat the LCC TIFF as linear (default: sRGB gamma)\n" +

@@ -58,24 +58,28 @@ public static class Inversion
         }
 
         bool channelScaleActive = !ApproxAll(cal.ChromaChannelScale, 1.0);
-        bool needDecomp = useMatrix
-            || !ampIdentity
-            || cal.ChromaGrade != cal.Grade
-            || channelScaleActive;
+        // Decomposition is needed only for the Path-A mechanisms (a decouple chroma matrix or
+        // per-channel amp) and the per-channel chroma scale. Chroma itself no longer has its own
+        // coefficient: Cineon applies ONE gamma to all three channels, and chroma — being the
+        // per-channel deviation — follows luminance proportionally without a second parameter.
+        // What used to be chroma_grade patched a missing colour-space conversion; that belongs to
+        // InputTransform and OutputRender now. See docs/CALIBRATION.md.
+        bool needDecomp = useMatrix || !ampIdentity || channelScaleActive;
 
         // ── Per-channel density LUTs (folds steps 1–4); cached, see DensityLuts ──
         double[][] dLut = DensityLuts(cal);
         double[] lut0 = dLut[0], lut1 = dLut[1], lut2 = dLut[2];
 
+        // Path A widened chroma by `amp`; undo that, relative to the single Cineon gamma.
         double[] effChroma =
         {
-            cal.ChromaGrade / amp[0],
-            cal.ChromaGrade / amp[1],
-            cal.ChromaGrade / amp[2],
+            cal.Grade / amp[0],
+            cal.Grade / amp[1],
+            cal.Grade / amp[2],
         };
 
         double cs0 = cal.ChromaChannelScale[0], cs1 = cal.ChromaChannelScale[1], cs2 = cal.ChromaChannelScale[2];
-        double pivot = cal.Pivot, grade = cal.Grade, chromaGrade = cal.ChromaGrade, dMax = cal.DMax;
+        double pivot = cal.Pivot, grade = cal.Grade, dMax = cal.DMax;
         double ec0 = effChroma[0], ec1 = effChroma[1], ec2 = effChroma[2];
 
         // Direct-compute params for the >1 fast path: the LUT only covers input
@@ -142,9 +146,9 @@ public static class Inversion
                     // branch below is the only consumer, for callers with no matrix.
                     if (useMatrix)
                     {
-                        double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * chromaGrade;
-                        double n1 = (m10 * c0 + m11 * c1 + m12 * c2) * chromaGrade;
-                        double n2 = (m20 * c0 + m21 * c1 + m22 * c2) * chromaGrade;
+                        double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * grade;
+                        double n1 = (m10 * c0 + m11 * c1 + m12 * c2) * grade;
+                        double n2 = (m20 * c0 + m21 * c1 + m22 * c2) * grade;
                         c0 = n0; c1 = n1; c2 = n2;
                     }
                     else

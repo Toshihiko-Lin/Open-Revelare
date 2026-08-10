@@ -40,29 +40,14 @@ public sealed class PreferencesDialog : Window
     private TextBox _sheetDir = new();
     private ComboBox _sheetBudget = new();
     private TextBlock _sheetNote = new();
-    private NumericUpDown _chromaValue = new();
-    private TextBlock _chromaNote = new();
 
     /// <summary>Index 0 is 自动; index N is a manual limit of N. Mirrors ImageIo's HardCap.</summary>
     private const int MaxConcurrency = 8;
 
-    /// <summary>
-    /// The historical chroma_grade default, fitted against DiVERE's Kodak Gold 200 ColorChecker
-    /// dataset. Its provenance is weak — that dataset is a spectral SIMULATION expressed in the
-    /// Endura Premier paper gamut, which is not the gamut this pipeline outputs into, and a
-    /// scalar cannot express a gamut relationship anyway. See docs/CALIBRATION.md.
-    ///
-    /// It stays as the default only so existing projects keep rendering as they did; the real
-    /// replacement is colour-space rendering (ColorSpaces.cs). No sibling presets are offered:
-    /// the Python build shipped a 淡/标准/浓 triple (2.6 / 3.05 / 3.5) whose outer two were
-    /// never measured against anything, which implied three calibrations where there was one.
-    /// </summary>
-    private const double GoldBaseline = 3.05;
-
     /// <summary>Everything the user can have changed but not yet saved.</summary>
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
-                                string SheetDir, int SheetBudget, double ChromaGrade);
+                                string SheetDir, int SheetBudget);
 
     public PreferencesDialog()
     {
@@ -84,8 +69,7 @@ public sealed class PreferencesDialog : Window
             CacheDir: s.CacheDirectory,
             CacheBudget: cb >= 0 ? cb : Array.IndexOf(CacheBudgets, 5),
             SheetDir: s.SheetCacheDirectory,
-            SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1),
-            ChromaGrade: s.RawChromaGrade));
+            SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1)));
     }
 
     private State Snapshot() => new(
@@ -99,11 +83,7 @@ public sealed class PreferencesDialog : Window
         CacheDir: _cacheDir.Text ?? "",
         CacheBudget: Math.Max(0, _cacheBudget.SelectedIndex),
         SheetDir: _sheetDir.Text ?? "",
-        SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex),
-        ChromaGrade: CurrentChromaGrade());
-
-    /// <summary>The live chroma_grade, falling back to the baseline on an empty box.</summary>
-    private double CurrentChromaGrade() => (double)(_chromaValue.Value ?? (decimal)GoldBaseline);
+        SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex));
 
     private void Build(State v)
     {
@@ -124,19 +104,10 @@ public sealed class PreferencesDialog : Window
         _cacheBudget = Combo(CacheBudgets.Select(g => Loc.F($"{g} GB（约 {g * 1024 / 349} 帧 60MP）")).ToArray(), v.CacheBudget);
         _sheetBudget = Combo(SheetBudgets.Select(g => Loc.F($"{g} GB（约 {g * 1024 * 1024 / 300} 卷）")).ToArray(), v.SheetBudget);
 
-        _chromaValue = new NumericUpDown
-        {
-            Minimum = 1.0m, Maximum = 6.0m, Increment = 0.05m,
-            FormatString = "F2",
-            Value = (decimal)v.ChromaGrade,
-            MinWidth = 120,
-        };
-
         _dngNote = Note();
         _concurrencyNote = Note();
         _cacheNote = Note();
         _sheetNote = Note();
-        _chromaNote = Note();
 
         _cacheOn = new CheckBox { Content = Loc.T("启用 DNG 转换磁盘缓存"), IsChecked = v.CacheOn };
         _cachePersist = new CheckBox { Content = Loc.T("跨会话保留（退出不删除，下次启动直接命中）"), IsChecked = v.CachePersist };
@@ -154,11 +125,9 @@ public sealed class PreferencesDialog : Window
         _cacheDir.TextChanged += (_, _) => UpdateCacheNote();
         _sheetBudget.SelectionChanged += (_, _) => UpdateSheetNote();
         _sheetDir.TextChanged += (_, _) => UpdateSheetNote();
-        _chromaValue.ValueChanged += (_, _) => UpdateChromaNote();
         UpdateConcurrencyNote();
         UpdateCacheNote();
         UpdateSheetNote();
-        UpdateChromaNote();
 
         var panel = new StackPanel { Margin = new Thickness(18), Spacing = 4 };
         panel.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), FontSize = 18, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 0, 0, 8) });
@@ -168,15 +137,6 @@ public sealed class PreferencesDialog : Window
         panel.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
         panel.Children.Add(_concurrencyNote);
 
-        panel.Children.Add(new TextBlock { Text = Loc.T("色度还原基准（chroma_grade）"), FontWeight = FontWeight.SemiBold,
-                                           Margin = new Thickness(0, 14, 0, 2) });
-        var chromaReset = new Button { Content = Loc.T("恢复基准"), Margin = new Thickness(6, 0, 0, 0) };
-        chromaReset.Click += (_, _) => { _chromaValue.Value = (decimal)GoldBaseline; UpdateChromaNote(); };
-        var chromaRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-        chromaRow.Children.Add(_chromaValue);
-        chromaRow.Children.Add(chromaReset);
-        panel.Children.Add(chromaRow);
-        panel.Children.Add(_chromaNote);
         var browse = new Button { Content = Loc.T("浏览…"), Margin = new Thickness(6, 0, 0, 0) };
         browse.Click += async (_, _) =>
         {
@@ -301,26 +261,6 @@ public sealed class PreferencesDialog : Window
     /// wants "richer" wants the SceneBase saturation slider, and the note has to send them there
     /// rather than let them discover it by pushing this to 6.0.
     /// </summary>
-    private void UpdateChromaNote()
-    {
-        double cg = CurrentChromaGrade();
-        // Off-baseline is not an error, but it IS uncalibrated, and the note says so rather than
-        // dressing the number up as another preset.
-        // One interpolated literal apiece — see UpdateConcurrencyNote: concatenating onto an
-        // interpolated string collapses it before Loc.F can see the composite format.
-        double offPct = Math.Abs(cg - GoldBaseline) / GoldBaseline * 100;
-        string dir = cg > GoldBaseline ? Loc.T("浓") : Loc.T("淡");
-        string baseline = Math.Abs(cg - GoldBaseline) < 0.005
-            ? Loc.T("当前为历史默认值。")
-            : Loc.F($"已偏离历史默认值 {offPct:F0}%（偏{dir}）。");
-
-        _chromaNote.Text =
-            Loc.F($"在密度域整体缩放色度。{GoldBaseline:F2} 拟合自 DiVERE 的 Kodak Gold 200 色卡数据集，但那是相纸色域下的光谱模拟值，与本管线的输出色域并不一致——这个参数依据薄弱，正在被真正的色彩空间渲染取代（见 CALIBRATION.md）。只想调浓淡请用 SceneBase 的饱和度。") + Environment.NewLine +
-            baseline + Loc.T("仅对相机 RAW 生效：扫描件固定按 1.0 导入（此分野同样缺乏依据，保留只为不改变既有工程）。")
-                     + Environment.NewLine +
-            Loc.T("作用于此后新导入的卷；已在卷中的帧保留各自存下的值，可在工程文件或 CLI 中单独改。");
-    }
-
     private static readonly int[] SheetBudgets = { 1, 2, 5, 10 };
 
     /// <summary>The catalog's own footprint, stated in rolls rather than bytes — one contact
@@ -367,7 +307,6 @@ public sealed class PreferencesDialog : Window
         s.CacheBudgetGb = CacheBudgets[Math.Clamp(_cacheBudget.SelectedIndex, 0, CacheBudgets.Length - 1)];
         s.SheetCacheDirectory = (_sheetDir.Text ?? "").Trim();
         s.SheetCacheBudgetGb = SheetBudgets[Math.Clamp(_sheetBudget.SelectedIndex, 0, SheetBudgets.Length - 1)];
-        s.RawChromaGrade = Math.Clamp(CurrentChromaGrade(), 1.0, 6.0);
         Settings.Save();
         App.ApplyTheme(s.Theme);
         Loc.Apply(s.Language);

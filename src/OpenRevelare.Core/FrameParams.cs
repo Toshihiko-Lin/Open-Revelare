@@ -29,13 +29,6 @@ public sealed class FrameParams
     /// <summary>Density-domain zero-point correction: D_corr = D + ev * log10(2).</summary>
     public double ScanExposureEv { get; set; } = 0.0;
 
-    /// <summary>
-    /// Density-domain chroma scale. Weakly founded and slated for replacement by colour-space
-    /// rendering; the default is held at the historical value so existing projects render
-    /// unchanged. See docs/CALIBRATION.md.
-    /// </summary>
-    public double ChromaGrade { get; set; } = 3.05;
-
     /// <summary>Density-domain contrast = digital "paper grade".</summary>
     public double Grade { get; set; } = 1.65;
 
@@ -119,10 +112,10 @@ public sealed class FrameParams
     /// direction with a per-stock strength (cosine similarity 0.9957–0.9997, and giving each
     /// stock its own matrix improves the fit by 0.1%). See docs/calibration/universal_crosstalk.py.
     ///
-    /// When on, <see cref="ChromaGrade"/> becomes the STRENGTH of that matrix rather than a
-    /// standalone multiplier — the direction is universal, the strength is where stock character
-    /// lives. Ignored on Path A rolls, whose <see cref="DecoupleChromaMatrix"/> already occupies
-    /// the same slot in the inversion and is solved for that roll's own light source.
+    /// When on, <see cref="Grade"/> scales the matrix — the direction is universal, the amount
+    /// follows the single Cineon gamma. Ignored on Path A rolls, whose
+    /// <see cref="DecoupleChromaMatrix"/> already occupies the same slot in the inversion and is
+    /// solved for that roll's own light source.
     /// </summary>
     public bool UseC41Crosstalk { get; set; }
     /// <summary>Per-channel chroma amplification fed into inversion (chroma_grade ÷ amp); null = 1.
@@ -184,7 +177,6 @@ public sealed class FrameParams
         WbOffset = (double[])WbOffset.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
         ScanExposureEv = ScanExposureEv,
-        ChromaGrade = ChromaGrade,
         Grade = Grade,
         Pivot = Pivot,
         OutputIntent = OutputIntent,

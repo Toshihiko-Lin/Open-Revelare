@@ -235,7 +235,6 @@ public partial class MainViewModel : ViewModelBase
     /// <see cref="LoadParams"/> reads it off the frame and BuildParams writes it back, so a
     /// render of a scan never silently reverts to the RAW-calibrated default.
     /// </summary>
-    private double _chromaGrade = 3.05;
 
     /// <summary>
     /// The frame's own rect within its source file, or null when the frame owns the whole file.
@@ -1162,7 +1161,6 @@ public partial class MainViewModel : ViewModelBase
         TBase = TBaseArr(),
         WbOffset = WbOffArr(),
         WbHigh = WbHighArr(),
-        ChromaGrade = _chromaGrade,
         ScanExposureEv = ScanEv,
         Grade = Grade,
         Pivot = Pivot,
@@ -1549,7 +1547,6 @@ public partial class MainViewModel : ViewModelBase
         // and its gains are folded into wb_high, which then feeds a pipeline rendering at THIS
         // value. On a scan (1.0) a hard-coded 3.05 would solve wb_high in a colour basis the
         // renderer never produces.
-        ChromaGrade = _chromaGrade,
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
@@ -2619,19 +2616,16 @@ public partial class MainViewModel : ViewModelBase
         // differences, so the sensor-crosstalk boost chroma_grade exists to undo is not wanted
         // on top of it — that would be a double amplification. The preference is a RAW-path
         // setting for exactly that reason; a scan is pinned at 1.0 regardless of it.
-        double chromaGrade = RawDecode.IsRawExtension(path) ? Settings.Current.RawChromaGrade : 1.0;
 
         if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
         {
             var single = new RollFrame(path);
-            single.Params.ChromaGrade = chromaGrade;
             if (rects is { Count: 1 }) single.Params.CropRect = rects[0];
             Frames.Add(single);
             return;
         }
 
         var parent = new RollFrame(path);
-        parent.Params.ChromaGrade = chromaGrade;
         parent.Params.CropRect = rects[0];
         Frames.Add(parent);
         for (int i = 1; i < rects.Count; i++)
@@ -2722,7 +2716,6 @@ public partial class MainViewModel : ViewModelBase
         Grade = p.Grade; Pivot = p.Pivot;
         // Not a control — carried through so BuildParams can write back the per-input value
         // chosen at import (1.0 for scans, 3.05 for RAW) instead of the dataclass default.
-        _chromaGrade = p.ChromaGrade;
         // Stage 2
         var (temp, tint, _) = WbMath.GainsToTempTint(p.WbGains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
@@ -3030,7 +3023,7 @@ public partial class MainViewModel : ViewModelBase
                     d.Pivot = WbMath.LinkedPivot(d.DMax);
             }
             if (Sync.CalWb) { d.WbHigh = (double[])s.WbHigh.Clone(); d.WbOffset = (double[])s.WbOffset.Clone(); }
-            if (Sync.CalGrade) { d.Grade = s.Grade; d.Pivot = s.Pivot; d.ChromaGrade = s.ChromaGrade; d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
+            if (Sync.CalGrade) { d.Grade = s.Grade; d.Pivot = s.Pivot; d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
             if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
             if (Sync.CalSprocket) { d.SprocketEnabled = s.SprocketEnabled; d.SprocketThreshold = s.SprocketThreshold; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform

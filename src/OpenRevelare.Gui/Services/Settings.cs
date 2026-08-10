@@ -60,22 +60,6 @@ public static class Settings
         /// on a workstation with plenty of headroom to spare.</summary>
         public int DecodeConcurrency { get; set; }
 
-        /// <summary>
-        /// chroma_grade applied to newly imported CAMERA RAW frames — a scalar on the density-domain
-        /// chroma vector. 3.05 was fitted against DiVERE's Kodak Gold 200 ColorChecker dataset; that
-        /// provenance does not hold up (spectral simulation, paper gamut, and a scalar cannot express
-        /// a gamut relationship). See docs/CALIBRATION.md.
-        ///
-        /// Scans import at 1.0 instead. That split was justified as "the camera's CFA crosstalk needs
-        /// undoing, the scanner's ICC matrix already did it" — which the same investigation showed to
-        /// be unfounded: the dataset carries no camera or scanner information at all. Both defaults
-        /// stay put only to keep existing projects rendering as they did.
-        ///
-        /// Applies to imports from here on; frames already in a roll keep the value stored with
-        /// them, editable per project via the project file or the CLI.
-        /// </summary>
-        public double RawChromaGrade { get; set; } = 3.05;
-
         /// <summary>Backdrop the photo is judged against (预览区右键 → 背景色). Deliberately
         /// independent of <see cref="Theme"/>: it is a viewing condition, not UI chrome, and a
         /// neutral mid grey is what keeps simultaneous contrast from biasing a colour call.
