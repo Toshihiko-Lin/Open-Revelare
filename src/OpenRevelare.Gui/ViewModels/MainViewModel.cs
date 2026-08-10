@@ -3109,10 +3109,10 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            _inputToSrgbMatrix = RawDecode.CameraToSrgbMatrix(raw);
+            _inputToSrgbMatrix = RawDecode.CameraToSrgbMatrix(raw, out string why);
             InputCharacterisationStatus = _inputToSrgbMatrix is null
-                ? Loc.T("LibRaw 没有这台相机的色彩数据，按未表征处理。")
-                : Loc.T("已启用：使用相机自身的色彩矩阵。");
+                ? Loc.F($"无法表征，按旧行为渲染 — {why}。可用 Adobe DNG Converter 转一张，再跑 docs/calibration/read_dng_matrix.py 把矩阵加进内置后备表。")
+                : Loc.F($"已启用：{why}");
         }
     }
 

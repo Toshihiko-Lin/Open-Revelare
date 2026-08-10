@@ -134,8 +134,16 @@ public static class RawDecode
     /// conversion changes chromaticity, never the grey axis, which is what makes it safe to
     /// apply after t_base normalisation has already set the white.
     /// </summary>
-    public static double[,]? CameraToSrgbMatrix(string path)
+    public static double[,]? CameraToSrgbMatrix(string path) => CameraToSrgbMatrix(path, out _);
+
+    /// <summary>
+    /// As above, reporting WHY the matrix is unavailable. The reason matters to the user: "this
+    /// camera is not in LibRaw's database" and "the file could not be opened at all" call for
+    /// completely different responses, and a single "no colour data" message conflates them.
+    /// </summary>
+    public static double[,]? CameraToSrgbMatrix(string path, out string diagnosis)
     {
+        diagnosis = "";
         try
         {
             // OpenFile alone is enough: the colour matrix comes from the camera's metadata, which
@@ -155,17 +163,40 @@ public static class RawDecode
 
             // An unknown camera leaves the matrix all-zero; an identity means LibRaw had nothing
             // to say either. Both are "no characterisation available", not a usable transform.
-            if (sum < 1e-6) return null;
+            if (sum < 1e-6)
+            {
+                diagnosis = CoreText.F($"矩阵全零（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
+                return null;
+            }
+
             bool identity = true;
             for (int r = 0; r < 3 && identity; r++)
                 for (int c = 0; c < 3; c++)
                     if (Math.Abs(result[r, c] - (r == c ? 1.0 : 0.0)) > 1e-6) { identity = false; break; }
 
-            return identity ? null : result;
+            if (identity)
+            {
+                // LibRaw parsed the file but has no colorimetry for this body — its camera table
+                // stops before the newer ones. Try the hand-maintained fallback before giving up.
+                string make = ctx.ImageParams.Make, model = ctx.ImageParams.Model;
+                double[,]? fb = CameraMatrixFallback.CameraToSrgb(make, model);
+                if (fb is not null)
+                {
+                    diagnosis = CoreText.F($"内置后备矩阵（{make} {model}）");
+                    return fb;
+                }
+                diagnosis = CoreText.F($"LibRaw 与内置后备表都没有这台相机（{make} {model}）");
+                return null;
+            }
+
+            diagnosis = CoreText.F($"LibRaw 的相机矩阵（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return null;   // a colour probe must never break opening a file
+            // A colour probe must never break opening a file — but it must not hide why either.
+            diagnosis = CoreText.F($"读取失败：{ex.GetType().Name}: {ex.Message}");
+            return null;
         }
     }
 
