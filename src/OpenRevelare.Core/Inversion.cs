@@ -134,6 +134,12 @@ public static class Inversion
 
                     if (channelScaleActive) { c0 *= cs0; c1 *= cs1; c2 *= cs2; }
 
+                    // The matrix REPLACES chromaAmp, it does not stack with it: this branch uses
+                    // the bare chroma_grade and never reads effChroma. That is correct, not an
+                    // oversight — ChromaAxisCompensationMatrix is built from 1/ampYb and 1/ampRg,
+                    // so it already carries the amplification, resolved per chroma axis instead
+                    // of per RGB channel. Passing both leaves the amp silently unused; the else
+                    // branch below is the only consumer, for callers with no matrix.
                     if (useMatrix)
                     {
                         double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * chromaGrade;

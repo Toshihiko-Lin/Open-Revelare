@@ -58,7 +58,10 @@ public sealed class FrameParams
     public DecoupleMode DecoupleMode { get; set; } = DecoupleMode.Linear;
     /// <summary>Axis-accurate 3×3 chroma-compensation matrix fed into inversion; null = off.</summary>
     public double[,]? DecoupleChromaMatrix { get; set; }
-    /// <summary>Per-channel chroma amplification fed into inversion (chroma_grade ÷ amp); null = 1.</summary>
+    /// <summary>Per-channel chroma amplification fed into inversion (chroma_grade ÷ amp); null = 1.
+    /// IGNORED when <see cref="DecoupleChromaMatrix"/> is set — the two are alternatives, and the
+    /// matrix already carries the amplification per chroma axis. Only callers without a matrix
+    /// (the CLI's --decouple-chroma-amp) need this; the GUI sets the matrix instead.</summary>
     public double[]? DecoupleChromaAmp { get; set; }
     /// <summary>Enable sprocket/light-board masking (fill masked pixels white after inversion).</summary>
     public bool SprocketEnabled { get; set; } = false;

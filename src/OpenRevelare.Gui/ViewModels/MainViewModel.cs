@@ -625,6 +625,13 @@ public partial class MainViewModel : ViewModelBase
 
     // Path A 分光解耦（卷级；导入时从 R/G/B 校正图算出，应用到整卷）
     private double[,]? _decoupleMatrix;
+    // NOT accompanied by a DecoupleChromaAmp, deliberately. Inversion treats amp and the chroma
+    // matrix as mutually EXCLUSIVE paths, not as two layers: with a matrix present it multiplies
+    // by the bare chroma_grade and never reads amp (Inversion.cs, the useMatrix branch). The
+    // matrix is the better of the two — ChromaAxisCompensationMatrix already carries 1/amp per
+    // chroma AXIS (yellow-blue, red-green), where amp is one scalar per RGB channel — so the
+    // roll carries the matrix alone. The CLI computes both only because --decouple-chroma-amp
+    // exists as a fallback for callers that have no matrix. Setting one here would be dead state.
     private double[,]? _decoupleChromaMatrix;
 
     // Roll-level calibration SOURCE paths retained for .ncproj save (matrices/field are
@@ -2468,6 +2475,12 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// Path A calibration: the decouple matrix plus the axis-accurate chroma compensation matrix
     /// (port of Python's compute_matrix_from_paths + _measure_chroma_amp).
+    ///
+    /// Returns the MATRIX and not a chroma_amp triple, though DecoupleCalibration can measure
+    /// both and the CLI prints both. They are alternatives, not layers: Inversion multiplies by
+    /// the bare chroma_grade whenever a chroma matrix is present and never looks at amp, so a
+    /// roll carrying both would silently ignore the amp. The matrix wins because it compensates
+    /// per chroma AXIS (it is built from 1/ampYb and 1/ampRg) rather than per RGB channel.
     ///
     /// This is the longest wait before the first frame can appear, so the two things it needs —
     /// the 3 calibration frames and the first few content frames — are decoded in ONE parallel
