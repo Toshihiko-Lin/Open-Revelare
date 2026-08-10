@@ -654,6 +654,19 @@
                                 </Expander>
 
                                 <!-- 片基去色罩 -->
+                                <!-- 输入基色 -->
+                                <Expander Header="{i18n:T '输入基色'}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{i18n:T '声明相机自身的基色，而不是让管线默认当作 sRGB。相机的三个通道对应的光谱响应并非 sRGB 原色，这一层此前从未被声明——Cineon 流程第 1→2 步做的正是它。扫描件不适用：ICC 已在解码时完成表征。'}" />
+                                        <CheckBox Content="{i18n:T '声明相机基色'}"
+                                                  IsChecked="{Binding DeclareInputPrimaries}"
+                                                  IsEnabled="{Binding HasImage}" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{Binding InputPrimariesStatus}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Expander>
+
                                 <Expander Header="{i18n:T '片基去色罩（T_base / D_max）'}" IsExpanded="True">
                                     <StackPanel Spacing="2">
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseText}"
