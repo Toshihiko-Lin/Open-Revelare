@@ -3151,12 +3151,19 @@ public partial class MainViewModel : ViewModelBase
         RefreshInputCharacterisation();
     }
 
-    /// <summary>Soft-proof targets, in the order the picker lists them. Index 0 = off.</summary>
+    /// <summary>
+    /// Soft-proof targets, in the order the picker lists them. Index 0 = off.
+    ///
+    /// Adobe RGB and Display P3 are deliberately NOT here. Soft proofing shows what the
+    /// destination gamut cannot hold, and both of those are WIDER than sRGB — which is what the
+    /// render currently sits in — so the round trip through them is a no-op (measured max change
+    /// 0.000023, i.e. below one 8-bit level). Offering them would be a control that visibly does
+    /// nothing. They become meaningful once the working space is widened; until then only the
+    /// two narrower print spaces have anything to show.
+    /// </summary>
     private static readonly ColorSpaceDef?[] SoftProofSpaces =
     {
         null,
-        ColorSpaces.AdobeRgb,
-        ColorSpaces.DisplayP3,
         ColorSpaces.KodakEnduraPremier,
         ColorSpaces.Kodak2383,
     };

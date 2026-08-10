@@ -195,3 +195,13 @@ ACKNOWLEDGEMENTS (no code incorporated)
     darktable is distributed under GPL-3.0. OpenRevelare references only the
     mathematical model (D_corr = D × wb_high + wb_offset) described by that
     module. No source code from darktable has been copied or incorporated.
+
+  rawspeed camera colour matrices — rawspeed contributors (LGPL-2.1)
+    https://github.com/darktable-org/rawspeed
+    src/OpenRevelare.Core/CameraMatrixFallback.cs carries the per-camera
+    ColorMatrix values from rawspeed's cameras.xml, used when the bundled
+    LibRaw has no colorimetry for a body. These are the camera manufacturers'
+    published DNG ColorMatrix figures — the same data Adobe ships in DNG
+    Converter and LibRaw stores as cam_xyz — not rawspeed's own creative work,
+    and no rawspeed source code is incorporated. Regenerate with
+    docs/calibration/gen_fallback_table.py.

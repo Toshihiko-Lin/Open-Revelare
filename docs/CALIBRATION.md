@@ -93,13 +93,19 @@ MODEL 2  γ + 代表性染料串扰
 
 `CameraMatrixFallback.cs` 是手工维护的补充表，键是 `"MAKE MODEL"`，值是相机公布的 DNG **ColorMatrix2**（XYZ D65 → 相机原生）。
 
-**OM-5 的条目已填入**，取自本机 darktable 的 `rawspeed/cameras.xml`（`/usr/share/darktable/rawspeed/cameras.xml`），那里公布的就是 Adobe 的 ColorMatrix，以 ×10000 的整数存放。注意 rawspeed 给 OM-5 和 E-M5 Mark III 的是**同一组矩阵** —— 同代 20MP 传感器，rawspeed 自己判定可以复用，不是我做的替代。另外 LibRaw 把这台机身的 make 报成 `OM Digital`（文件里写的是 `OM Digital Solutions`），表的键要按 LibRaw 的写法。
+**表是生成的，不是手打的。** `docs/calibration/gen_fallback_table.py` 读 rawspeed 的 `cameras.xml`（随 darktable 安装，`/usr/share/darktable/rawspeed/cameras.xml`）批量生成，当前 **1269 条**。rawspeed 公布的就是相机厂商的 DNG ColorMatrix，以 ×10000 的整数存放 —— 和 Adobe DNG Converter、LibRaw 用的是同一份数据。换一份更新的 `cameras.xml` 重跑脚本即可刷新。
 
-**表里的每一条都必须是实测的，不能凭记忆写。** 编一个看起来合理的矩阵比不填更糟 —— 界面会声称"已表征"，喂给管线的却是虚构。取值流程：用 Adobe DNG Converter 转一张该机身的 DNG，跑 `docs/calibration/read_dng_matrix.py`，它直接读文件里的 ColorMatrix2 标签并打印可粘贴的代码。数值因此可追溯到一个能重新读取的文件。
+**键必须按 LibRaw 的写法。** LibRaw 把 OM-5 的 make 报成 `OM Digital`，而文件里写的是 `OM Digital Solutions`，rawspeed 的 `<ID>` 又写 `OM System`。脚本因此为每台机身发出所有可能的拼法，多个键共享一个矩阵是正常的。字典是大小写不敏感的，所以脚本也按不敏感去重（`FUJIFILM` / `Fujifilm` 只留一条）。
+
+另外记一笔：rawspeed 给 OM-5 和 E-M5 Mark III 的是**同一组矩阵** —— 同代 20MP 传感器，rawspeed 自己判定可以复用，不是我做的替代。
+
+**表里的每一条都必须是实测的，不能凭记忆写。** 编一个看起来合理的矩阵比不填更糟 —— 界面会声称"已表征"，喂给管线的却是虚构。（`read_dng_matrix.py` 仍然保留：rawspeed 里没有的机身，可以用 Adobe DNG Converter 转一张再读出来。）
+
+**全表校验**：1269 条全部产出良态变换 —— 无退化矩阵、无异常对角元、中性轴保持到 1e-6。
 
 **推导过程有个陷阱，值得记下来。** 从 ColorMatrix2 得到 camera→sRGB，必须先把矩阵按 D65 白点做行归一化（让相机把 D65 白看成 (1,1,1)）**再求逆**，即 dcraw 的 `cam_xyz_coeff` 过程。看起来更直接的做法 —— 先算完 camera→sRGB 再把结果的行归一化到和为 1 —— 是错的：它同样能让行和为 1、也同样保持中性轴，**表面上完全正常**，但非对角元会严重偏离。在一组实测值上，绿行给出 `(-1.51, 5.31, -2.80)`，正确值是 `(-0.19, 1.79, -0.60)`。
 
-推导与取值方式都已用 LibRaw 认识的机身反证：把 rawspeed 里 **E-M5 Mark III** 的条目喂进本模块的推导，结果与 LibRaw 自己的 `rgb_cam` 吻合到 **1.03e-4**（float32 存储精度）。同一条路取出的 OM-5 条目因此可信。
+推导与取值方式都已用 LibRaw 认识的机身反证：把 rawspeed 里 **E-M5 Mark III** 的条目喂进本模块的推导，结果与 LibRaw 自己的 `rgb_cam` 吻合到 **1.03e-4**（float32 存储精度）。同一条路取出的其余 1268 条因此可信。后备表只在 LibRaw 返回单位阵时才接管，所以 LibRaw 认识的机身仍走它自己的矩阵，两者不会打架。
 
 实测 OM-5：色度展宽 **1.324×**，逐色相 1.144–1.529，中性轴逐位不动。
 
@@ -110,6 +116,8 @@ MODEL 2  γ + 代表性染料串扰
 预览此前是"sRGB 编码后直接送屏"，中间没有任何色彩管理 —— `WriteableBitmap` 不带 ICC，Avalonia 也不做显示器变换。因此在广色域屏上看到的一直偏艳，这与本次改动无关，是既有事实。
 
 现在底部工具条有「软打样」下拉：选中某个空间后，预览会走 sRGB → 该空间（含 gamut mapping）→ 回 sRGB 的往返，屏幕上呈现的就是导出到该空间会得到的样子。默认关闭，只影响预览，不影响导出文件，也不写进工程。
+
+**只列出比 sRGB 窄的空间。** 软打样展示的是目标色域"装不下"的部分，而 Adobe RGB 与 Display P3 都比 sRGB **宽** —— 反转结果目前就落在 sRGB 里，往返它们实测最大变化 **0.000023**（不到 8-bit 的一级），即完全看不出变化。曾经把它们列进选项，结果是一个切换了却毫无反应的控件；现已移除，等工作空间加宽后再放回来。Endura（0.119）与 Kodak 2383（0.103）确有可见差异，保留。
 
 尚未做的：工作空间本身仍是隐含的 sRGB。要让 gamut mapping 在导出时真正起作用，仍需把工作空间加宽 —— 但如上所述，那一步的前提是先重做 Stage 2 的 display-referred 假设，不是简单换个标签。
 

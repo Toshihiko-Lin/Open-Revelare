@@ -574,10 +574,8 @@
 
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '软打样'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" SelectedIndex="{Binding SoftProofIndex}" VerticalAlignment="Center"
-                                  ToolTip.Tip="{i18n:T '在屏幕上模拟导出到某个色彩空间的样子：超出该色域的颜色会按导出时的方式收进来。只影响预览，不影响导出文件。'}">
+                                  ToolTip.Tip="{i18n:T '在屏幕上模拟导出到某个色彩空间的样子：超出该色域的颜色会按导出时的方式收进来。只影响预览，不影响导出文件。只列出比 sRGB 窄的空间——Adobe RGB / Display P3 比 sRGB 宽，而反转结果目前就落在 sRGB 里，模拟它们不会有任何变化。'}">
                             <ComboBoxItem Content="{i18n:T '关（直接看 sRGB）'}" />
-                            <ComboBoxItem Content="Adobe RGB" />
-                            <ComboBoxItem Content="Display P3" />
                             <ComboBoxItem Content="{i18n:T 'Kodak Endura Premier（相纸）'}" />
                             <ComboBoxItem Content="{i18n:T 'Kodak 2383（拷贝片）'}" />
                         </ComboBox>
