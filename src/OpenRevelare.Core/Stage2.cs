@@ -21,8 +21,39 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Stage2
 {
-    private const float LumaR = 0.2126f, LumaG = 0.7152f, LumaB = 0.0722f;
+    /// <summary>
+    /// Luminance weights — the Y row of the WORKING SPACE's RGB→XYZ matrix, not a constant.
+    ///
+    /// These were hardcoded to sRGB's 0.2126/0.7152/0.0722. That is correct only while the
+    /// working space IS sRGB: ACEScg's are 0.2722/0.6741/0.0537, so the same code would compute
+    /// the wrong luminance the moment the space widened, silently mis-weighting highlights,
+    /// shadows, hue-preserving curves and saturation all at once.
+    ///
+    /// Derived rather than tabulated so the two can never drift apart: change
+    /// <see cref="ColorPipeline.Working"/> and these follow.
+    /// </summary>
+    private static readonly float LumaR, LumaG, LumaB;
+
+    static Stage2()
+    {
+        double[,] toXyz = ColorPipeline.Working.ToXyz();
+        LumaR = (float)toXyz[1, 0];
+        LumaG = (float)toXyz[1, 1];
+        LumaB = (float)toXyz[1, 2];
+    }
     private const float HsGammaStrength = 1.2f;
+
+    /// <summary>
+    /// Companding for the tone-curve step. Curves are authored against a perceptual ramp — a
+    /// control point at 0.5 should sit at mid-grey, not at half the linear light — so the data is
+    /// encoded before sampling and decoded after.
+    ///
+    /// This is a working-space property in principle, but 2.2 is deliberately kept as a plain
+    /// constant rather than derived: it defines what the user's saved curve points MEAN. Deriving
+    /// it would silently reinterpret every stored curve the moment the working space changed,
+    /// which is a data-compatibility break disguised as a refactor. If the working space widens,
+    /// this stays 2.2 and curves keep their meaning.
+    /// </summary>
     private const float Gamma = 2.2f, InvGamma = 1.0f / 2.2f;
     private const int CurveLutSize = 256;
 
@@ -154,9 +185,19 @@ public static class Stage2
                 r *= scale; g *= scale; bl *= scale;
             }
 
-            // 6 — tone curves, in gamma-2.2 encoded space
+            // 6 — tone curves, in gamma-2.2 encoded space.
+            //
+            // Values outside [0,1] are carried THROUGH rather than truncated. The curve is only
+            // defined on [0,1], so out-of-range samples keep their original value and rejoin
+            // afterwards; clamping them here (as this did) destroyed exactly the headroom a
+            // wider working space exists to provide — an ACEScg red lands at 1.23 in sRGB terms,
+            // and truncating it before the curve throws that away permanently.
+            //
+            // Negatives are still floored: Pow of a negative base is NaN, and a negative here
+            // means the colour left the gamut entirely, which the output stage handles.
             if (doCurves)
             {
+                float kr = r > 1.0f ? r : 0.0f, kg = g > 1.0f ? g : 0.0f, kb = bl > 1.0f ? bl : 0.0f;
                 float cr = (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
                 float cg = (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
                 float cb = (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
@@ -181,9 +222,11 @@ public static class Stage2
                 if (lutG != null) cg = SampleLut(lutG, cg);
                 if (lutB != null) cb = SampleLut(lutB, cb);
 
-                r = Math.Clamp((float)Math.Pow(cr, Gamma), 0.0f, 1.0f);
-                g = Math.Clamp((float)Math.Pow(cg, Gamma), 0.0f, 1.0f);
-                bl = Math.Clamp((float)Math.Pow(cb, Gamma), 0.0f, 1.0f);
+                // Restore anything that was above 1.0 on the way in: the curve had nothing to
+                // say about it, so it passes through untouched rather than being flattened.
+                r = kr > 0.0f ? kr : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
+                g = kg > 0.0f ? kg : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
+                bl = kb > 0.0f ? kb : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
             }
 
             // 7 — saturation
