@@ -646,6 +646,26 @@
                                 </Expander>
 
                                 <!-- 片基去色罩 -->
+                                <!-- 通道串扰补偿 -->
+                                <Expander Header="{i18n:T '通道串扰补偿'}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{i18n:T '三层染料的吸收带与传感器通带必然重叠，逐通道操作（片基、黑白场）到不了这部分色度。补偿的方向由 18 组实测标定求得（单一方向解释 99% 方差，跨扫描仪、跨染料、跨工艺成立）；份量则是选择，不是测量——底片本身不携带这个信息。'}" />
+                                        <ComboBox Name="CrosstalkBox" HorizontalAlignment="Stretch"
+                                                  SelectedIndex="{Binding CrosstalkPresetIndex}">
+                                            <ComboBoxItem Content="{i18n:T '关闭（沿用 chroma_grade）'}" />
+                                            <ComboBoxItem Content="{i18n:T '中性——仅修正形状，不改浓淡'}" />
+                                            <ComboBoxItem Content="{i18n:T 'Portra 风格（更柔）'}" />
+                                            <ComboBoxItem Content="{i18n:T '柔和'}" />
+                                            <ComboBoxItem Content="{i18n:T '中位数'}" />
+                                            <ComboBoxItem Content="{i18n:T 'Gold 风格（更浓）'}" />
+                                            <ComboBoxItem Content="{i18n:T '浓郁'}" />
+                                        </ComboBox>
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{Binding CrosstalkStatus}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Expander>
+
                                 <Expander Header="{i18n:T '片基去色罩（T_base / D_max）'}" IsExpanded="True">
                                     <StackPanel Spacing="2">
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseText}"

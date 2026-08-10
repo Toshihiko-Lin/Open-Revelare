@@ -238,6 +238,34 @@ public partial class MainViewModel : ViewModelBase
     private double _chromaGrade = 3.05;
 
     /// <summary>
+    /// Crosstalk compensation preset: 0 = off (chroma_grade's historical behaviour), otherwise
+    /// index+1 into <see cref="C41Crosstalk.Presets"/>. A view-level choice, applied per roll.
+    /// </summary>
+    private int _crosstalkPresetIndex;
+
+    public int CrosstalkPresetIndex
+    {
+        get => _crosstalkPresetIndex;
+        set
+        {
+            int v = Math.Clamp(value, 0, C41Crosstalk.Presets.Count);
+            if (_crosstalkPresetIndex == v) return;
+            _crosstalkPresetIndex = v;
+            OnPropertyChanged(nameof(CrosstalkPresetIndex));
+            OnPropertyChanged(nameof(CrosstalkStatus));
+            MarkRollDirty();
+            ScheduleRender();
+        }
+    }
+
+    /// <summary>One line describing what the current preset does and where its number came from.</summary>
+    public string CrosstalkStatus => _crosstalkPresetIndex == 0
+        ? Loc.T("关闭：沿用 chroma_grade 的历史行为。")
+        : C41Crosstalk.Presets[_crosstalkPresetIndex - 1] is var p
+            ? Loc.F($"k = {p.K:+0.0000;-0.0000}，色度 ×{p.ChromaGain:F3}｜{p.Source}")
+            : "";
+
+    /// <summary>
     /// The frame's own rect within its source file, or null when the frame owns the whole file.
     /// Split frames only — on an ordinary frame the file IS the frame.
     ///
@@ -1162,7 +1190,14 @@ public partial class MainViewModel : ViewModelBase
         TBase = TBaseArr(),
         WbOffset = WbOffArr(),
         WbHigh = WbHighArr(),
-        ChromaGrade = _chromaGrade,
+        // A preset REPLACES chroma_grade rather than modulating it, so chroma_grade goes to 1.
+        // The eighteen measured calibrations carry total chroma gains of x0.70 to x1.34; 3.05
+        // sits far outside that entire range. Keeping it as a base would preserve exactly the
+        // over-amplification this is meant to retire — the pictures do get less saturated, and
+        // that is the correction, not a regression.
+        ChromaGrade = CrosstalkPresetIndex > 0 ? 1.0 : _chromaGrade,
+        CrosstalkStrength = CrosstalkPresetIndex > 0
+            ? C41Crosstalk.Presets[CrosstalkPresetIndex - 1].K : null,
         ScanExposureEv = ScanEv,
         Grade = Grade,
         Pivot = Pivot,
@@ -1549,7 +1584,14 @@ public partial class MainViewModel : ViewModelBase
         // and its gains are folded into wb_high, which then feeds a pipeline rendering at THIS
         // value. On a scan (1.0) a hard-coded 3.05 would solve wb_high in a colour basis the
         // renderer never produces.
-        ChromaGrade = _chromaGrade,
+        // A preset REPLACES chroma_grade rather than modulating it, so chroma_grade goes to 1.
+        // The eighteen measured calibrations carry total chroma gains of x0.70 to x1.34; 3.05
+        // sits far outside that entire range. Keeping it as a base would preserve exactly the
+        // over-amplification this is meant to retire — the pictures do get less saturated, and
+        // that is the correction, not a regression.
+        ChromaGrade = CrosstalkPresetIndex > 0 ? 1.0 : _chromaGrade,
+        CrosstalkStrength = CrosstalkPresetIndex > 0
+            ? C41Crosstalk.Presets[CrosstalkPresetIndex - 1].K : null,
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
