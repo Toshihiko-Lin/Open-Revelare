@@ -92,21 +92,24 @@ public sealed class FrameParams
     public double[,]? DecoupleChromaMatrix { get; set; }
 
     /// <summary>
-    /// Use the C-41 process crosstalk matrix (<see cref="C41Crosstalk.Direction"/>) in place of
-    /// chroma_grade's isotropic scalar. Off by default, so existing projects render unchanged.
+    /// Crosstalk compensation strength, or null to leave it off (the default, so existing
+    /// projects are untouched). 0 applies the coupling's shape with no net saturation change;
+    /// positive increases chroma, negative reduces it. See <see cref="C41Crosstalk"/>.
     ///
-    /// This is the structurally correct form of what chroma_grade approximates. The chroma C-41
-    /// loses is an inter-channel effect, so no per-channel operation reaches it and no scalar
-    /// describes it; measured across eight modelled stocks the relationship is one shared matrix
-    /// direction with a per-stock strength (cosine similarity 0.9957–0.9997, and giving each
-    /// stock its own matrix improves the fit by 0.1%). See docs/calibration/universal_crosstalk.py.
+    /// This replaces chroma_grade's role, and differs from it in the one way that matters: the
+    /// SHAPE is fixed by measurement (one direction explains 99% of the variance across eighteen
+    /// real calibrations, spanning scanners, dye sets and processes) while the AMOUNT is admitted
+    /// to be a choice. chroma_grade conflated the two into a single number and presented the
+    /// result as physics.
     ///
-    /// When on, <see cref="ChromaGrade"/> becomes the STRENGTH of that matrix rather than a
-    /// standalone multiplier — the direction is universal, the strength is where stock character
-    /// lives. Ignored on Path A rolls, whose <see cref="DecoupleChromaMatrix"/> already occupies
-    /// the same slot in the inversion and is solved for that roll's own light source.
+    /// Ignored on Path A rolls: their own decouple chroma matrix occupies the same slot in the
+    /// inversion and was solved for that roll's actual light source.
     /// </summary>
-    public bool UseC41Crosstalk { get; set; }
+    public double? CrosstalkStrength { get; set; }
+
+    /// <summary>Name of the preset <see cref="CrosstalkStrength"/> came from, for display and for
+    /// round-tripping the user's choice; null when set numerically.</summary>
+    public string? CrosstalkPreset { get; set; }
     /// <summary>Per-channel chroma amplification fed into inversion (chroma_grade ÷ amp); null = 1.
     /// IGNORED when <see cref="DecoupleChromaMatrix"/> is set — the two are alternatives, and the
     /// matrix already carries the amplification per chroma axis. Only callers without a matrix
@@ -179,7 +182,8 @@ public sealed class FrameParams
         DecoupleMatrix = DecoupleMatrix,
         DecoupleMode = DecoupleMode,
         DecoupleChromaMatrix = DecoupleChromaMatrix,
-        UseC41Crosstalk = UseC41Crosstalk,
+        CrosstalkStrength = CrosstalkStrength,
+        CrosstalkPreset = CrosstalkPreset,
         DecoupleChromaAmp = DecoupleChromaAmp,
         SprocketEnabled = SprocketEnabled,
         SprocketThreshold = SprocketThreshold,
