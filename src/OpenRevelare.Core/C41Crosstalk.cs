@@ -33,17 +33,11 @@ namespace OpenRevelare.Core;
 /// effect is universal and why compensating for it is a physical correction rather than a
 /// matter of taste.
 ///
-/// WHAT IS NOT UNIVERSAL: strength. The eighteen carry total chroma gains from x0.70 to x1.34 —
-/// twelve REDUCE chroma, six raise it, mean x0.97. Their consensus is "leave the amount alone",
-/// and there is no measured basis for a built-in boost. It also cannot be derived from the roll:
-/// the matrix has a luminance null space, so neutrals are unaffected by it at any strength
-/// (measured residual 2.22e-16 for k from 0.5 to 2.0), and neutrals are all that base-sampling
-/// and white-point setting can read. A negative cannot say how saturated its subject was — the
-/// same densities fit "pale red, strong crosstalk" and "deep red, weak crosstalk" equally. So
-/// strength is a declaration, not a measurement, and the presets below name whose declaration
-/// each one is. See docs/calibration/paper_free_crosstalk.py.
-///
-/// For scale: chroma_grade's 3.05 claims a gain of x3.05, outside the entire measured range.
+/// WHAT IS NOT UNIVERSAL: strength. Across the same eighteen it runs 0.99 to 1.89, varying with
+/// the scanner and with whoever solved it — the same film on the same scanner appears twice, at
+/// 1.41 and 1.79. Structurally it works out to target_chroma / negative_chroma, so it is set by
+/// which target one declares, not by the film. It stays a parameter; only the direction is fixed
+/// here. See docs/calibration/paper_free_crosstalk.py.
 /// </summary>
 public static class C41Crosstalk
 {
@@ -92,12 +86,6 @@ public static class C41Crosstalk
     /// <summary>
     /// Strength presets, each solved from one real calibration in DiVERE's config/matrices.
     ///
-    /// A preset REPLACES chroma_grade; it does not modulate it. The gains here are totals,
-    /// measured against applying no correction at all, and they span x0.70 to x1.34 — the whole
-    /// range the eighteen real calibrations occupy. chroma_grade's 3.05 claims x3.05, far outside
-    /// every one of them, so selecting a preset visibly reduces saturation compared to the old
-    /// default. That drop IS the correction.
-    ///
     /// These answer "in the style of WHICH roll" explicitly, rather than burying one roll's taste
     /// in a constant — which is how chroma_grade's 3.05 came to look like a law of C-41 when it
     /// was one stock's fit. Every entry here names its source and can be re-derived with
@@ -112,7 +100,7 @@ public static class C41Crosstalk
     /// </summary>
     public static readonly IReadOnlyList<Preset> Presets = new[]
     {
-        new Preset("neutral",  Neutral, 1.000, "shape only — no measured basis for any gain"),
+        new Preset("neutral",  Neutral, 1.000, "shape only — no measured basis for a boost"),
         new Preset("portra",   -0.3936, 0.723, "9000ed_pt160 — Portra 160 on Nikon 9000ED"),
         new Preset("soft",     -0.2956, 0.792, "9000ed_pt400 — Portra 400 on Nikon 9000ED"),
         new Preset("median",   -0.0928, 0.935, "median of all eighteen measured calibrations"),
