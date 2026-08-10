@@ -85,6 +85,14 @@ public static class Stage2
     /// for one table lookup per sample. Note this still runs when every op above is disabled.</param>
     public static void ApplyChain(float[] d, FrameParams cal, bool srgbExit = false)
     {
+        // Display-referred chain: scale light in linear, then encode, then do everything
+        // perceptual in the encoded space where its definitions actually hold.
+        if (cal.DisplayReferredStage2)
+        {
+            ApplyDisplayReferred(d, cal, srgbExit);
+            return;
+        }
+
         // ── Hoisted enables + per-op constants ───────────────────────────────────
         static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
 
@@ -248,6 +256,70 @@ public static class Stage2
 
             d[b] = r; d[b + 1] = g; d[b + 2] = bl;
         });
+    }
+
+    /// <summary>
+    /// The two-stage chain: linear-light operations, then the output encoding, then the
+    /// perceptual operations in display space.
+    ///
+    /// WHY THE SPLIT. Each Stage-2 operation is one of two kinds, and the old chain ran both
+    /// kinds in linear light:
+    ///
+    ///   • White balance and exposure SCALE LIGHT. A gain of 2 means twice the photons, which is
+    ///     a multiply in linear and nothing so simple once encoded — measured, linear 0.25×2
+    ///     encodes to 0.735, whereas doubling the encoded value clips to 1.0 outright.
+    ///   • Levels, contrast, highlights/shadows, curves and saturation are PERCEPTUAL. Contrast
+    ///     pivots on 0.5 meaning mid-grey; in linear light 0.5 is 73.5% display brightness, so
+    ///     the old chain rotated about a point well above mid-grey and crushed the shadows.
+    ///
+    /// Encoding once, in the middle, also removes the private gamma the curve step used to apply
+    /// and undo around itself — the data is already in the right space when the curve sees it,
+    /// so the curve simply samples it. That private round trip existed only because the encoding
+    /// happened too late.
+    /// </summary>
+    private static void ApplyDisplayReferred(float[] d, FrameParams cal, bool srgbExit)
+    {
+        static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
+
+        // ── Stage A: linear light ────────────────────────────────────────────────
+        bool doWb = !AllOne(cal.WbGains);
+        bool doExposure = cal.ExposureEv != 0.0;
+        if (doWb || doExposure)
+        {
+            float wb0 = (float)cal.WbGains[0], wb1 = (float)cal.WbGains[1], wb2 = (float)cal.WbGains[2];
+            float gain = (float)Math.Pow(2.0, cal.ExposureEv);
+            Parallel.For(0, d.Length / 3, p =>
+            {
+                int b = p * 3;
+                float r = d[b], g = d[b + 1], bl = d[b + 2];
+                if (doWb) { r *= wb0; g *= wb1; bl *= wb2; }
+                if (doExposure) { r *= gain; g *= gain; bl *= gain; }
+                d[b] = r < 0f ? 0f : r;
+                d[b + 1] = g < 0f ? 0f : g;
+                d[b + 2] = bl < 0f ? 0f : bl;
+            });
+        }
+
+        // ── The encoding: linear → display. Everything below is defined here. ────
+        // Applied unconditionally, not only when srgbExit is set: the perceptual ops NEED the
+        // encoded domain to mean what they say. Under OutputIntent.None the caller passes
+        // srgbExit=false and Stage 2 does not run at all, so this cannot encode linear output.
+        Srgb.ApplyForwardInPlace(d);
+
+        // ── Stage B: display space ───────────────────────────────────────────────
+        var perceptual = cal.Clone();
+        perceptual.WbGains = new[] { 1.0, 1.0, 1.0 };
+        perceptual.ExposureEv = 0.0;
+        perceptual.DisplayReferredStage2 = false;      // run the op bodies, not this wrapper
+        ApplyChain(d, perceptual, srgbExit: false);    // already encoded; no exit TRC
+
+        // Final clamp. In the old chain the sRGB exit TRC came LAST and quietly bounded
+        // everything; here the encoding happens before the perceptual ops, so an op that
+        // overshoots has nothing after it. Contrast is the one that does — measured 1.049 on a
+        // 0.2 setting, because rotating about mid-grey lifts highlights above white by design.
+        // Display-encoded values have no meaning outside [0,1], so this is the correct place to
+        // resolve it rather than letting it reach the exporter.
+        Parallel.For(0, d.Length, i => d[i] = d[i] < 0f ? 0f : (d[i] > 1f ? 1f : d[i]));
     }
 
     private static float SampleLut(float[] lut, float x)

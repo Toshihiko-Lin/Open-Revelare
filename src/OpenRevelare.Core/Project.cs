@@ -214,6 +214,8 @@ public static class Project
             ["grade"] = p.Grade,
             ["pivot"] = p.Pivot,
             ["output_intent"] = p.OutputIntent == OutputIntent.Basic ? "basic" : "none",
+            // Absent = false: a project written before the Stage-2 rework keeps the old chain.
+            ["display_referred_stage2"] = p.DisplayReferredStage2,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["lensfun_override"] = null,                     // C# build has no lensfun
@@ -268,6 +270,7 @@ public static class Project
             Grade = d["grade"] is { } g ? g.GetValue<double>() : Dbl(d, "gamma", 1.65),
             Pivot = Dbl(d, "pivot", 0.9),
             OutputIntent = Str(d, "output_intent", "basic") == "none" ? OutputIntent.None : OutputIntent.Basic,
+            DisplayReferredStage2 = Bool(d, "display_referred_stage2", false),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),

@@ -45,6 +45,24 @@ public sealed class FrameParams
     /// <summary>"none" (linear) | "basic" (sRGB gamma).</summary>
     public OutputIntent OutputIntent { get; set; } = OutputIntent.Basic;
 
+    /// <summary>
+    /// Which Stage-2 semantics this roll uses. Default <c>true</c> for new rolls; projects saved
+    /// before the rework load as <c>false</c> and keep rendering exactly as they did.
+    ///
+    /// The rework splits Stage 2 by what each operation physically IS. White balance and exposure
+    /// scale light, so they are only correct in linear; everything after them — levels, contrast,
+    /// highlights/shadows, curves, saturation — is perceptual and is only meaningful once the
+    /// data is display-encoded. The old chain ran all seven in linear light and had each
+    /// perceptual op improvise its own encoding, which is why contrast pivoted on 0.5 while
+    /// linear 0.5 is 73.5% display brightness, and why the curve step encoded and decoded a
+    /// private gamma 2.2 that the sRGB exit then applied a second time.
+    ///
+    /// It is a version flag rather than a preference because the slider VALUES change meaning:
+    /// the same contrast number produces a different picture under each. Nothing about an
+    /// existing project can be reinterpreted safely, so it is pinned per roll.
+    /// </summary>
+    public bool DisplayReferredStage2 { get; set; } = true;
+
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
@@ -170,6 +188,7 @@ public sealed class FrameParams
         Grade = Grade,
         Pivot = Pivot,
         OutputIntent = OutputIntent,
+        DisplayReferredStage2 = DisplayReferredStage2,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
