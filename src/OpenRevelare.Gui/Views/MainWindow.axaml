@@ -564,7 +564,7 @@
                      the export button's flyout (and off 文件) instead of being three peers. -->
                 <Border Grid.Row="2" Padding="8,5" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出'}" Margin="2,0,8,0" />
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputIntentIndex}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T '基础 = sRGB gamma + 帧编辑；线性 = 跳过帧编辑与 sRGB（原始线性）'}">
@@ -572,7 +572,17 @@
                             <ComboBoxItem Content="{i18n:T '线性'}" />
                         </ComboBox>
 
-                        <Button Grid.Column="3" Name="ExportButton" Classes="primary" Click="OnExportClick"
+                        <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '软打样'}" Margin="16,0,8,0" />
+                        <ComboBox Grid.Column="3" SelectedIndex="{Binding SoftProofIndex}" VerticalAlignment="Center"
+                                  ToolTip.Tip="{i18n:T '在屏幕上模拟导出到某个色彩空间的样子：超出该色域的颜色会按导出时的方式收进来。只影响预览，不影响导出文件。'}">
+                            <ComboBoxItem Content="{i18n:T '关（直接看 sRGB）'}" />
+                            <ComboBoxItem Content="Adobe RGB" />
+                            <ComboBoxItem Content="Display P3" />
+                            <ComboBoxItem Content="{i18n:T 'Kodak Endura Premier（相纸）'}" />
+                            <ComboBoxItem Content="{i18n:T 'Kodak 2383（拷贝片）'}" />
+                        </ComboBox>
+
+                        <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
                                 ToolTip.Tip="{i18n:T '导出当前帧（Ctrl+E）'}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -580,7 +590,7 @@
                                 <TextBlock Text="{i18n:T '导出…'}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="4" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
+                        <Button Grid.Column="6" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
                                 CornerRadius="0,6,6,0" Padding="6,6" Margin="1,0,0,0"
                                 ToolTip.Tip="{i18n:T '整卷导出 / 印样'}">
                             <ctl:Icon Data="{StaticResource IcoChevron}" Width="12" Height="12"
@@ -634,6 +644,17 @@
                                                       IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
                                         </Grid>
                                         <TextBlock Classes="groupHint" Text="{Binding LccStatus}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 输入色彩表征 -->
+                                <Expander Header="{i18n:T '输入色彩表征'}">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Classes="groupHint"
+                                                   Text="{i18n:T '用相机自身的色彩矩阵把原生 RGB 映到 sRGB。相机 RAW 解码出来的是传感器自己的原色，此前管线直接当作 sRGB 使用——这正是 chroma_grade 当初要补的那一层，区别在于矩阵按色相各向异性地展开色度，而标量做不到。'}" />
+                                        <CheckBox Content="{i18n:T '启用（新建卷默认开启）'}"
+                                                  IsChecked="{Binding CharacteriseInput}" IsEnabled="{Binding HasImage}" />
+                                        <TextBlock Classes="groupHint" Text="{Binding InputCharacterisationStatus}" Margin="0,4,0,0" />
                                     </StackPanel>
                                 </Expander>
 

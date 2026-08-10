@@ -117,6 +117,56 @@ public static class RawDecode
     public static ImageBuffer DecodeRaw(string path, FbddMode fbdd = FbddMode.Off)
         => DecodeLibRaw(path, fbdd, halfSize: false);
 
+    /// <summary>
+    /// The camera's own colour matrix: linear camera-native RGB → linear sRGB, row-major 3×3.
+    /// Null when the file is not a RAW we can open, or the camera is not in LibRaw's database.
+    ///
+    /// This is the piece that makes the pipeline's colour input KNOWN rather than assumed.
+    /// <see cref="DecodeRaw(string, FbddMode)"/> decodes camera-native on purpose — the density
+    /// maths wants the sensor's own numbers, undisturbed — but that leaves the result in a space
+    /// whose primaries nothing had recorded. Calling the result "sRGB" was a label of
+    /// convenience, and it is precisely the gap chroma_grade grew into: with no characterised
+    /// input there was no conversion to perform, so a scalar was the only lever left.
+    /// See docs/CALIBRATION.md.
+    ///
+    /// LibRaw derives this from the camera's published colorimetry (its cam_xyz, composed with
+    /// XYZ→sRGB). Rows sum to 1, so a neutral in camera space stays neutral in sRGB — the
+    /// conversion changes chromaticity, never the grey axis, which is what makes it safe to
+    /// apply after t_base normalisation has already set the white.
+    /// </summary>
+    public static double[,]? CameraToSrgbMatrix(string path)
+    {
+        try
+        {
+            using RawContext ctx = RawContext.OpenFile(path);
+            ctx.Unpack();
+
+            var m = ctx.RgbCamera;
+            var result = new double[3, 3];
+            double sum = 0;
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                {
+                    result[r, c] = m[r, c];
+                    sum += Math.Abs(result[r, c]);
+                }
+
+            // An unknown camera leaves the matrix all-zero; an identity means LibRaw had nothing
+            // to say either. Both are "no characterisation available", not a usable transform.
+            if (sum < 1e-6) return null;
+            bool identity = true;
+            for (int r = 0; r < 3 && identity; r++)
+                for (int c = 0; c < 3; c++)
+                    if (Math.Abs(result[r, c] - (r == c ? 1.0 : 0.0)) > 1e-6) { identity = false; break; }
+
+            return identity ? null : result;
+        }
+        catch
+        {
+            return null;   // a colour probe must never break opening a file
+        }
+    }
+
     // NOTE: there is deliberately no public half-size DECODE entry point any more
     // (raw_decode.py::decode_raw_fast has no live C# counterpart). It existed and became
     // unreachable once the roll warm-up started sharing ONE full-quality decode between the

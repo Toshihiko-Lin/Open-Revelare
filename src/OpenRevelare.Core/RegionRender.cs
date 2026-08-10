@@ -156,7 +156,10 @@ public static class RegionRender
         // ── Geometry: one composed inverse map, output rect → source coordinate ──
         ImageBuffer outImg = MapGeometry(inverted, b.X0, b.Y0, frameW, frameH, cal, rect);
 
-        // ── Stage 2 + sRGB (pointwise; no region dependence) ─────────────────────
+        // ── Input characterisation + Stage 2 + sRGB (pointwise; no region dependence) ──
+        // Must mirror Pipeline.ProcessFrame exactly, or the preview stops predicting the export.
+        if (cal.InputToSrgbMatrix is double[,] inputMatrix)
+            ColorMatrix.ApplyInPlace(outImg.Data, inputMatrix);
         if (cal.OutputIntent == OutputIntent.Basic)
             Stage2.ApplyChain(outImg.Data, cal, srgbExit: true);
         return (outImg, realised);

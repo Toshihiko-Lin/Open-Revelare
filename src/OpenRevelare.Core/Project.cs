@@ -22,6 +22,18 @@ public static class Project
     {
         public string InputType = "raw";      // "raw" | "tiff"
         public string SourcePath = "B";       // "A" (RGB light) | "B" (white light)
+
+        /// <summary>
+        /// Whether this roll converts camera-native RGB into sRGB using the camera's own matrix
+        /// (<see cref="RawDecode.CameraToSrgbMatrix"/>).
+        ///
+        /// Absent from the file = false, which is what every project written before input
+        /// characterisation existed looks like. That is deliberate: characterising the input
+        /// visibly changes colour (it expands chroma, per hue), so switching it on under an
+        /// existing project would silently re-render work the user had already finished. New
+        /// rolls get it on; old rolls keep what they had until the user opts in.
+        /// </summary>
+        public bool CharacteriseInput;
         public bool? TiffIsLinear;
         public string? CalSourcePath;         // Path-A calibration directory
         public Dictionary<string, string>? CalRgbPaths;   // {"R":…,"G":…,"B":…}
@@ -144,6 +156,7 @@ public static class Project
             ["input_type"] = rm.InputType,
             ["source_path"] = rm.SourcePath,
             ["tiff_is_linear"] = rm.TiffIsLinear,
+            ["characterise_input"] = rm.CharacteriseInput,
         };
         if (rm.CalSourcePath is not null) d["cal_source_path"] = rm.CalSourcePath;
         if (rm.CalRgbPaths is not null)
@@ -174,6 +187,9 @@ public static class Project
         return new RollMeta
         {
             InputType = Str(d, "input_type", "raw"),
+            // Default FALSE, not true: a project written before this existed must keep rendering
+            // exactly as it did. See RollMeta.CharacteriseInput.
+            CharacteriseInput = Bool(d, "characterise_input", false),
             SourcePath = Str(d, "source_path", "B"),
             TiffIsLinear = d["tiff_is_linear"]?.GetValue<bool>(),
             CalSourcePath = d["cal_source_path"]?.GetValue<string>(),

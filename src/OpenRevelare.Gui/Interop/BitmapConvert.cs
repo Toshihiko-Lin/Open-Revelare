@@ -14,10 +14,37 @@ namespace OpenRevelare.Gui.Interop;
 /// </summary>
 public static class BitmapConvert
 {
+    /// <summary>
+    /// Soft-proof target: when set, every preview is re-rendered through this space and back to
+    /// sRGB, so the screen shows what exporting to it would look like. Null = off, the direct
+    /// path, which is what the app has always done.
+    ///
+    /// A static rather than a parameter because it must apply to every preview surface at once —
+    /// main view, thumbnails, sharp patches — and threading it through eight call sites would
+    /// invite the one that got missed. It is read on render threads and written from the UI
+    /// thread; a torn read is impossible for a reference-sized field and the worst case is one
+    /// frame rendered against the previous setting, which the follow-up render corrects.
+    /// </summary>
+    public static ColorSpaceDef? SoftProof;
+
     /// <summary>sRGB-encoded [0,1] interleaved RGB → 8-bit Bgra8888 WriteableBitmap.
     /// Safe to call off the UI thread (a WriteableBitmap is not a control).</summary>
     public static WriteableBitmap ToBitmap(ImageBuffer srgb)
     {
+        if (SoftProof is ColorSpaceDef proof)
+        {
+            // Round-trip in LINEAR light: decode once, sRGB → target (gamut-mapped) → back to
+            // sRGB, encode once. The outbound leg discards what the target cannot hold; the
+            // return leg puts the survivors back on a screen that assumes sRGB. Going through
+            // the encoded helpers instead would apply the TRC twice.
+            var copy = (float[])srgb.Data.Clone();
+            Srgb.ApplyInverseInPlace(copy);
+            OutputRender.Convert(copy, ColorSpaces.Srgb, proof, GamutMapping.Desaturate);
+            OutputRender.Convert(copy, proof, ColorSpaces.Srgb, GamutMapping.Desaturate);
+            Srgb.ApplyForwardInPlace(copy);
+            srgb = new ImageBuffer(srgb.Width, srgb.Height, copy);
+        }
+
         int w = srgb.Width, h = srgb.Height;
         var bmp = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96),
                                       PixelFormat.Bgra8888, AlphaFormat.Opaque);
