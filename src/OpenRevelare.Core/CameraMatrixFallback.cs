@@ -24,8 +24,19 @@ public static class CameraMatrixFallback
     private static readonly Dictionary<string, double[,]> ColorMatrix2 =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            // Populated from measured DNG tags — see AddFromDng in the calibration notes.
-            // (Empty until a real matrix is read out of a converted file.)
+            // OM System OM-5 — from rawspeed's cameras.xml (darktable), which publishes the same
+            // ColorMatrix Adobe ships, as integers scaled by 10000. Extraction verified against a
+            // body LibRaw DOES know: feeding rawspeed's E-M5 Mark III entry through the derivation
+            // below reproduces LibRaw's own rgb_cam to 1.03e-4, i.e. float32 storage precision.
+            //
+            // LibRaw reports this body as make "OM Digital" (not the file's own
+            // "OM Digital Solutions"), so that is the key that has to match.
+            ["OM Digital OM-5"] = new[,]
+            {
+                {  1.1896, -0.5110, -0.1076 },
+                { -0.3181,  1.1378,  0.2048 },
+                { -0.0519,  0.1224,  0.5166 },
+            },
         };
 
     /// <summary>D65 white as XYZ — the illuminant DNG's ColorMatrix2 is defined against.</summary>
