@@ -57,6 +57,19 @@ MODEL 2  γ + 代表性染料串扰
 
 因此方向是做真正的色彩空间渲染：工作空间（默认 ACEScg，色域足够大，中间步骤不裁信息）+ 可选输出空间（sRGB / AdobeRGB / DisplayP3 / Endura Premier / Kodak 2383）+ gamut mapping。渲染到相纸色域会以正确的方式给出相纸观感，`chroma_grade` 随之失去存在理由。
 
-`ColorSpaces.cs` 是这一步的地基，矩阵已对照公开参考值验证（sRGB / AdobeRGB / ACEScg 的 RGB→XYZ 均吻合到 6 位小数，往返为单位阵，白点跨 D65/D60 适配后仍映到白）。
+## 色彩空间渲染的现状
 
-**兼容性**：现存工程文件里存着 `chroma_grade: 3.05`，载入时保持原值不变，输出与从前一致 —— 不静默改变用户已完成的作品。
+已落地的部分：
+
+- **`ColorSpaces.cs`** —— 六个空间的原色定义（sRGB / AdobeRGB / DisplayP3 / ACEScg / Endura Premier / Kodak 2383，取自 DiVERE）与 Bradford 白点适配。矩阵对照公开参考值验证：三个标准空间的 RGB→XYZ 吻合到 6 位小数，往返为单位阵，跨 D65/D60 白点适配后白仍映到白。
+- **`OutputRender.cs`** —— 色域变换 + gamut mapping（`Desaturate` 保色相保亮度，`Clip` 逐通道截断）+ 各空间的编码曲线。`FromSrgbEncoded` 处理管线已经烘进 sRGB TRC 的情况：逆变换回线性、变换、再按目标空间编码；sRGB 目标是逐位不变的 no-op。
+- **`IccProfiles.Build(ColorSpaceDef)`** —— 为任意注册空间生成 ICC，D50 适配后的原色由色度坐标推导。sRGB / AdobeRGB 仍走原有硬编码路径，产物逐字节不变。
+- **导出对话框**与 CLI `--color-space` 提供选择，嵌入的 Profile 与实际写入的像素一致。
+
+验证覆盖：色域变换的往返、中性轴保持中性、in-gamut 像素不被 mapper 触碰、窄化方向上 desaturate 的亮度误差为 0 而 clip 会抬高亮度、ICC gamma 标签与 `Encode()` 实际施加的曲线一致、以及 TIFF/JPEG 落盘后 Profile 确实嵌入且正确。
+
+**一个当前的实情**：gamut mapping 选项目前是**惰性的**，已在界面上禁用并注明。原因是所有可选目标空间都比 sRGB 宽，而反转结果目前就落在 sRGB 里，不存在超出色域的颜色。它要到工作空间换成 ACEScg 之后才开始起作用 —— 那正是下一步。
+
+尚未做的：工作空间本身仍是隐含的 sRGB。把它换成 ACEScg 才能让 `chroma_grade` 真正退场，也才能让 gamut mapping 有意义。
+
+**兼容性**：现存工程文件里存着 `chroma_grade: 3.05`，载入时保持原值不变；导出色彩空间默认 sRGB，即默认路径与从前逐位一致 —— 不静默改变用户已完成的作品。

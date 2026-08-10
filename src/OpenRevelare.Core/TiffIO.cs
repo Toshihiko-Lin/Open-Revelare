@@ -314,10 +314,24 @@ public static class TiffIO
     /// the call sites.</summary>
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode = CompressionMode.Lzw,
                                     ColorSpace? iccSpace = null, string? description = null)
+        => ExportFile.Write(path, target => WriteTiff16(img, target,
+               mode, iccSpace is ColorSpace c ? Legacy(c) : null, description));
+
+    /// <summary>
+    /// As above, embedding the profile of any registered space. The caller is responsible for
+    /// having actually rendered the pixels into <paramref name="iccSpace"/> — see
+    /// <see cref="OutputRender"/>; a profile that disagrees with the data is worse than none.
+    /// </summary>
+    public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode,
+                                    ColorSpaceDef? iccSpace, string? description = null)
         => ExportFile.Write(path, target => WriteTiff16(img, target, mode, iccSpace, description));
 
+    /// <summary>Bridges the two-value legacy enum onto the registry.</summary>
+    internal static ColorSpaceDef Legacy(ColorSpace c) =>
+        c == ColorSpace.AdobeRgb ? ColorSpaces.AdobeRgb : ColorSpaces.Srgb;
+
     private static void WriteTiff16(ImageBuffer img, string path, CompressionMode mode,
-                                    ColorSpace? iccSpace, string? description)
+                                    ColorSpaceDef? iccSpace, string? description)
     {
         Compression compression = mode switch
         {
@@ -344,7 +358,7 @@ public static class TiffIO
             tif.SetField(TiffTag.PREDICTOR, Predictor.HORIZONTAL); // improves 16-bit compression
         tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
 
-        if (iccSpace is ColorSpace cs)
+        if (iccSpace is ColorSpaceDef cs)
         {
             byte[] icc = IccProfiles.Build(cs);
             tif.SetField(TiffTag.ICCPROFILE, icc.Length, icc);

@@ -76,11 +76,27 @@
 
             <!-- ── 色彩 ─────────────────────────────────────────────── -->
             <StackPanel Spacing="4">
-                <TextBlock Text="{i18n:T '色彩'}" FontWeight="SemiBold" />
-                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 sRGB ICC 配置文件'}"
+                <TextBlock Text="{i18n:T '色彩空间'}" FontWeight="SemiBold" />
+                <ComboBox Name="ColorSpaceBox" HorizontalAlignment="Stretch"
+                          SelectionChanged="OnColorSpaceChanged" />
+                <TextBlock Classes="groupHint" Name="ColorSpaceHint" TextWrapping="Wrap" />
+
+                <Grid Name="GamutRow" ColumnDefinitions="Auto,*" Margin="0,6,0,0">
+                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '超出色域的颜色'}"
+                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox Grid.Column="1" Name="GamutBox" HorizontalAlignment="Stretch"
+                              SelectionChanged="OnAnyChanged">
+                        <ComboBoxItem Content="{i18n:T '降饱和收进色域（保色相，推荐）'}" />
+                        <ComboBoxItem Content="{i18n:T '逐通道截断（快，可能偏色相）'}" />
+                    </ComboBox>
+                </Grid>
+                <TextBlock Classes="groupHint"
+                           Text="{i18n:T '暂时用不上：上面每个空间都比 sRGB 宽，而反转结果目前就落在 sRGB 里，不会有颜色超出。等工作空间换成 ACEScg 之后这一项才开始起作用。'}" />
+
+                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}" Margin="0,6,0,0"
                           IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
-                           Text="{i18n:T '输出意图为 NONE（线性）时不写入任何配置文件——手上这份数据不是 sRGB，贴上标签只会误导下游。'}" />
+                           Text="{i18n:T '输出意图为 NONE（线性）时，色彩空间选择与配置文件都不生效——手上这份数据是线性的，转换或贴标签都会误导下游。'}" />
             </StackPanel>
 
             <!-- ── 重名 ─────────────────────────────────────────────── -->

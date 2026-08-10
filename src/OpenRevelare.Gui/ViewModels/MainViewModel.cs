@@ -3150,10 +3150,23 @@ public partial class MainViewModel : ViewModelBase
         // whereas shrinking the negative first would throw away detail the render still needed
         // — and would move every Stage-1 measurement with it.
         ImageBuffer outImg = opt.Downsample ? Resample.Box(img, opt.MaxLongEdge) : img;
-        // NONE intent writes linear data. No profile offered here describes that, so an "embed"
-        // request is honoured only where it would be true.
-        ColorSpace? icc = opt.EmbedIcc && p.OutputIntent == OutputIntent.Basic ? ColorSpace.Srgb : null;
-        if (opt.Format == ExportFormat.Jpeg) JpegIO.ExportJpeg(outImg, path, opt.JpegQuality, icc: icc);
+
+        // The colour-space choice only applies under BASIC, whose render is sRGB-encoded and can
+        // therefore be re-rendered into another space. NONE intent writes linear data: no profile
+        // offered here describes that, so both the conversion and the "embed" request are skipped
+        // rather than producing a file whose profile disagrees with its pixels.
+        // Rewrites outImg.Data in place. Safe: every caller hands over a buffer freshly rendered
+        // by Pipeline.ProcessFrame for this one export and drops it afterwards.
+        ColorSpaceDef? icc = null;
+        if (p.OutputIntent == OutputIntent.Basic)
+        {
+            ColorSpaceDef target = opt.ResolvedColorSpace;
+            OutputRender.FromSrgbEncoded(outImg.Data, target, opt.GamutMapping);
+            if (opt.EmbedIcc) icc = target;
+        }
+
+        if (opt.Format == ExportFormat.Jpeg)
+            JpegIO.ExportJpeg(outImg, path, opt.JpegQuality, null, icc);
         else TiffIO.ExportTiff16(outImg, path, opt.TiffCompression, icc);
     }
 

@@ -16,15 +16,13 @@ public enum ExportFormat
 /// Everything the export dialog decides. Persisted in settings.json, because an export preset is
 /// the kind of thing a person picks once and then wants every time.
 ///
-/// The list is deliberately shorter than it could be. Two options that a film exporter is
-/// normally expected to have are missing ON PURPOSE, because the code behind them is not there:
+/// Output colour space is a real choice now: <see cref="OutputRender"/> converts the working
+/// space into the destination gamut, maps what falls outside it, and applies that space's own
+/// encoding curve, so the embedded profile describes what was actually written. Before that
+/// existed the option was deliberately withheld — offering it would have attached an Adobe RGB
+/// profile to sRGB pixels, which is not a wider gamut but a mislabelled file.
 ///
-/// • Output colour space — <see cref="ColorSpace.AdobeRgb"/> has a profile builder, but the
-///   pipeline encodes pixels with the sRGB TRC under <see cref="OutputIntent.Basic"/> and there
-///   is no conversion step. Offering the choice would attach an Adobe RGB profile to sRGB pixels,
-///   which is not a wider gamut — it is a mislabelled file. So the choice is only whether to
-///   embed the profile that matches what was actually written.
-/// • Sharpening — there is no sharpening implementation to call.
+/// Sharpening is still absent on purpose: there is no sharpening implementation to call.
 ///
 /// Resizing is offered but honestly labelled: <see cref="Resample.Box"/> averages by an INTEGER
 /// factor, so it lands at or under the requested long edge rather than exactly on it.
@@ -39,10 +37,29 @@ public sealed class ExportOptions
 
     public int JpegQuality { get; set; } = 95;
 
-    /// <summary>Embed the sRGB profile describing what was written. Ignored under
+    /// <summary>Embed the profile describing what was written. Ignored under
     /// <see cref="OutputIntent.None"/>, whose output is linear and which no profile here
     /// describes.</summary>
     public bool EmbedIcc { get; set; } = true;
+
+    /// <summary>
+    /// Destination colour space, by <see cref="ColorSpaceDef.Name"/>. Stored as a string rather
+    /// than an enum so a project written by a newer build naming a space this one lacks falls
+    /// back to sRGB instead of failing to parse.
+    ///
+    /// sRGB is the default because it is what an unmanaged viewer assumes; the wider and the
+    /// print-emulating spaces are opt-in.
+    /// </summary>
+    public string ColorSpace { get; set; } = "sRGB";
+
+    /// <summary>How colours outside the destination gamut are handled. Only matters when the
+    /// destination is narrower than the source somewhere.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public GamutMapping GamutMapping { get; set; } = GamutMapping.Desaturate;
+
+    /// <summary>The resolved destination space; sRGB when the stored name is unknown.</summary>
+    [JsonIgnore]
+    public ColorSpaceDef ResolvedColorSpace => ColorSpaces.ByName(ColorSpace, ColorSpaces.Srgb);
 
     public bool Downsample { get; set; }
 
@@ -71,6 +88,7 @@ public sealed class ExportOptions
                 _ => "LZW",
             }}");
         string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
-        return $"{format} · {size}" + (EmbedIcc ? Loc.T(" · 嵌 sRGB") : "");
+        string space = ResolvedColorSpace.Name;
+        return $"{format} · {size} · {space}" + (EmbedIcc ? Loc.F($" · 嵌 {space}") : "");
     }
 }

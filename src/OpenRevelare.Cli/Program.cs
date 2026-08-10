@@ -442,23 +442,33 @@ static int Run(string[] args)
         }
         else
         {
-            // --color-space applies the working space's TRC and embeds its ICC. It is only
-            // meaningful on --intent none, where the pipeline hands us LINEAR data; with
-            // intent basic the sRGB TRC is already baked in, so we only tag it (mirroring
-            // export.py's already_encoded branch, which likewise ignores color_space).
-            ColorSpace? icc = null;
-            if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)
+            // --color-space names the destination gamut. Under intent basic the render arrives
+            // sRGB-encoded and is re-rendered into that space (OutputRender undoes the TRC,
+            // converts in linear light, re-encodes); under intent none the data is still linear,
+            // so it is converted from the working space and encoded once.
+            ColorSpaceDef? icc = null;
+            if (opts.TryGetValue("color-space", out var csName))
             {
-                icc = ColorSpace.Srgb;
-                if (opts.ContainsKey("color-space"))
-                    Console.WriteLine("note: --color-space ignored (intent basic already encodes sRGB)");
+                if (!ColorSpaces.All.TryGetValue(csName, out var target))
+                {
+                    Console.Error.WriteLine($"unknown --color-space '{csName}'. known: "
+                        + string.Join(", ", ColorSpaces.All.Keys));
+                    return 2;
+                }
+                if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)
+                    OutputRender.FromSrgbEncoded(outImg.Data, target);
+                else
+                {
+                    // The inversion's linear output carries sRGB primaries — that is the working
+                    // space the pipeline has always implicitly used, now named rather than assumed.
+                    OutputRender.Convert(outImg.Data, ColorSpaces.Srgb, target);
+                    OutputRender.Encode(outImg.Data, target);
+                }
+                icc = target;
             }
-            else if (opts.TryGetValue("color-space", out var csName))
+            else if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)
             {
-                icc = csName.Equals("adobergb", StringComparison.OrdinalIgnoreCase)
-                    ? ColorSpace.AdobeRgb : ColorSpace.Srgb;
-                if (icc == ColorSpace.AdobeRgb) Srgb.ApplyAdobeRgbInPlace(outImg.Data);
-                else Srgb.ApplyForwardInPlace(outImg.Data);
+                icc = ColorSpaces.Srgb;
             }
             opts.TryGetValue("description", out var desc);
             TiffIO.ExportTiff16(outImg, outPath, compress, icc, desc);

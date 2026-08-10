@@ -23,10 +23,19 @@ public static class JpegIO
     /// Save truncates the destination before it has anything to put there.</summary>
     public static void ExportJpeg(ImageBuffer img, string path, int quality = 95,
                                   string? description = null, ColorSpace? icc = null)
+        => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description,
+               icc is ColorSpace c ? TiffIO.Legacy(c) : null));
+
+    /// <summary>
+    /// As above, embedding the profile of any registered space. The caller must have rendered the
+    /// pixels into <paramref name="icc"/> already — see <see cref="OutputRender"/>.
+    /// </summary>
+    public static void ExportJpeg(ImageBuffer img, string path, int quality,
+                                  string? description, ColorSpaceDef? icc)
         => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description, icc));
 
     private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,
-                                  ColorSpace? icc)
+                                  ColorSpaceDef? icc)
     {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;
@@ -45,7 +54,7 @@ public static class JpegIO
         image.Metadata.ExifProfile = exif;
         // Same profile the TIFF path embeds, from the same builder — an export dialog that offers
         // one "embed ICC" switch must mean the same thing in both containers.
-        if (icc is ColorSpace cs)
+        if (icc is ColorSpaceDef cs)
             image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
                 IccProfiles.Build(cs));
 

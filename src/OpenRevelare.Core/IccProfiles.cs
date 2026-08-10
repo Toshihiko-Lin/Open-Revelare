@@ -54,6 +54,59 @@ public static class IccProfiles
         : Build("sRGB IEC61966-2.1 compatible — OpenRevelare", SrgbPrimaries, SrgbTrcTag());
 
     /// <summary>
+    /// Builds a matrix/TRC profile for any registered space, deriving the D50-adapted primaries
+    /// from its chromaticities rather than carrying a hard-coded table per space.
+    ///
+    /// sRGB and AdobeRGB keep going through <see cref="Build(ColorSpace)"/> above: their
+    /// hard-coded primaries are the exact values the reference profiles carry, and a byte-for-byte
+    /// match with what shipped before matters more for them than uniformity of construction.
+    /// Everything else — Display P3, ACEScg, the paper spaces — is generated here.
+    /// </summary>
+    public static byte[] Build(ColorSpaceDef space)
+    {
+        if (space.Name.Equals("sRGB", StringComparison.OrdinalIgnoreCase))
+            return Build(ColorSpace.Srgb);
+        if (space.Name.Equals("AdobeRGB", StringComparison.OrdinalIgnoreCase))
+            return Build(ColorSpace.AdobeRgb);
+
+        // The profile's rXYZ/gXYZ/bXYZ are the RGB→XYZ columns adapted to the D50 PCS.
+        double[,] toD50 = ColorSpaces.Mul(
+            ColorSpaces.Adaptation(space.White, D50White), space.ToXyz());
+
+        // Build() indexes [primary, component]; ToXyz() is [component, primary].
+        double[,] rows =
+        {
+            { toD50[0, 0], toD50[1, 0], toD50[2, 0] },
+            { toD50[0, 1], toD50[1, 1], toD50[2, 1] },
+            { toD50[0, 2], toD50[1, 2], toD50[2, 2] },
+        };
+
+        byte[] trc = space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase)
+            ? SrgbTrcTag()                                   // P3 shares sRGB's piecewise curve
+            : GammaTrcTag(OutputRender.EncodingGamma(space));
+
+        return Build($"{space.Name} — OpenRevelare", rows, trc);
+    }
+
+    /// <summary>D50 as chromaticity, for adapting a space's primaries into the ICC PCS.</summary>
+    private static readonly (double X, double Y) D50White = (0.34567, 0.35850);
+
+    /// <summary>
+    /// 'curv' holding a single u8Fixed8 gamma. Gamma 1.0 still goes through here rather than a
+    /// count-0 (identity) curve: an explicit 1.0 says "linear" to every CMM, whereas count-0 is
+    /// less widely handled.
+    /// </summary>
+    private static byte[] GammaTrcTag(double gamma)
+    {
+        var t = new List<byte>();
+        t.AddRange(Encoding.ASCII.GetBytes("curv"));
+        t.AddRange(UInt32Be(0));
+        t.AddRange(UInt32Be(1));
+        t.AddRange(UInt16Be((ushort)Math.Round(gamma * 256.0)));
+        return t.ToArray();
+    }
+
+    /// <summary>
     /// 'curv' with a single u8Fixed8 gamma. AdobeRGB's 563/256 is exactly representable
     /// there (563/256 × 256 = 563) — which is precisely why the spec picked that odd
     /// number rather than a round 2.2.
