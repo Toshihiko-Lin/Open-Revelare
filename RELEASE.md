@@ -6,10 +6,13 @@
 | 通道 | 谁在读 | 更新方式 |
 |---|---|---|
 | GitHub Releases API | 新版（≥1.0.0）能连上 github.com 的用户 | 打 tag，CI 自动建 draft，**人工点发布** |
-| Gitee Releases API | 新版（≥1.0.0）所有用户（race 模式，谁先回谁赢） | **人工**把 GitHub release 搬到 `Toshihiko-Lin/revelare-release` |
+| Gitee Releases API | 新版（≥1.0.0）所有用户 | **人工**把 GitHub release 搬到 `Toshihiko-Lin/revelare-release` |
 | `version.json` | **官网**（版号 + 6 个下载按钮）<br>+ 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
 
-新版客户端 (≥1.0.0) 两条 Release API 并发查、谁先响应谁赢，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
+新版客户端 (≥1.0.0) 两条 Release API 并发查、**两条都等**，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
+两边都有这一版时，弹窗同时给「前往下载」（GitHub）和「国内镜像下载」（Gitee），由用户自己选——
+能不能连上哪一边，检测这边判断不了（走代理的 GitHub 查得动 API，照样拉不动包）。
+只有一边应答时就只给那一边。版号以 GitHub 为准，Gitee 版号对不上（还没搬）时不给镜像按钮。
 旧版 (0.8.0) 仍走 `version.json`。
 
 > **`version.json` 不是只给 0.8.0 的。** `revelare.netlify.app` 的首页和 `/download` 页
@@ -63,7 +66,8 @@ git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <
       新建一个标签和 release，标签名与 GitHub 一致（例如 `v1.1.0`，带 v，与仓库现有的保持一致；
       客户端两种都认，`tag_name` 读进来会 `TrimStart('v')`），正文与 GitHub 一致，
       把 GitHub release 的几个包（setup.exe / AppImage / dmg）上传为附件。
-      新版客户端 (≥1.0.0) 会同时查询两个 API，谁先响应谁赢——搬到 Gitee 之后大陆用户才能收到通知。
+      新版客户端 (≥1.0.0) 会同时查询两个 API 并等齐两边——搬到 Gitee 之后大陆用户才能收到通知，
+      也才会在弹窗里看到「国内镜像下载」这个按钮（两边版号一致才给，见上表下方说明）。
 - [ ] 附件名保持 CI 产出的原名。客户端按**扩展名 + 架构**挑包
       （`.exe` / `.appimage` / `.dmg` 且匹配 `arm64`|`x86_64`，见 `Updater.PlatformAssetUrl`），
       不匹配产品名——Gitee 为每个 tag 自动生成的 `v1.1.0.zip` / `.tar.gz` 源码包因此会被跳过。

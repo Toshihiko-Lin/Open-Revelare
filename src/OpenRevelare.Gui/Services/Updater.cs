@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -19,10 +18,14 @@ namespace OpenRevelare.Gui.Services;
 /// </list>
 /// api.github.com is unreachable from much of mainland China, which is most of this project's
 /// users: on GitHub alone their check does not fail, it hangs and then silently gives up, and
-/// they never hear that a release happened. Reaching a mirror is also exactly what tells us the
-/// user can DOWNLOAD from it, so the link handed back is always the one from whichever mirror
-/// answered — sending someone to a github.com asset they cannot fetch would be no better than
-/// staying quiet.
+/// they never hear that a release happened.
+///
+/// BOTH links are handed back, not one. An earlier version raced the two and returned whichever
+/// answered first, preferring GitHub whenever it was done — which meant a reachable GitHub always
+/// won and the Gitee link was unreachable in practice, while users behind the block only saw Gitee
+/// because GitHub had burnt the whole timeout first. Reachability is not something this code can
+/// infer: a proxied GitHub answers the API fine and still cannot serve a release asset. So the
+/// notice offers both and lets the user pick, and <see cref="CheckAsync"/> waits for both.
 ///
 /// The two APIs are near enough identical — <c>tag_name</c>, a Markdown <c>body</c>, and an
 /// <c>assets</c> array of name + browser_download_url — that one parser reads both. Gitee tags
@@ -47,9 +50,18 @@ public static class Updater
     public const string GiteeLatestReleaseUrl = $"https://gitee.com/api/v5/repos/{GiteeRepo}/releases/latest";
     public const string GiteeReleasesPageUrl = $"https://gitee.com/{GiteeRepo}/releases/latest";
 
-    /// <summary><see cref="Changelog"/> is always PLAIN TEXT — release bodies are Markdown and
-    /// the notice dialog has no renderer, so flattening happens here rather than at the call site.</summary>
-    public sealed record UpdateInfo(string Version, string ReleaseDate, string DownloadUrl, string Changelog);
+    /// <summary>
+    /// <see cref="Changelog"/> is always PLAIN TEXT — release bodies are Markdown and the notice
+    /// dialog has no renderer, so flattening happens here rather than at the call site.
+    ///
+    /// <see cref="MirrorDownloadUrl"/> is the Gitee link and is empty when that mirror did not
+    /// answer, did not carry this version yet (it is copied across by hand, so it can lag), or
+    /// when Gitee is itself the source — in which case it is <see cref="DownloadUrl"/> that holds
+    /// the Gitee link. The notice shows a second button only when this is non-empty.
+    /// </summary>
+    public sealed record UpdateInfo(
+        string Version, string ReleaseDate, string DownloadUrl, string Changelog,
+        string MirrorDownloadUrl = "");
 
     /// <summary>
     /// Opens a URL in the user's browser — the C# stand-in for Python's <c>webbrowser.open</c>,
@@ -71,30 +83,32 @@ public static class Updater
     /// Asks both mirrors and returns a release only when it is newer than <paramref
     /// name="currentVersion"/>. 6 s for the background check at startup; the manual 检查更新…
     /// menu item passes 8 s.
+    ///
+    /// Waits for BOTH so the notice can offer both links. That costs a blocked GitHub its full
+    /// timeout, which is the price of not guessing which host the user can actually download
+    /// from — and the wait is unattended anyway: the startup check runs 3 s after the window is
+    /// already up, and the manual one shows 正在检查更新 …
     /// </summary>
     public static async Task<UpdateInfo?> CheckAsync(string currentVersion, int timeoutSec = 6)
     {
-        Task<UpdateInfo?> github = FromApiAsync(LatestReleaseUrl, ReleasesPageUrl, currentVersion, timeoutSec);
-        Task<UpdateInfo?> gitee = FromApiAsync(GiteeLatestReleaseUrl, GiteeReleasesPageUrl, currentVersion, timeoutSec);
+        UpdateInfo?[] found = await Task.WhenAll(
+            FromApiAsync(LatestReleaseUrl, ReleasesPageUrl, currentVersion, timeoutSec),
+            FromApiAsync(GiteeLatestReleaseUrl, GiteeReleasesPageUrl, currentVersion, timeoutSec));
+        UpdateInfo? github = found[0], gitee = found[1];
 
-        // A RACE, not Task.WhenAll. Where github.com is blocked it does not refuse the connection,
-        // it hangs until the timeout — so waiting for both would make every check in mainland
-        // China take the full 6 s (8 s on the manual one) even though Gitee answered in a fraction
-        // of that. Whoever finds a release first is the answer, and switching mirrors costs the
-        // user nothing they can see.
-        var pending = new List<Task<UpdateInfo?>> { github, gitee };
-        while (pending.Count > 0)
-        {
-            Task<UpdateInfo?> finished = await Task.WhenAny(pending);
-            pending.Remove(finished);
-            // GitHub is canonical, so it wins whenever it is already done — including the common
-            // case where both mirrors are reachable and answer within a few ms of each other.
-            if (github.IsCompleted && await github is { } canonical) return canonical;
-            if (await finished is { } info) return info;
-        }
-        return null;
-        // The loser keeps running to its own timeout and is dropped. It cannot throw: FromApiAsync
-        // swallows everything, so nothing is left unobserved.
+        // Neither mirror advertised anything newer — or neither answered. Same silence either way.
+        if (github is null && gitee is null) return null;
+
+        // GitHub is canonical, so its release notes and version are the ones shown when both
+        // answered; Gitee rides along as the second button. Where only Gitee answered it becomes
+        // the whole notice, with no second button to offer.
+        if (github is null) return gitee;
+        if (gitee is null) return github;
+
+        // Both answered. They are the same build unless the hand-copy to Gitee has not happened
+        // yet, in which case Gitee still advertises the previous release — offering that as a
+        // download for the version named in the notice would hand the user the wrong installer.
+        return github with { MirrorDownloadUrl = gitee.Version == github.Version ? gitee.DownloadUrl : "" };
     }
 
     /// <summary>

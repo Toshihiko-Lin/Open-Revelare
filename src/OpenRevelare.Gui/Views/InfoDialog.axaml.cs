@@ -46,6 +46,26 @@ public partial class InfoDialog : Window
         return this;
     }
 
+    private Action? _secondaryAction;
+
+    private void OnSecondaryActionClick(object? sender, RoutedEventArgs e)
+    {
+        _secondaryAction?.Invoke();
+        Close();
+    }
+
+    /// <summary>
+    /// Adds a third button, between 关闭 and the primary one — the update notice's 国内镜像下载.
+    /// Deliberately not IsDefault: Enter stays with <see cref="WithAction"/>'s button.
+    /// </summary>
+    public InfoDialog WithSecondaryAction(string label, Action action)
+    {
+        _secondaryAction = action;
+        SecondaryActionButton.Content = label;
+        SecondaryActionButton.IsVisible = true;
+        return this;
+    }
+
     private static string Version => Services.AppInfo.Version;
 
     // ONE translation entry, not thirty: the compiler folds these adjacent literals into a single

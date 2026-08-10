@@ -1630,7 +1630,12 @@ public partial class MainWindow : Window
         await ShowUpdateDialogAsync(info);
     }
 
-    /// <summary>The 发现新版本 notice — 前往下载 opens the download URL, 稍后再说 dismisses.</summary>
+    /// <summary>
+    /// The 发现新版本 notice — 前往下载 opens the download URL, 稍后再说 dismisses. When Gitee also
+    /// carries the release a 国内镜像下载 button sits beside them: which host a user can actually
+    /// reach is not something the check can tell (a proxied GitHub answers the API and still fails
+    /// on the asset), so both are offered rather than guessed at. See Services.Updater.
+    /// </summary>
     private async Task ShowUpdateDialogAsync(Services.Updater.UpdateInfo info)
     {
         // Already plain text whichever channel it came from — Updater flattens the manifest's
@@ -1641,6 +1646,8 @@ public partial class MainWindow : Window
             Loc.F($"，当前 {AppVersion}。\n\n") +
             (string.IsNullOrEmpty(changelog) ? "" : Loc.F($"更新说明：\n{changelog}\n\n")) +
             (string.IsNullOrEmpty(info.DownloadUrl) ? "" : Loc.F($"下载地址：\n{info.DownloadUrl}\n\n")) +
+            (string.IsNullOrEmpty(info.MirrorDownloadUrl)
+                ? "" : Loc.F($"国内镜像：\n{info.MirrorDownloadUrl}\n\n")) +
             // 三个平台的「怎么装」完全不同，别只写 Windows 的。链接本身也是按平台挑的，
             // 见 Updater.PlatformDownloadUrl。
             (OperatingSystem.IsMacOS()
@@ -1652,6 +1659,9 @@ public partial class MainWindow : Window
         var dlg = new InfoDialog(Loc.T("发现新版本"), body);
         if (!string.IsNullOrEmpty(info.DownloadUrl))
             dlg.WithAction(Loc.T("前往下载"), Loc.T("稍后再说"), () => Services.Updater.OpenUrl(info.DownloadUrl));
+        if (!string.IsNullOrEmpty(info.MirrorDownloadUrl))
+            dlg.WithSecondaryAction(Loc.T("国内镜像下载"),
+                                    () => Services.Updater.OpenUrl(info.MirrorDownloadUrl));
         await dlg.ShowDialog(this);
     }
 }
