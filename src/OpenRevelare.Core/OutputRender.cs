@@ -46,8 +46,19 @@ public static class OutputRender
                                GamutMapping mapping = GamutMapping.Desaturate)
     {
         if (from == to) return;
+        ApplyMatrix(data, ColorSpaces.Convert(from, to), to, mapping);
+    }
 
-        double[,] m = ColorSpaces.Convert(from, to);
+    /// <summary>
+    /// Applies an arbitrary 3×3 to interleaved linear RGB, gamut-mapping the result into
+    /// <paramref name="destination"/>'s range. Shared by <see cref="Convert"/> and by the input
+    /// characterisation step (<see cref="ColorMatrix.ApplyInPlace"/>), which needs exactly the
+    /// same out-of-range treatment for exactly the same reason — its matrix also has large
+    /// negative off-diagonals and also throws colour outside [0,1].
+    /// </summary>
+    public static void ApplyMatrix(float[] data, double[,] m, ColorSpaceDef destination,
+                                   GamutMapping mapping = GamutMapping.Desaturate)
+    {
         float m00 = (float)m[0, 0], m01 = (float)m[0, 1], m02 = (float)m[0, 2];
         float m10 = (float)m[1, 0], m11 = (float)m[1, 1], m12 = (float)m[1, 2];
         float m20 = (float)m[2, 0], m21 = (float)m[2, 1], m22 = (float)m[2, 2];
@@ -55,7 +66,7 @@ public static class OutputRender
         // Luminance weights OF THE DESTINATION space — the Y row of its RGB→XYZ matrix. Using
         // sRGB's familiar 0.2126/0.7152/0.0722 here would be wrong for any other destination:
         // the whole point is that these primaries are not sRGB's.
-        double[,] toXyz = to.ToXyz();
+        double[,] toXyz = destination.ToXyz();
         float ly = (float)toXyz[1, 0], lg = (float)toXyz[1, 1], lb = (float)toXyz[1, 2];
 
         Parallel.For(0, data.Length / 3, i =>
