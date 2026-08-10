@@ -55,24 +55,6 @@ public sealed class FrameParams
     /// <summary>Mean-normalised LCC flat field (from <see cref="Lcc.LoadFlatField"/>); null = off.
     /// Applied after distortion, before vignette. Resized to the frame if dimensions differ.</summary>
     public ImageBuffer? LccFlatField { get; set; }
-    /// <summary>
-    /// Input characterisation: linear camera-native RGB → linear sRGB, row-major 3×3. Null =
-    /// uncharacterised, the historical behaviour, where the decoded data was simply treated as
-    /// though it were already sRGB.
-    ///
-    /// Read from the camera's own colorimetry at import (<see cref="RawDecode.CameraToSrgbMatrix"/>)
-    /// and applied to the POSITIVE after inversion, not to the negative before it: the density
-    /// maths — t_base normalisation, wb_high/wb_offset, d_max — is calibrated against the sensor's
-    /// own numbers, and moving it into another space beforehand would invalidate every one of
-    /// those measurements. Rows sum to 1, so neutrals are untouched and the white the inversion
-    /// established survives the conversion.
-    ///
-    /// This is what makes the pipeline's colour input KNOWN. Measured on an E-M5 III, the matrix
-    /// expands chroma by about 1.32× and does so per hue (1.14–1.53 across the probes) — the same
-    /// job chroma_grade was doing with one isotropic scalar. See docs/CALIBRATION.md.
-    /// </summary>
-    public double[,]? InputToSrgbMatrix { get; set; }
-
     /// <summary>Path-A decouple matrix applied to the linear RAW before inversion (row-major
     /// 3×3, t_dec = t·Mᵀ); null = white-light passthrough. From import-time calibration.</summary>
     public double[,]? DecoupleMatrix { get; set; }
@@ -147,7 +129,6 @@ public sealed class FrameParams
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccFlatField,
-        InputToSrgbMatrix = InputToSrgbMatrix,
         DecoupleMatrix = DecoupleMatrix,
         DecoupleMode = DecoupleMode,
         DecoupleChromaMatrix = DecoupleChromaMatrix,

@@ -75,13 +75,6 @@ public static class Pipeline
         if (cal.CropRect != null)
             result = Geometry.ApplyCrop(result, cal.CropRect.Value);
 
-        // ── Input characterisation: camera-native → sRGB ──────────────────────
-        // After inversion, before Stage 2. Stage 2's operations are all defined against sRGB
-        // (contrast pivots on 0.5, the luma weights are sRGB's, curves clamp to [0,1]), so the
-        // conversion has to land before them for those definitions to hold.
-        if (cal.InputToSrgbMatrix is double[,] inputMatrix)
-            ColorMatrix.ApplyInPlace(result.Data, inputMatrix);
-
         // ── Output intent gate ────────────────────────────────────────────────
         if (cal.OutputIntent == OutputIntent.None)
             return result;

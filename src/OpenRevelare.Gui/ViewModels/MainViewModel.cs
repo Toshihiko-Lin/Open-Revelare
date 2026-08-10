@@ -631,7 +631,6 @@ public partial class MainViewModel : ViewModelBase
     /// Null for scans (their ICC path already characterises them) and for cameras LibRaw does
     /// not know, which is the historical uncharacterised behaviour.
     /// </summary>
-    private double[,]? _inputToSrgbMatrix;
 
     // Path A 分光解耦（卷级；导入时从 R/G/B 校正图算出，应用到整卷）
     private double[,]? _decoupleMatrix;
@@ -1154,7 +1153,6 @@ public partial class MainViewModel : ViewModelBase
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
-        InputToSrgbMatrix = _inputToSrgbMatrix,
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -1561,7 +1559,6 @@ public partial class MainViewModel : ViewModelBase
         // and rawDelta divides the net's log-gains BY that d_highlight — so if these two disagree
         // the mismatch is baked into every iteration. The input characterisation is here for the
         // same reason: the net judges colour, so it must judge it in the space the export uses.
-        InputToSrgbMatrix = _inputToSrgbMatrix,
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -3095,24 +3092,30 @@ public partial class MainViewModel : ViewModelBase
     private void RefreshInputCharacterisation()
     {
         string? raw = Frames.FirstOrDefault(f => !f.IsVirtual && RawDecode.IsRawExtension(f.Path))?.Path;
+
+        // The decoder is what characterises, so the flag has to be set BEFORE anything decodes —
+        // t_base and every other Stage-1 measurement is then sampled in one consistent space,
+        // exactly as the scanner path has always worked. Scans set it false: their ICC transform
+        // already did this job inside TiffIO, and a second conversion would double up.
+        RawDecode.CharacteriseInput = raw is not null && CharacteriseInput;
+
         if (raw is null)
         {
-            _inputToSrgbMatrix = null;
             InputCharacterisationStatus = Frames.Count == 0
                 ? ""
                 : Loc.T("扫描件：ICC 路径已完成表征，此项不适用。");
         }
         else if (!CharacteriseInput)
         {
-            _inputToSrgbMatrix = null;
             InputCharacterisationStatus = Loc.T("已关闭——按未表征的旧行为渲染。");
         }
         else
         {
-            _inputToSrgbMatrix = RawDecode.CameraToSrgbMatrix(raw, out string why);
-            InputCharacterisationStatus = _inputToSrgbMatrix is null
-                ? Loc.F($"无法表征，按旧行为渲染 — {why}。可用 Adobe DNG Converter 转一张，再跑 docs/calibration/read_dng_matrix.py 把矩阵加进内置后备表。")
-                : Loc.F($"已启用：{why}");
+            // Purely to report WHICH source the matrix comes from; the decoder applies it.
+            bool available = RawDecode.CameraToSrgbMatrix(raw, out string why) is not null;
+            InputCharacterisationStatus = available
+                ? Loc.F($"已启用：{why}")
+                : Loc.F($"无法表征，按未表征的旧行为渲染 — {why}。");
         }
     }
 

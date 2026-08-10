@@ -112,7 +112,33 @@ public static class RawDecode
         }
     }
 
-    /// <summary>Decode a RAW file to a linear-light, camera-native, UniWB float32 image.
+    /// <summary>
+    /// When true, decodes map camera-native RGB into linear sRGB using the camera's own
+    /// colorimetry — LibRaw's <c>output_color = 1</c> where it knows the body, and
+    /// <see cref="CameraMatrixFallback"/> where it does not.
+    ///
+    /// THIS IS THE ONLY CORRECT PLACE FOR IT, and the reason is ordering, not taste. The scanner
+    /// path has always characterised inside its decoder (TiffIO applies the ICC rXYZ/gXYZ/bXYZ
+    /// matrix while reading), so a scan reaches the pipeline already in linear sRGB and every
+    /// Stage-1 measurement — t_base, wb_high, wb_offset, d_max — is sampled in that one space.
+    /// Characterisation comes BEFORE calibration.
+    ///
+    /// Putting the camera matrix inside the pipeline instead cannot be made to work, and both
+    /// placements were tried on real film: after the inversion it drove 65.6% of realistic
+    /// colours negative, a hue shift concentrated on reds; before the inversion it destroyed the
+    /// density scale, because t_base and the other three measurements had been sampled in the
+    /// un-characterised space. Moving the matrix is a change of coordinate system, and the
+    /// decoder is the only point where the whole system changes at once.
+    ///
+    /// A static rather than a parameter because it must hold for EVERY decode a roll performs —
+    /// full frames, region slices, downsampled previews, the Path A calibration ROI means — and
+    /// threading a flag through six overloads is how one path gets missed and silently calibrates
+    /// in the wrong space. Set once per roll, before any decoding starts.
+    /// </summary>
+    public static bool CharacteriseInput { get; set; }
+
+    /// <summary>Decode a RAW file to a linear-light, UniWB float32 image — camera-native, or
+    /// linear sRGB when <see cref="CharacteriseInput"/> is set.
     /// <paramref name="fbdd"/> = pre-demosaic chroma noise reduction (default off, as before).</summary>
     public static ImageBuffer DecodeRaw(string path, FbddMode fbdd = FbddMode.Off)
         => DecodeLibRaw(path, fbdd, halfSize: false);
@@ -246,7 +272,10 @@ public static class RawDecode
                 p.UseCameraWb = false;
                 p.UseAutoWb = false;
                 p.UserMultipliers = new[] { 1f, 1f, 1f, 1f };       // UniWB (R,G,B,G2)
-                p.OutputColor = (LibRawColorSpace)0;                // 0 = raw / camera-native, no matrix
+                // 1 = sRGB (LibRaw applies the camera's own matrix), 0 = camera-native.
+                // Bodies LibRaw has no colorimetry for come out unchanged under 1; those are
+                // finished off with the fallback matrix in Process(), after the decode.
+                p.OutputColor = (LibRawColorSpace)(CharacteriseInput ? 1 : 0);
                 p.OutputBps = 16;
                 p.NoAutoBright = true;                              // no histogram stretch
                 p.UserQual = Algorithm(demosaic);                   // AHD, or PPG for previews
@@ -316,14 +345,77 @@ public static class RawDecode
                                           System.Drawing.Rectangle? regionInFrame = null)
     {
         ProcessedImage img;
+        double[,]? fallback = null;
         using (RawContext ctx = OpenAndProcess(path, fbdd, halfSize, demosaic, regionInFrame))
+        {
+            // LibRaw's output_color=1 is a no-op for a body it has no colorimetry for (verified:
+            // an OM-5 decodes byte-identically under 0 and 1). Detect that here, while the
+            // context is open, and finish the job with the fallback matrix below.
+            if (CharacteriseInput && IsUncharacterised(ctx))
+                fallback = CameraMatrixFallback.CameraToSrgb(ctx.ImageParams.Make,
+                                                             ctx.ImageParams.Model);
             img = ctx.MakeDcrawMemoryImage();
+        }
         if (img.Bits != 16)
         {
             img.Dispose();
             throw new NotSupportedException("expected 16-bit RAW output");
         }
+        if (fallback is not null) ApplyFallbackMatrix(img, fallback);
         return img;
+    }
+
+    /// <summary>
+    /// True when LibRaw has no colour matrix for this body, so <c>output_color = 1</c> left the
+    /// data camera-native. Its rgb_cam is the identity in exactly that case.
+    /// </summary>
+    private static bool IsUncharacterised(RawContext ctx)
+    {
+        try
+        {
+            var m = ctx.RgbCamera;
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                    if (Math.Abs(m[r, c] - (r == c ? 1.0f : 0.0f)) > 1e-6f) return false;
+            return true;
+        }
+        catch { return false; }   // unreadable → assume LibRaw handled it, do not double-convert
+    }
+
+    /// <summary>
+    /// Applies a camera→sRGB matrix to a decoded 16-bit buffer in place, for bodies LibRaw could
+    /// not convert itself.
+    ///
+    /// Saturating rather than wrapping: the matrix has negative off-diagonals, so a saturated
+    /// colour can land outside [0,65535], and a ushort would wrap a small negative into a huge
+    /// positive — one black pixel becoming blinding white. Clamping is right here (unlike the
+    /// pipeline's gamut mapping) because this is still the NEGATIVE: the values are transmittances
+    /// on their way into the density maths, not a finished picture whose hue must be preserved,
+    /// and t_base is sampled downstream of this so the whole calibration follows the clamped data.
+    /// </summary>
+    private static void ApplyFallbackMatrix(ProcessedImage img, double[,] m)
+    {
+        Span<ushort> span = img.AsSpan<ushort>();
+        int ch = img.Channels;
+        if (ch < 3) return;
+
+        float m00 = (float)m[0, 0], m01 = (float)m[0, 1], m02 = (float)m[0, 2];
+        float m10 = (float)m[1, 0], m11 = (float)m[1, 1], m12 = (float)m[1, 2];
+        float m20 = (float)m[2, 0], m21 = (float)m[2, 1], m22 = (float)m[2, 2];
+
+        int n = img.Width * img.Height;
+        for (int i = 0; i < n; i++)
+        {
+            int p = i * ch;
+            float r = span[p], g = span[p + 1], b = span[p + 2];
+            span[p] = Sat(m00 * r + m01 * g + m02 * b);
+            span[p + 1] = Sat(m10 * r + m11 * g + m12 * b);
+            span[p + 2] = Sat(m20 * r + m21 * g + m22 * b);
+        }
+
+        static ushort Sat(float v) => v <= 0f ? (ushort)0
+                                    : v >= 65535f ? (ushort)65535
+                                    : (ushort)(v + 0.5f);
     }
 
     private static ImageBuffer DecodeLibRaw(string path, FbddMode fbdd, bool halfSize)
