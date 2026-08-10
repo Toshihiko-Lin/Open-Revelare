@@ -22,8 +22,7 @@ public static class Pipeline
     /// the process in general. They occupy the same slot in the inversion and must not stack.
     /// </summary>
     public static double[,]? ResolveChromaMatrix(FrameParams cal) =>
-        cal.DecoupleChromaMatrix
-        ?? (cal.CrosstalkStrength is double k ? C41Crosstalk.ForStrength(k) : null);
+        cal.DecoupleChromaMatrix ?? (cal.UseC41Crosstalk ? C41Crosstalk.Direction : null);
 
     /// <summary>Run Stage 1 (+ black floor) and, for BASIC intent, the sRGB exit TRC.</summary>
     /// <param name="applyBlackFloor">Apply the film-base black-point normalisation. Set FALSE for the

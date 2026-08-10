@@ -203,10 +203,6 @@ public static class Project
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
             ["scan_exposure_ev"] = p.ScanExposureEv,
             ["chroma_grade"] = p.ChromaGrade,
-            // Crosstalk compensation. Null when off, which is what every project written before
-            // it existed looks like — so those keep rendering exactly as they did.
-            ["crosstalk_strength"] = p.CrosstalkStrength,
-            ["crosstalk_preset"] = p.CrosstalkPreset,
             // Input colour space. Written only when it departs from the sRGB default, so a
             // project that never touched it stays byte-identical to one from an older build.
             ["input_primaries"] = p.InputPrimaries is { } ip
@@ -265,10 +261,6 @@ public static class Project
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
             ScanExposureEv = Dbl(d, "scan_exposure_ev", 0.0),
             ChromaGrade = Dbl(d, "chroma_grade", 3.05),
-            CrosstalkStrength = d["crosstalk_strength"] is JsonNode cs && cs.GetValueKind()
-                                    is System.Text.Json.JsonValueKind.Number
-                                ? cs.GetValue<double>() : null,
-            CrosstalkPreset = Str(d, "crosstalk_preset", "") is { Length: > 0 } cp ? cp : null,
             InputPrimaries = Xy3(d, "input_primaries"),
             InputWhitePoint = d["input_white_point"] is JsonArray wa && wa.Count == 2
                 ? new[] { wa[0]!.GetValue<double>(), wa[1]!.GetValue<double>() }

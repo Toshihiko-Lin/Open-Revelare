@@ -64,69 +64,23 @@ public static class C41Crosstalk
     };
 
     /// <summary>
-    /// Neutral: correct the coupling's SHAPE without changing how saturated the result is.
-    ///
-    /// The default, and the honest one. Solving each of the eighteen measured matrices for the
-    /// strength it implies gives values from -0.43 to +0.48 with a mean of -0.04 — twelve REDUCE
-    /// chroma, six increase it. Their consensus is "leave the amount alone", which is also what
-    /// the synthetic test in docs/calibration/study_saturation.py found (compensation required:
-    /// 0.000). There is no measured basis for a built-in boost, so the default does not apply one.
+    /// Median chroma strength across the eighteen measured matrices — a starting point, not a
+    /// constant. The 0.99–1.89 spread is real and reflects scanner and calibration choices, so
+    /// this is where to begin rather than a value to defend.
     /// </summary>
-    public const double Neutral = 0.0;
+    public const double Strength = 1.3234;
 
     /// <summary>
-    /// A named strength, together with where its number came from.
+    /// <see cref="Direction"/> scaled by <paramref name="strength"/>. The inversion multiplies by
+    /// chroma_grade on top, so pass <see cref="Direction"/> with chroma_grade carrying the
+    /// strength, or this with chroma_grade at 1 — not both.
     /// </summary>
-    /// <param name="Name">Stable identifier, stored in project files.</param>
-    /// <param name="K">Strength: the result is (I + K · <see cref="Direction"/>) on chroma.</param>
-    /// <param name="ChromaGain">What K does to chroma magnitude, for labelling the UI.</param>
-    /// <param name="Source">The calibration this was solved from — the roll it is "in the style of".</param>
-    public readonly record struct Preset(string Name, double K, double ChromaGain, string Source);
-
-    /// <summary>
-    /// Strength presets, each solved from one real calibration in DiVERE's config/matrices.
-    ///
-    /// These answer "in the style of WHICH roll" explicitly, rather than burying one roll's taste
-    /// in a constant — which is how chroma_grade's 3.05 came to look like a law of C-41 when it
-    /// was one stock's fit. Every entry here names its source and can be re-derived with
-    /// docs/calibration/paper_free_crosstalk.py.
-    ///
-    /// The ordering matches the stocks' reputations, which is some evidence the numbers capture
-    /// real character: Portra soft, Gold denser, Fuji densest.
-    ///
-    /// HONEST LIMIT: each k carries its scanner along with its film. The same Gold 200 solved on
-    /// the same scanner appears at -0.005 and +0.376 in two different users' calibrations. So a
-    /// preset is "the look of one calibration", not a measurement of that emulsion.
-    /// </summary>
-    public static readonly IReadOnlyList<Preset> Presets = new[]
-    {
-        new Preset("neutral",  Neutral, 1.000, "shape only — no measured basis for a boost"),
-        new Preset("portra",   -0.3936, 0.723, "9000ed_pt160 — Portra 160 on Nikon 9000ED"),
-        new Preset("soft",     -0.2956, 0.792, "9000ed_pt400 — Portra 400 on Nikon 9000ED"),
-        new Preset("median",   -0.0928, 0.935, "median of all eighteen measured calibrations"),
-        new Preset("gold",     +0.2095, 1.148, "9000ed_g200_135 — Gold 200 (135) on Nikon 9000ED"),
-        new Preset("vivid",    +0.4773, 1.337, "9000ed_fuji100 — Fuji 100 on Nikon 9000ED"),
-    };
-
-    /// <summary>The preset with this name, or null. Unknown names fall back rather than throw, so
-    /// a project written by a newer build still opens.</summary>
-    public static Preset? ByName(string? name) =>
-        name is null ? null
-        : Presets.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-              is { Name.Length: > 0 } hit ? hit : null;
-
-    /// <summary>
-    /// The chroma transform for a given strength: identity plus K times the direction.
-    ///
-    /// K = 0 gives the identity, i.e. the coupling's shape is applied with no net change in
-    /// saturation. Positive K increases chroma, negative reduces it.
-    /// </summary>
-    public static double[,] ForStrength(double k)
+    public static double[,] Scaled(double strength = Strength)
     {
         var m = new double[3, 3];
         for (int r = 0; r < 3; r++)
             for (int c = 0; c < 3; c++)
-                m[r, c] = (r == c ? 1.0 : 0.0) + k * Direction[r, c];
+                m[r, c] = Direction[r, c] * strength;
         return m;
     }
 }
