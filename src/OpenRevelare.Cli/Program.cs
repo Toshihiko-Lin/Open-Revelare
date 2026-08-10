@@ -455,15 +455,8 @@ static int Run(string[] args)
                         + string.Join(", ", ColorSpaces.All.Keys));
                     return 2;
                 }
-                if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)
-                    OutputRender.FromSrgbEncoded(outImg.Data, target);
-                else
-                {
-                    // The inversion's linear output carries sRGB primaries — that is the working
-                    // space the pipeline has always implicitly used, now named rather than assumed.
-                    OutputRender.Convert(outImg.Data, ColorSpaces.Srgb, target);
-                    OutputRender.Encode(outImg.Data, target);
-                }
+                ColorPipeline.Render(outImg.Data, target,
+                    alreadyEncoded: cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic);
                 icc = target;
             }
             else if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)

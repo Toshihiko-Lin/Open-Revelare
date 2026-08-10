@@ -564,7 +564,7 @@
                      the export button's flyout (and off 文件) instead of being three peers. -->
                 <Border Grid.Row="2" Padding="8,5" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出'}" Margin="2,0,8,0" />
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputIntentIndex}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T '基础 = sRGB gamma + 帧编辑；线性 = 跳过帧编辑与 sRGB（原始线性）'}">
@@ -572,15 +572,23 @@
                             <ComboBoxItem Content="{i18n:T '线性'}" />
                         </ComboBox>
 
-                        <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '软打样'}" Margin="16,0,8,0" />
-                        <ComboBox Grid.Column="3" SelectedIndex="{Binding SoftProofIndex}" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '显示器'}" Margin="16,0,8,0" />
+                        <ComboBox Grid.Column="3" SelectedIndex="{Binding DisplayIndex}" VerticalAlignment="Center"
+                                  ToolTip.Tip="{i18n:T '你这块屏幕实际的色彩空间。预览会转换到它——广色域屏上，这是「看起来过饱和」与「颜色正确」的差别。只影响预览，不影响导出文件，也不写进工程（换台机器屏幕就不同了）。'}">
+                            <ComboBoxItem Content="{i18n:T 'sRGB（默认，不做色彩管理）'}" />
+                            <ComboBoxItem Content="Display P3" />
+                            <ComboBoxItem Content="Adobe RGB" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Column="4" Classes="fieldLabel" Text="{i18n:T '软打样'}" Margin="16,0,8,0" />
+                        <ComboBox Grid.Column="5" SelectedIndex="{Binding SoftProofIndex}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T '在屏幕上模拟导出到某个色彩空间的样子：超出该色域的颜色会按导出时的方式收进来。只影响预览，不影响导出文件。只列出比 sRGB 窄的空间——Adobe RGB / Display P3 比 sRGB 宽，而反转结果目前就落在 sRGB 里，模拟它们不会有任何变化。'}">
                             <ComboBoxItem Content="{i18n:T '关（直接看 sRGB）'}" />
                             <ComboBoxItem Content="{i18n:T 'Kodak Endura Premier（相纸）'}" />
                             <ComboBoxItem Content="{i18n:T 'Kodak 2383（拷贝片）'}" />
                         </ComboBox>
 
-                        <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
+                        <Button Grid.Column="7" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
                                 ToolTip.Tip="{i18n:T '导出当前帧（Ctrl+E）'}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -588,7 +596,7 @@
                                 <TextBlock Text="{i18n:T '导出…'}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="6" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
+                        <Button Grid.Column="8" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
                                 CornerRadius="0,6,6,0" Padding="6,6" Margin="1,0,0,0"
                                 ToolTip.Tip="{i18n:T '整卷导出 / 印样'}">
                             <ctl:Icon Data="{StaticResource IcoChevron}" Width="12" Height="12"

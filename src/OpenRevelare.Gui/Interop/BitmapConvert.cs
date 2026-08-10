@@ -27,21 +27,40 @@ public static class BitmapConvert
     /// </summary>
     public static ColorSpaceDef? SoftProof;
 
+    /// <summary>
+    /// The space the screen actually is. Null = sRGB, i.e. the unmanaged assumption the app has
+    /// always made and still the right default: Avalonia hands the bitmap to the compositor with
+    /// no profile, so whatever the display does with those numbers is what the user sees.
+    ///
+    /// Setting it makes the preview colour-managed — the working space is converted into the
+    /// display's actual gamut rather than being sent verbatim. On a wide-gamut panel that is the
+    /// difference between "everything looks oversaturated" and correct. It is a VIEW setting: it
+    /// never touches exported files, and it is not stored with the project, because the same
+    /// project opened on another machine faces a different screen.
+    /// </summary>
+    public static ColorSpaceDef? Display;
+
     /// <summary>sRGB-encoded [0,1] interleaved RGB → 8-bit Bgra8888 WriteableBitmap.
     /// Safe to call off the UI thread (a WriteableBitmap is not a control).</summary>
     public static WriteableBitmap ToBitmap(ImageBuffer srgb)
     {
-        if (SoftProof is ColorSpaceDef proof)
+        ColorSpaceDef screen = Display ?? ColorSpaces.Srgb;
+        bool proofing = SoftProof is ColorSpaceDef;
+        if (proofing || screen != ColorPipeline.Working)
         {
-            // Round-trip in LINEAR light: decode once, sRGB → target (gamut-mapped) → back to
-            // sRGB, encode once. The outbound leg discards what the target cannot hold; the
-            // return leg puts the survivors back on a screen that assumes sRGB. Going through
-            // the encoded helpers instead would apply the TRC twice.
+            // One linear round trip covering both jobs, so the TRC is applied exactly once.
+            // Soft proof: working → target → back, which discards what the target cannot hold
+            // and is the whole point of proofing. Display: working → screen, the conversion an
+            // unmanaged path skips and the reason wide-gamut panels oversaturate.
             var copy = (float[])srgb.Data.Clone();
             Srgb.ApplyInverseInPlace(copy);
-            OutputRender.Convert(copy, ColorSpaces.Srgb, proof, GamutMapping.Desaturate);
-            OutputRender.Convert(copy, proof, ColorSpaces.Srgb, GamutMapping.Desaturate);
-            Srgb.ApplyForwardInPlace(copy);
+            if (SoftProof is ColorSpaceDef proof)
+            {
+                OutputRender.Convert(copy, ColorPipeline.Working, proof, GamutMapping.Desaturate);
+                OutputRender.Convert(copy, proof, ColorPipeline.Working, GamutMapping.Desaturate);
+            }
+            OutputRender.Convert(copy, ColorPipeline.Working, screen, GamutMapping.Desaturate);
+            OutputRender.Encode(copy, screen);
             srgb = new ImageBuffer(srgb.Width, srgb.Height, copy);
         }
 

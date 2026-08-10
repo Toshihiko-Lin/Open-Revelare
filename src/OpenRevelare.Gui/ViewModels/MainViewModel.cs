@@ -3096,6 +3096,39 @@ public partial class MainViewModel : ViewModelBase
     /// with the project and never touches the exported file. Defaults to off, so the preview
     /// keeps behaving exactly as before until asked otherwise.
     /// </summary>
+    /// <summary>Display spaces offered, in picker order. Index 0 = sRGB, the unmanaged default.</summary>
+    private static readonly ColorSpaceDef[] DisplaySpaces =
+    {
+        ColorSpaces.Srgb, ColorSpaces.DisplayP3, ColorSpaces.AdobeRgb,
+    };
+
+    private int _displayIndex;
+
+    /// <summary>
+    /// Which space the SCREEN is. A view setting — never written to a project, never applied to
+    /// an exported file, because the same project opened elsewhere meets a different monitor.
+    ///
+    /// Index 0 (sRGB) is the historical behaviour: the bitmap goes to the compositor unmanaged
+    /// and whatever the panel does with those numbers is what is seen. Selecting the panel's
+    /// actual space converts into it instead, which is what stops a wide-gamut display from
+    /// showing everything oversaturated.
+    /// </summary>
+    public int DisplayIndex
+    {
+        get => _displayIndex;
+        set
+        {
+            int v = Math.Clamp(value, 0, DisplaySpaces.Length - 1);
+            if (_displayIndex == v) return;
+            _displayIndex = v;
+            OnPropertyChanged(nameof(DisplayIndex));
+            // Null for sRGB keeps the fast path: BitmapConvert skips the whole conversion when
+            // the screen is the working space.
+            BitmapConvert.Display = v == 0 ? null : DisplaySpaces[v];
+            ScheduleRender();
+        }
+    }
+
     public int SoftProofIndex
     {
         get => _softProofIndex;
@@ -3214,7 +3247,7 @@ public partial class MainViewModel : ViewModelBase
         if (p.OutputIntent == OutputIntent.Basic)
         {
             ColorSpaceDef target = opt.ResolvedColorSpace;
-            OutputRender.FromSrgbEncoded(outImg.Data, target, opt.GamutMapping);
+            ColorPipeline.Render(outImg.Data, target, alreadyEncoded: true, opt.GamutMapping);
             if (opt.EmbedIcc) icc = target;
         }
 
