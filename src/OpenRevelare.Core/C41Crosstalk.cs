@@ -1,7 +1,23 @@
 namespace OpenRevelare.Core;
 
 /// <summary>
-/// The C-41 dye crosstalk direction — the process's own signature, shared by every stock.
+/// A chroma-crosstalk direction fitted from DiVERE's modelled ColorChecker data.
+///
+/// ⚠ NOT what its name suggests, and not usable as a C-41 process constant. Every one of the
+/// eight datasets it was fitted from describes densities ON KODAK ENDURA PREMIER PAPER, not on
+/// the negative — their own descriptions say so ("…→kodak_endura_premier_d60_uc 打印流程下，相纸
+/// 上得到的理论密度") and each declares required_working_colorspace: KodakEnduraPremier. The
+/// matrix therefore maps PAPER density to scene, and carries the paper's dye characteristics
+/// baked in. OpenRevelare deliberately does not model a print stage, so this is the wrong
+/// transform for its pipeline.
+///
+/// The eight stocks' agreement in direction (cosine 0.9957–0.9997) is consequently weaker
+/// evidence than it looked: they share one print chain, so part of that agreement is the paper's,
+/// not the film's. Whether C-41 alone has a universal crosstalk direction remains OPEN — DiVERE
+/// ships no paper-free film data, so it cannot be settled from this source.
+///
+/// Kept, disabled by default, because the analysis and the fitting method are sound and become
+/// usable the moment paper-free densities exist. Do not enable it expecting a process constant.
 ///
 /// A per-channel inversion cannot recover the chroma that C-41 loses, because the loss happens
 /// BETWEEN channels: the three dye layers' absorptions overlap, so each channel's density reading
@@ -14,18 +30,17 @@ namespace OpenRevelare.Core;
 /// because the relationship is anisotropic, and the fitted residual showed it (per-patch error up
 /// to 0.206). What the relationship actually is, is the matrix below.
 ///
-/// WHY A SINGLE SHARED MATRIX IS LEGITIMATE — and this is the design's whole premise, not an
-/// approximation of convenience. Solving the density-chroma matrix independently for eight
-/// modelled C-41 stocks (Gold 200, Portra 160/400/800, Ektar 100, Ultramax 400, plus two DIR
-/// variants) gives eight matrices whose DIRECTIONS agree to a cosine similarity of 0.9957–0.9997.
-/// Allowing each stock its own full matrix instead of one shared shape plus a per-stock scalar
-/// improves the fit by 0.1%. The extra freedom buys nothing: the shape belongs to the PROCESS.
+/// THE SHARED-SHAPE RESULT, and what survives of it. Fitting the matrix independently per stock
+/// gives eight whose directions agree to cosine 0.9957–0.9997, and forcing one shared shape with
+/// only a per-stock scalar costs 0.1% of fit quality. That much is a real property of the data.
+/// What it is a property OF is the open question: the eight share a print chain as well as a
+/// process, so the agreement cannot be attributed to C-41 alone.
 ///
-/// What differs between stocks is only strength — Portra 160 at 4.21, Gold 200 at 3.45, and the
-/// DIR variants down at 3.16–3.21, DIR couplers visibly suppressing chroma without rotating it.
-/// That difference is exactly the stock character the pipeline is meant to preserve rather than
-/// normalise away, and it arrives on its own: the same matrix applied to a denser or softer
-/// negative produces a denser or softer positive. See docs/calibration/universal_crosstalk.py.
+/// Strength does vary per stock — Portra 160 4.06, Gold 200 3.43, DIR variants 3.15–3.17 — and
+/// DIR suppressing magnitude without rotating direction is the one finding here that is hard to
+/// explain by the paper. But strength is not a film constant either: it works out to
+/// target_chroma / negative_chroma, so it is set by which target one declares, not by C-41.
+/// See docs/calibration/universal_crosstalk.py.
 /// </summary>
 public static class C41Crosstalk
 {
