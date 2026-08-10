@@ -2605,10 +2605,10 @@ public partial class MainViewModel : ViewModelBase
     private void AddFramesForPath(string path)
     {
         // Scanner TIFF: the ICC matrix applied on load already corrects the inter-channel
-        // differences, so the sensor-crosstalk boost chroma_grade = 3.05 exists to undo is
-        // not wanted on top of it — that would be a double amplification. 3.05 is calibrated
-        // against a camera CFA and belongs to the RAW path only.
-        double chromaGrade = RawDecode.IsRawExtension(path) ? 3.05 : 1.0;
+        // differences, so the sensor-crosstalk boost chroma_grade exists to undo is not wanted
+        // on top of it — that would be a double amplification. The preference is a RAW-path
+        // setting for exactly that reason; a scan is pinned at 1.0 regardless of it.
+        double chromaGrade = RawDecode.IsRawExtension(path) ? Settings.Current.RawChromaGrade : 1.0;
 
         if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
         {

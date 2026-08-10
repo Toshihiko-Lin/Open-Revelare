@@ -60,6 +60,22 @@ public static class Settings
         /// on a workstation with plenty of headroom to spare.</summary>
         public int DecodeConcurrency { get; set; }
 
+        /// <summary>
+        /// chroma_grade applied to newly imported CAMERA RAW frames — the strength of the chroma
+        /// reconstruction, and with it WHICH film stock's colour rendering is the reference.
+        /// 3.05 is the calibrated default: Kodak Gold 200 as the control variable, measured with a
+        /// ColorChecker 24 under D55. Other stocks' deviations from that baseline (Portra softer,
+        /// Ektar denser) are preserved as the stylistic characteristics they are.
+        ///
+        /// Scans are NOT governed by this: their ICC matrix has already unfolded the inter-channel
+        /// chroma differences, so they import at 1.0 and a second amplification would just
+        /// oversaturate. See <see cref="Views.PreferencesDialog"/> for the presets.
+        ///
+        /// Applies to imports from here on; frames already in a roll keep the value stored with
+        /// them, editable per project via the project file or the CLI.
+        /// </summary>
+        public double RawChromaGrade { get; set; } = 3.05;
+
         /// <summary>Backdrop the photo is judged against (预览区右键 → 背景色). Deliberately
         /// independent of <see cref="Theme"/>: it is a viewing condition, not UI chrome, and a
         /// neutral mid grey is what keeps simultaneous contrast from biasing a colour call.
