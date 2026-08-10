@@ -47,12 +47,15 @@ public sealed class PreferencesDialog : Window
     private const int MaxConcurrency = 8;
 
     /// <summary>
-    /// The one calibrated chroma_grade: Kodak Gold 200 as the control variable, ColorChecker 24
-    /// under D55. No sibling presets are offered. The Python build shipped a 淡/标准/浓 triple
-    /// (2.6 / 3.05 / 3.5) whose outer two were never measured against a stock — they were round
-    /// numbers either side of the real one, and presenting them next to 3.05 implied three
-    /// calibrations where there is one. Anyone who needs a different reference can type it, and
-    /// a value that has actually been measured against a named stock can join this as a preset.
+    /// The historical chroma_grade default, fitted against DiVERE's Kodak Gold 200 ColorChecker
+    /// dataset. Its provenance is weak — that dataset is a spectral SIMULATION expressed in the
+    /// Endura Premier paper gamut, which is not the gamut this pipeline outputs into, and a
+    /// scalar cannot express a gamut relationship anyway. See docs/CALIBRATION.md.
+    ///
+    /// It stays as the default only so existing projects keep rendering as they did; the real
+    /// replacement is colour-space rendering (ColorSpaces.cs). No sibling presets are offered:
+    /// the Python build shipped a 淡/标准/浓 triple (2.6 / 3.05 / 3.5) whose outer two were
+    /// never measured against anything, which implied three calibrations where there was one.
     /// </summary>
     private const double GoldBaseline = 3.05;
 
@@ -308,12 +311,12 @@ public sealed class PreferencesDialog : Window
         double offPct = Math.Abs(cg - GoldBaseline) / GoldBaseline * 100;
         string dir = cg > GoldBaseline ? Loc.T("浓") : Loc.T("淡");
         string baseline = Math.Abs(cg - GoldBaseline) < 0.005
-            ? Loc.T("当前为标定基准值。")
-            : Loc.F($"已偏离基准 {offPct:F0}%（偏{dir}），此值未经实测标定。");
+            ? Loc.T("当前为历史默认值。")
+            : Loc.F($"已偏离历史默认值 {offPct:F0}%（偏{dir}）。");
 
         _chromaNote.Text =
-            Loc.F($"{GoldBaseline:F2} 是以 Kodak Gold 200 为控制变量、ColorChecker 24 + D55 实测标定的唯一基准值。它决定以哪一种胶卷的色彩表现作为还原基准——不是饱和度滑块：调它会挪动整套标定基准，各卷相对基准的差异（Portra 偏柔、Ektar 偏浓）是被有意保留的风格特征。只想调浓淡请用 SceneBase 的饱和度。") + Environment.NewLine +
-            baseline + Loc.T("仅对相机 RAW 生效：扫描件的 ICC 矩阵已展开通道间色度差值，固定按 1.0 导入。")
+            Loc.F($"在密度域整体缩放色度。{GoldBaseline:F2} 拟合自 DiVERE 的 Kodak Gold 200 色卡数据集，但那是相纸色域下的光谱模拟值，与本管线的输出色域并不一致——这个参数依据薄弱，正在被真正的色彩空间渲染取代（见 CALIBRATION.md）。只想调浓淡请用 SceneBase 的饱和度。") + Environment.NewLine +
+            baseline + Loc.T("仅对相机 RAW 生效：扫描件固定按 1.0 导入（此分野同样缺乏依据，保留只为不改变既有工程）。")
                      + Environment.NewLine +
             Loc.T("作用于此后新导入的卷；已在卷中的帧保留各自存下的值，可在工程文件或 CLI 中单独改。");
     }

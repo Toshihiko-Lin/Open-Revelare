@@ -29,7 +29,11 @@ public sealed class FrameParams
     /// <summary>Density-domain zero-point correction: D_corr = D + ev * log10(2).</summary>
     public double ScanExposureEv { get; set; } = 0.0;
 
-    /// <summary>Density-domain chroma scale for C-41 colour restoration.</summary>
+    /// <summary>
+    /// Density-domain chroma scale. Weakly founded and slated for replacement by colour-space
+    /// rendering; the default is held at the historical value so existing projects render
+    /// unchanged. See docs/CALIBRATION.md.
+    /// </summary>
     public double ChromaGrade { get; set; } = 3.05;
 
     /// <summary>Density-domain contrast = digital "paper grade".</summary>

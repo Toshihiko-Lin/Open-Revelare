@@ -230,8 +230,8 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>
     /// The current frame's chroma_grade. No control binds to it — it is set per input type at
-    /// import (1.0 for scans, whose ICC matrix has already corrected the inter-channel
-    /// differences; 3.05 for RAW, to undo camera CFA crosstalk) and thereafter only carried:
+    /// import (1.0 for scans, 3.05 for RAW; a split whose stated justification did not survive
+    /// scrutiny, kept for project compatibility — see docs/CALIBRATION.md) and thereafter carried:
     /// <see cref="LoadParams"/> reads it off the frame and BuildParams writes it back, so a
     /// render of a scan never silently reverts to the RAW-calibrated default.
     /// </summary>

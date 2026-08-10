@@ -84,10 +84,13 @@ result applied to the whole roll (same scanner, same settings, same parameters).
 **chroma_grade on the TIFF path**
 
 Loading a scan reads its embedded ICC profile: first the profile's own three TRC curves linearise
-each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB. That unfolds the
-chroma differences between channels, so `chroma_grade` defaults to **1.0** on a TIFF import (no
-extra chroma amplification) against 3.05 for a RAW import (which compensates for camera sensor
-crosstalk).
+each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB.
+
+`chroma_grade` defaults to **1.0** on a TIFF import (no extra chroma amplification) against 3.05
+for a RAW import. That split has no defensible basis — its original rationale (3.05 compensating
+camera sensor crosstalk) did not survive tracing; see
+[CALIBRATION.md](../../../../docs/CALIBRATION.md). It is kept only so existing projects render
+unchanged.
 
 When a file has no ICC, or the profile is LUT-only with no matrix tags, the corresponding step is
 skipped and the scanner's channel differences go uncorrected; pull back any resulting cast with
@@ -227,17 +230,14 @@ the positive still reads grey.
 - **grade**: controls the contrast of the positive, by analogy with paper grade in a traditional
   darkroom. The default of 1.65 suits standard C-41 consumer colour negative; ECN-2 motion-picture
   negative may want it lowered to 1.4–1.6.
-- **chroma_grade**: controls the strength of the chroma reconstruction. Not exposed in the GUI; the
-  value follows the input type — 3.05 for a RAW import, 1.0 for a scan (see "chroma_grade on the
-  TIFF path" above). The 3.05 was calibrated against Kodak Gold 200 as the reference stock, one
-  variable at a time: it is what makes Gold 200's chroma land closest to the real scene, and the
-  stylistic differences of other stocks (Portra softer, Ektar heavier) then show through on that
-  basis rather than being flattened out.
+- **chroma_grade**: scales chroma in the density domain. Not exposed in the GUI; the value follows
+  the input type — 3.05 for a RAW import, 1.0 for a scan (see "chroma_grade on the TIFF path"
+  above).
 
-  Changing it moves the reference stock the whole calibration is built on, rather than simply making
-  the picture richer or lighter — so for everyday "more" or "less", use the SceneBase **saturation**
-  slider. When you genuinely need to change the coefficient, two routes are open: the `chroma_grade`
-  field in the project file, or `--chroma-grade` on the CLI.
+  This parameter rests on weak foundations and is being replaced by real colour-space rendering;
+  see [CALIBRATION.md](../../../../docs/CALIBRATION.md). For everyday "more" or "less", use the
+  SceneBase **saturation** slider. When you genuinely need to change the coefficient, two routes
+  are open: the `chroma_grade` field in the project file, or `--chroma-grade` on the CLI.
 
 ---
 
@@ -377,9 +377,9 @@ darkest area of the picture again, or lower D_max a little.
 
 **Colour comes out weak (ECN-2 motion-picture film)**
 
-ECN-2's chroma characteristics differ from C-41's, and the default chroma_grade of 3.05 may not be
-enough. Nudge the SceneBase saturation slider to the right; to change the coefficient directly, use
-the `chroma_grade` field in the project file or the CLI's `--chroma-grade`.
+ECN-2's chroma characteristics differ from C-41's, and the default chroma_grade of 3.05 may not
+suit it. Nudge the SceneBase saturation slider to the right; to change the coefficient directly,
+use the `chroma_grade` field in the project file or the CLI's `--chroma-grade`.
 
 **The export looks weaker than the preview**
 

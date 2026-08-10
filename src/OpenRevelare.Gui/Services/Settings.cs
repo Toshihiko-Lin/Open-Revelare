@@ -61,15 +61,15 @@ public static class Settings
         public int DecodeConcurrency { get; set; }
 
         /// <summary>
-        /// chroma_grade applied to newly imported CAMERA RAW frames — the strength of the chroma
-        /// reconstruction, and with it WHICH film stock's colour rendering is the reference.
-        /// 3.05 is the calibrated default: Kodak Gold 200 as the control variable, measured with a
-        /// ColorChecker 24 under D55. Other stocks' deviations from that baseline (Portra softer,
-        /// Ektar denser) are preserved as the stylistic characteristics they are.
+        /// chroma_grade applied to newly imported CAMERA RAW frames — a scalar on the density-domain
+        /// chroma vector. 3.05 was fitted against DiVERE's Kodak Gold 200 ColorChecker dataset; that
+        /// provenance does not hold up (spectral simulation, paper gamut, and a scalar cannot express
+        /// a gamut relationship). See docs/CALIBRATION.md.
         ///
-        /// Scans are NOT governed by this: their ICC matrix has already unfolded the inter-channel
-        /// chroma differences, so they import at 1.0 and a second amplification would just
-        /// oversaturate. See <see cref="Views.PreferencesDialog"/> for the presets.
+        /// Scans import at 1.0 instead. That split was justified as "the camera's CFA crosstalk needs
+        /// undoing, the scanner's ICC matrix already did it" — which the same investigation showed to
+        /// be unfounded: the dataset carries no camera or scanner information at all. Both defaults
+        /// stay put only to keep existing projects rendering as they did.
         ///
         /// Applies to imports from here on; frames already in a roll keep the value stored with
         /// them, editable per project via the project file or the CLI.

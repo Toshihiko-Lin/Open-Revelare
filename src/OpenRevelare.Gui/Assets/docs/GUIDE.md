@@ -56,7 +56,9 @@
 
 **TIFF 路径的 chroma_grade**
 
-载入扫描件时会读取其嵌入的 ICC Profile：先用 Profile 自带的三条 TRC 曲线逐通道线性化，再用 rXYZ/gXYZ/bXYZ 矩阵把设备 RGB 映到 sRGB 线性光。通道间色度差值由此展开，因此 TIFF 导入时 `chroma_grade` 默认为 **1.0**（不额外放大色度），而 RAW 导入默认为 3.05（补偿相机 sensor 串扰）。
+载入扫描件时会读取其嵌入的 ICC Profile：先用 Profile 自带的三条 TRC 曲线逐通道线性化，再用 rXYZ/gXYZ/bXYZ 矩阵把设备 RGB 映到 sRGB 线性光。
+
+TIFF 导入时 `chroma_grade` 默认为 **1.0**（不额外放大色度），RAW 导入默认为 3.05。这个分野目前没有站得住的依据——它原本的理由（3.05 补偿相机 sensor 串扰）经追溯不成立，详见 [CALIBRATION.md](../../../../docs/CALIBRATION.md)。保留现状是为了不改变既有工程的输出。
 
 文件没有 ICC、或 Profile 只有 LUT 没有矩阵标签时，相应步骤跳过，扫描仪的通道差异不被校正；此时若有色偏，用 SceneBase 的饱和度与白平衡回收。需要直接改这个系数，走工程文件的 `chroma_grade` 字段或 CLI 的 `--chroma-grade`。
 
@@ -143,9 +145,9 @@ T_base 采样消除的是片基的颜色（橙色偏移），但不保证片基�
 ### 6. 调整 grade（可选）
 
 - **grade**：控制正片对比度，相当于传统暗房的相纸号数。默认 1.65 适合标准 C-41 消费彩负；ECN-2 电影负片可能需要降低到 1.4–1.6。
-- **chroma_grade**：控制色度还原强度，GUI 中不开放调整，由输入类型决定——RAW 导入用 3.05，扫描件导入用 1.0（见上文「TIFF 路径的 chroma_grade」）。3.05 是以 Kodak Gold 200 为基准胶卷、用控制变量法标定的参数，使 Gold 200 的色度还原最接近真实场景，其他胶卷的风格差异（Portra 偏柔、Ektar 偏浓）会在此基准上自然呈现，不被抹平。
+- **chroma_grade**：在密度域整体缩放色度，GUI 中不开放调整，由输入类型决定——RAW 导入用 3.05，扫描件导入用 1.0（见上文「TIFF 路径的 chroma_grade」）。
 
-  改动它挪走的是整套标定的基准胶卷，而不是单纯调浓淡，因此日常想让画面更浓或更淡，请用 SceneBase 的**饱和度**滑块。确实需要改这个系数时，两条路径可用：工程文件里的 `chroma_grade` 字段，或 CLI 的 `--chroma-grade`。
+  这个参数的依据薄弱，正在被真正的色彩空间渲染取代，详见 [CALIBRATION.md](../../../../docs/CALIBRATION.md)。日常想让画面更浓或更淡，请用 SceneBase 的**饱和度**滑块。确实需要改这个系数时，两条路径可用：工程文件里的 `chroma_grade` 字段，或 CLI 的 `--chroma-grade`。
 
 ---
 
