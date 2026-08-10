@@ -137,46 +137,6 @@ public static class RawDecode
     public static double[,]? CameraToSrgbMatrix(string path) => CameraToSrgbMatrix(path, out _);
 
     /// <summary>
-    /// The camera's own primaries as CIE xy, recovered from its colour matrix — the value
-    /// <see cref="FrameParams.InputPrimaries"/> wants for a camera-copied roll. Null when the
-    /// camera is unknown.
-    ///
-    /// Each camera primary is (1,0,0), (0,1,0), (0,0,1) in camera space, so its position in sRGB
-    /// is the corresponding COLUMN of the camera→sRGB matrix; converting that to XYZ and
-    /// normalising gives the chromaticity. Declaring these primaries is mathematically identical
-    /// to applying the matrix (verified: round trip agrees to 1e-4), which is the point — it
-    /// states the same fact as a property of the data rather than as an operation on it.
-    ///
-    /// Values may be IMAGINARY — outside the spectral locus, even negative — because sensor
-    /// spectral responses are not real colours. Measured on an OM-5: R (0.764, 0.209),
-    /// G (0.339, 0.822), B (0.018, -0.210). That is expected and harmless: the primaries are a
-    /// basis, not a set of displayable colours, and the conversion maths only needs them to be
-    /// linearly independent.
-    ///
-    /// The scanner path needs no equivalent — TiffIO already applies the ICC rXYZ/gXYZ/bXYZ
-    /// matrix while decoding, so a scan reaches the pipeline already characterised.
-    /// </summary>
-    public static double[,]? CameraPrimaries(string path)
-    {
-        double[,]? m = CameraToSrgbMatrix(path);
-        if (m is null) return null;
-
-        double[,] srgbToXyz = ColorSpaces.Srgb.ToXyz();
-        var xy = new double[3, 2];
-        for (int c = 0; c < 3; c++)
-        {
-            double x = srgbToXyz[0, 0] * m[0, c] + srgbToXyz[0, 1] * m[1, c] + srgbToXyz[0, 2] * m[2, c];
-            double y = srgbToXyz[1, 0] * m[0, c] + srgbToXyz[1, 1] * m[1, c] + srgbToXyz[1, 2] * m[2, c];
-            double z = srgbToXyz[2, 0] * m[0, c] + srgbToXyz[2, 1] * m[1, c] + srgbToXyz[2, 2] * m[2, c];
-            double sum = x + y + z;
-            if (Math.Abs(sum) < 1e-9) return null;
-            xy[c, 0] = x / sum;
-            xy[c, 1] = y / sum;
-        }
-        return xy;
-    }
-
-    /// <summary>
     /// As above, reporting WHY the matrix is unavailable. The reason matters to the user: "this
     /// camera is not in LibRaw's database" and "the file could not be opened at all" call for
     /// completely different responses, and a single "no colour data" message conflates them.

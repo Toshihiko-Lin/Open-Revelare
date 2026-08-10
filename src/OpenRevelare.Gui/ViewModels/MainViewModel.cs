@@ -1152,7 +1152,6 @@ public partial class MainViewModel : ViewModelBase
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
-        InputPrimaries = _declareInputPrimaries ? _cameraPrimaries : null,
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -1550,7 +1549,6 @@ public partial class MainViewModel : ViewModelBase
         // renderer never produces.
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
-        InputPrimaries = _declareInputPrimaries ? _cameraPrimaries : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
         // gains are folded straight into wb_high, which is then applied to a pipeline that DOES
         // decouple; iterating on an un-decoupled render solves wb_high in the wrong colour basis
@@ -2590,12 +2588,6 @@ public partial class MainViewModel : ViewModelBase
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
         Frames.Clear();
         foreach (string p in paths) AddFramesForPath(p);
-        // Camera primaries, read once per roll — cheap (header parse only) and identical for
-        // every frame. Null for scans and for cameras nothing knows about.
-        _cameraPrimaries = Frames.FirstOrDefault(fr => !fr.IsVirtual && RawDecode.IsRawExtension(fr.Path))
-                               ?.Path is { } rawPath ? RawDecode.CameraPrimaries(rawPath) : null;
-        OnPropertyChanged(nameof(InputPrimariesStatus));
-
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
@@ -3068,56 +3060,6 @@ public partial class MainViewModel : ViewModelBase
         SetUndoBaseline();
         UpdateUndoState();
         MarkRollDirty();   // frames added / copied / removed — the roll's shape changed
-    }
-
-    /// <summary>The camera's primaries for this roll, read once at import; null when unknown.</summary>
-    private double[,]? _cameraPrimaries;
-
-    private bool _declareInputPrimaries;
-
-    /// <summary>
-    /// Whether to declare the camera's own primaries instead of letting the pipeline assume sRGB.
-    /// OFF by default — deliberately, and not because the physics is in doubt.
-    ///
-    /// Declaring them is mathematically identical to applying the camera's colour matrix (round
-    /// trip agrees to 1e-4), and three earlier attempts to apply that matrix elsewhere in the
-    /// pipeline all failed on real film. Those failures were positional, and this position — after
-    /// the decode, before the density domain — is the one that matches Cineon step 1→2 and
-    /// DiVERE's input_transformation. But every previous verification was done against an
-    /// automatically sampled film base that turned out to be catching light-box spill rather than
-    /// the mask, so none of them could tell a good render from a bad one.
-    ///
-    /// With the base sampled by hand the colour is reported accurate, which is the first baseline
-    /// worth comparing against. Hence a switch: the change is visible, and it should be judged,
-    /// not assumed.
-    ///
-    /// Scanner rolls ignore this — TiffIO already applies their ICC matrix while decoding.
-    /// </summary>
-    public bool DeclareInputPrimaries
-    {
-        get => _declareInputPrimaries;
-        set
-        {
-            if (_declareInputPrimaries == value) return;
-            _declareInputPrimaries = value;
-            OnPropertyChanged(nameof(DeclareInputPrimaries));
-            OnPropertyChanged(nameof(InputPrimariesStatus));
-            MarkRollDirty();
-            ScheduleRender();
-        }
-    }
-
-    /// <summary>One line naming what the declaration resolved to, or why it did not.</summary>
-    public string InputPrimariesStatus
-    {
-        get
-        {
-            if (!RollIsRaw) return Loc.T("扫描件：ICC 已在解码时完成表征，此项不适用。");
-            if (!_declareInputPrimaries) return Loc.T("关闭：管线按 sRGB 基色处理相机数据。");
-            if (_cameraPrimaries is null) return Loc.T("LibRaw 与内置后备表都没有这台相机的色彩数据。");
-            var p = _cameraPrimaries;
-            return Loc.F($"R({p[0,0]:F4},{p[0,1]:F4}) G({p[1,0]:F4},{p[1,1]:F4}) B({p[2,0]:F4},{p[2,1]:F4})");
-        }
     }
 
     /// <summary>True when the roll's source files are RAW (else TIFF) — decided by the first frame.</summary>
