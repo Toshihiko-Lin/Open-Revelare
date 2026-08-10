@@ -631,7 +631,6 @@ public partial class MainViewModel : ViewModelBase
     /// Null for scans (their ICC path already characterises them) and for cameras LibRaw does
     /// not know, which is the historical uncharacterised behaviour.
     /// </summary>
-    private double[,]? _inputToSrgbMatrix;
 
     // Path A 分光解耦（卷级；导入时从 R/G/B 校正图算出，应用到整卷）
     private double[,]? _decoupleMatrix;
@@ -1154,7 +1153,6 @@ public partial class MainViewModel : ViewModelBase
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
-        InputToSrgbMatrix = _inputToSrgbMatrix,
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -1561,7 +1559,6 @@ public partial class MainViewModel : ViewModelBase
         // and rawDelta divides the net's log-gains BY that d_highlight — so if these two disagree
         // the mismatch is baked into every iteration. The input characterisation is here for the
         // same reason: the net judges colour, so it must judge it in the space the export uses.
-        InputToSrgbMatrix = _inputToSrgbMatrix,
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -2023,7 +2020,6 @@ public partial class MainViewModel : ViewModelBase
             Meta = new Project.RollMeta
             {
                 InputType = RollIsRaw ? "raw" : "tiff",
-                CharacteriseInput = CharacteriseInput,
                 SourcePath = _decoupleMatrix is not null ? "A" : "B",
                 CalSourcePath = _calSourceDir,
                 CalRgbPaths = _calRgbPaths is { Length: 3 } r
@@ -2313,9 +2309,6 @@ public partial class MainViewModel : ViewModelBase
         // Before anything reads pixels: the negatives may have moved since this was saved.
         bool relinked = await RelinkIfMissingAsync(data);
 
-        // Quietly: restoring a saved value is neither an edit nor something to re-render for.
-        // Re-run after the frames are in place, below, since the matrix is read off frame 1.
-        SetCharacteriseInputQuietly(data.Meta.CharacteriseInput);
 
         _calSourceDir = data.Meta.CalSourcePath;
         _calRgbPaths = data.Meta.CalRgbPaths is { } r && r.ContainsKey("R")
@@ -2390,7 +2383,6 @@ public partial class MainViewModel : ViewModelBase
         }
         LccEnabled = lcc is not null;
         RefreshSplitPaths();        // reopened split rolls get the sharp region previews too
-        RefreshInputCharacterisation();   // honours the flag restored from the project file
         IsBusy = false;
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync → decode + LoadParams + render
 
@@ -2600,9 +2592,6 @@ public partial class MainViewModel : ViewModelBase
         Frames.Clear();
         foreach (string p in paths) AddFramesForPath(p);
         RefreshSplitPaths();        // before the first switch, which consults it
-        // A NEW roll characterises its input; only a reopened project may say otherwise. Quietly,
-        // so a fresh import is not marked dirty by its own default.
-        SetCharacteriseInputQuietly(true);   // before the first render, which bakes it in
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
 
@@ -3082,74 +3071,6 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>True when the roll's source files are RAW (else TIFF) — decided by the first frame.</summary>
     private bool RollIsRaw => Frames.Count > 0 && RawDecode.IsRawExtension(Frames[0].Path);
-
-    /// <summary>
-    /// Re-reads the roll's input characterisation from its first RAW frame. Cheap (LibRaw opens
-    /// and unpacks metadata only, no demosaic) and idempotent, so it can run on any roll change.
-    ///
-    /// Scans get null: their ICC path already maps device RGB into sRGB before the density stage,
-    /// so a second characterisation would be a double conversion. Cameras LibRaw does not know
-    /// also get null, which leaves the historical uncharacterised behaviour in place rather than
-    /// guessing at a matrix.
-    /// </summary>
-    private void RefreshInputCharacterisation()
-    {
-        string? raw = Frames.FirstOrDefault(f => !f.IsVirtual && RawDecode.IsRawExtension(f.Path))?.Path;
-        if (raw is null)
-        {
-            _inputToSrgbMatrix = null;
-            InputCharacterisationStatus = Frames.Count == 0
-                ? ""
-                : Loc.T("扫描件：ICC 路径已完成表征，此项不适用。");
-        }
-        else if (!CharacteriseInput)
-        {
-            _inputToSrgbMatrix = null;
-            InputCharacterisationStatus = Loc.T("已关闭——按未表征的旧行为渲染。");
-        }
-        else
-        {
-            _inputToSrgbMatrix = RawDecode.CameraToSrgbMatrix(raw, out string why);
-            InputCharacterisationStatus = _inputToSrgbMatrix is null
-                ? Loc.F($"无法表征，按旧行为渲染 — {why}。可用 Adobe DNG Converter 转一张，再跑 docs/calibration/read_dng_matrix.py 把矩阵加进内置后备表。")
-                : Loc.F($"已启用：{why}");
-        }
-    }
-
-    /// <summary>One line under the toggle saying what actually happened — including the two cases
-    /// where the switch is on but there is nothing to apply.</summary>
-    [ObservableProperty] private string _inputCharacterisationStatus = "";
-
-    private bool _characteriseInput = true;
-
-    /// <summary>
-    /// Whether this roll maps camera-native RGB into sRGB with the camera's own matrix. On for
-    /// newly imported rolls; reopened projects take whatever they were saved with, which for
-    /// anything written before this feature existed is off.
-    ///
-    /// Hand-written rather than [ObservableProperty] because loading and importing both need to
-    /// seed it WITHOUT marking the roll dirty or scheduling a render — restoring a stored value
-    /// is not an edit. <see cref="SetCharacteriseInputQuietly"/> is that path.
-    /// </summary>
-    public bool CharacteriseInput
-    {
-        get => _characteriseInput;
-        set
-        {
-            if (_characteriseInput == value) return;
-            SetCharacteriseInputQuietly(value);
-            MarkRollDirty();
-            ScheduleRender();
-        }
-    }
-
-    /// <summary>Seeds the flag and re-reads the matrix without treating it as a user edit.</summary>
-    private void SetCharacteriseInputQuietly(bool value)
-    {
-        _characteriseInput = value;
-        OnPropertyChanged(nameof(CharacteriseInput));
-        RefreshInputCharacterisation();
-    }
 
     /// <summary>
     /// Soft-proof targets, in the order the picker lists them. Index 0 = off.

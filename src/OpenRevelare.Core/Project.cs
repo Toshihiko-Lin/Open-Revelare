@@ -23,17 +23,6 @@ public static class Project
         public string InputType = "raw";      // "raw" | "tiff"
         public string SourcePath = "B";       // "A" (RGB light) | "B" (white light)
 
-        /// <summary>
-        /// Whether this roll converts camera-native RGB into sRGB using the camera's own matrix
-        /// (<see cref="RawDecode.CameraToSrgbMatrix"/>).
-        ///
-        /// Absent from the file = false, which is what every project written before input
-        /// characterisation existed looks like. That is deliberate: characterising the input
-        /// visibly changes colour (it expands chroma, per hue), so switching it on under an
-        /// existing project would silently re-render work the user had already finished. New
-        /// rolls get it on; old rolls keep what they had until the user opts in.
-        /// </summary>
-        public bool CharacteriseInput;
         public bool? TiffIsLinear;
         public string? CalSourcePath;         // Path-A calibration directory
         public Dictionary<string, string>? CalRgbPaths;   // {"R":…,"G":…,"B":…}
@@ -156,7 +145,6 @@ public static class Project
             ["input_type"] = rm.InputType,
             ["source_path"] = rm.SourcePath,
             ["tiff_is_linear"] = rm.TiffIsLinear,
-            ["characterise_input"] = rm.CharacteriseInput,
         };
         if (rm.CalSourcePath is not null) d["cal_source_path"] = rm.CalSourcePath;
         if (rm.CalRgbPaths is not null)
@@ -187,9 +175,6 @@ public static class Project
         return new RollMeta
         {
             InputType = Str(d, "input_type", "raw"),
-            // Default FALSE, not true: a project written before this existed must keep rendering
-            // exactly as it did. See RollMeta.CharacteriseInput.
-            CharacteriseInput = Bool(d, "characterise_input", false),
             SourcePath = Str(d, "source_path", "B"),
             TiffIsLinear = d["tiff_is_linear"]?.GetValue<bool>(),
             CalSourcePath = d["cal_source_path"]?.GetValue<string>(),
@@ -218,6 +203,14 @@ public static class Project
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
             ["scan_exposure_ev"] = p.ScanExposureEv,
             ["chroma_grade"] = p.ChromaGrade,
+            // Input colour space. Written only when it departs from the sRGB default, so a
+            // project that never touched it stays byte-identical to one from an older build.
+            ["input_primaries"] = p.InputPrimaries is { } ip
+                ? new JsonArray(ip[0, 0], ip[0, 1], ip[1, 0], ip[1, 1], ip[2, 0], ip[2, 1])
+                : null,
+            ["input_white_point"] = p.InputWhitePoint is { Length: 2 } iw
+                ? new JsonArray(iw[0], iw[1])
+                : null,
             ["grade"] = p.Grade,
             ["pivot"] = p.Pivot,
             ["output_intent"] = p.OutputIntent == OutputIntent.Basic ? "basic" : "none",
@@ -268,6 +261,10 @@ public static class Project
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
             ScanExposureEv = Dbl(d, "scan_exposure_ev", 0.0),
             ChromaGrade = Dbl(d, "chroma_grade", 3.05),
+            InputPrimaries = Xy3(d, "input_primaries"),
+            InputWhitePoint = d["input_white_point"] is JsonArray wa && wa.Count == 2
+                ? new[] { wa[0]!.GetValue<double>(), wa[1]!.GetValue<double>() }
+                : null,
             Grade = d["grade"] is { } g ? g.GetValue<double>() : Dbl(d, "gamma", 1.65),
             Pivot = Dbl(d, "pivot", 0.9),
             OutputIntent = Str(d, "output_intent", "basic") == "none" ? OutputIntent.None : OutputIntent.Basic,
@@ -319,6 +316,17 @@ public static class Project
         => n is JsonArray a && a.Count >= 4
             ? (a[0]!.GetValue<double>(), a[1]!.GetValue<double>(), a[2]!.GetValue<double>(), a[3]!.GetValue<double>())
             : null;
+
+    /// <summary>Six flat numbers → the 3×2 CIE xy primaries array; null when absent or malformed.</summary>
+    private static double[,]? Xy3(JsonObject d, string key)
+    {
+        if (d[key] is not JsonArray a || a.Count != 6) return null;
+        var m = new double[3, 2];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 2; j++)
+                m[i, j] = a[i * 2 + j]!.GetValue<double>();
+        return m;
+    }
 
     private static double[] Vec3(JsonObject d, string key, double a, double b, double c)
         => d[key] is JsonArray arr && arr.Count >= 3

@@ -44,6 +44,12 @@ public static class Pipeline
         if (cal.SprocketEnabled && cal.SprocketThreshold is double thr)
             sprocketMask = Sprocket.MakeMask(src.Data, src.PixelCount, (float)thr);
 
+        // ── Input colour space: declared primaries → sRGB, on the NEGATIVE ────────
+        // Before the inversion, because that is where t_base and the rest of Stage 1 are
+        // calibrated; and before decouple, because decouple's matrix is solved in this space.
+        if (InputTransform.ToSrgb(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
+            InputTransform.Apply(src.Data, inputM);
+
         // ── Path A: RGB-light decoupling (linear domain, after vignette) ──────────
         if (cal.DecoupleMatrix != null)
             Decouple.Apply(src.Data, cal.DecoupleMatrix, cal.DecoupleMode);
@@ -75,12 +81,6 @@ public static class Pipeline
         if (cal.CropRect != null)
             result = Geometry.ApplyCrop(result, cal.CropRect.Value);
 
-        // ── Input characterisation: camera-native → sRGB ──────────────────────
-        // After inversion, before Stage 2. Stage 2's operations are all defined against sRGB
-        // (contrast pivots on 0.5, the luma weights are sRGB's, curves clamp to [0,1]), so the
-        // conversion has to land before them for those definitions to hold.
-        if (cal.InputToSrgbMatrix is double[,] inputMatrix)
-            ColorMatrix.ApplyInPlace(result.Data, inputMatrix);
 
         // ── Output intent gate ────────────────────────────────────────────────
         if (cal.OutputIntent == OutputIntent.None)

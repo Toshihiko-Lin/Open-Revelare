@@ -56,22 +56,32 @@ public sealed class FrameParams
     /// Applied after distortion, before vignette. Resized to the frame if dimensions differ.</summary>
     public ImageBuffer? LccFlatField { get; set; }
     /// <summary>
-    /// Input characterisation: linear camera-native RGB → linear sRGB, row-major 3×3. Null =
-    /// uncharacterised, the historical behaviour, where the decoded data was simply treated as
-    /// though it were already sRGB.
+    /// The colour space the decoded negative is treated as being in — CIE xy for the R, G and B
+    /// primaries, in that order. Null = sRGB's primaries, which is what the pipeline has always
+    /// assumed implicitly.
     ///
-    /// Read from the camera's own colorimetry at import (<see cref="RawDecode.CameraToSrgbMatrix"/>)
-    /// and applied to the POSITIVE after inversion, not to the negative before it: the density
-    /// maths — t_base normalisation, wb_high/wb_offset, d_max — is calibrated against the sensor's
-    /// own numbers, and moving it into another space beforehand would invalidate every one of
-    /// those measurements. Rows sum to 1, so neutrals are untouched and the white the inversion
-    /// established survives the conversion.
+    /// WHY THIS EXISTS. Nothing ever declared what space the decoded negative occupied. Nothing
+    /// converted it either, so the density inversion silently treated the sensor's own primaries
+    /// as sRGB's — an assumption, never a measurement. Measured against DiVERE's Kodak Gold 200
+    /// dataset, letting these primaries move instead of pinning them to sRGB drops the fit error
+    /// by 28% (docs/calibration/solve_input_primaries.py). The fixed assumption is a real,
+    /// quantifiable error, and it sits at the INPUT — which is where it has to be fixed, not in a
+    /// downstream scalar like chroma_grade.
     ///
-    /// This is what makes the pipeline's colour input KNOWN. Measured on an E-M5 III, the matrix
-    /// expands chroma by about 1.32× and does so per hue (1.14–1.53 across the probes) — the same
-    /// job chroma_grade was doing with one isotropic scalar. See docs/CALIBRATION.md.
+    /// WHAT IT IS NOT: the camera manufacturer's ColorMatrix. That describes how the sensor sees
+    /// a real SCENE, and a negative holds no scene — it holds dye densities. Three separate
+    /// attempts to push the camera matrix through this pipeline all failed on real film for that
+    /// reason (see docs/CALIBRATION.md). What belongs here is the EQUIVALENT primaries of the
+    /// whole chain, sensor spectral response composed with the film's dye transmission, and that
+    /// can only be solved from a chart — which is exactly what DiVERE's primaries_xy is.
+    ///
+    /// COUPLED TO t_base. The base is sampled in whatever space this declares, so changing one
+    /// invalidates the other. Both are roll-level calibration and must be re-established together.
     /// </summary>
-    public double[,]? InputToSrgbMatrix { get; set; }
+    public double[,]? InputPrimaries { get; set; }
+
+    /// <summary>White point of <see cref="InputPrimaries"/> as CIE xy; null = D65.</summary>
+    public double[]? InputWhitePoint { get; set; }
 
     /// <summary>Path-A decouple matrix applied to the linear RAW before inversion (row-major
     /// 3×3, t_dec = t·Mᵀ); null = white-light passthrough. From import-time calibration.</summary>
@@ -147,7 +157,8 @@ public sealed class FrameParams
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccFlatField,
-        InputToSrgbMatrix = InputToSrgbMatrix,
+        InputPrimaries = InputPrimaries,
+        InputWhitePoint = InputWhitePoint,
         DecoupleMatrix = DecoupleMatrix,
         DecoupleMode = DecoupleMode,
         DecoupleChromaMatrix = DecoupleChromaMatrix,

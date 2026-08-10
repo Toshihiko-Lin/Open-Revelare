@@ -645,17 +645,6 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 输入色彩表征 -->
-                                <Expander Header="{i18n:T '输入色彩表征'}">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Classes="groupHint"
-                                                   Text="{i18n:T '用相机自身的色彩矩阵把原生 RGB 映到 sRGB。相机 RAW 解码出来的是传感器自己的原色，此前管线直接当作 sRGB 使用——这正是 chroma_grade 当初要补的那一层，区别在于矩阵按色相各向异性地展开色度，而标量做不到。'}" />
-                                        <CheckBox Content="{i18n:T '启用（新建卷默认开启）'}"
-                                                  IsChecked="{Binding CharacteriseInput}" IsEnabled="{Binding HasImage}" />
-                                        <TextBlock Classes="groupHint" Text="{Binding InputCharacterisationStatus}" Margin="0,4,0,0" />
-                                    </StackPanel>
-                                </Expander>
-
                                 <!-- 片基去色罩 -->
                                 <Expander Header="{i18n:T '片基去色罩（T_base / D_max）'}" IsExpanded="True">
                                     <StackPanel Spacing="2">
