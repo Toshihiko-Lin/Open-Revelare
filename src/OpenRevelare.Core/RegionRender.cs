@@ -154,7 +154,7 @@ public static class RegionRender
 
         double blackFloor = Math.Pow(10.0, cal.Pivot * (1.0 - cal.Grade) - cal.DMax);
         ImageBuffer inverted = Inversion.Invert(slice, cal, cal.DecoupleChromaAmp,
-                                                cal.DecoupleChromaMatrix, blackFloor);
+                                                Pipeline.ResolveChromaMatrix(cal), blackFloor);
         if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);
 
         // ── Geometry: one composed inverse map, output rect → source coordinate ──

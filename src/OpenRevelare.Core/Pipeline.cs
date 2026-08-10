@@ -14,6 +14,16 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Pipeline
 {
+    /// <summary>
+    /// Which chroma matrix the inversion should use.
+    ///
+    /// Path A wins when present: its matrix is solved for that roll's own narrow-band light
+    /// source, so it describes a real measurement of THIS setup, where the C-41 matrix describes
+    /// the process in general. They occupy the same slot in the inversion and must not stack.
+    /// </summary>
+    public static double[,]? ResolveChromaMatrix(FrameParams cal) =>
+        cal.DecoupleChromaMatrix ?? (cal.UseC41Crosstalk ? C41Crosstalk.Direction : null);
+
     /// <summary>Run Stage 1 (+ black floor) and, for BASIC intent, the sRGB exit TRC.</summary>
     /// <param name="applyBlackFloor">Apply the film-base black-point normalisation. Set FALSE for the
     /// Deep-WB affine solve, whose density inversion assumes the RAW positive 10^(d_adj).</param>
@@ -66,7 +76,7 @@ public static class Pipeline
         // into the write that produces the value is free, whereas a standalone pass costs a
         // full read+write of the frame.
         double blackFloor = Math.Pow(10.0, cal.Pivot * (1.0 - cal.Grade) - cal.DMax);
-        ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp, cal.DecoupleChromaMatrix,
+        ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp, ResolveChromaMatrix(cal),
                                               applyBlackFloor ? blackFloor : null);
 
         // Apply sprocket mask after inversion + black floor: fill masked pixels white.

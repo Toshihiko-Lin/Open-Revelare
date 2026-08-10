@@ -90,6 +90,23 @@ public sealed class FrameParams
     public DecoupleMode DecoupleMode { get; set; } = DecoupleMode.Linear;
     /// <summary>Axis-accurate 3×3 chroma-compensation matrix fed into inversion; null = off.</summary>
     public double[,]? DecoupleChromaMatrix { get; set; }
+
+    /// <summary>
+    /// Use the C-41 process crosstalk matrix (<see cref="C41Crosstalk.Direction"/>) in place of
+    /// chroma_grade's isotropic scalar. Off by default, so existing projects render unchanged.
+    ///
+    /// This is the structurally correct form of what chroma_grade approximates. The chroma C-41
+    /// loses is an inter-channel effect, so no per-channel operation reaches it and no scalar
+    /// describes it; measured across eight modelled stocks the relationship is one shared matrix
+    /// direction with a per-stock strength (cosine similarity 0.9957–0.9997, and giving each
+    /// stock its own matrix improves the fit by 0.1%). See docs/calibration/universal_crosstalk.py.
+    ///
+    /// When on, <see cref="ChromaGrade"/> becomes the STRENGTH of that matrix rather than a
+    /// standalone multiplier — the direction is universal, the strength is where stock character
+    /// lives. Ignored on Path A rolls, whose <see cref="DecoupleChromaMatrix"/> already occupies
+    /// the same slot in the inversion and is solved for that roll's own light source.
+    /// </summary>
+    public bool UseC41Crosstalk { get; set; }
     /// <summary>Per-channel chroma amplification fed into inversion (chroma_grade ÷ amp); null = 1.
     /// IGNORED when <see cref="DecoupleChromaMatrix"/> is set — the two are alternatives, and the
     /// matrix already carries the amplification per chroma axis. Only callers without a matrix
@@ -162,6 +179,7 @@ public sealed class FrameParams
         DecoupleMatrix = DecoupleMatrix,
         DecoupleMode = DecoupleMode,
         DecoupleChromaMatrix = DecoupleChromaMatrix,
+        UseC41Crosstalk = UseC41Crosstalk,
         DecoupleChromaAmp = DecoupleChromaAmp,
         SprocketEnabled = SprocketEnabled,
         SprocketThreshold = SprocketThreshold,
