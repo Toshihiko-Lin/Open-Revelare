@@ -51,7 +51,10 @@ public static class OutputRender
 
     /// <summary>
     /// Applies an arbitrary 3×3 to interleaved linear RGB, gamut-mapping the result into
-    /// <paramref name="destination"/>'s range.
+    /// <paramref name="destination"/>'s range. Shared by <see cref="Convert"/> and by the input
+    /// characterisation step (<see cref="ColorMatrix.ApplyInPlace"/>), which needs exactly the
+    /// same out-of-range treatment for exactly the same reason — its matrix also has large
+    /// negative off-diagonals and also throws colour outside [0,1].
     /// </summary>
     public static void ApplyMatrix(float[] data, double[,] m, ColorSpaceDef destination,
                                    GamutMapping mapping = GamutMapping.Desaturate)
