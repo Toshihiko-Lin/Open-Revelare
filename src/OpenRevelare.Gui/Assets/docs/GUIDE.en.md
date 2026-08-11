@@ -236,8 +236,10 @@ it proportionally, so chroma follows luminance automatically. To make a picture 
 use the SceneBase **saturation** slider.
 
 Earlier versions had a `chroma_grade` parameter (defaulting to 3.05) that compensated for chroma
-the pipeline was losing elsewhere. That "elsewhere" turned out to be **film-base sampling**, and
-the parameter has been removed entirely — see [CALIBRATION.md](../../../../docs/CALIBRATION.md).
+the pipeline was losing elsewhere. That "elsewhere" was **missing colour management** — the
+inversion's output was treated as sRGB outright, so the gamut conversion that should have happened
+never did. With the conversion supplied, the parameter has been removed entirely — see
+[CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
 ---
 

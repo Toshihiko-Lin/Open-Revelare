@@ -508,11 +508,18 @@ or Photoshop.
 
 **There used to be a `chroma_grade`, and it has been removed.** Earlier versions split density into
 luminance and chroma and gave chroma its own coefficient (3.05 by default) to make up for colour
-the pipeline was losing elsewhere. That "elsewhere" turned out to be **film-base sampling**: when
-the automatic sample caught light-box spill instead of the orange mask, the mask was never removed
-and the colour was wrong throughout — and chroma_grade was a patch applied downstream of that
-mistake. With the base sampled correctly the colour is right, and the patch has nothing left to do.
-The full trace is in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
+the pipeline was losing elsewhere.
+
+That "elsewhere" was **missing colour management**: the linear data leaving the inversion never
+declared a colour space and was simply treated as sRGB, so the gamut conversion that should have
+happened never did. Against the Cineon workflow, that is the colour-space half of its step 4,
+"log → Rec709: colour space AND gamma together" — this pipeline only ever did the gamma. Chroma was
+therefore always short, and chroma_grade faked it downstream with one isotropic scalar.
+
+A scalar cannot express a gamut relationship: gamut is anisotropic and hue-dependent, and the
+measured residual after scalar compensation was mean 0.093 / max 0.206 per patch. The real fix is
+to supply the conversion (`InputTransform` / `OutputRender`), after which the parameter has no
+reason to exist. The full trace is in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
 **Why there is no per-roll colour-chart calibration**
 
