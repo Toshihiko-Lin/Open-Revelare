@@ -479,13 +479,23 @@
                                  pixels, laid over the (6x downsampled) preview. Positioned in
                                  code from the letterbox rect, so it rides the same zoom/pan
                                  transform as everything else in ZoomGrid. -->
-                            <Canvas Name="PatchLayer" IsHitTestVisible="False">
+                            <!-- Stretch is explicit on both Canvases below for the same reason it
+                                 is on the Images: everything in them is positioned by code from
+                                 LetterboxRect(), and the frame is only where it looks if that box
+                                 is the one the Canvas actually occupies. A Canvas measures to its
+                                 CONTENT, so it fills ZoomGrid only by the Grid's default
+                                 alignment — leaving that implicit let the drawn overlay and the
+                                 pointer coordinates disagree on macOS, where the applied crop
+                                 came out with neither the ratio nor the position the frame had. -->
+                            <Canvas Name="PatchLayer" IsHitTestVisible="False"
+                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                                 <Image Name="PatchImg" Stretch="Fill" />
                             </Canvas>
                             <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
                                    IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"
                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                             <Canvas Name="Overlay" Background="Transparent"
+                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                     PointerPressed="OnOverlayPressed"
                                     PointerMoved="OnOverlayMoved"
                                     PointerReleased="OnOverlayReleased">

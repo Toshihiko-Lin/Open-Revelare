@@ -228,13 +228,28 @@ public partial class MainWindow : Window
         return iw <= 0 || ih <= 0 || vw <= 0 || vh <= 0 ? 1 : Math.Min(vw / iw, vh / ih);
     }
 
-    /// <summary>The displayed bitmap's rect inside ZoomGrid BEFORE the render transform — the
-    /// Uniform letterbox, i.e. the same centring <see cref="ToNormalisedRect"/> undoes.</summary>
+    /// <summary>
+    /// The displayed bitmap's rect inside ZoomGrid BEFORE the render transform — the Uniform
+    /// letterbox, i.e. the same centring <see cref="ToNormalisedRect"/> undoes.
+    ///
+    /// Measured in OVERLAY's box, not ViewPort's. The crop frame is drawn into Overlay with
+    /// Canvas.SetLeft/SetTop and every pointer coordinate arrives as GetPosition(Overlay), so
+    /// Overlay is the space this rect has to be expressed in. The two are the same box only while
+    /// the Canvas fills ZoomGrid — a Canvas measures to its CONTENT, and relying on the Grid's
+    /// default alignment to stretch it left the sizes free to disagree. On macOS they did: the
+    /// frame drew at one scale, the pointer mapped at another, and the crop that came out had
+    /// neither the ratio nor the position the frame showed. Overlay now declares Stretch, and
+    /// reading its bounds here means the drawing and the hit-testing cannot drift apart even if
+    /// the layout changes again.
+    ///
+    /// Falls back to ViewPort before the first layout pass, when Overlay still measures 0.
+    /// </summary>
     private Rect? LetterboxRect()
     {
         if (PreviewBitmap is not { } bmp) return null;
         double iw = bmp.PixelSize.Width, ih = bmp.PixelSize.Height;
-        double vw = ViewPort.Bounds.Width, vh = ViewPort.Bounds.Height;
+        double vw = Overlay.Bounds.Width, vh = Overlay.Bounds.Height;
+        if (vw <= 0 || vh <= 0) { vw = ViewPort.Bounds.Width; vh = ViewPort.Bounds.Height; }
         if (iw <= 0 || ih <= 0 || vw <= 0 || vh <= 0) return null;
         double s = Math.Min(vw / iw, vh / ih);
         return new Rect((vw - iw * s) / 2, (vh - ih * s) / 2, iw * s, ih * s);
@@ -459,6 +474,12 @@ public partial class MainWindow : Window
         {
             Vm.CropEditing = false;      // before SetCrop, so the render that follows is cropped
             Vm.SetCrop(c);
+            // Back to fit, for the same reason a FRAME SWITCH resets it: the zoom and pan describe
+            // a picture that no longer exists. _zoom multiplies the fit scale and _pan is in
+            // absolute viewport pixels, so a crop committed while zoomed in leaves the (now much
+            // smaller) result magnified and shoved off-centre. ApplyTransform only ever RAISES
+            // _zoom to MinZoom(), never lowers it back to fit, so nothing else would undo it.
+            ResetZoom();
         }
         ExitMode();                      // drops the draft
     }
@@ -1030,6 +1051,9 @@ public partial class MainWindow : Window
         // free-hand drag is still locked to 1:1 for a ratio the user can no longer see.
         // Index 0 is 自由, whose handler only clears _cropAspect — it applies no crop.
         CropPresetCombo.SelectedIndex = 0;
+        // The frame just got BIGGER under a zoom and pan measured against the cropped one — the
+        // mirror of the CommitCrop case.
+        ResetZoom();
     }
 
     /// <summary>Pick an aspect preset: lock the crop drag ratio and drop a centred crop of that ratio.</summary>
