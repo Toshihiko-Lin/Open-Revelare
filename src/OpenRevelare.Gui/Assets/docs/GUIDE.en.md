@@ -230,16 +230,13 @@ the positive still reads grey.
 - **grade**: controls the contrast of the positive, by analogy with paper grade in a traditional
   darkroom. The default of 1.65 suits standard C-41 consumer colour negative; ECN-2 motion-picture
   negative may want it lowered to 1.4–1.6.
-The inversion has no separate chroma parameter. Cineon applies **one gamma to all three
-channels** — chroma being each channel's deviation from their mean, a common multiplier preserves
-it proportionally, so chroma follows luminance automatically. To make a picture richer or lighter,
-use the SceneBase **saturation** slider.
 
-Earlier versions had a `chroma_grade` parameter (defaulting to 3.05) that compensated for chroma
-the pipeline was losing elsewhere. That "elsewhere" was **missing colour management** — the
-inversion's output was treated as sRGB outright, so the gamut conversion that should have happened
-never did. With the conversion supplied, the parameter has been removed entirely — see
-[CALIBRATION.md](../../../../docs/CALIBRATION.md).
+grade sets the chroma richness too — chroma follows luminance proportionally. To adjust richness on
+its own, use the SceneBase **saturation** slider.
+
+> Earlier versions carried a `chroma_grade` parameter (3.05 by default) to compensate for the
+> chroma shortfall caused by missing colour management; with that gap filled, the parameter has
+> been removed — see [CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
 ---
 

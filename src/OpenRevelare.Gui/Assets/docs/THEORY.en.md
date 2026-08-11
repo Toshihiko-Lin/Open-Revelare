@@ -139,10 +139,7 @@ After the TRC inverse and the matrix, the TIFF path puts out **standard linear s
 puts out the camera's own linear light. Both are linear, and both go straight into the density
 domain.
 
-**Beyond that the two paths differ in nothing to do with chroma.** Earlier versions gave RAW and
-scans different `chroma_grade` defaults (3.05 / 1.0) on the grounds that the camera's CFA crosstalk
-needed compensating; that parameter has been removed entirely — see step 7 and
-[CALIBRATION.md](../../../../docs/CALIBRATION.md).
+Beyond that the two paths differ in nothing to do with chroma.
 
 Worth noting: the scan path is **colour-managed by construction** — the ICC's rXYZ/gXYZ/bXYZ tags
 describe the device primaries and are applied at decode. The camera path performs no equivalent
@@ -500,26 +497,13 @@ to about 1.0. Digitising has no "high-contrast paper" link in it, so a plain inv
 contrast a typical C-41 negative is missing, and the pivot parameter sets where the mid-tone anchor
 sits, so mid-tone brightness holds steady as grade is changed.
 
-**One gamma, three channels.** That is the whole of it — there is no second coefficient. **Chroma
-needs no separate treatment**: it is each channel's deviation from their mean, and multiplying all
-three by one grade preserves it proportionally, so chroma follows luminance automatically. This is
-what Cineon does, and it is why "invert and align the three channels" looks sufficient in DaVinci
-or Photoshop.
+One gamma applies to all three channels; chroma, being each channel's deviation from their mean,
+follows proportionally and stays in step with luminance.
 
-**There used to be a `chroma_grade`, and it has been removed.** Earlier versions split density into
-luminance and chroma and gave chroma its own coefficient (3.05 by default) to make up for colour
-the pipeline was losing elsewhere.
-
-That "elsewhere" was **missing colour management**: the linear data leaving the inversion never
-declared a colour space and was simply treated as sRGB, so the gamut conversion that should have
-happened never did. Against the Cineon workflow, that is the colour-space half of its step 4,
-"log → Rec709: colour space AND gamma together" — this pipeline only ever did the gamma. Chroma was
-therefore always short, and chroma_grade faked it downstream with one isotropic scalar.
-
-A scalar cannot express a gamut relationship: gamut is anisotropic and hue-dependent, and the
-measured residual after scalar compensation was mean 0.093 / max 0.206 per patch. The real fix is
-to supply the conversion (`InputTransform` / `OutputRender`), after which the parameter has no
-reason to exist. The full trace is in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
+> Earlier versions carried a `chroma_grade` coefficient (3.05 by default) to compensate for the
+> chroma shortfall caused by missing colour management. That gap is now filled by the gamut
+> conversion in `InputTransform` / `OutputRender`, and the parameter has been removed. The trace is
+> in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
 **Why there is no per-roll colour-chart calibration**
 
