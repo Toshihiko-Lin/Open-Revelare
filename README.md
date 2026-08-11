@@ -341,6 +341,8 @@ OpenRevelare 免费、不销售、无订阅无内购，分发本身不以商业�
 - darktable 的 `negadoctor` 模块 —— 参照其数学模型 `D_corr = D × wb_high + wb_offset`
 
 **致谢名单**
+
+感谢以下用户对软件早期开发与完善提供的支持：
 - 豆腐
 - Caramello_焦糖玛奇朵
 - REPEATER000
