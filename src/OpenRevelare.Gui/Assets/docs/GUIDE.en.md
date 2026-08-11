@@ -81,21 +81,21 @@ option is **pre-selected** from that probe, so there is usually nothing to work 
 The probe only pre-selects; you can override it. In roll mode the first file is probed and the
 result applied to the whole roll (same scanner, same settings, same parameters).
 
-**chroma_grade on the TIFF path**
+**Colour management on the scan path**
 
 Loading a scan reads its embedded ICC profile: first the profile's own three TRC curves linearise
-each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB.
+each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB. **The scan path is
+therefore colour-managed by construction.**
 
-`chroma_grade` defaults to **1.0** on a TIFF import (no extra chroma amplification) against 3.05
-for a RAW import. That split has no defensible basis — its original rationale (3.05 compensating
-camera sensor crosstalk) did not survive tracing; see
-[CALIBRATION.md](../../../../docs/CALIBRATION.md). It is kept only so existing projects render
-unchanged.
+Camera RAW gets no equivalent transform, and that is not a gap — the relative sensitivity
+differences between the camera's three channels are normalised out by the film base (dividing by
+T_base), and a base measured on the actual roll fits your real copying conditions better than a
+looked-up camera matrix would: the light source, the lens and the copy geometry are all normalised
+along with it.
 
 When a file has no ICC, or the profile is LUT-only with no matrix tags, the corresponding step is
 skipped and the scanner's channel differences go uncorrected; pull back any resulting cast with
-SceneBase's saturation and white balance. To change the coefficient itself, use the `chroma_grade`
-field in the project file or the CLI's `--chroma-grade`.
+SceneBase's saturation and white balance.
 
 > Note: with an 8-bit TIFF, the log-density arithmetic behind the inversion has only a limited
 > number of levels to work with in the shadows, and slight banding is possible. Export 16-bit from
@@ -230,14 +230,14 @@ the positive still reads grey.
 - **grade**: controls the contrast of the positive, by analogy with paper grade in a traditional
   darkroom. The default of 1.65 suits standard C-41 consumer colour negative; ECN-2 motion-picture
   negative may want it lowered to 1.4–1.6.
-- **chroma_grade**: scales chroma in the density domain. Not exposed in the GUI; the value follows
-  the input type — 3.05 for a RAW import, 1.0 for a scan (see "chroma_grade on the TIFF path"
-  above).
+The inversion has no separate chroma parameter. Cineon applies **one gamma to all three
+channels** — chroma being each channel's deviation from their mean, a common multiplier preserves
+it proportionally, so chroma follows luminance automatically. To make a picture richer or lighter,
+use the SceneBase **saturation** slider.
 
-  This parameter rests on weak foundations and is being replaced by real colour-space rendering;
-  see [CALIBRATION.md](../../../../docs/CALIBRATION.md). For everyday "more" or "less", use the
-  SceneBase **saturation** slider. When you genuinely need to change the coefficient, two routes
-  are open: the `chroma_grade` field in the project file, or `--chroma-grade` on the CLI.
+Earlier versions had a `chroma_grade` parameter (defaulting to 3.05) that compensated for chroma
+the pipeline was losing elsewhere. That "elsewhere" turned out to be **film-base sampling**, and
+the parameter has been removed entirely — see [CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
 ---
 
@@ -319,8 +319,13 @@ has its own SceneBase.
 Click "Export" (or File → Export in the menu).
 
 **Format**:
-- **TIFF (16-bit, AdobeRGB)**: the highest quality, for grading afterwards or for archiving.
-- **JPEG (sRGB)**: ready to use, smaller, for sharing and publishing on the web.
+- **TIFF (16-bit)**: the highest quality, for grading afterwards or for archiving.
+- **JPEG (8-bit)**: smaller, for sharing and publishing on the web.
+
+**Colour space**: sRGB (the default, universal) / Adobe RGB / Display P3 / Kodak Endura Premier
+(darkroom-print look) / Kodak 2383 (print-film look). The embedded ICC profile matches what was
+actually written. Colours the destination gamut cannot hold are desaturated toward the neutral of
+their own luminance — preserving hue and brightness — rather than clipped per channel.
 
 **Resolution**: unlimited.
 
@@ -377,9 +382,11 @@ darkest area of the picture again, or lower D_max a little.
 
 **Colour comes out weak (ECN-2 motion-picture film)**
 
-ECN-2's chroma characteristics differ from C-41's, and the default chroma_grade of 3.05 may not
-suit it. Nudge the SceneBase saturation slider to the right; to change the coefficient directly,
-use the `chroma_grade` field in the project file or the CLI's `--chroma-grade`.
+ECN-2's chroma characteristics differ from C-41's. The pipeline has no compensation parameter for
+this — each stock's difference comes through on its own, from its own density structure under the
+same grade. To adjust richness, use the SceneBase saturation slider; for a theatrical look, set
+the export colour space to Kodak 2383 (print film), which is the gamut a motion-picture negative
+actually targets.
 
 **The export looks weaker than the preview**
 

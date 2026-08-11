@@ -187,7 +187,8 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 ### 成像
 
-- **密度域六步反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数）、色度缩放。前五项在界面中可调且都有明确的物理含义；色度缩放按输入类型取值（RAW 3.05、扫描件 1.0），依据薄弱、正被色彩空间渲染取代（见 [docs/CALIBRATION.md](docs/CALIBRATION.md)），可经工程文件或 CLI 修改
+- **密度域反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数），每一项都在界面中可调且有明确的物理含义。反转本身是 Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有独立的色度参数（早期版本有一个 `chroma_grade`，追溯后已移除，见 [docs/CALIBRATION.md](docs/CALIBRATION.md)）
+- **完整色彩管理**——链上每一段的色彩空间显式声明；导出可选 sRGB / Adobe RGB / Display P3 / Kodak Endura Premier（相纸）/ Kodak 2383（拷贝片），预览可设显示器空间与软打样
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
 - **智能白平衡**——DeepWB 神经网络一键估算白点（模型单独授权，[见下](#智能白平衡模型--单独授权请读一下)）
@@ -209,7 +210,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 |---|---|
 | **RAW 输入** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ 等（LibRaw） |
 | **其他输入** | TIFF / JPEG / PNG |
-| **导出** | 8/16-bit TIFF、JPEG，可嵌 sRGB / Adobe RGB ICC profile |
+| **导出** | 16-bit TIFF、JPEG，五种输出色彩空间，嵌入的 ICC 与实际像素一致 |
 
 ## 工作原理
 
@@ -221,7 +222,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 |  | **FilmBase · 物理还原** | **SceneBase · 审美调整** |
 |---|---|---|
-| 描述的是 | 这卷胶片客观存在的物理属性：片基的颜色与密度、最大密度、通道平衡、反转对比度、色度还原系数 | 色温偏好、曝光亮度、对比度风格、最终饱和度 |
+| 描述的是 | 这卷胶片客观存在的物理属性：片基的颜色与密度、最大密度、通道平衡、反转对比度 | 色温偏好、曝光亮度、对比度风格、最终饱和度 |
 | 性质 | 不是审美选择，是测量结果。同一卷共用同一套 | 同一张底片可以有完全不同的设定，每帧各调各的 |
 | 改的是 | 反转方程的**输入**——重算物理还原 | 反转方程的**输出**——在还原结果上调整 |
 
@@ -243,9 +244,9 @@ $$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
 
 $$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
 
-**反转**——亮度与色度分离后分别控制（grade 管对比度，chroma_grade 管色度还原）：
+**反转**——Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有第二个系数：
 
-$$D_\text{adj} = \text{pivot} + (D_\text{mean} - \text{pivot}) \times \text{grade} + D_\text{chroma} \times \frac{\text{chroma\_grade}}{\text{chroma\_amp}} - D_\text{max}$$
+$$D_\text{adj} = \text{pivot} + (D - \text{pivot}) \times \text{grade} - D_\text{max}$$
 
 $$T_\text{pos} = 10^{D_\text{adj}}$$
 

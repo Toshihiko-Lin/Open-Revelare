@@ -190,7 +190,8 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 
 ### Imaging
 
-- **Six-step density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade, chroma scaling. The first five are adjustable in the UI and each has a clear physical meaning; the chroma scaling takes its value from the input type (3.05 for RAW, 1.0 for scans), rests on weak foundations, and is being replaced by real colour-space rendering (see [docs/CALIBRATION.md](docs/CALIBRATION.md)). Changeable via the project file or the CLI
+- **Density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade. Every one is adjustable in the UI and physically meaningful. The inversion itself is the Cineon way: one gamma across all three channels, chroma following proportionally, with no separate chroma parameter (earlier versions had a `chroma_grade`; it was traced and removed — see [docs/CALIBRATION.md](docs/CALIBRATION.md))
+- **Full colour management** — every stage's colour space is declared explicitly; export to sRGB / Adobe RGB / Display P3 / Kodak Endura Premier (paper) / Kodak 2383 (print film), with a display-space setting and soft proofing for the preview
 - **Narrowband source decoupling (Path A)** — for LED / fluorescent light-box copying, inter-channel crosstalk is solved out with a 3×3 matrix from a set of R/G/B calibration frames. Method from [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **Auto-calibration** — estimates base, sprocket threshold, dark-end valley, `d_max`, highlight white balance from the roll
 - **Smart white balance** — DeepWB neural network estimates the white point in one click (model separately licensed, [see below](#smart-white-balance-model--separate-licence-read-this))
@@ -212,7 +213,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 |---|---|
 | **RAW input** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ etc. (LibRaw) |
 | **Other input** | TIFF / JPEG / PNG |
-| **Export** | 8/16-bit TIFF, JPEG, with an embedded sRGB or Adobe RGB ICC profile |
+| **Export** | 16-bit TIFF, JPEG, five output colour spaces; the embedded ICC matches the pixels |
 
 ## How it works
 
@@ -246,9 +247,10 @@ $$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
 
 $$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
 
-**Inversion** — luminance and chroma separated and controlled independently (grade = contrast, chroma_grade = chroma recovery):
+**Inversion** — the Cineon way: one gamma across all three channels, chroma following
+proportionally, with no second coefficient:
 
-$$D_\text{adj} = \text{pivot} + (D_\text{mean} - \text{pivot}) \times \text{grade} + D_\text{chroma} \times \frac{\text{chroma\_grade}}{\text{chroma\_amp}} - D_\text{max}$$
+$$D_\text{adj} = \text{pivot} + (D - \text{pivot}) \times \text{grade} - D_\text{max}$$
 
 $$T_\text{pos} = 10^{D_\text{adj}}$$
 

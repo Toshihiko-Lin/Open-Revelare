@@ -15,8 +15,8 @@ two areas of the interface.
 
 Every FilmBase parameter describes an objective physical property of this roll of film: the optical
 density and colour of the film base ($T_\text{base}$), the maximum density the film can record
-($D_\text{max}$), the density balance between channels ($w_\text{high}$ / $w_\text{offset}$), the
-contrast slope of the inversion (grade) and the chroma reconstruction coefficient (chroma_grade).
+($D_\text{max}$), the density balance between channels ($w_\text{high}$ / $w_\text{offset}$), and
+the contrast slope of the inversion (grade).
 
 These parameters are not aesthetic choices; they are measurements. Same brand and batch of film,
 same processing, and the FilmBase parameters are in theory identical for every frame — which is
@@ -133,26 +133,23 @@ ICC profile. The software probes that and picks a linearisation accordingly:
   scanners do); with a LUT-only profile those tags are missing, and step 2 is skipped with a
   warning.
 
-**How this relates to the RAW path, and why chroma_grade differs**
+**How this relates to the RAW path**
 
-After the TRC inversion and the matrix, the TIFF path puts out **standard linear sRGB**, aligned in
-colour space with the camera-native linear light of the RAW path (both linear, both ready to enter
-the density domain).
+After the TRC inverse and the matrix, the TIFF path puts out **standard linear sRGB**; the RAW path
+puts out the camera's own linear light. Both are linear, and both go straight into the density
+domain.
 
-The two paths currently take different `chroma_grade` defaults — 3.05 for RAW, 1.0 for TIFF
-(passthrough, no extra chroma amplification).
+**Beyond that the two paths differ in nothing to do with chroma.** Earlier versions gave RAW and
+scans different `chroma_grade` defaults (3.05 / 1.0) on the grounds that the camera's CFA crosstalk
+needed compensating; that parameter has been removed entirely — see step 7 and
+[CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
-**That split has no defensible basis.** The earlier account was that 3.05 undoes the camera CFA's
-channel crosstalk while the scanner's ICC matrix has already undone its own, so scans need none.
-Tracing where 3.05 actually came from, that explanation does not hold: the dataset it was fitted
-against carries no camera or scanner information whatsoever, and what it compensates is not sensor
-crosstalk. The full trace is in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
-
-The practical consequence is that one and the same negative renders differently depending on
-whether it was copied with a camera or run through a scanner, with no physical justification for
-the difference. The status quo is kept only so existing projects render unchanged; the real fix is
-the colour-space rendering described below, at which point this split retires along with
-`chroma_grade` itself.
+Worth noting: the scan path is **colour-managed by construction** — the ICC's rXYZ/gXYZ/bXYZ tags
+describe the device primaries and are applied at decode. The camera path performs no equivalent
+transform, and that is not a gap: the relative sensitivity differences between the camera's three
+channels are normalised out by $T_\text{base}$ (dividing by the film base), and a base measured on
+the actual roll fits the real copying conditions better than a looked-up camera matrix — the light
+source, the lens and the copy geometry are all normalised along with it.
 
 When a file carries no ICC profile, its samples are taken as already linear (no TRC inverse, no
 matrix); when the profile is LUT-only and has no rXYZ/gXYZ/bXYZ tags, the matrix step is skipped.
@@ -263,7 +260,7 @@ amplification is measured:
 
 $$\text{chroma\_amp} = \frac{\text{std}(D_\text{chroma,\ after})}{\text{std}(D_\text{chroma,\ before})}$$
 
-and `chroma_grade` is divided by it during the inversion, so a decoupled roll and a white-light roll
+and `grade` is divided by it when applied to the chroma component, so a decoupled roll and a white-light roll
 arrive at the same saturation.
 
 **Characteristics**:
@@ -497,58 +494,30 @@ to about 1.0. Digitising has no "high-contrast paper" link in it, so a plain inv
 contrast a typical C-41 negative is missing, and the pivot parameter sets where the mid-tone anchor
 sits, so mid-tone brightness holds steady as grade is changed.
 
-**chroma_grade (the chroma scale)**: a scalar applied to the chroma component in the density
-domain. Defaults to 3.05 (RAW) / 1.0 (scans).
+**One gamma, three channels.** That is the whole of it — there is no second coefficient. **Chroma
+needs no separate treatment**: it is each channel's deviation from their mean, and multiplying all
+three by one grade preserves it proportionally, so chroma follows luminance automatically. This is
+what Cineon does, and it is why "invert and align the three channels" looks sufficient in DaVinci
+or Photoshop.
 
-**This parameter rests on weak foundations and is being replaced.** The full trace is in
-[CALIBRATION.md](../../../../docs/CALIBRATION.md); the essentials:
+**There used to be a `chroma_grade`, and it has been removed.** Earlier versions split density into
+luminance and chroma and gave chroma its own coefficient (3.05 by default) to make up for colour
+the pipeline was losing elsewhere. That "elsewhere" turned out to be **film-base sampling**: when
+the automatic sample caught light-box spill instead of the orange mask, the mask was never removed
+and the colour was wrong throughout — and chroma_grade was a patch applied downstream of that
+mistake. With the base sampled correctly the colour is right, and the patch has nothing left to do.
+The full trace is in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
 
-- 3.05 was fitted against DiVERE's Kodak Gold 200 + ColorChecker 24 dataset. That dataset is a
-  spectral **simulation** of theoretical densities (its own descriptor says `"type": "DensityExp"`),
-  not a measurement — earlier documentation called it "measured", which was inaccurate.
-- The fit targeted moving the 18 chromatic patches' mean saturation from 0.79 back to 0.97. But
-  that 0.79 was measured in the **Kodak Endura Premier paper gamut**, whereas the pipeline outputs
-  sRGB, with no paper stage anywhere in between.
-- The deficit was attributed to dye interlayer crosstalk and DIR couplers, yet the dataset used is
-  the `auc_noDIR` variant — DIR is explicitly switched off in it, so DIR cannot be the cause.
-- "The paper gamut is narrow" does not survive checking either: the gamut accounts for only about
-  6% (`docs/calibration/gamut_check.py`), not 21%. The real origin of the deficit is **unresolved**.
-- The only executable quantification in the repository (`docs/calibration/study_saturation.py`)
-  points the opposite way: on a synthetic negative, per-channel inversion comes out 11–14% *over*
-  the true scene, and the compensation required is 0.
+**Why there is no per-roll colour-chart calibration**
 
-More fundamentally: **a scalar cannot fix a gamut problem.** Gamut relationships are anisotropic
-and hue-dependent — paper does not compress cyan and magenta by the same amount. That same script
-measures the residual after scalar compensation at mean 0.093 / max 0.206: it does not flatten.
+The most accurate route available is to measure per roll — shoot a ColorChecker on one frame of
+every roll, copy it after processing, and solve from the chart data for this roll's actual
+parameters under this development. That is what [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
+does.
 
-The root cause of all of this is that the linear data leaving the inversion never declared a colour
-space, implicitly being "sRGB because that is what we export". With no gamut to convert into, a
-scalar on the chroma vector was the only lever available. The correct fix is real colour-space
-rendering — see below.
-
-**chroma_grade is not exposed in the GUI**: as of 1.0 the preferences no longer offer presets or a
-custom value for chroma_grade; the value follows the input type instead (3.05 for RAW, 1.0 for a
-scan). The parameter itself is
-still there — it is the `chroma_grade` field in the project file and `--chroma-grade` on the CLI,
-and either route can change it.
-
-Withdrawing the GUI entry point was deliberate: compensating chroma with a single global scalar is
-a stopgap whose basis has since been traced and found wanting (above), and until it is replaced it
-should not become a public interface users depend on. For "make it richer or lighter", use the
-SceneBase saturation slider.
-
-**On how chroma_grade is calibrated: why not a colour chart per roll**
-
-OpenRevelare's chroma_grade is a fixed global preset. The more accurate approach is to measure per
-roll — shoot a ColorChecker on one frame of every roll, copy it after processing, and solve
-automatically from the chart data for this roll's actual parameter deviation under this
-development, calibrating the compensation matrix for the sensor-paper spectral mismatch (the second
-layer of crosstalk described in step 3) at the same time. That is the most accurate route available
-today, and it is what [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) does.
-
-OpenRevelare does not do per-roll chart calibration because of what it costs to use: buying a
-ColorChecker, giving up a frame on every roll to it, and copying it separately after processing is
-a workflow cost far beyond what most film photographers need in accuracy.
+OpenRevelare does not, because of what it costs to use: buying a ColorChecker, giving up a frame on
+every roll to it, and copying it separately after processing is a workflow cost far beyond what
+most film photographers need in accuracy.
 
 **If you need absolute rigour**: for a workflow that needs traceable colour accuracy — copying
 cultural artefacts, commercial archives, scientific use — use DiVERE directly.
@@ -556,7 +525,7 @@ cultural artefacts, commercial archives, scientific use — use DiVERE directly.
 **chroma_amp (RGB path only)**: the RGB decouple matrix amplifies chroma further in the density
 domain (about 2×), and without compensation Path A's output oversaturates. The pipeline measures
 the ratio of chroma standard deviations before and after decoupling (averaged over the three
-channels) and divides chroma_grade by it during the inversion, so Path A and Path B come out at the
+channels) and divides grade by it when applied to chroma, so Path A and Path B come out at the
 same saturation automatically.
 
 #### What is particular about ECN-2 motion-picture film
@@ -584,13 +553,13 @@ C-41), and how far the grade parameter should adjust contrast needs reassessing 
 
 **Chroma**: ECN-2's DIR coupler formulation and dye layer structure differ from C-41's, and
 motion-picture film's logic for handling saturation comes from theatrical print standards, not
-C-41's consumer-photography logic. At chroma_grade = 3.05, ECN-2 stocks often come out either
-oversaturated or weak depending on the brand; compensate on the SceneBase saturation slider.
+C-41's consumer-photography logic. The pipeline carries no compensation parameter for it — each
+stock's difference comes through on its own, out of its own density structure under the same grade.
+Adjust richness on the SceneBase saturation slider; for a theatrical look, export into the Kodak
+2383 print-film gamut, which is what a motion-picture negative actually targets.
 
-There is no plan to calibrate a separate chroma_grade for ECN-2 — the parameter is weakly founded
-and on its way out (above). The corresponding fix for ECN-2 is to render into the Kodak 2383 print
-film gamut, which is precisely the target gamut a motion-picture negative has in the theatrical
-chain; that route becomes available once colour-space rendering lands.
+The corresponding fix for ECN-2 is to render into the Kodak 2383 print film gamut, which is
+precisely the target gamut a motion-picture negative has in the theatrical chain.
 
 ---
 
