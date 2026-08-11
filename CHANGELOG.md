@@ -1,5 +1,32 @@
 # OpenRevelare — 更新日志
 
+## v1.2.2（2026-08-11）
+
+接着修 1.2.1 没修完的裁切问题。
+
+**修复**
+
+- **macOS：裁切后画面显示不正确**。1.2.1 的修复没有解决根本问题——裁切框在屏幕上
+  是对的，但应用后比例会变、位置也会漂。选 1:1 预设尤其明显。
+- **负片视图下放大，看到的是去色罩后的画面**。框选片基时放大到触发局部高清渲染，
+  那一块会变成处理完的正片，而不是正在取样的原始负片。按住对比看原片时同理。
+- 裁切或清除裁切后回到「适应窗口」，画面不再放大着偏在一边。
+
+---
+
+**Fixed**
+
+- **macOS: the crop was not displayed correctly after applying it.** The 1.2.1 fix did
+  not get to the bottom of it — the frame looked right on screen, but the applied crop
+  came out with a different ratio and drifted out of position. Most visible with the
+  1:1 preset.
+- **Zooming in on the negative view showed the de-masked picture.** Zooming far enough
+  to trigger the sharp-patch render while picking the film base replaced that region
+  with the finished positive instead of the negative being sampled. Same for the
+  hold-to-compare view.
+- Applying or clearing a crop now returns to fit, instead of leaving the picture
+  magnified and off to one side.
+
 ## v1.2.1（2026-08-11）
 
 **新增**
