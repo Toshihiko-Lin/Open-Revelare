@@ -394,8 +394,17 @@ The preview uses an approximate fast path and the export uses high-precision flo
 slight difference between them is normal. If it is pronounced, check that the output intent is set
 the way you meant (BASIC / NONE).
 
-**Lensfun does not recognise the lens**
+**The corners are dark, or tinted**
 
-The format of the lens model in EXIF varies between camera manufacturers. The camera and lens model
-can be named by hand in the settings, overriding what was detected. If the lens is not in the
-Lensfun database at all, skipping this step does not affect the inversion itself.
+Vignetting and colour non-uniformity from the copy lens. The "Lens correction (manual)" panel
+offers two routes: the vignette slider compensates the brightness falloff with a formula; if the
+corners also carry a colour cast, use the LCC flat field instead — shoot one blank light frame and
+load it, and the per-pixel brightness AND colour non-uniformity of this lens and stand are divided
+out, which is more accurate than any formula.
+
+**The frame edges bow**
+
+Barrel or pincushion distortion from the copy lens. Adjust the distortion slider in the "Lens
+correction (manual)" panel — negative corrects barrel, positive pincushion. The macro primes
+normally used for copying distort very little, and the value is fixed: measure once, type it in,
+and it holds for the whole roll.

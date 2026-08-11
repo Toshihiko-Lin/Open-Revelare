@@ -156,22 +156,28 @@ matrix); when the profile is LUT-only and has no rXYZ/gXYZ/bXYZ tags, the matrix
 In both cases the scanner's channel differences go uncorrected, so pull back any resulting cast
 with SceneBase's saturation and white balance.
 
-Scanner TIFF goes down Path B (the white-light path); Lensfun and RGB decoupling are not used.
+Scanner TIFF goes down Path B (the white-light path); lens correction and RGB decoupling are not used.
 
 ---
 
-### Step 2: Lensfun lens correction (optional, linear domain)
+### Step 2: lens correction (optional, linear domain)
 
 Every correction happens in the **linear light domain**, after the decode and before the inversion,
-which is the only correct moment for it:
+which is the only correct moment for it — distortion and vignetting are linear optical effects, and
+correcting them after the log transform would have $-\log_{10}$ amplify them non-linearly.
 
-- **Distortion**: pixel coordinates are remapped from the Lensfun database's polynomial model.
-- **Chromatic aberration**: R/G/B are remapped with different scale factors each, removing purple
-  and green fringing.
-- **Vignetting**: per-pixel brightness compensation for the falloff towards the corners.
+- **Distortion**: a single-parameter radial model ($k_1 < 0$ corrects barrel, $k_1 > 0$
+  pincushion), backward-mapped with bilinear sampling; out-of-bounds samples clamp to the edge.
+- **Vignetting**: a radial gain model, with `VignetteAmount` setting how much the corners are
+  lifted and `VignetteFalloff` how steep the falloff is.
+- **LCC flat-field**: not a model but a **measurement** — shoot one blank, featureless light frame
+  and it records this particular lens-and-stand's per-pixel brightness AND colour non-uniformity;
+  the correction is a per-channel divide by the mean-normalised flat field. More accurate than the
+  formulaic vignette, because it takes out colour non-uniformity along with brightness.
 
-The EXIF information (camera model, lens model, focal length, aperture) is read automatically and
-matched against the Lensfun database; there is nothing to pick by hand.
+All three are **manual parameters**; there is no EXIF-driven lens-database matching. A copy setup
+normally uses a macro prime whose distortion is small and fixed — measure it once and type it in —
+and a flat field is far more specific to your copy stand than any generic database entry could be.
 
 ---
 

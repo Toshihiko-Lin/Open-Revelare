@@ -357,7 +357,6 @@ Feedback and bugs: open an [issue](https://github.com/Toshihiko-Lin/Open-Revelar
 
 - No per-roll colour-chart calibration: for strict colour-accurate work (heritage copying, commercial archiving, research) use DiVERE
 - 8-bit TIFF input may show slight banding in shadows; export 16-bit from the scanner when possible
-- Lenses missing from the Lensfun database must be specified manually
 
 ## Donate
 
