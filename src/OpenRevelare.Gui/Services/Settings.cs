@@ -83,6 +83,18 @@ public static class Settings
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public SheetStyle SheetStyle { get; set; } = SheetStyle.Light;
 
+        /// <summary>
+        /// Run the full auto-inversion chain (片基 → 亮部 WB → D-max → 色阶) when a roll is
+        /// imported, instead of only estimating the film base.
+        ///
+        /// On by default: the chain's four steps are what a user does by hand immediately after
+        /// every import anyway, and each one is re-runnable from its own button afterwards, so
+        /// the cost of a wrong guess is a click. Off restores the film-base-only import — worth
+        /// having for rolls whose calibration is being dialled in deliberately, where an
+        /// automatic D-max and levels are noise on top of the measurement.
+        /// </summary>
+        public bool AutoInvertOnImport { get; set; } = true;
+
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
         public Models.ExportOptions Export { get; set; } = new();

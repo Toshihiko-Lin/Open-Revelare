@@ -1,5 +1,36 @@
 # OpenRevelare — 更新日志
 
+## 未发布
+
+**新增**
+
+- **导入后自动整卷分析去色罩**：勾选后自动完成片基、白平衡、密度与色阶的标定，
+  无需框选任何区域。分析整卷并汇总成一组参数应用到所有帧，因此同一卷观感一致，
+  不会把夕阳或钨丝灯的氛围当成偏色修掉。
+
+  当前帧先出结果，整卷分析在后台继续——需要解码全卷，视帧数和机器约每帧数秒，
+  完成前缩略图与参数仍会变动。
+
+  开关在导入弹窗里（偏好设置 → 导入 设的是它的默认值）。不勾选则完全不做自动
+  测量，所有参数保持默认，整卷标定交给手动。
+
+---
+
+**Added**
+
+- **Roll-wide mask removal on import** — tick it and the film base, white balance,
+  density and levels are all calibrated for you, with no region selection anywhere.
+  It analyses the whole roll and pools one parameter set for every frame, so a roll
+  stays visually consistent and a sunset or tungsten interior is not corrected away
+  as if it were a cast.
+
+  The current frame is solved first and the roll-wide pass continues in the
+  background — it decodes every frame, roughly a few seconds each, and thumbnails
+  and parameters keep changing until it finishes.
+
+  The switch is in the import dialog (偏好设置 → 导入 sets its default). Left
+  unticked, nothing is measured and the whole calibration is yours to do by hand.
+
 ## v1.2.0（2026-08-11）
 
 色彩管理重做。

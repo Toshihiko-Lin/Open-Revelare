@@ -32,6 +32,7 @@ public sealed class PreferencesDialog : Window
     private ComboBox _concurrency = new();
     private TextBlock _dngNote = new();
     private TextBlock _concurrencyNote = new();
+    private CheckBox _autoInvert = new();
     private CheckBox _cacheOn = new();
     private CheckBox _cachePersist = new();
     private TextBox _cacheDir = new();
@@ -47,7 +48,7 @@ public sealed class PreferencesDialog : Window
     /// <summary>Everything the user can have changed but not yet saved.</summary>
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
-                                string SheetDir, int SheetBudget);
+                                string SheetDir, int SheetBudget, bool AutoInvert);
 
     public PreferencesDialog()
     {
@@ -69,7 +70,8 @@ public sealed class PreferencesDialog : Window
             CacheDir: s.CacheDirectory,
             CacheBudget: cb >= 0 ? cb : Array.IndexOf(CacheBudgets, 5),
             SheetDir: s.SheetCacheDirectory,
-            SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1)));
+            SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1),
+            AutoInvert: s.AutoInvertOnImport));
     }
 
     private State Snapshot() => new(
@@ -83,7 +85,8 @@ public sealed class PreferencesDialog : Window
         CacheDir: _cacheDir.Text ?? "",
         CacheBudget: Math.Max(0, _cacheBudget.SelectedIndex),
         SheetDir: _sheetDir.Text ?? "",
-        SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex));
+        SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex),
+        AutoInvert: _autoInvert.IsChecked ?? true);
 
     private void Build(State v)
     {
@@ -109,6 +112,7 @@ public sealed class PreferencesDialog : Window
         _cacheNote = Note();
         _sheetNote = Note();
 
+        _autoInvert = new CheckBox { Content = Loc.T("导入后自动整卷分析去色罩"), IsChecked = v.AutoInvert };
         _cacheOn = new CheckBox { Content = Loc.T("启用 DNG 转换磁盘缓存"), IsChecked = v.CacheOn };
         _cachePersist = new CheckBox { Content = Loc.T("跨会话保留（退出不删除，下次启动直接命中）"), IsChecked = v.CachePersist };
         _cacheDir = new TextBox { Watermark = Loc.T("留空 = 和源文件同目录"), MinWidth = 250, Text = v.CacheDir };
@@ -148,6 +152,13 @@ public sealed class PreferencesDialog : Window
         clear.Click += (_, _) => { _cacheDir.Text = ""; UpdateCacheNote(); };
         var dirRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         dirRow.Children.Add(_cacheDir); dirRow.Children.Add(browse); dirRow.Children.Add(clear);
+
+        panel.Children.Add(new TextBlock { Text = Loc.T("导入"), FontWeight = FontWeight.SemiBold,
+                                           Margin = new Thickness(0, 14, 0, 2) });
+        panel.Children.Add(_autoInvert);
+        panel.Children.Add(new TextBlock {
+            Text = Loc.T("这里设的是导入弹窗里那个勾选框的默认值，实际是否执行以每次导入时的选择为准。不勾选则导入时完全不做自动测量，所有参数保持默认。这四步之后都能在「整卷校准」里各自单独重来。"),
+            TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 2, 0, 0) });
 
         panel.Children.Add(new TextBlock { Text = Loc.T("磁盘缓存"), FontWeight = FontWeight.SemiBold,
                                            Margin = new Thickness(0, 14, 0, 2) });
@@ -301,6 +312,7 @@ public sealed class PreferencesDialog : Window
         s.Theme = _theme.SelectedIndex == 1 ? "light" : "dark";
         s.Language = _language.SelectedIndex switch { 1 => "zh", 2 => "en", _ => "auto" };
         s.DecodeConcurrency = Math.Max(0, _concurrency.SelectedIndex);
+        s.AutoInvertOnImport = _autoInvert.IsChecked ?? true;
         s.CacheEnabled = _cacheOn.IsChecked ?? true;
         s.CachePersistent = _cachePersist.IsChecked ?? false;
         s.CacheDirectory = (_cacheDir.Text ?? "").Trim();

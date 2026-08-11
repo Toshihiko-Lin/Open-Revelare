@@ -94,6 +94,16 @@
                         <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickLcc" />
                     </Grid>
                 </StackPanel>
+
+                <!-- ── 自动整卷分析去色罩 ───────────────────────────── -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{i18n:T '自动整卷分析去色罩'}" FontWeight="SemiBold" />
+                    <CheckBox Name="AutoInvertChk" Content="{i18n:T '导入后自动整卷分析去色罩'}"
+                              IsChecked="True"
+                              ToolTip.Tip="{i18n:T '按顺序自动完成：片基 T_base → 亮部 WB → D-max → 黑白场，无需框选任何区域。'}" />
+                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                               Text="{i18n:T '遍历整卷、汇总成一组参数应用到所有帧，同卷观感一致。当前帧会先出结果，整卷分析在后台继续——需要解码全卷，视帧数和机器约每帧数秒，完成前缩略图与参数仍会变动。不勾选则完全不做任何自动测量，所有参数保持默认值，全部交给你手动标定。'}" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

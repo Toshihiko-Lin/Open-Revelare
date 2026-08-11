@@ -19,4 +19,15 @@ public sealed class ImportConfig
     public string? CalDir { get; set; }     // Path A calibration directory (R/G/B blank-board RAWs)
     public bool LccEnabled { get; set; }
     public string? LccPath { get; set; }
+
+    /// <summary>
+    /// Run the roll-wide auto-inversion chain (片基 → 亮部 WB → D-max → 黑白场) after the roll
+    /// loads. Defaults to the saved preference, and whatever the user picks in the dialog is
+    /// written back to it — the checkbox is both this roll's choice and the new default.
+    ///
+    /// The decision lives here rather than only in 偏好设置 because it is a per-import one: the
+    /// chain has to decode every frame, which is the slowest thing an import does, and whether
+    /// that is worth it depends on the roll in front of you.
+    /// </summary>
+    public bool AutoInvert { get; set; } = true;
 }

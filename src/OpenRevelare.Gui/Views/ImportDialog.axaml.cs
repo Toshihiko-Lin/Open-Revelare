@@ -47,6 +47,8 @@ public partial class ImportDialog : Window
         InitializeComponent();
         FileList.ItemsSource = Files;
         FormatCombo.ItemsSource = FormatPresets;
+        // Opens on whatever the last import chose (OnOk writes it back).
+        AutoInvertChk.IsChecked = Settings.Current.AutoInvertOnImport;
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
@@ -137,7 +139,14 @@ public partial class ImportDialog : Window
             CalDir = SrcA.IsChecked == true ? CalEdit.Text : null,
             LccEnabled = LccChk.IsChecked == true,
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
+            AutoInvert = AutoInvertChk.IsChecked == true,
         };
+        // The dialog's choice becomes the new default, so the next import opens on it.
+        if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert)
+        {
+            Settings.Current.AutoInvertOnImport = cfg.AutoInvert;
+            Settings.Save();
+        }
         cfg.Paths.AddRange(Files);
         cfg.Notes.CameraBody = CameraEdit.Text ?? "";
         cfg.Notes.FilmStock = FilmEdit.Text ?? "";

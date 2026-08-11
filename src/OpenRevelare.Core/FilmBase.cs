@@ -18,6 +18,182 @@ public static class FilmBase
     private const double Truncate = 4.0;
 
     /// <summary>
+    /// Film base as the brightest DENSE MODE of the frame's luma, rather than as a bright-tail
+    /// percentile. Co-sited: the window is chosen on luma, and all three channels are averaged
+    /// over exactly the pixels inside it.
+    ///
+    /// Why a mode and not a tail. Every percentile estimator here — including NexFilm's
+    /// <c>compute_auto_base</c>, which this originally followed — assumes the brightest pixels
+    /// ARE the base. On a copy-stand negative that assumption fails, because the light board's
+    /// transition shoulder outlives the board cut: the sprocket threshold removes the board's
+    /// core, but its penumbra bleeds into the frame edges and is still far brighter than the
+    /// base. On the measured sample the non-board luma histogram held a dense base peak of
+    /// 126637 pixels at luma ≈0.14 that fell off a cliff to ~168 per bin above 0.158, and every
+    /// tail estimator landed in that thin scatter instead of on the peak:
+    ///
+    ///   p99.99 → 0.364, 0.637, 0.371   (R/G 0.571 — green-dominant, physically impossible)
+    ///   p99    → 0.232, 0.308, 0.165   (R/G 0.752)
+    ///   p95    → 0.207, 0.203, 0.082   (R/G 1.024)
+    ///   mode   → 0.198, 0.174, 0.060   (R/G 1.142)
+    ///   manual → 0.200, 0.175, 0.060   (R/G 1.143)
+    ///
+    /// Lowering the percentile only walks toward the mode asymptotically and never reaches it,
+    /// because the contamination is a gradient, not an outlier count — no percentile is both
+    /// low enough to clear the shoulder and high enough to still mean "base".
+    ///
+    /// The mode is also what makes this robust: bare base is one near-uniform material covering
+    /// a large, contiguous area, so it is the single densest thing in the histogram by a wide
+    /// margin. Picture content spreads; the base piles up. Widening the averaging window 3×
+    /// moved R/G by 0.002 on the sample, so the result is not tuned to a window choice.
+    ///
+    /// Requires a board cut, and returns null without one. The mode is only the base on a frame
+    /// where the base is bounded from above by something brighter that has just been removed —
+    /// take the board away and the brightest dense mode is picture content, not base. Measured on
+    /// a synthetic no-board negative with a true base of (0.700, 0.420, 0.200), the mode returned
+    /// (0.493, 0.296, 0.141): a uniform ~30% underestimate, i.e. a base sitting inside the
+    /// picture's own tone distribution. The bright-tail estimator is right for that case and
+    /// <see cref="EstimateTBaseFromRoll"/>'s no-board branch already handles it, so callers fall
+    /// back to it rather than this.
+    /// </summary>
+    /// <param name="image">Frame to measure — the luma domain the board cut was calibrated in.</param>
+    /// <param name="sprocketThreshold">Board cut; pixels above it are dropped before the
+    /// histogram is built. Null → returns null (see above).</param>
+    /// <param name="valueImage">Optional post-decouple buffer supplying the averaged VALUES while
+    /// <paramref name="image"/> still supplies the luma. Same split as
+    /// <see cref="EstimateTBaseFromRoll"/>'s valueImages, and required on Path A.</param>
+    /// <returns>The (3,) base, or null when no mode cleared the density floor.</returns>
+    public static double[]? EstimateTBaseByMode(ImageBuffer image,
+                                                double? sprocketThreshold = null,
+                                                ImageBuffer? valueImage = null)
+    {
+        const int Bins = 512;
+        // A bin must hold this share of the surviving pixels to count as the base mode. Set well
+        // below the base peak's real share (the sample's was ~8% of non-board pixels in one bin)
+        // and well above the shoulder scatter (~0.01%), so the gap between them is ~2 orders of
+        // magnitude wide and the exact value is not load-bearing.
+        const double ModeFloor = 0.0015;
+        // Averaging window as a fraction of the peak luma. Narrow enough to exclude the
+        // neighbouring picture tones, wide enough that the mean is taken over a large sample.
+        const double HalfWindow = 0.06;
+
+        if (sprocketThreshold is not double cut || cut <= 0.0) return null;
+
+        ImageBuffer values = valueImage ?? image;
+        float[] s = image.Data, v = values.Data;
+        int total = Math.Min(image.PixelCount, values.PixelCount);
+
+        var histogram = new int[Bins];
+        double scale = cut;
+        long kept = 0;
+        for (int p = 0; p < total; p++)
+        {
+            int i = p * 3;
+            double luma = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
+            if (luma > cut) continue;
+            histogram[(int)Math.Clamp(luma / scale * (Bins - 1), 0, Bins - 1)]++;
+            kept++;
+        }
+        if (kept == 0) return null;
+
+        // Brightest bin that is dense enough to be a material rather than scatter. Walking down
+        // from the bright end (not taking the global mode) is what keeps a large dark subject
+        // from winning: the base is the brightest such mode, not the most populous one overall.
+        int peak = -1;
+        for (int b = Bins - 1; b >= 0; b--)
+            if (histogram[b] > kept * ModeFloor) { peak = b; break; }
+        if (peak < 0) return null;
+
+        double peakLuma = (double)peak / (Bins - 1) * scale;
+        double low = peakLuma * (1.0 - HalfWindow), high = peakLuma * (1.0 + HalfWindow);
+
+        var sum = new double[3];
+        long count = 0;
+        for (int p = 0; p < total; p++)
+        {
+            int i = p * 3;
+            double luma = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
+            if (luma < low || luma > high) continue;
+            sum[0] += v[i]; sum[1] += v[i + 1]; sum[2] += v[i + 2];
+            count++;
+        }
+        if (count == 0) return null;
+
+        var tBase = new[] { sum[0] / count, sum[1] / count, sum[2] / count };
+        Quantise(tBase);
+        return tBase.Any(x => x <= 0) ? null : tBase;
+    }
+
+    /// <summary>
+    /// Roll-wide film base by mode: <see cref="EstimateTBaseByMode"/> per frame, then the
+    /// per-channel MEDIAN of the frames that produced one.
+    ///
+    /// The median is the whole point of doing this across a roll. The base is one physical
+    /// material with a near-constant D_min along the strip, so the frames are repeated
+    /// measurements of a single quantity — and a median of repeated measurements discards the
+    /// frame whose mode landed on something else (an all-black scene with no bare base showing,
+    /// a light leak, a frame where the board cut sat wrong) instead of letting it move the
+    /// result. A mean would not: one bad frame drags it.
+    /// </summary>
+    /// <param name="images">Mask-domain frames (raw luma, where the board cut is calibrated).</param>
+    /// <param name="sprocketThreshold">Board cut, required — see <see cref="EstimateTBaseByMode"/>.</param>
+    /// <param name="valueImages">Optional post-decouple value buffers, index-aligned with
+    /// <paramref name="images"/>.</param>
+    /// <returns>The (3,) roll base, or null when no frame yielded a mode.</returns>
+    public static double[]? EstimateTBaseByModeFromRoll(IReadOnlyList<ImageBuffer> images,
+                                                        double? sprocketThreshold = null,
+                                                        IReadOnlyList<ImageBuffer>? valueImages = null)
+    {
+        var perFrame = new List<double[]>();
+        int frames = valueImages is null ? images.Count : Math.Min(images.Count, valueImages.Count);
+        for (int f = 0; f < frames; f++)
+            if (EstimateTBaseByMode(images[f], sprocketThreshold, valueImages?[f]) is { } pick)
+                perFrame.Add(pick);
+
+        if (perFrame.Count == 0) return null;
+        var tBase = new double[3];
+        for (int c = 0; c < 3; c++) tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
+        Quantise(tBase);
+        return tBase.Any(x => x <= 0) ? null : tBase;
+    }
+
+    /// <summary>
+    /// Roll-wide D_max: the per-frame 99.9th density percentile of T / t_base, reduced across
+    /// frames by an UPPER percentile rather than by a median or a max.
+    ///
+    /// D_max is a property of the film and its development — the densest the emulsion goes — not
+    /// of any one scene, which is why one value for the roll is the right model. But the frames
+    /// are not repeated measurements of it the way they are for t_base: a frame only reaches the
+    /// film's true D_max if it actually contains a bright highlight. An underexposed or flat
+    /// frame reads low, so a median would be dragged below the film's real ceiling and every
+    /// frame that DOES contain a highlight would then clip to white.
+    ///
+    /// So the reduction is asymmetric on purpose: take a high percentile across frames
+    /// (<paramref name="rollPercentile"/>, default 90) — high enough that the well-exposed frames
+    /// define the ceiling, but not <c>max</c>, which would hand the whole roll to a single frame
+    /// with a dust speck or a specular blowout.
+    /// </summary>
+    /// <param name="images">Frames in the same domain the inversion divides, already normalised
+    /// by t_base is NOT assumed — this divides internally.</param>
+    /// <param name="tBase">The roll's film base.</param>
+    /// <param name="rollPercentile">Cross-frame percentile, 0-100.</param>
+    /// <returns>The roll D_max, or null when no frame could be measured.</returns>
+    public static double? DetectDMaxFromRoll(IReadOnlyList<ImageBuffer> images, double[] tBase,
+                                             double rollPercentile = 90.0)
+    {
+        var perFrame = new List<double>();
+        foreach (ImageBuffer img in images)
+        {
+            var norm = new ImageBuffer(img.Width, img.Height);
+            for (int p = 0; p < img.PixelCount; p++)
+                for (int c = 0; c < 3; c++)
+                    norm.Data[p * 3 + c] = (float)(img.Data[p * 3 + c] / Math.Max(tBase[c], 1e-10));
+            double d = DetectDMax(norm);
+            if (double.IsFinite(d) && d > 0) perFrame.Add(d);
+        }
+        return perFrame.Count == 0 ? null : Percentile(perFrame.ToArray(), rollPercentile);
+    }
+
+    /// <summary>
     /// Film-base transmittance from an unexposed (D_min) rect. The returned T_base
     /// encodes D_min removal AND shadow-end WB (the orange mask) at once.
     /// rect = (x, y, w, h) normalised to [0,1]. Returns (3,).
