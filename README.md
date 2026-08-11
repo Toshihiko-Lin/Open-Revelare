@@ -340,19 +340,26 @@ OpenRevelare 免费、不销售、无订阅无内购，分发本身不以商业�
 - [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)（MIT）—— 密度域色彩模型的参照
 - darktable 的 `negadoctor` 模块 —— 参照其数学模型 `D_corr = D × wb_high + wb_offset`
 
+**致谢名单**
+- 豆腐
+- Caramello_焦糖玛奇朵
+- REPEATER000
+- jamais
+- hhd
+
+
+
 反馈与 bug 请开 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues)，附上系统版本、相机或扫描仪型号、输入格式与错误信息。请不要上传含隐私内容的原片。
 
-## Roadmap 与已知限制
+## 已知限制
 
-**规划中**
 
-- ECN-2 电影负片的独立标定数据（基于 ColorChecker 24，当前用 C-41 基准近似）
-- macOS 真机验证与 `SystemMemory` 实现（macOS 版从未在真机运行，解码并发为保守固定档）
 
-**已知限制**
+
 
 - 不做逐卷色卡标定：追求严格色彩精度（文物翻拍、商业存档、科研）请用 DiVERE
 - 8-bit TIFF 输入暗部可能出现轻微色带，建议扫描时导出 16-bit
+- macOS 真机验证与 `SystemMemory` 实现（macOS 版从未在真机运行，解码并发为保守固定档）
 
 ## 打赏
 
