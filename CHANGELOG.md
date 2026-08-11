@@ -2,90 +2,54 @@
 
 ## v1.2.0（2026-08-11）
 
-色彩管线大修。反相现在跑在宽色域的 ACEScg 里，帧编辑跑在你选定的输出空间里，
-导出所见即所得。**既有工程的画面会与上一版不同**，且滑块数值的含义已改变。
+色彩管理重做。
+现在色彩管理完善，`chroma_grade = 3.05` 标量随之取消。
+
+> **既有工程的画面会与本版不同，建议重新处理。** 滑块数值本身保留，但它们的含义
+> 变了——现在是「在当前输出空间里调这么多」。1.1.2 及更早版本调好的卷，反差与
+> 饱和度都会有可见变化。
 
 **修复**
 
-- **工作空间加宽到 ACEScg**：反相与三通道对齐此前跑在 sRGB 里，饱和的染料在
-  输出变换有机会安置它之前就被截掉了。现在密度域上游是 ACEScg（场景参考、
-  宽于任何输出空间），颜色能完整穿过对数域。这一步补上后，色域映射（朝等亮度
-  中性轴收缩）才真正开始起作用——此前"更宽"的输出空间几乎是无操作
-- **补上 Cineon 第 4 步**：标准流程的第 4 步是「色彩空间与 Gamma 一起转换」，
-  此前只做了 Gamma 那一半，色彩空间的转换从未发生。现在反相结果经完整的
-  第 4 步进入输出空间，帧编辑（色阶/对比度/曲线/饱和度）在该空间内进行——
-  这些操作的定义本就依赖显示参考空间：对比度绕 0.5 转是因为 0.5 是中灰
-- **导出不再二次转换**：帧编辑既然已在目标空间内跑完，导出便直接写出屏幕上的
-  像素，只附上对应的 ICC。此前是"渲染成 sRGB、导出时再转一次"，屏幕与文件
-  始终是两次不同的渲染
+- **取消 `chroma_grade`（默认 3.05）**：这个参数用一个各向同性的标量去补偿一个
+  各向异性、随色相变化的色域关系，本就表达不了。它存在的原因是管线缺少色彩空间
+  声明；声明补上后，颜色由真实的色域变换给出，参数整体移除（不是改默认值）
+- **工作空间加宽到 ACEScg**：反相与三通道对齐颜色能完整穿过对数域
 
 **变更**
 
-- **输出空间移到主窗口**，不在导出弹窗里选。它改变渲染结果，因此是胶卷参数、
-  会保存进工程。换空间时滑块**数值保留、画面随之改变**——这些数值的含义本就是
-  「在当前输出空间里调这么多」
-- **软打样移除**：它原本是对一次导出的模拟，而现在预览显示的就是真实结果
-- **输出意图移到导出弹窗**，改为「导出为场景线性 ACEScg」勾选框。"线性"描述的
-  是某一次导出（交给外部调色的中间文件），而不是工作方式，因此不该改变预览
-- **显示器色彩管理移除**：预览位图原样交给系统。要让屏幕观感准确，正确做法是
-  用校色仪实测生成 ICC 并注册为系统显示器配置文件，由操作系统统一转换
-- **撤下 Kodak Endura Premier / Kodak 2383 输出空间**：实测其基色三角面积分别是
-  sRGB 的 127% 与 141%，比 Adobe RGB 还宽，而实体相纸的可呈现色域窄于 sRGB。
-  这两组数描述的是染料集的编码基色，不是介质能呈现的色域，选中它们执行的是
-  色域扩张加白点偏移，而非复现暗房或院线观感——那种观感在密度曲线和 3D LUT
-  里。想要院线观感，请导出场景线性 ACEScg 后到调色软件里套 Print LUT。
-  旧工程指定这两个空间时会迁移到 sRGB 并在状态栏说明
+- **输出空间移到主窗口**（sRGB / Display P3 / Adobe RGB），不在导出弹窗里选。
+  它改变渲染结果，因此是胶卷参数、会保存进工程
+- **输出意图移到导出弹窗**，改为「导出为场景线性 ACEScg」勾选框。"线性"描述的是
+  某一次导出（交给外部调色的中间文件），而不是工作方式，因此不该改变预览
 
 ---
 
-A colour-pipeline overhaul. The inversion now runs in wide-gamut ACEScg and frame
-edits run in the output space you pick, so the export is what you already see.
-**Existing projects will render differently**, and the adjustment sliders have
-changed meaning.
+Colour management rebuilt.
+Now that colour management is in place, the `chroma_grade = 3.05` scalar is retired.
+
+> **Existing projects will render differently and are worth reprocessing.** The
+> slider values are preserved, but their meaning has changed — they now mean "this
+> much adjustment in the current output space". Rolls graded on 1.1.2 or earlier
+> will show visible differences in contrast and saturation.
 
 **Fixed**
 
+- **`chroma_grade` (default 3.05) retired** — an isotropic scalar cannot express
+  what is an anisotropic, hue-dependent gamut relationship. It existed because the
+  pipeline declared no colour spaces; now that it does, colour comes from real
+  gamut conversion and the parameter is removed outright, not merely defaulted away
 - **Working space widened to ACEScg** — the inversion and three-channel alignment
-  used to run in sRGB, so a saturated dye was clipped before the output transform
-  could place it. The density domain is now fed from ACEScg (scene-referred, wider
-  than any output space) and colour survives the log domain intact. Only with this
-  in place does gamut mapping (shrinking toward the luminance-matched neutral) do
-  any work — until now the "wider" output spaces were very nearly a no-op
-- **Cineon step 4 restored** — the standard workflow's step 4 converts colour space
-  AND gamma together; only the gamma half was ever done, and the colour-space half
-  never happened. The inverted positive now goes through the whole of step 4 into
-  the output space, and frame edits (levels, contrast, curves, saturation) run
-  inside it — operations whose definitions require a display-referred space, since
-  contrast pivots on 0.5 precisely because 0.5 is mid-grey
-- **No second conversion on export** — with frame edits already finished in the
-  target space, the export writes the pixels on screen and simply attaches the
-  matching ICC. Previously it rendered to sRGB and converted again at export, so
-  screen and file were always two different renders
+  can now pass through the log domain with colour intact
 
 **Changed**
 
-- **Output space moved to the main window**, out of the export dialog. It changes
-  the render, so it is a roll parameter and is saved with the project. Switching
-  keeps the slider VALUES and lets the picture change — those numbers always meant
-  "this much adjustment in the current output space"
-- **Soft proofing removed** — it simulated an export the render was not performing;
-  the preview now shows the real thing
+- **Output space moved to the main window** (sRGB / Display P3 / Adobe RGB), out of
+  the export dialog. It changes the render, so it is a roll parameter saved with the
+  project
 - **Output intent moved to the export dialog** as an "export scene-linear ACEScg"
   checkbox. "Linear" describes one export (an intermediate for someone else's
   grading suite), not how a roll is worked on, so it should not alter the preview
-- **Display colour management removed** — the preview bitmap goes to the system as
-  is. For an accurate on-screen look, calibrate the display with a colorimeter and
-  register the resulting ICC as the system display profile, letting the OS handle
-  the conversion
-- **Kodak Endura Premier / Kodak 2383 withdrawn as output spaces** — their primary
-  triangles measure 127% and 141% of sRGB's area, wider than Adobe RGB, whereas
-  real photographic paper reproduces a gamut narrower than sRGB. Those figures
-  describe the dye set's encoding primaries, not what the medium can reproduce, so
-  selecting them performed a gamut expansion plus a white-point shift rather than
-  reproducing a darkroom or projection look — that look lives in density curves and
-  a 3D LUT. For a projection look, export scene-linear ACEScg and apply a print LUT
-  in a grading application. Older projects naming these spaces migrate to sRGB and
-  say so in the status bar
 
 ## v1.1.2（2026-08-10）
 
