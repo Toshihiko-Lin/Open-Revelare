@@ -206,9 +206,23 @@ public partial class MainWindow : Window
         return fit > 1.0 ? 1.0 / fit : 1.0;
     }
 
+    /// <summary>
+    /// The bitmap the letterbox math must measure.
+    ///
+    /// Read off the VIEW MODEL, never off <c>PreviewImg.Source</c>. Both are fed by the same
+    /// PropertyChanged event — the control through its binding, this code through its own
+    /// subscriber — and the two have no defined ordering. Reading the control therefore sees the
+    /// OUTGOING bitmap whenever this runs first, which is exactly what happens on macOS: its
+    /// backend runs the posted recompute ahead of the binding's layout pass far more often than
+    /// X11/Win32 do. The letterbox then describes the UNCROPPED frame, and every consumer built on
+    /// it — the crop overlay, the sharp patch, the pan clamp, the zoom readout — is placed against
+    /// a picture that is no longer on screen.
+    /// </summary>
+    private Bitmap? PreviewBitmap => Vm?.PreviewImage;
+
     private double FitScale()
     {
-        if (PreviewImg.Source is not Bitmap bmp) return 1;
+        if (PreviewBitmap is not { } bmp) return 1;
         double iw = bmp.PixelSize.Width, ih = bmp.PixelSize.Height;
         double vw = ViewPort.Bounds.Width, vh = ViewPort.Bounds.Height;
         return iw <= 0 || ih <= 0 || vw <= 0 || vh <= 0 ? 1 : Math.Min(vw / iw, vh / ih);
@@ -218,7 +232,7 @@ public partial class MainWindow : Window
     /// Uniform letterbox, i.e. the same centring <see cref="ToNormalisedRect"/> undoes.</summary>
     private Rect? LetterboxRect()
     {
-        if (PreviewImg.Source is not Bitmap bmp) return null;
+        if (PreviewBitmap is not { } bmp) return null;
         double iw = bmp.PixelSize.Width, ih = bmp.PixelSize.Height;
         double vw = ViewPort.Bounds.Width, vh = ViewPort.Bounds.Height;
         if (iw <= 0 || ih <= 0 || vw <= 0 || vh <= 0) return null;
@@ -512,14 +526,22 @@ public partial class MainWindow : Window
     /// next wheel/resize nudged ApplyTransform.
     ///
     /// Gated on the SIZE, not on the reference: a render lands a fresh bitmap on every debounce
-    /// tick and every drag step, and re-running this per drag frame would rebuild the label
-    /// string a hundred times a second for a number that has not moved.
+    /// tick and every drag step, and re-running the ZOOM part per drag frame would rebuild the
+    /// label string a hundred times a second for a number that has not moved.
+    ///
+    /// The OVERLAY is deliberately outside that gate. The crop frame, the dim bands and the sharp
+    /// patch are all positioned from the letterbox, which depends on the bitmap the VM is holding
+    /// right now — and a crop can land a bitmap the same size as the one it replaces (a frame
+    /// already cropped to that shape, a re-crop of equal extent, a split frame whose margin box
+    /// happens to match). The size gate swallowed those, leaving the frame drawn against the
+    /// previous picture. Re-laying it out costs a few Canvas.SetLeft calls; the readout is what
+    /// was expensive, so only the readout stays gated.
     ///
     /// The size is read off the VIEW MODEL, and the recompute is posted rather than run inline,
     /// because this runs from PropertyChanged — the same event the Source binding listens to,
-    /// with no defined ordering between the two subscribers. Reading PreviewImg.Source here (or
-    /// letting FitScale read it) can therefore still see the OUTGOING bitmap. Posting lets the
-    /// binding land first.
+    /// with no defined ordering between the two subscribers. Posting lets the binding land first
+    /// so the Image has re-measured; <see cref="PreviewBitmap"/> makes the math correct even when
+    /// it has not.
     /// </summary>
     private PixelSize _lastPreviewSize;
 
@@ -530,6 +552,13 @@ public partial class MainWindow : Window
         {
             _lastPreviewSize = size;
             Dispatcher.UIThread.Post(ApplyTransform, DispatcherPriority.Background);
+        }
+        else
+        {
+            // Same size, new pixels: the zoom/pan state is unchanged, but everything drawn from
+            // the letterbox still has to be re-placed against the bitmap that just arrived.
+            Dispatcher.UIThread.Post(() => { UpdatePatchLayout(); RenderCropFrame(); },
+                                     DispatcherPriority.Background);
         }
         // Every render invalidates the patch (the VM drops it), so re-ask for the new
         // parameters if the view is still zoomed in far enough to want one.
@@ -1051,7 +1080,7 @@ public partial class MainWindow : Window
             }
             return;
         }
-        if (_mode == SampleMode.None || Vm is null || PreviewImg.Source is null) return;
+        if (_mode == SampleMode.None || Vm is null || PreviewBitmap is null) return;
         _dragStart = e.GetPosition(Overlay);
 
         if (_mode == SampleMode.Crop)
@@ -1228,7 +1257,7 @@ public partial class MainWindow : Window
     /// undoing the Uniform letterbox (the bitmap is centred and scaled to fit).</summary>
     private (double X, double Y, double W, double H)? ToNormalisedRect(Point a, Point b)
     {
-        if (PreviewImg.Source is not Bitmap bmp) return null;
+        if (PreviewBitmap is not { } bmp) return null;
         double iw = bmp.PixelSize.Width, ih = bmp.PixelSize.Height;
         double cw = Overlay.Bounds.Width, ch = Overlay.Bounds.Height;
         if (iw <= 0 || ih <= 0 || cw <= 0 || ch <= 0) return null;

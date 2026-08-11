@@ -14,6 +14,10 @@
   开关在导入弹窗里（偏好设置 → 导入 设的是它的默认值）。不勾选则完全不做自动
   测量，所有参数保持默认，整卷标定交给手动。
 
+**修复**
+
+- **macOS：裁切后画面显示不正确**。
+
 ---
 
 **Added**
@@ -30,6 +34,13 @@
 
   The switch is in the import dialog (偏好设置 → 导入 sets its default). Left
   unticked, nothing is measured and the whole calibration is yours to do by hand.
+
+**Fixed**
+
+- **macOS: the crop was not displayed correctly after applying it.** The crop frame,
+  the dim area, the handles and the zoom percentage stayed where the uncropped
+  picture had them, making it look as though the wrong region had been cut. Re-cropping
+  to the same size also left the frame unchanged.
 
 ## v1.2.0（2026-08-11）
 
