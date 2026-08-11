@@ -10,8 +10,8 @@ namespace OpenRevelare.Core;
 ///      inverse leaves a nonlinear cross-channel residual that shows up as opposing
 ///      colour casts at different luminances and no linear white balance can undo.
 ///   2. rXYZ/gXYZ/bXYZ — the device→PCS primaries, from which
-///      M = M_D50→sRGB × [rXYZ|gXYZ|bXYZ] maps device linear RGB into sRGB linear.
-///      Absent on LUT-only profiles, where the caller must skip the matrix.
+///      M = M_D50→working × [rXYZ|gXYZ|bXYZ] maps device linear RGB into the pipeline's
+///      working space. Absent on LUT-only profiles, where the caller must skip the matrix.
 ///
 /// Profile layout (ICC.1:2010): u32 size at 0, tag table at 128 as a u32 count
 /// followed by count × (sig u32, offset u32, size u32).
@@ -27,15 +27,20 @@ public static class IccRead
     /// </summary>
     public const double TrcLinearTolerance = 0.004;
 
-    /// <summary>sRGB primaries → D50 XYZ (ICC.1:2010 Annex A), Bradford-adapted.</summary>
-    private static readonly double[,] MSrgbToD50 =
-    {
-        { 0.4360747, 0.3850649, 0.1430804 },
-        { 0.2225045, 0.7168786, 0.0606169 },
-        { 0.0139322, 0.0971045, 0.7141733 },
-    };
+    /// <summary>The ICC profile connection space white, CIE xy (ICC.1:2010: D50).</summary>
+    private static readonly (double X, double Y) PcsWhite = (0.3457, 0.3585);
 
-    private static readonly double[,] MD50ToSrgb = Invert3(MSrgbToD50);
+    /// <summary>
+    /// PCS (D50-adapted XYZ) → <see cref="ColorPipeline.Working"/> linear RGB.
+    ///
+    /// Derived rather than tabulated, so it follows the working space if that declaration ever
+    /// changes. Two steps, and both are needed: Bradford-adapt D50 to the working white (ACEScg
+    /// sits at ~D60, so skipping this tints everything), then XYZ → working RGB.
+    /// </summary>
+    private static readonly double[,] MD50ToWorking =
+        ColorSpaces.Mul(
+            ColorPipeline.Working.FromXyz(),
+            ColorSpaces.Adaptation(PcsWhite, ColorPipeline.Working.White));
 
     /// <summary>Number of entries in the per-channel linearisation LUT. Matches the
     /// Python loader: index-lookup keeps max error under half a 16-bit code level.</summary>
@@ -187,9 +192,22 @@ public static class IccRead
     }
 
     /// <summary>
-    /// The 3×3 mapping device linear RGB → sRGB linear RGB, from the profile's
-    /// rXYZ/gXYZ/bXYZ primaries. Null when any primary tag is missing or malformed
-    /// (LUT-only profiles), in which case the caller must skip the matrix.
+    /// The 3×3 mapping device linear RGB → <see cref="ColorPipeline.Working"/> linear RGB,
+    /// from the profile's rXYZ/gXYZ/bXYZ primaries. Null when any primary tag is missing or
+    /// malformed (LUT-only profiles), in which case the caller must skip the matrix.
+    ///
+    /// The destination is the WORKING space, not sRGB. It landed in sRGB originally, which was
+    /// wrong in a way that only showed on profiled scanner TIFFs: those pixels entered the
+    /// density maths carrying sRGB primaries, and step 4 then converted them ACEScg → sRGB
+    /// (<see cref="ColorPipeline.ToOutputSpace"/>) — undoing a transform nobody had applied.
+    /// Reinterpreting sRGB primaries as ACEScg stretches the gamut outward: saturation rose
+    /// ~1.13× on red and blue, ~1.4× on green, and neutrals picked up a cast, because the
+    /// residual has strong negative off-diagonals rather than being a scalar.
+    ///
+    /// This is NOT the "external matrix" that <see cref="FrameParams.InputPrimaries"/> warns
+    /// about. That warning is about substituting a camera's ColorMatrix for calibrated input
+    /// primaries; this matrix only carries the file into the space the pipeline already says
+    /// it works in, which is the precondition every later stage assumes.
     /// </summary>
     public static double[,]? ReadMatrix(byte[] icc)
     {
@@ -205,7 +223,7 @@ public static class IccRead
             devToD50[1, c] = S15Fixed16(icc, t.Offset + 12);
             devToD50[2, c] = S15Fixed16(icc, t.Offset + 16);
         }
-        return Mul3(MD50ToSrgb, devToD50);
+        return Mul3(MD50ToWorking, devToD50);
     }
 
     /// <summary>Human-readable profile description from 'desc' (v2) or 'dscm' (v4), or null.</summary>
@@ -263,22 +281,4 @@ public static class IccRead
         return m;
     }
 
-    private static double[,] Invert3(double[,] m)
-    {
-        double det =
-            m[0, 0] * (m[1, 1] * m[2, 2] - m[1, 2] * m[2, 1]) -
-            m[0, 1] * (m[1, 0] * m[2, 2] - m[1, 2] * m[2, 0]) +
-            m[0, 2] * (m[1, 0] * m[2, 1] - m[1, 1] * m[2, 0]);
-        var inv = new double[3, 3];
-        inv[0, 0] = (m[1, 1] * m[2, 2] - m[1, 2] * m[2, 1]) / det;
-        inv[0, 1] = (m[0, 2] * m[2, 1] - m[0, 1] * m[2, 2]) / det;
-        inv[0, 2] = (m[0, 1] * m[1, 2] - m[0, 2] * m[1, 1]) / det;
-        inv[1, 0] = (m[1, 2] * m[2, 0] - m[1, 0] * m[2, 2]) / det;
-        inv[1, 1] = (m[0, 0] * m[2, 2] - m[0, 2] * m[2, 0]) / det;
-        inv[1, 2] = (m[0, 2] * m[1, 0] - m[0, 0] * m[1, 2]) / det;
-        inv[2, 0] = (m[1, 0] * m[2, 1] - m[1, 1] * m[2, 0]) / det;
-        inv[2, 1] = (m[0, 1] * m[2, 0] - m[0, 0] * m[2, 1]) / det;
-        inv[2, 2] = (m[0, 0] * m[1, 1] - m[0, 1] * m[1, 0]) / det;
-        return inv;
-    }
 }

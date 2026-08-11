@@ -69,7 +69,9 @@ public static class TiffIO
         /// <summary>Per-channel encoded→linear LUTs; null when the file is already linear.</summary>
         public float[][]? Luts { get; init; }
 
-        /// <summary>Device→sRGB linear matrix; null on LUT-only profiles (step skipped).</summary>
+        /// <summary>Device→working-space linear matrix; null on LUT-only profiles (step
+        /// skipped). See <see cref="IccRead.ReadMatrix"/> for why the destination is the
+        /// working space and not sRGB.</summary>
         public double[,]? Matrix { get; init; }
 
         public bool IsIdentity => Luts is null && Matrix is null;
@@ -91,7 +93,7 @@ public static class TiffIO
         float[][]? luts = IccRead.BuildTrcLuts(icc, out bool allLinear);
         if (allLinear) luts = null;
 
-        // Step 2 — device→sRGB primaries. Null (skipped) on LUT-only profiles.
+        // Step 2 — device→working-space primaries. Null (skipped) on LUT-only profiles.
         return new IccTransform { Luts = luts, Matrix = IccRead.ReadMatrix(icc) };
     }
 

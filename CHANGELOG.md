@@ -2,10 +2,16 @@
 
 ## v1.2.2（2026-08-11）
 
-接着修 1.2.1 没修完的裁切问题。
+接着修 1.2.1 没修完的裁切问题，外加一处 TIFF 色彩管理的修正。
 
 **修复**
 
+- **带 ICC 配置文件的 TIFF，色度被放大**。这类文件在加载时被转换到 sRGB 原色，但管线
+  的工作空间是 ACEScg；第 4 步随后又按 ACEScg → sRGB 转出去，等于逆了一个从未施加过的
+  变换。结果是色域被往外撑：红、蓝饱和度约 ×1.13，绿约 ×1.4，中性灰还会偏色。现在 ICC
+  矩阵直接落到工作空间。RAW 不受影响；不带配置文件的 TIFF 也照旧原样通过。
+
+  **注意**：已经按旧行为调过的 TIFF 卷，这次改动后画面会变，片基（t_base）需要重新取样。
 - **macOS：裁切后画面显示不正确**。1.2.1 的修复没有解决根本问题——裁切框在屏幕上
   是对的，但应用后比例会变、位置也会漂。选 1:1 预设尤其明显。
 - **负片视图下放大，看到的是去色罩后的画面**。框选片基时放大到触发局部高清渲染，
@@ -16,6 +22,16 @@
 
 **Fixed**
 
+- **Profiled TIFFs came out with amplified chroma.** A TIFF carrying an ICC profile was
+  converted into sRGB primaries on load, but the pipeline works in ACEScg — so step 4
+  then converted it ACEScg → sRGB, undoing a transform that had never been applied.
+  That stretched the gamut outward: saturation rose ~1.13× on red and blue, ~1.4× on
+  green, and neutrals picked up a cast. The ICC matrix now lands in the working space
+  directly. RAW was never affected, and TIFFs without a profile still pass through
+  untouched.
+
+  **Note**: rolls of TIFFs already adjusted against the old behaviour will shift, and
+  their film base (t_base) needs re-sampling.
 - **macOS: the crop was not displayed correctly after applying it.** The 1.2.1 fix did
   not get to the bottom of it — the frame looked right on screen, but the applied crop
   came out with a different ratio and drifted out of position. Most visible with the
