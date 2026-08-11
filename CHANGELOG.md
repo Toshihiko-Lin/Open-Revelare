@@ -1,6 +1,6 @@
 # OpenRevelare — 更新日志
 
-## 未发布
+## v1.2.1（2026-08-11）
 
 **新增**
 
@@ -37,10 +37,7 @@
 
 **Fixed**
 
-- **macOS: the crop was not displayed correctly after applying it.** The crop frame,
-  the dim area, the handles and the zoom percentage stayed where the uncropped
-  picture had them, making it look as though the wrong region had been cut. Re-cropping
-  to the same size also left the frame unchanged.
+- **macOS: the crop was not displayed correctly after applying it.**
 
 ## v1.2.0（2026-08-11）
 
