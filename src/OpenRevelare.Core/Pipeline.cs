@@ -57,7 +57,7 @@ public static class Pipeline
         // ── Input colour space: declared primaries → sRGB, on the NEGATIVE ────────
         // Before the inversion, because that is where t_base and the rest of Stage 1 are
         // calibrated; and before decouple, because decouple's matrix is solved in this space.
-        if (InputTransform.ToSrgb(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
+        if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
             InputTransform.Apply(src.Data, inputM);
 
         // ── Path A: RGB-light decoupling (linear domain, after vignette) ──────────
@@ -96,11 +96,13 @@ public static class Pipeline
         if (cal.OutputIntent == OutputIntent.None)
             return result;
 
-        // ── Stage 2 (BASIC): WB → exposure → levels → contrast → hi/sh → curves
-        //    → saturation → sRGB TRC (order matches pipeline.py::_run_stage2).
-        //    The seven ops run as ONE fused pass; the per-op enables now live inside
-        //    Stage2.ApplyChain rather than being spelled out here. ─────────────────
-        Stage2.ApplyChain(result.Data, cal, srgbExit: true);
+        // ── Step 4 + Stage 2 (BASIC) ──────────────────────────────────────────────
+        //    Stage2.ApplyChain performs the step-4 conversion (ACEScg → the roll's output
+        //    space, primaries and gamma together) and then runs WB → exposure → levels →
+        //    contrast → hi/sh → curves → saturation IN that space, as one fused pass.
+        //    The result is display-encoded in cal.ResolvedOutputSpace — which is what both
+        //    the preview and the exported file use, so the two agree by construction.
+        Stage2.ApplyChain(result.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return result;
     }
 }

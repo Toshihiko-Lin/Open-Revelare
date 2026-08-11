@@ -175,7 +175,19 @@ public static class OutputRender
     public static double EncodingGamma(ColorSpaceDef space) => space.Name switch
     {
         "AdobeRGB" => 563.0 / 256.0,
+        "Rec709" => 2.4,   // BT.1886 display gamma — the Cineon workflow's step-4 target
         "ACEScg" => 1.0,
         _ => 2.2,   // the paper/print spaces are published at 2.2
     };
+
+    /// <summary>
+    /// Whether <paramref name="space"/> is display-referred, i.e. whether its encoded values are
+    /// bounded and carry a perceptual ramp that Stage 2's definitions rely on.
+    ///
+    /// ACEScg is the one registered space that is NOT: it is scene-linear, so encoding into it is
+    /// the identity and its values are unbounded above. Stage 2 must never run in it — contrast
+    /// pivoting on 0.5 and levels' [0,1] endpoints are meaningless there.
+    /// </summary>
+    public static bool IsDisplayReferred(ColorSpaceDef space) =>
+        !space.Name.Equals("ACEScg", StringComparison.OrdinalIgnoreCase);
 }

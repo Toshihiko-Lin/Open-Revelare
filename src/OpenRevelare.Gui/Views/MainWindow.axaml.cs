@@ -1334,13 +1334,14 @@ public partial class MainWindow : Window
 
         // The negative is shown as-is, un-inverted: no film-base calibration has happened yet, so
         // a positive rendering would be a guess. The gutters — the thing being cut on — are
-        // unmistakable either way. The buffer is linear light and BitmapConvert expects sRGB, so
-        // it gets the display TRC first; without it the strip renders far too dark to judge.
+        // unmistakable either way. The buffer is scene-linear working space, so it goes through
+        // step 4 to reach the space BitmapConvert expects; without it the strip renders far too
+        // dark to judge.
         foreach (var (plan, preview) in detected)
         {
             var shown = new OpenRevelare.Core.ImageBuffer(
                 preview.Width, preview.Height, (float[])preview.Data.Clone());
-            OpenRevelare.Core.Srgb.ApplyForwardInPlace(shown.Data);
+            OpenRevelare.Core.ColorPipeline.ToOutputSpace(shown.Data, Vm.CurrentOutputSpace);
             plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
         }
 
@@ -1501,7 +1502,7 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         // Options first, destination second: the format decides the extension the save dialog
         // should be offering, so asking for a filename first asks in the wrong order.
-        var opts = new ExportDialog(rollMode: false);
+        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
@@ -1540,7 +1541,7 @@ public partial class MainWindow : Window
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
-        var opts = new ExportDialog(rollMode: true);
+        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 

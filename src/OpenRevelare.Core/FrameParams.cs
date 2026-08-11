@@ -56,6 +56,39 @@ public sealed class FrameParams
     /// </summary>
     public bool DisplayReferredStage2 { get; set; } = true;
 
+    /// <summary>
+    /// The Cineon step-4 target: the space the positive is converted into, Stage 2 adjusts in, and
+    /// the file is written in. By <see cref="ColorSpaceDef.Name"/>.
+    ///
+    /// A PER-ROLL RENDER PARAMETER, not a view setting and not an export setting. It has to be:
+    /// Stage 2 runs inside this space, so it changes the rendered pixels, and the same adjustment
+    /// numbers land differently in a narrower space. That is the intended behaviour — picking
+    /// Kodak 2383 and then grading is how you grade FOR 2383 — but it means the choice belongs
+    /// with the roll's other render parameters and must be saved alongside them.
+    ///
+    /// Stored as a string rather than an enum so a project written by a newer build naming a space
+    /// this one lacks degrades to the default instead of failing to parse.
+    /// </summary>
+    public string OutputSpace { get; set; } = "sRGB";
+
+    /// <summary>
+    /// The resolved step-4 target; <see cref="ColorPipeline.DefaultOutput"/> when the stored name
+    /// is unknown or names a scene-referred space.
+    ///
+    /// ACEScg is rejected here rather than trusted: it is a legitimate registered space and a
+    /// legitimate WORKING space, but Stage 2's operations have no meaning in it (it is unbounded
+    /// and scene-linear), so accepting it would silently produce a render whose contrast pivot
+    /// sits nowhere near mid-grey.
+    /// </summary>
+    public ColorSpaceDef ResolvedOutputSpace
+    {
+        get
+        {
+            var s = ColorSpaces.ByName(OutputSpace, ColorPipeline.DefaultOutput);
+            return OutputRender.IsDisplayReferred(s) ? s : ColorPipeline.DefaultOutput;
+        }
+    }
+
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
@@ -181,6 +214,7 @@ public sealed class FrameParams
         Pivot = Pivot,
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
+        OutputSpace = OutputSpace,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,

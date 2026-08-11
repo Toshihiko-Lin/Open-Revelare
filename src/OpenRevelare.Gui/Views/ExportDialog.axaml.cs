@@ -13,33 +13,28 @@ namespace OpenRevelare.Gui.Views;
 /// Options that do not apply to the current format are DISABLED, not hidden: a control that
 /// disappears reads as a feature the app lacks, while a greyed one reads as "not for this
 /// format", which is what is actually true.
+///
+/// The colour space is NOT chosen here any more. It is a render parameter now — Stage 2 runs
+/// inside it — so it lives in the main window next to the other things that change the picture,
+/// and the file simply inherits what is already on screen. This dialog reports it so the summary
+/// still says what will be written.
 /// </summary>
 public partial class ExportDialog : Window
 {
     private readonly bool _rollMode;
 
-    /// <summary>
-    /// The destination spaces offered, in the order they appear. Not every registered space is
-    /// here: ACEScg is a working space, and exporting scene-linear ACEScg from a dialog whose
-    /// other options assume a display-referred file would mostly produce files people cannot use.
-    /// </summary>
-    private static readonly ColorSpaceDef[] Spaces =
-    {
-        ColorSpaces.Srgb,
-        ColorSpaces.AdobeRgb,
-        ColorSpaces.DisplayP3,
-        ColorSpaces.KodakEnduraPremier,
-        ColorSpaces.Kodak2383,
-    };
+    /// <summary>The roll's output space — reported, not chosen.</summary>
+    private readonly ColorSpaceDef _space;
 
-    /// <summary>What each space is for, in the hint under the picker.</summary>
+    /// <summary>What each space is for, in the hint under the label.</summary>
     private static string HintFor(ColorSpaceDef s) => s.Name switch
     {
+        "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
+        "KodakEnduraPremier" or "Kodak2383" =>
+            Loc.T("旧工程指定的染料集基色，已不再提供选择。"),
         "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
         "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
         "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
-        "KodakEnduraPremier" => Loc.T("柯达 Endura Premier 相纸色域——渲染成暗房放大照片的观感。这是「相纸味」的正确做法：走真实的色域变换，而不是把饱和度整体拧大。"),
-        "Kodak2383" => Loc.T("柯达 2383 拷贝片色域——院线放映的观感，ECN-2 电影负片的对口选择。"),
         _ => "",
     };
 
@@ -47,13 +42,15 @@ public partial class ExportDialog : Window
     public ExportOptions Options { get; private set; } = new();
 
     // Avalonia needs a parameterless constructor for XAML tooling.
-    public ExportDialog() : this(rollMode: false) { }
+    public ExportDialog() : this(rollMode: false, ColorPipeline.DefaultOutput) { }
 
     /// <param name="rollMode">A whole roll goes to a folder unattended, so it needs a conflict
     /// policy. A single frame goes through a save dialog that already asked, so it does not.</param>
-    public ExportDialog(bool rollMode)
+    /// <param name="space">The roll's output space, for the summary and the hint.</param>
+    public ExportDialog(bool rollMode, ColorSpaceDef space)
     {
         _rollMode = rollMode;
+        _space = space;
         InitializeComponent();
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
@@ -76,12 +73,6 @@ public partial class ExportDialog : Window
         };
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
 
-        ColorSpaceBox.ItemsSource = Spaces.Select(DisplayName).ToList();
-        int spaceIdx = Array.FindIndex(Spaces,
-            s => s.Name.Equals(saved.ColorSpace, StringComparison.OrdinalIgnoreCase));
-        ColorSpaceBox.SelectedIndex = spaceIdx >= 0 ? spaceIdx : 0;
-        GamutBox.SelectedIndex = saved.GamutMapping == GamutMapping.Clip ? 1 : 0;
-
         IccChk.IsChecked = saved.EmbedIcc;
         DownsampleChk.IsChecked = saved.Downsample;
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
@@ -100,8 +91,9 @@ public partial class ExportDialog : Window
             _ => TiffIO.CompressionMode.Lzw,
         },
         JpegQuality = (int)QualitySlider.Value,
-        ColorSpace = Spaces[Math.Clamp(ColorSpaceBox.SelectedIndex, 0, Spaces.Length - 1)].Name,
-        GamutMapping = GamutBox.SelectedIndex == 1 ? GamutMapping.Clip : GamutMapping.Desaturate,
+        // Carried, not chosen: the render already landed in this space.
+        ColorSpace = _space.Name,
+        ExportLinear = LinearChk.IsChecked == true,
         EmbedIcc = IccChk.IsChecked == true,
         Downsample = DownsampleChk.IsChecked == true,
         MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
@@ -126,7 +118,7 @@ public partial class ExportDialog : Window
         // Guard: the IsCheckedChanged handlers fire while InitializeComponent is still wiring
         // controls up, before every named field exists.
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
-            || ColorSpaceBox is null || GamutRow is null || ColorSpaceHint is null) return;
+            || ColorSpaceHint is null || LinearChk is null || IccHint is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         TiffGroup.IsEnabled = !jpeg;
@@ -134,20 +126,23 @@ public partial class ExportDialog : Window
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
-        ColorSpaceDef space = Spaces[Math.Clamp(ColorSpaceBox.SelectedIndex, 0, Spaces.Length - 1)];
-        ColorSpaceHint.Text = HintFor(space);
+        // A scene-linear export has no output space and no profile that describes it, so both the
+        // space it would have gone to and the embed option stop applying. Disabled rather than
+        // hidden: they read as "not for this kind of file", which is what is true.
+        bool linear = LinearChk.IsChecked == true;
+        ColorSpaceHint.IsEnabled = !linear;
+        IccChk.IsEnabled = !linear;
 
-        // The mapper only has work to do when the destination is NARROWER than the source
-        // somewhere. Every space offered here is wider than sRGB — which is what the render
-        // arrives in — so as things stand nothing ever falls outside and the choice is inert.
-        // It is disabled rather than removed because it stops being inert the moment the working
-        // space becomes ACEScg, which is where this is heading.
-        GamutRow.IsEnabled = false;
+        ColorSpaceHint.Text = linear
+            ? Loc.T("场景线性导出不经过第 4 步，因此没有输出色彩空间。")
+            : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
+
+        IccHint.Text = linear
+            ? Loc.T("场景线性数据没有对应的显示配置文件，贴任何标签都会误导下游，故不嵌入。")
+            : Loc.T("嵌入的配置文件与实际写入的像素一致。");
 
         SummaryLbl.Text = Collect().Summary();
     }
-
-    private void OnColorSpaceChanged(object? sender, SelectionChangedEventArgs e) => SyncEnabledState();
     private void OnFormatChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnDownsampleToggled(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnAnyChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();

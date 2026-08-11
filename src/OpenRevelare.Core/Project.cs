@@ -219,6 +219,7 @@ public static class Project
             ["output_intent"] = p.OutputIntent == OutputIntent.Basic ? "basic" : "none",
             // Absent = false: a project written before the Stage-2 rework keeps the old chain.
             ["display_referred_stage2"] = p.DisplayReferredStage2,
+            ["output_space"] = p.OutputSpace,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["lensfun_override"] = null,                     // C# build has no lensfun
@@ -276,6 +277,12 @@ public static class Project
             Pivot = Dbl(d, "pivot", 0.9),
             OutputIntent = Str(d, "output_intent", "basic") == "none" ? OutputIntent.None : OutputIntent.Basic,
             DisplayReferredStage2 = Bool(d, "display_referred_stage2", false),
+            // Projects saved before the colour-managed rework carry no output space. They were
+            // rendered in sRGB throughout, so sRGB is the name that describes their stored
+            // adjustment values — but they are MIGRATED to the new pipeline rather than pinned to
+            // the old one, which means the working space is now ACEScg for them too and step 4 is
+            // a real conversion. Their pixels will differ from what the old build produced.
+            OutputSpace = Str(d, "output_space", "sRGB"),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),

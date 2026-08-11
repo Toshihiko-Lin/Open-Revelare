@@ -188,7 +188,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 ### 成像
 
 - **密度域反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数），每一项都在界面中可调且有明确的物理含义。反转本身是 Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有独立的色度参数（早期版本有一个 `chroma_grade`，补齐色彩管理后已移除）
-- **完整色彩管理**——链上每一段的色彩空间显式声明；导出可选 sRGB / Adobe RGB / Display P3 / Kodak Endura Premier（相纸）/ Kodak 2383（拷贝片），预览可设显示器空间与软打样
+- **完整色彩管理**——工作空间 ACEScg（宽色域，场景参考）承载反相；输出空间在主窗口选（sRGB / Display P3 / Adobe RGB），帧编辑即在该空间内进行，导出所见即所得；也可导出场景线性 ACEScg 交给外部调色
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
 - **智能白平衡**——DeepWB 神经网络一键估算白点（模型单独授权，[见下](#智能白平衡模型--单独授权请读一下)）
@@ -210,7 +210,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 |---|---|
 | **RAW 输入** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ 等（LibRaw） |
 | **其他输入** | TIFF / JPEG / PNG |
-| **导出** | 16-bit TIFF、JPEG，五种输出色彩空间，嵌入的 ICC 与实际像素一致 |
+| **导出** | 16-bit TIFF、JPEG，三种输出色彩空间（另可导出场景线性 ACEScg），嵌入的 ICC 与实际像素一致 |
 
 ## 工作原理
 

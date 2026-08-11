@@ -4,9 +4,12 @@ namespace OpenRevelare.Core;
 /// Stage 2 (SceneBase) op-chain — port of negative/levels.py, run in the order
 /// pipeline.py::_run_stage2 uses:
 ///   WB → exposure → levels → contrast → highlights/shadows → curves → saturation.
-/// All ops work in linear light on the interleaved float buffer, in place, and
-/// (except curves/sRGB) do NOT clip — headroom is carried in full float so later
-/// steps keep working on un-truncated data.
+///
+/// Stage 2 runs in the roll's OUTPUT space, after the Cineon step-4 conversion, because that is
+/// what its operations mean: contrast pivots on 0.5 as mid-grey, levels' endpoints are 0 and 1,
+/// curve control points are authored on a bounded perceptual ramp. None of that is true in the
+/// scene-linear working space. The output space is therefore threaded in rather than assumed —
+/// luminance weights and the exit curve both come from it.
 ///
 /// ONE FUSED PASS, not seven. Every op here is pointwise — none of them reads a
 /// neighbouring pixel — so running them as seven separate <c>Parallel.For</c> sweeps was
@@ -22,25 +25,29 @@ namespace OpenRevelare.Core;
 public static class Stage2
 {
     /// <summary>
-    /// Luminance weights — the Y row of the WORKING SPACE's RGB→XYZ matrix, not a constant.
+    /// Luminance weights — the Y row of the RGB→XYZ matrix of the space Stage 2 is RUNNING IN,
+    /// which is the roll's OUTPUT space, not the working space.
     ///
-    /// These were hardcoded to sRGB's 0.2126/0.7152/0.0722. That is correct only while the
-    /// working space IS sRGB: ACEScg's are 0.2722/0.6741/0.0537, so the same code would compute
-    /// the wrong luminance the moment the space widened, silently mis-weighting highlights,
-    /// shadows, hue-preserving curves and saturation all at once.
+    /// This is the distinction the split makes necessary. Stage 2 happens after step 4, so by the
+    /// time these ops see a pixel it has already been converted out of ACEScg into the output
+    /// space; weighting it by ACEScg's 0.2722/0.6741/0.0537 would be measuring luminance in a
+    /// space the data has left. Rec709 wants sRGB's 0.2126/0.7152/0.0722, and the paper spaces
+    /// want their own — the whole point of offering them.
     ///
-    /// Derived rather than tabulated so the two can never drift apart: change
-    /// <see cref="ColorPipeline.Working"/> and these follow.
+    /// Derived per call rather than cached in a static, because the output space is a per-roll
+    /// parameter now and a static would pin whichever roll happened to render first.
     /// </summary>
-    private static readonly float LumaR, LumaG, LumaB;
-
-    static Stage2()
+    private readonly record struct Luma(float R, float G, float B)
     {
-        double[,] toXyz = ColorPipeline.Working.ToXyz();
-        LumaR = (float)toXyz[1, 0];
-        LumaG = (float)toXyz[1, 1];
-        LumaB = (float)toXyz[1, 2];
+        public static Luma For(ColorSpaceDef space)
+        {
+            double[,] toXyz = space.ToXyz();
+            return new Luma((float)toXyz[1, 0], (float)toXyz[1, 1], (float)toXyz[1, 2]);
+        }
+
+        public float Of(float r, float g, float b) => r * R + g * G + b * B;
     }
+
     private const float HsGammaStrength = 1.2f;
 
     /// <summary>
@@ -48,11 +55,11 @@ public static class Stage2
     /// control point at 0.5 should sit at mid-grey, not at half the linear light — so the data is
     /// encoded before sampling and decoded after.
     ///
-    /// This is a working-space property in principle, but 2.2 is deliberately kept as a plain
+    /// This is an output-space property in principle, but 2.2 is deliberately kept as a plain
     /// constant rather than derived: it defines what the user's saved curve points MEAN. Deriving
-    /// it would silently reinterpret every stored curve the moment the working space changed,
-    /// which is a data-compatibility break disguised as a refactor. If the working space widens,
-    /// this stays 2.2 and curves keep their meaning.
+    /// it would silently reinterpret every stored curve whenever the output space changed — and
+    /// that space is now a per-roll setting the user can switch at will, so a derived value would
+    /// move the curve under them on every switch. It stays 2.2 and curves keep their meaning.
     /// </summary>
     private const float Gamma = 2.2f, InvGamma = 1.0f / 2.2f;
     private const int CurveLutSize = 256;
@@ -79,19 +86,24 @@ public static class Stage2
     /// clamps, same guard conditions) — that is what makes the fused result bit-identical to
     /// running them one after another over the whole frame.
     /// </summary>
-    /// <param name="srgbExit">Also apply the sRGB output TRC as the final per-pixel step. It
-    /// rides along here rather than as its own sweep for the same reason the seven ops do —
-    /// it is pointwise, and a separate pass over a 24 MP frame is another 288 MB of traffic
-    /// for one table lookup per sample. Note this still runs when every op above is disabled.</param>
-    public static void ApplyChain(float[] d, FrameParams cal, bool srgbExit = false)
+    /// <param name="output">The space Stage 2 runs in — the roll's step-4 target. Luminance
+    /// weights and the encoding curve both come from it.</param>
+    /// <param name="encodeExit">Also apply <paramref name="output"/>'s TRC as the final per-pixel
+    /// step. It rides along here rather than as its own sweep for the same reason the seven ops do
+    /// — it is pointwise, and a separate pass over a 24 MP frame is another 288 MB of traffic for
+    /// one table lookup per sample. Note this still runs when every op above is disabled.</param>
+    public static void ApplyChain(float[] d, FrameParams cal, ColorSpaceDef output,
+                                  bool encodeExit = false)
     {
         // Display-referred chain: scale light in linear, then encode, then do everything
         // perceptual in the encoded space where its definitions actually hold.
         if (cal.DisplayReferredStage2)
         {
-            ApplyDisplayReferred(d, cal, srgbExit);
+            ApplyDisplayReferred(d, cal, output, encodeExit);
             return;
         }
+
+        Luma luma = Luma.For(output);
 
         // ── Hoisted enables + per-op constants ───────────────────────────────────
         static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
@@ -134,11 +146,15 @@ public static class Stage2
 
         if (!(doWb || doExposure || doLevels || doContrast || doHs || doCurves || doSaturation))
         {
-            if (srgbExit) Srgb.ApplyForwardInPlace(d);
+            if (encodeExit) OutputRender.Encode(d, output);
             return;
         }
 
-        float[]? srgbLut = srgbExit ? Srgb.ForwardLut : null;
+        // The LUT fast path only exists for the piecewise sRGB/P3 curve. Every other space is a
+        // power curve, applied as a separate sweep after the chain — one extra pass over the
+        // frame, which is the honest cost of not having a table for it.
+        bool lutExit = encodeExit && UsesSrgbCurve(output);
+        float[]? srgbLut = lutExit ? Srgb.ForwardLut : null;
 
         Parallel.For(0, d.Length / 3, p =>
         {
@@ -176,8 +192,8 @@ public static class Stage2
             // 5 — highlights / shadows (luma-driven, hue preserving)
             if (doHs)
             {
-                float luma = r * LumaR + g * LumaG + bl * LumaB;
-                float lumaC = luma < 0.0f ? 0.0f : (luma > 1.0f ? 1.0f : luma);
+                float lum = luma.Of(r, g, bl);
+                float lumaC = lum < 0.0f ? 0.0f : (lum > 1.0f ? 1.0f : lum);
                 float outv = lumaC;
                 if (sh != 0.0f)
                 {
@@ -214,9 +230,9 @@ public static class Stage2
                 {
                     if (preserveHue)
                     {
-                        float luma = cr * LumaR + cg * LumaG + cb * LumaB;
-                        float lumaOut = SampleLut(lutM, luma);
-                        float scale = luma > 1e-6f ? lumaOut / Math.Max(luma, 1e-6f) : 1.0f;
+                        float lum = luma.Of(cr, cg, cb);
+                        float lumaOut = SampleLut(lutM, lum);
+                        float scale = lum > 1e-6f ? lumaOut / Math.Max(lum, 1e-6f) : 1.0f;
                         cr = Math.Clamp(cr * scale, 0.0f, 1.0f);
                         cg = Math.Clamp(cg * scale, 0.0f, 1.0f);
                         cb = Math.Clamp(cb * scale, 0.0f, 1.0f);
@@ -240,13 +256,14 @@ public static class Stage2
             // 7 — saturation
             if (doSaturation)
             {
-                float luma = r * LumaR + g * LumaG + bl * LumaB;
-                r = luma + (r - luma) * satFactor;
-                g = luma + (g - luma) * satFactor;
-                bl = luma + (bl - luma) * satFactor;
+                float lum = luma.Of(r, g, bl);
+                r = lum + (r - lum) * satFactor;
+                g = lum + (g - lum) * satFactor;
+                bl = lum + (bl - lum) * satFactor;
             }
 
-            // 8 — sRGB output TRC (same shared table Srgb.ApplyForwardInPlace uses)
+            // 8 — output TRC (same shared table Srgb.ApplyForwardInPlace uses), when the
+            // destination is one of the piecewise-curve spaces. Others fall to the sweep below.
             if (srgbLut != null)
             {
                 r = srgbLut[Srgb.LutIndex(r)];
@@ -256,11 +273,22 @@ public static class Stage2
 
             d[b] = r; d[b + 1] = g; d[b + 2] = bl;
         });
+
+        // Power-curve spaces: the exit TRC could not ride along in the fused loop, so it runs here.
+        if (encodeExit && !lutExit) OutputRender.Encode(d, output);
     }
 
     /// <summary>
-    /// The two-stage chain: linear-light operations, then the output encoding, then the
-    /// perceptual operations in display space.
+    /// Whether <paramref name="space"/> encodes with sRGB's piecewise curve — the one curve we
+    /// hold a LUT for. Display P3 shares it exactly; everything else is a pure power curve.
+    /// </summary>
+    private static bool UsesSrgbCurve(ColorSpaceDef space) =>
+        space.Name.Equals("sRGB", StringComparison.OrdinalIgnoreCase)
+     || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The two-stage chain: linear-light operations, then step 4, then the perceptual operations
+    /// in the output space.
     ///
     /// WHY THE SPLIT. Each Stage-2 operation is one of two kinds, and the old chain ran both
     /// kinds in linear light:
@@ -276,8 +304,14 @@ public static class Stage2
     /// and undo around itself — the data is already in the right space when the curve sees it,
     /// so the curve simply samples it. That private round trip existed only because the encoding
     /// happened too late.
+    ///
+    /// The middle step is the Cineon workflow's step 4: it converts PRIMARIES as well as applying
+    /// the transfer curve. That is what makes the output space a real choice — the perceptual ops
+    /// below run in whatever space the roll targets, so the on-screen result and the exported file
+    /// are the same render rather than one being a simulation of the other.
     /// </summary>
-    private static void ApplyDisplayReferred(float[] d, FrameParams cal, bool srgbExit)
+    private static void ApplyDisplayReferred(float[] d, FrameParams cal, ColorSpaceDef output,
+                                             bool encodeExit)
     {
         static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
 
@@ -300,18 +334,22 @@ public static class Stage2
             });
         }
 
-        // ── The encoding: linear → display. Everything below is defined here. ────
-        // Applied unconditionally, not only when srgbExit is set: the perceptual ops NEED the
-        // encoded domain to mean what they say. Under OutputIntent.None the caller passes
-        // srgbExit=false and Stage 2 does not run at all, so this cannot encode linear output.
-        Srgb.ApplyForwardInPlace(d);
+        // ── STEP 4: scene-linear working space → output space, primaries AND gamma ────
+        // This is the Cineon step 4 proper, and it sits here because everything below is DEFINED
+        // in the output space. Applied unconditionally, not only when encodeExit is set: the
+        // perceptual ops NEED the encoded domain to mean what they say. Under OutputIntent.None
+        // the caller never reaches Stage 2 at all, so this cannot encode linear output.
+        //
+        // Note this converts primaries as well as applying the curve — the earlier version only
+        // did the curve, because working and output were the same space by assumption.
+        ColorPipeline.ToOutputSpace(d, output);
 
-        // ── Stage B: display space ───────────────────────────────────────────────
+        // ── Stage B: output space ────────────────────────────────────────────────
         var perceptual = cal.Clone();
         perceptual.WbGains = new[] { 1.0, 1.0, 1.0 };
         perceptual.ExposureEv = 0.0;
-        perceptual.DisplayReferredStage2 = false;      // run the op bodies, not this wrapper
-        ApplyChain(d, perceptual, srgbExit: false);    // already encoded; no exit TRC
+        perceptual.DisplayReferredStage2 = false;          // run the op bodies, not this wrapper
+        ApplyChain(d, perceptual, output, encodeExit: false);   // already encoded; no exit TRC
 
         // Final clamp. In the old chain the sRGB exit TRC came LAST and quietly bounded
         // everything; here the encoding happens before the perceptual ops, so an op that

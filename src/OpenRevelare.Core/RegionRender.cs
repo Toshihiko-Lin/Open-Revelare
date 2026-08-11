@@ -146,7 +146,7 @@ public static class RegionRender
             mask = Sprocket.MakeMask(slice.Data, slice.PixelCount, (float)thr);
 
         // Mirrors Pipeline.ProcessFrame — the preview must predict the export.
-        if (InputTransform.ToSrgb(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
+        if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
             InputTransform.Apply(slice.Data, inputM);
 
         if (cal.DecoupleMatrix != null)
@@ -160,9 +160,9 @@ public static class RegionRender
         // ── Geometry: one composed inverse map, output rect → source coordinate ──
         ImageBuffer outImg = MapGeometry(inverted, b.X0, b.Y0, frameW, frameH, cal, rect);
 
-        // ── Stage 2 + sRGB (pointwise; no region dependence) ─────────────────────
+        // ── Step 4 + Stage 2 (pointwise; no region dependence) ───────────────────
         if (cal.OutputIntent == OutputIntent.Basic)
-            Stage2.ApplyChain(outImg.Data, cal, srgbExit: true);
+            Stage2.ApplyChain(outImg.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return (outImg, realised);
     }
 

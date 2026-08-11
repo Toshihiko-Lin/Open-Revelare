@@ -27,10 +27,14 @@ public partial class SprocketDialog : Window
     {
         _w = preview.Width; _h = preview.Height;
 
-        // Gamma-encoded base for display; green is baked in per Refresh() (matches
-        // Python's _to_overlay_pixmap — one composited image, not a separate layer).
+        // Display-encoded base; green is baked in per Refresh() (matches Python's
+        // _to_overlay_pixmap — one composited image, not a separate layer).
+        //
+        // The incoming buffer is scene-linear working space, so this is the step-4 conversion, not
+        // a bare gamma: the sprocket mask is judged on luma and geometry, but the operator is
+        // still looking at a picture and it should not be in the wrong primaries.
         _baseDisp = (float[])preview.Data.Clone();
-        Srgb.ApplyForwardInPlace(_baseDisp);
+        ColorPipeline.ToOutputSpace(_baseDisp, ColorPipeline.DefaultOutput);
 
         // Mean luma for the mask threshold (matches Python's image.mean(axis=2)).
         _luma = new float[_w * _h];

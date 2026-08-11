@@ -18,18 +18,26 @@ namespace OpenRevelare.Core;
 public static class InputTransform
 {
     /// <summary>
-    /// The matrix taking the declared input space to sRGB's primaries, or null when the
-    /// declaration is absent or already sRGB — in which case there is nothing to do and the
+    /// The matrix taking the declared input space to the WORKING space's primaries, or null when
+    /// the declaration is absent or already matches — in which case there is nothing to do and the
     /// caller skips the pass entirely.
+    ///
+    /// The destination is <see cref="ColorPipeline.Working"/> (ACEScg), not sRGB. That is the
+    /// point of the whole arrangement: the negative enters the density maths in a gamut wide
+    /// enough to hold it, so a saturated dye is still present when the output transform runs.
+    /// Landing in sRGB here would clip it before step 4 ever saw it.
+    ///
+    /// The white-point default follows the working space too — an absent declaration means "no
+    /// adaptation", which is only true if the assumed white is the destination's own.
     /// </summary>
-    public static double[,]? ToSrgb(double[,]? primaries, double[]? whitePoint)
+    public static double[,]? ToWorking(double[,]? primaries, double[]? whitePoint)
     {
         if (primaries is null) return null;
         if (primaries.GetLength(0) != 3 || primaries.GetLength(1) != 2) return null;
 
         var wp = whitePoint is { Length: 2 }
             ? (whitePoint[0], whitePoint[1])
-            : (ColorSpaces.Srgb.White.X, ColorSpaces.Srgb.White.Y);
+            : (ColorPipeline.Working.White.X, ColorPipeline.Working.White.Y);
 
         var input = new ColorSpaceDef("input",
             (primaries[0, 0], primaries[0, 1]),
@@ -41,7 +49,7 @@ public static class InputTransform
         // than throw from inside a render: an unusable calibration should leave the frame
         // rendering as it did, not fail the whole pass.
         double[,] m;
-        try { m = ColorSpaces.Convert(input, ColorSpaces.Srgb); }
+        try { m = ColorSpaces.Convert(input, ColorPipeline.Working); }
         catch (InvalidOperationException) { return null; }
 
         // An identity means the declaration matches what the pipeline already assumed; skipping
@@ -53,7 +61,7 @@ public static class InputTransform
     }
 
     /// <summary>
-    /// Applies <see cref="ToSrgb"/> to a linear negative in place.
+    /// Applies <see cref="ToWorking"/> to a linear negative in place.
     ///
     /// Uses Path A's gamut-mapped linear path, not a bare multiply. A primaries change has
     /// negative off-diagonals like any colour matrix, so it can push a near-zero transmittance
@@ -61,6 +69,6 @@ public static class InputTransform
     /// explodes. Decouple's per-pixel alpha blend is exactly the safety net for that: it exists
     /// because the Path A matrix has the same problem, and only the pixels that need it retreat.
     /// </summary>
-    public static void Apply(float[] data, double[,] toSrgb)
-        => Decouple.Apply(data, toSrgb, DecoupleMode.Linear);
+    public static void Apply(float[] data, double[,] toWorking)
+        => Decouple.Apply(data, toWorking, DecoupleMode.Linear);
 }

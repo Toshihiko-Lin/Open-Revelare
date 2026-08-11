@@ -8,62 +8,27 @@ namespace OpenRevelare.Gui.Interop;
 /// <summary>
 /// Turns a Core <see cref="ImageBuffer"/> into an Avalonia bitmap for on-screen display.
 ///
-/// The buffer handed in must already be sRGB-encoded [0,1] — i.e. the output of
-/// <c>Pipeline.ProcessFrame</c> with BASIC intent, which applies the sRGB exit TRC.
-/// We only quantise to 8-bit BGRA here; no colour maths happens in the view layer.
+/// The buffer handed in is already display-encoded in the ROLL'S OUTPUT SPACE — the render did the
+/// step-4 conversion and Stage 2 ran inside that space — so there is no colour maths left to do
+/// here. This is pure quantisation to 8-bit BGRA.
+///
+/// NO DISPLAY MANAGEMENT, deliberately. The bitmap goes to the compositor without a profile and
+/// the panel does whatever it does with those numbers. Doing better means what Photoshop and
+/// Lightroom do: convert through the OS's registered display profile, which is a calibrator's
+/// MEASUREMENT of that individual panel. A dropdown of standard spaces is not that — it is a
+/// guess, and a wrong guess is worse than none, because the user then grades against colours the
+/// screen is not actually showing. Anyone who needs accuracy calibrates their display.
+///
+/// Soft proofing also used to live here as a working→target→back round trip, simulating an export
+/// the render itself was not doing. It is gone because it stopped being a simulation of anything:
+/// the output space is a render parameter now, so the preview shows the real thing.
 /// </summary>
 public static class BitmapConvert
 {
-    /// <summary>
-    /// Soft-proof target: when set, every preview is re-rendered through this space and back to
-    /// sRGB, so the screen shows what exporting to it would look like. Null = off, the direct
-    /// path, which is what the app has always done.
-    ///
-    /// A static rather than a parameter because it must apply to every preview surface at once —
-    /// main view, thumbnails, sharp patches — and threading it through eight call sites would
-    /// invite the one that got missed. It is read on render threads and written from the UI
-    /// thread; a torn read is impossible for a reference-sized field and the worst case is one
-    /// frame rendered against the previous setting, which the follow-up render corrects.
-    /// </summary>
-    public static ColorSpaceDef? SoftProof;
-
-    /// <summary>
-    /// The space the screen actually is. Null = sRGB, i.e. the unmanaged assumption the app has
-    /// always made and still the right default: Avalonia hands the bitmap to the compositor with
-    /// no profile, so whatever the display does with those numbers is what the user sees.
-    ///
-    /// Setting it makes the preview colour-managed — the working space is converted into the
-    /// display's actual gamut rather than being sent verbatim. On a wide-gamut panel that is the
-    /// difference between "everything looks oversaturated" and correct. It is a VIEW setting: it
-    /// never touches exported files, and it is not stored with the project, because the same
-    /// project opened on another machine faces a different screen.
-    /// </summary>
-    public static ColorSpaceDef? Display;
-
-    /// <summary>sRGB-encoded [0,1] interleaved RGB → 8-bit Bgra8888 WriteableBitmap.
+    /// <summary>Display-encoded [0,1] interleaved RGB → 8-bit Bgra8888 WriteableBitmap.
     /// Safe to call off the UI thread (a WriteableBitmap is not a control).</summary>
     public static WriteableBitmap ToBitmap(ImageBuffer srgb)
     {
-        ColorSpaceDef screen = Display ?? ColorSpaces.Srgb;
-        bool proofing = SoftProof is ColorSpaceDef;
-        if (proofing || screen != ColorPipeline.Working)
-        {
-            // One linear round trip covering both jobs, so the TRC is applied exactly once.
-            // Soft proof: working → target → back, which discards what the target cannot hold
-            // and is the whole point of proofing. Display: working → screen, the conversion an
-            // unmanaged path skips and the reason wide-gamut panels oversaturate.
-            var copy = (float[])srgb.Data.Clone();
-            Srgb.ApplyInverseInPlace(copy);
-            if (SoftProof is ColorSpaceDef proof)
-            {
-                OutputRender.Convert(copy, ColorPipeline.Working, proof, GamutMapping.Desaturate);
-                OutputRender.Convert(copy, proof, ColorPipeline.Working, GamutMapping.Desaturate);
-            }
-            OutputRender.Convert(copy, ColorPipeline.Working, screen, GamutMapping.Desaturate);
-            OutputRender.Encode(copy, screen);
-            srgb = new ImageBuffer(srgb.Width, srgb.Height, copy);
-        }
-
         int w = srgb.Width, h = srgb.Height;
         var bmp = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96),
                                       PixelFormat.Bgra8888, AlphaFormat.Opaque);

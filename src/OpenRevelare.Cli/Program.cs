@@ -144,6 +144,25 @@ static int Run(string[] args)
         ? OutputIntent.None
         : OutputIntent.Basic;
 
+    // --color-space is a RENDER parameter now, not a post-conversion: it names the Cineon step-4
+    // target, so it must be set before ProcessFrame runs — Stage 2 executes inside that space.
+    if (opts.TryGetValue("color-space", out var csName))
+    {
+        if (!ColorSpaces.All.TryGetValue(csName, out var target))
+        {
+            Console.Error.WriteLine($"unknown --color-space '{csName}'. known: "
+                + string.Join(", ", ColorSpaces.All.Keys));
+            return 2;
+        }
+        if (!OutputRender.IsDisplayReferred(target))
+        {
+            Console.Error.WriteLine($"--color-space '{csName}' is scene-referred; it is the "
+                + "working space, not an output space.");
+            return 2;
+        }
+        cal.OutputSpace = target.Name;
+    }
+
     try
     {
         cal.Validate();
@@ -440,27 +459,15 @@ static int Run(string[] args)
         }
         else
         {
-            // --color-space names the destination gamut. Under intent basic the render arrives
-            // sRGB-encoded and is re-rendered into that space (OutputRender undoes the TRC,
-            // converts in linear light, re-encodes); under intent none the data is still linear,
-            // so it is converted from the working space and encoded once.
-            ColorSpaceDef? icc = null;
-            if (opts.TryGetValue("color-space", out var csName))
-            {
-                if (!ColorSpaces.All.TryGetValue(csName, out var target))
-                {
-                    Console.Error.WriteLine($"unknown --color-space '{csName}'. known: "
-                        + string.Join(", ", ColorSpaces.All.Keys));
-                    return 2;
-                }
-                ColorPipeline.Render(outImg.Data, target,
-                    alreadyEncoded: cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic);
-                icc = target;
-            }
-            else if (cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic)
-            {
-                icc = ColorSpaces.Srgb;
-            }
+            // --color-space names the step-4 target, which the render already used: it was applied
+            // to cal before ProcessFrame, so Stage 2 ran inside that space and the buffer is
+            // already encoded in it. Nothing to convert here — only the profile to name.
+            //
+            // Under intent none the data is scene-linear ACEScg and no display profile describes
+            // it, so none is embedded.
+            ColorSpaceDef? icc = cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic
+                ? cal.ResolvedOutputSpace
+                : null;
             opts.TryGetValue("description", out var desc);
             TiffIO.ExportTiff16(outImg, outPath, compress, icc, desc);
             Console.WriteLine($"wrote {outPath} (TIFF {compress}{(icc is null ? "" : $", ICC {icc}")}) "

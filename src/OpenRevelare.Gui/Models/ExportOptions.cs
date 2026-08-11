@@ -16,11 +16,10 @@ public enum ExportFormat
 /// Everything the export dialog decides. Persisted in settings.json, because an export preset is
 /// the kind of thing a person picks once and then wants every time.
 ///
-/// Output colour space is a real choice now: <see cref="OutputRender"/> converts the working
-/// space into the destination gamut, maps what falls outside it, and applies that space's own
-/// encoding curve, so the embedded profile describes what was actually written. Before that
-/// existed the option was deliberately withheld — offering it would have attached an Adobe RGB
-/// profile to sRGB pixels, which is not a wider gamut but a mislabelled file.
+/// Output colour space is NOT here any more, only carried through: it became a render parameter
+/// when Stage 2 started running inside it, so it lives on the roll and is picked in the main
+/// window. The export writes what the render already produced and labels it accordingly — which
+/// is what makes the preview WYSIWYG rather than an approximation of the file.
 ///
 /// Sharpening is still absent on purpose: there is no sharpening implementation to call.
 ///
@@ -37,29 +36,44 @@ public sealed class ExportOptions
 
     public int JpegQuality { get; set; } = 95;
 
-    /// <summary>Embed the profile describing what was written. Ignored under
-    /// <see cref="OutputIntent.None"/>, whose output is linear and which no profile here
+    /// <summary>Embed the profile describing what was written. Ignored when
+    /// <see cref="ExportLinear"/> is set, whose output is scene-linear and which no profile here
     /// describes.</summary>
     public bool EmbedIcc { get; set; } = true;
 
     /// <summary>
-    /// Destination colour space, by <see cref="ColorSpaceDef.Name"/>. Stored as a string rather
-    /// than an enum so a project written by a newer build naming a space this one lacks falls
-    /// back to sRGB instead of failing to parse.
+    /// Write the scene-linear working-space (ACEScg) render instead of the finished picture:
+    /// skip step 4 and Stage 2 entirely.
     ///
-    /// sRGB is the default because it is what an unmanaged viewer assumes; the wider and the
-    /// print-emulating spaces are opt-in.
+    /// This is what the old roll-level "线性" output intent became. It is an EXPORT property, not
+    /// a roll mode — the file is an intermediate for someone else's grading suite, so the person
+    /// asking for it wants this one file linear, not their working preview stripped of every
+    /// adjustment. Keeping it here is also what lets the preview stay honest: the main window
+    /// always shows the full render, so the output-space picker means what it says.
+    ///
+    /// Not persisted: an export preset that silently defaulted to linear would hand somebody an
+    /// unviewable file the next time they exported without looking.
     /// </summary>
+    [JsonIgnore]
+    public bool ExportLinear { get; set; }
+
+    /// <summary>
+    /// The space the file is written in, by <see cref="ColorSpaceDef.Name"/> — CARRIED from the
+    /// roll, not chosen here.
+    ///
+    /// It moved to the main window because it stopped being an export decision: Stage 2 runs
+    /// inside this space, so it changes the picture, and choosing it at export time would mean
+    /// grading against one space and writing another. The dialog reports it; the roll owns it.
+    ///
+    /// Not persisted in settings for the same reason — an export preset that pinned a colour space
+    /// would silently override the roll's own on the next export.
+    /// </summary>
+    [JsonIgnore]
     public string ColorSpace { get; set; } = "sRGB";
 
-    /// <summary>How colours outside the destination gamut are handled. Only matters when the
-    /// destination is narrower than the source somewhere.</summary>
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public GamutMapping GamutMapping { get; set; } = GamutMapping.Desaturate;
-
-    /// <summary>The resolved destination space; sRGB when the stored name is unknown.</summary>
+    /// <summary>The resolved destination space; the pipeline default when the name is unknown.</summary>
     [JsonIgnore]
-    public ColorSpaceDef ResolvedColorSpace => ColorSpaces.ByName(ColorSpace, ColorSpaces.Srgb);
+    public ColorSpaceDef ResolvedColorSpace => ColorSpaces.ByName(ColorSpace, ColorPipeline.DefaultOutput);
 
     public bool Downsample { get; set; }
 
@@ -88,6 +102,8 @@ public sealed class ExportOptions
                 _ => "LZW",
             }}");
         string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
+        if (ExportLinear)
+            return $"{format} · {size} · " + Loc.T("场景线性 ACEScg（无 ICC）");
         string space = ResolvedColorSpace.Name;
         return $"{format} · {size} · {space}" + (EmbedIcc ? Loc.F($" · 嵌 {space}") : "");
     }

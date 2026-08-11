@@ -730,9 +730,8 @@ public partial class MainViewModel : ViewModelBase
         SprocketMaskOverlay = BitmapConvert.ToMaskOverlay(shaped, flags.Width, flags.Height);
     }
 
-    // 输出意图：0=基础（sRGB gamma + Stage 2），1=线性（跳过 Stage 2 与 sRGB）
-    [ObservableProperty] private int _outputIntentIndex;
-    partial void OnOutputIntentIndexChanged(int value) => ScheduleRender();
+    // 输出意图不再是胶卷级模式：预览恒为完整渲染，"线性" 是单次导出的属性
+    // （导出弹窗的「导出为场景线性 ACEScg」勾选框），见 ForExport。
 
     // 片基透射率 T_base（默认 0.82/0.51/0.29；框选未曝光橙色片基采样）
     [ObservableProperty] private double _tBaseR = 0.82;
@@ -1146,7 +1145,13 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Snapshot the current state into a FrameParams for a render/export.</summary>
     private FrameParams BuildParams() => new()
     {
-        OutputIntent = OutputIntentIndex == 0 ? OutputIntent.Basic : OutputIntent.None,
+        // Always BASIC. The intent stopped being a roll-level mode when the output space became
+        // one: "linear" is a property of a particular EXPORT (hand this file to a colourist),
+        // not of how the roll is being worked on. The preview is therefore always the full
+        // render, which is what makes the output-space picker mean what it says.
+        OutputIntent = OutputIntent.Basic,
+        // Step-4 target: the space Stage 2 runs in and the file is written in.
+        OutputSpace = OutputSpaces[_outputSpaceIndex].Name,
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
@@ -1197,8 +1202,11 @@ public partial class MainViewModel : ViewModelBase
         // the negative. Same for the before/after compare below.
         ClearSharpPatch();
         _savedPositive = PreviewImage;
+        // The buffer is scene-linear ACEScg (pre-inversion). Step 4 takes it to the roll's output
+        // space, which is the space BitmapConvert is expecting — applying a bare sRGB gamma here
+        // would encode the right curve onto the wrong primaries.
         var disp = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
-        Srgb.ApplyForwardInPlace(disp.Data);   // gamma for display only
+        ColorPipeline.ToOutputSpace(disp.Data, CurrentOutputSpace);
         PreviewImage = BitmapConvert.ToBitmap(disp);
     }
 
@@ -1843,9 +1851,9 @@ public partial class MainViewModel : ViewModelBase
     public void ResetAdjustments()
     {
         _renderCts?.Cancel();
-        // Stage 1 — lens / sprocket / intent
+        // Stage 1 — lens / sprocket
         DistortionK1 = 0; VignetteAmount = 0; VignetteFalloff = 2.5;
-        SprocketEnabled = false; SprocketThreshold = 0.9; OutputIntentIndex = 0;
+        SprocketEnabled = false; SprocketThreshold = 0.9;
         // Stage 1 — film base
         TBaseR = 0.82; TBaseG = 0.51; TBaseB = 0.29;
         DMax = 2.0; ScanEv = 0;
@@ -2704,7 +2712,12 @@ public partial class MainViewModel : ViewModelBase
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
         LccEnabled = p.LccFlatField != null;
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
-        OutputIntentIndex = p.OutputIntent == OutputIntent.Basic ? 0 : 1;
+        // p.OutputIntent is deliberately NOT adopted: a roll saved with the old NONE intent would
+        // otherwise load with a blank-looking preview and no control left to change it back.
+        // The preview is always the full render now; linear is an export-time choice.
+        // Adopt the roll's saved step-4 target without writing it back or dirtying the roll —
+        // this is loading, not choosing.
+        SyncOutputSpace(p.ResolvedOutputSpace.Name);
         // Stage 1 — film base
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMax = p.DMax; ScanEv = p.ScanExposureEv;
@@ -3066,78 +3079,130 @@ public partial class MainViewModel : ViewModelBase
     private bool RollIsRaw => Frames.Count > 0 && RawDecode.IsRawExtension(Frames[0].Path);
 
     /// <summary>
-    /// Soft-proof targets, in the order the picker lists them. Index 0 = off.
+    /// Step-4 targets, in the order the picker lists them.
     ///
-    /// Adobe RGB and Display P3 are deliberately NOT here. Soft proofing shows what the
-    /// destination gamut cannot hold, and both of those are WIDER than sRGB — which is what the
-    /// render currently sits in — so the round trip through them is a no-op (measured max change
-    /// 0.000023, i.e. below one 8-bit level). Offering them would be a control that visibly does
-    /// nothing. They become meaningful once the working space is widened; until then only the
-    /// two narrower print spaces have anything to show.
+    /// Every one is display-referred; ACEScg is absent on purpose — it is the WORKING space, and
+    /// Stage 2's operations have no meaning in a scene-linear unbounded space. All of these are
+    /// now genuinely different renders rather than simulations, including the two wider-than-sRGB
+    /// ones: the working space is ACEScg, so there is real saturation for Adobe RGB and P3 to
+    /// hold that sRGB cannot.
     /// </summary>
-    private static readonly ColorSpaceDef?[] SoftProofSpaces =
+    /// Three spaces are registered in <see cref="ColorSpaces"/> but deliberately NOT offered here.
+    ///
+    /// Rec709 shares sRGB's primaries exactly and differs only in transfer function, so listing
+    /// both would be two entries with the same gamut and a shadow-only difference between them —
+    /// a choice without a decision behind it.
+    ///
+    /// The two Kodak spaces (Endura Premier paper, 2383 print film) are out because what they
+    /// deliver does not match what their names promise. Their primaries measure 127% and 141% of
+    /// sRGB's area — WIDER than Adobe RGB — whereas real photographic paper reproduces a gamut
+    /// NARROWER than sRGB. They describe the dye set's encoding primaries, not the medium's
+    /// reproducible gamut, so selecting them performs a gamut expansion plus a D65→D60 white
+    /// shift rather than reproducing a darkroom print or a projection print. That look lives in
+    /// density curves and a 3D LUT; three chromaticity coordinates cannot carry it.
+    private static readonly ColorSpaceDef[] OutputSpaces =
     {
-        null,
-        ColorSpaces.KodakEnduraPremier,
-        ColorSpaces.Kodak2383,
+        ColorSpaces.Srgb,
+        ColorSpaces.DisplayP3,
+        ColorSpaces.AdobeRgb,
     };
+    // The display-space picker is gone: the preview is always handed to the compositor unmanaged,
+    // which is what the app did before any of this and what it does again.
+    //
+    // The honest reason is that the app cannot do the job properly. Doing it the way Photoshop and
+    // Lightroom do means the OS's registered display profile — a calibrator's measurement, with
+    // per-channel TRC curves and the panel's real primaries. A three-entry dropdown of standard
+    // spaces is not that; it is a guess, and a wrong guess actively misleads, because the user
+    // then grades against colours the panel is not showing. EDID cannot fill the gap either: it is
+    // factory boilerplate, and this very laptop reports a panel covering 63.5% of sRGB, which
+    // would desaturate everything if applied.
+    //
+    // Unmanaged is at least a KNOWN state: the numbers reach the panel untouched, and anyone who
+    // needs accuracy calibrates their display and trusts the OS to do the conversion.
 
-    private int _softProofIndex;
+    private int _outputSpaceIndex;
 
     /// <summary>
-    /// Which space the preview simulates. A VIEW setting, not a roll parameter: it is not saved
-    /// with the project and never touches the exported file. Defaults to off, so the preview
-    /// keeps behaving exactly as before until asked otherwise.
-    /// </summary>
-    /// <summary>Display spaces offered, in picker order. Index 0 = sRGB, the unmanaged default.</summary>
-    private static readonly ColorSpaceDef[] DisplaySpaces =
-    {
-        ColorSpaces.Srgb, ColorSpaces.DisplayP3, ColorSpaces.AdobeRgb,
-    };
-
-    private int _displayIndex;
-
-    /// <summary>
-    /// Which space the SCREEN is. A view setting — never written to a project, never applied to
-    /// an exported file, because the same project opened elsewhere meets a different monitor.
+    /// The roll's step-4 target: what the positive is converted into, what Stage 2 adjusts in, and
+    /// what the exported file is written in. One control for all three, which is what makes the
+    /// preview WYSIWYG.
     ///
-    /// Index 0 (sRGB) is the historical behaviour: the bitmap goes to the compositor unmanaged
-    /// and whatever the panel does with those numbers is what is seen. Selecting the panel's
-    /// actual space converts into it instead, which is what stops a wide-gamut display from
-    /// showing everything oversaturated.
+    /// This is NOT a view setting. It changes the rendered
+    /// pixels, so it is saved with the roll and marks the project dirty. Changing it keeps the
+    /// Stage-2 slider VALUES and lets the picture move — those numbers mean "this much adjustment
+    /// in the current output space", so re-interpreting them in a new space is the honest
+    /// behaviour and the reason grading for 2383 works at all.
     /// </summary>
-    public int DisplayIndex
+    public int OutputSpaceIndex
     {
-        get => _displayIndex;
+        get => _outputSpaceIndex;
         set
         {
-            int v = Math.Clamp(value, 0, DisplaySpaces.Length - 1);
-            if (_displayIndex == v) return;
-            _displayIndex = v;
-            OnPropertyChanged(nameof(DisplayIndex));
-            // Null for sRGB keeps the fast path: BitmapConvert skips the whole conversion when
-            // the screen is the working space.
-            BitmapConvert.Display = v == 0 ? null : DisplaySpaces[v];
+            int v = Math.Clamp(value, 0, OutputSpaces.Length - 1);
+            if (_outputSpaceIndex == v) return;
+            _outputSpaceIndex = v;
+            OnPropertyChanged(nameof(OutputSpaceIndex));
+            OnPropertyChanged(nameof(OutputSpaceHint));
+            OnPropertyChanged(nameof(CurrentOutputSpace));
+
+            // Roll-uniform: a strip whose frames sat in different output spaces would be a contact
+            // sheet of incomparable renders.
+            foreach (RollFrame f in Frames) f.Params.OutputSpace = OutputSpaces[v].Name;
+            if (Frames.Count > 0) MarkRollDirty();
+
+            // Thumbnails are rebuilt too: unlike the old soft proof, this changes what each frame
+            // IS, so a strip still showing the previous space would be showing the wrong picture.
+            foreach (RollFrame f in Frames) SetThumbnail(f, null);
+            RestartThumbnails();
             ScheduleRender();
         }
     }
 
-    public int SoftProofIndex
+    /// <summary>The roll's output space — what an export will be written in.</summary>
+    public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
+
+    /// <summary>What the selected output space is for, shown under the picker.</summary>
+    public string OutputSpaceHint => OutputSpaces[_outputSpaceIndex].Name switch
     {
-        get => _softProofIndex;
-        set
+        "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
+        "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
+        "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
+        // Spaces still resolvable from older projects, so they need a label even though the picker
+        // no longer offers them.
+        "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
+        "KodakEnduraPremier" or "Kodak2383" =>
+            Loc.T("旧工程指定的染料集基色。已不再提供选择——它描述的是染料编码基色，而非相纸/拷贝片实际能呈现的色域。"),
+        _ => "",
+    };
+
+    /// <summary>
+    /// Adopt a saved output space into the picker. Called when a frame or roll is loaded — this is
+    /// loading, not choosing, so it does not mark the roll dirty on its own.
+    ///
+    /// A roll naming a space the picker no longer offers (the two Kodak dye-set spaces, or Rec709)
+    /// is MIGRATED to sRGB and the frames are rewritten to say so. Leaving the name in place while
+    /// the picker showed index 0 would be the worst outcome: the label would read sRGB while the
+    /// render still used the old space, and the next edit would silently rewrite it anyway. The
+    /// migration is stated in the status bar rather than done behind the user's back.
+    /// </summary>
+    private void SyncOutputSpace(string name)
+    {
+        int i = Array.FindIndex(OutputSpaces,
+                                s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (i < 0)
         {
-            int v = Math.Clamp(value, 0, SoftProofSpaces.Length - 1);
-            if (_softProofIndex == v) return;
-            _softProofIndex = v;
-            OnPropertyChanged(nameof(SoftProofIndex));
-            BitmapConvert.SoftProof = SoftProofSpaces[v];
-            // Re-render the main preview under the new setting. Thumbnails keep whatever they
-            // were built with until they are rebuilt for another reason — deliberately: soft
-            // proofing is for judging the frame you are working on, and re-rendering the whole
-            // strip on every toggle would cost far more than it tells you.
-            ScheduleRender();
+            string target = OutputSpaces[0].Name;
+            foreach (RollFrame f in Frames) f.Params.OutputSpace = target;
+            if (Frames.Count > 0)
+            {
+                MarkRollDirty();
+                StatusText = Loc.F($"输出空间 {name} 已不再提供，本卷改用 {target}——画面会与上次打开时不同。");
+            }
         }
+        _outputSpaceIndex = i < 0 ? 0 : i;
+        OnPropertyChanged(nameof(OutputSpaceIndex));
+        OnPropertyChanged(nameof(OutputSpaceHint));
+        OnPropertyChanged(nameof(CurrentOutputSpace));
     }
 
     /// <summary>Append more scans to the current roll (must match the roll's RAW/TIFF type);
@@ -3223,6 +3288,21 @@ public partial class MainViewModel : ViewModelBase
     /// later export path go through here so the dialog cannot promise a setting that only some
     /// of them honour.
     /// </summary>
+    /// <summary>
+    /// The render params for one export: the roll's own, with the intent forced to NONE when this
+    /// export was asked to be scene-linear.
+    ///
+    /// Applied here rather than on the roll so the preview never moves — "linear" describes this
+    /// file, not the way the roll is being worked on.
+    /// </summary>
+    private static FrameParams ForExport(FrameParams p, ExportOptions opt)
+    {
+        if (!opt.ExportLinear) return p;
+        FrameParams q = p.Clone();
+        q.OutputIntent = OutputIntent.None;
+        return q;
+    }
+
     private static void WriteExport(ImageBuffer img, string path, FrameParams p, ExportOptions opt)
     {
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
@@ -3230,19 +3310,16 @@ public partial class MainViewModel : ViewModelBase
         // — and would move every Stage-1 measurement with it.
         ImageBuffer outImg = opt.Downsample ? Resample.Box(img, opt.MaxLongEdge) : img;
 
-        // The colour-space choice only applies under BASIC, whose render is sRGB-encoded and can
-        // therefore be re-rendered into another space. NONE intent writes linear data: no profile
-        // offered here describes that, so both the conversion and the "embed" request are skipped
-        // rather than producing a file whose profile disagrees with its pixels.
-        // Rewrites outImg.Data in place. Safe: every caller hands over a buffer freshly rendered
-        // by Pipeline.ProcessFrame for this one export and drops it afterwards.
-        ColorSpaceDef? icc = null;
-        if (p.OutputIntent == OutputIntent.Basic)
-        {
-            ColorSpaceDef target = opt.ResolvedColorSpace;
-            ColorPipeline.Render(outImg.Data, target, alreadyEncoded: true, opt.GamutMapping);
-            if (opt.EmbedIcc) icc = target;
-        }
+        // NO conversion happens here any more, and that is the point. The render already landed in
+        // the roll's output space — step 4 ran before Stage 2, and Stage 2 ran inside it — so the
+        // bytes on screen are the bytes to write. Converting again would be converting a second
+        // time. All that is left is to name the space in the profile.
+        //
+        // NONE intent writes linear data: no profile offered here describes that, so the embed
+        // request is skipped rather than producing a file whose profile disagrees with its pixels.
+        ColorSpaceDef? icc = p.OutputIntent == OutputIntent.Basic && opt.EmbedIcc
+            ? p.ResolvedOutputSpace
+            : null;
 
         if (opt.Format == ExportFormat.Jpeg)
             JpegIO.ExportJpeg(outImg, path, opt.JpegQuality, null, icc);
@@ -3280,8 +3357,9 @@ public partial class MainViewModel : ViewModelBase
                 if (outPath is null) { skipped++; continue; }
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
-                await Task.Run(() => WriteExport(Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), p),
-                                                 outPath, p, opt));
+                FrameParams ep = ForExport(p, opt);
+                await Task.Run(() => WriteExport(Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), ep),
+                                                 outPath, ep, opt));
             }
             string detail = "";
             if (renamed > 0) detail += Loc.F($"，其中 {renamed} 帧重名已另存");
@@ -3410,7 +3488,8 @@ public partial class MainViewModel : ViewModelBase
             // Overwrite stays the rule for a single export: the save dialog already asked, and the
             // format came from the options dialog rather than being guessed from the extension.
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
-            await Task.Run(() => WriteExport(Pipeline.ProcessFrame(LoadFullLinear(srcPath), p), path, p, opt));
+            FrameParams ep = ForExport(p, opt);
+            await Task.Run(() => WriteExport(Pipeline.ProcessFrame(LoadFullLinear(srcPath), ep), path, ep, opt));
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
         }
         catch (Exception ex)

@@ -191,7 +191,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 ### Imaging
 
 - **Density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade. Every one is adjustable in the UI and physically meaningful. The inversion itself is the Cineon way: one gamma across all three channels, chroma following proportionally, with no separate chroma parameter (earlier versions had a `chroma_grade`; it was removed once colour management was in place)
-- **Full colour management** — every stage's colour space is declared explicitly; export to sRGB / Adobe RGB / Display P3 / Kodak Endura Premier (paper) / Kodak 2383 (print film), with a display-space setting and soft proofing for the preview
+- **Full colour management** — a wide scene-referred ACEScg working space carries the inversion; the output space is chosen in the main window (sRGB / Display P3 / Adobe RGB), frame edits happen inside it, and the export is what you already see on screen; a scene-linear ACEScg export is also available for external grading
 - **Narrowband source decoupling (Path A)** — for LED / fluorescent light-box copying, inter-channel crosstalk is solved out with a 3×3 matrix from a set of R/G/B calibration frames. Method from [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **Auto-calibration** — estimates base, sprocket threshold, dark-end valley, `d_max`, highlight white balance from the roll
 - **Smart white balance** — DeepWB neural network estimates the white point in one click (model separately licensed, [see below](#smart-white-balance-model--separate-licence-read-this))
@@ -213,7 +213,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 |---|---|
 | **RAW input** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ etc. (LibRaw) |
 | **Other input** | TIFF / JPEG / PNG |
-| **Export** | 16-bit TIFF, JPEG, five output colour spaces; the embedded ICC matches the pixels |
+| **Export** | 16-bit TIFF, JPEG, three output colour spaces (plus a scene-linear ACEScg export); the embedded ICC matches the pixels |
 
 ## How it works
 

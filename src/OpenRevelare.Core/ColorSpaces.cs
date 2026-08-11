@@ -99,6 +99,18 @@ public static class ColorSpaces
     public static readonly ColorSpaceDef AdobeRgb = new(
         "AdobeRGB", (0.6400, 0.3300), (0.2100, 0.7100), (0.1500, 0.0600), (0.3127, 0.3290));
 
+    /// <summary>
+    /// ITU-R BT.709. Shares sRGB's primaries and D65 white exactly — the two differ only in
+    /// transfer function (2.4 pure power here, sRGB's piecewise curve there), which is why this
+    /// needs its own entry rather than aliasing sRGB: <see cref="OutputRender.EncodingGamma"/>
+    /// keys off the name.
+    ///
+    /// This is the space step 4 of the Cineon workflow names, so it belongs in the picker even
+    /// though its gamut is identical to sRGB's.
+    /// </summary>
+    public static readonly ColorSpaceDef Rec709 = new(
+        "Rec709", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290));
+
     /// <summary>Display P3 — DCI-P3 primaries on a D65 white. </summary>
     public static readonly ColorSpaceDef DisplayP3 = new(
         "DisplayP3", (0.6800, 0.3200), (0.2650, 0.6900), (0.1500, 0.0600), (0.3127, 0.3290));
@@ -133,7 +145,7 @@ public static class ColorSpaces
 
     /// <summary>Every registered space, keyed by <see cref="ColorSpaceDef.Name"/>.</summary>
     public static readonly IReadOnlyDictionary<string, ColorSpaceDef> All =
-        new[] { Srgb, AdobeRgb, DisplayP3, AcesCg, KodakEnduraPremier, Kodak2383 }
+        new[] { Srgb, Rec709, AdobeRgb, DisplayP3, AcesCg, KodakEnduraPremier, Kodak2383 }
             .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
