@@ -4,7 +4,7 @@ Read a DNG's ColorMatrix2 tag and print the entry to paste into CameraMatrixFall
 Why this exists: the bundled LibRaw (0.21.x) carries 1181 cameras and its table stops before
 several current bodies — the OM System OM-5 among them. For those, LibRaw parses the raw file
 fine but returns an identity colour matrix, i.e. "no colorimetry", and the pipeline falls back to
-treating camera-native RGB as though it were sRGB. See docs/CALIBRATION.md.
+treating camera-native RGB as though it were sRGB.
 
 The fix is a hand-maintained fallback table, and the entries have to be MEASURED. This script is
 how: convert one frame from the camera with Adobe DNG Converter, run it through here, and paste

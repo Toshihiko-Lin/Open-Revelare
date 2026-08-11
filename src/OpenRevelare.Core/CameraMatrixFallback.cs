@@ -7,7 +7,7 @@ namespace OpenRevelare.Core;
 /// actually shooting — the OM System OM-5 (October 2022) among them. For those, LibRaw parses the
 /// file fine but returns an identity matrix, i.e. "no colorimetry", and the pipeline falls back to
 /// treating camera-native RGB as though it were sRGB. That is exactly the uncharacterised state
-/// chroma_grade grew out of (see docs/CALIBRATION.md), so it is worth filling in by hand.
+/// chroma_grade grew out of, so it is worth filling in by hand.
 ///
 /// ENTRIES MUST BE MEASURED, NOT GUESSED. Each one is the camera's published DNG ColorMatrix
 /// (XYZ D65 → camera), the same quantity LibRaw stores as cam_xyz and Adobe ships in DNG

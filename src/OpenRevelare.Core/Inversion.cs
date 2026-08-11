@@ -63,7 +63,7 @@ public static class Inversion
         // coefficient: Cineon applies ONE gamma to all three channels, and chroma — being the
         // per-channel deviation — follows luminance proportionally without a second parameter.
         // What used to be chroma_grade patched a missing colour-space conversion; that belongs to
-        // InputTransform and OutputRender now. See docs/CALIBRATION.md.
+        // InputTransform and OutputRender now.
         bool needDecomp = useMatrix || !ampIdentity || channelScaleActive;
 
         // ── Per-channel density LUTs (folds steps 1–4); cached, see DensityLuts ──

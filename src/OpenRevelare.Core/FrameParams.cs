@@ -82,7 +82,7 @@ public sealed class FrameParams
     /// WHAT IT IS NOT: the camera manufacturer's ColorMatrix. That describes how the sensor sees
     /// a real SCENE, and a negative holds no scene — it holds dye densities. Three separate
     /// attempts to push the camera matrix through this pipeline all failed on real film for that
-    /// reason (see docs/CALIBRATION.md). What belongs here is the EQUIVALENT primaries of the
+    /// reason. What belongs here is the EQUIVALENT primaries of the
     /// whole chain, sensor spectral response composed with the film's dye transmission, and that
     /// can only be solved from a chart — which is exactly what DiVERE's primaries_xy is.
     ///

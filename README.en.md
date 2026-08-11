@@ -190,7 +190,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 
 ### Imaging
 
-- **Density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade. Every one is adjustable in the UI and physically meaningful. The inversion itself is the Cineon way: one gamma across all three channels, chroma following proportionally, with no separate chroma parameter (earlier versions had a `chroma_grade`; it was traced and removed — see [docs/CALIBRATION.md](docs/CALIBRATION.md))
+- **Density-domain inversion** — base `t_base`, white balance `wb_high` / `wb_offset`, scan exposure, `d_max`, grade. Every one is adjustable in the UI and physically meaningful. The inversion itself is the Cineon way: one gamma across all three channels, chroma following proportionally, with no separate chroma parameter (earlier versions had a `chroma_grade`; it was removed once colour management was in place)
 - **Full colour management** — every stage's colour space is declared explicitly; export to sRGB / Adobe RGB / Display P3 / Kodak Endura Premier (paper) / Kodak 2383 (print film), with a display-space setting and soft proofing for the preview
 - **Narrowband source decoupling (Path A)** — for LED / fluorescent light-box copying, inter-channel crosstalk is solved out with a 3×3 matrix from a set of R/G/B calibration frames. Method from [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **Auto-calibration** — estimates base, sprocket threshold, dark-end valley, `d_max`, highlight white balance from the roll

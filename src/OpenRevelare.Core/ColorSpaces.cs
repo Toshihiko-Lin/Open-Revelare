@@ -11,7 +11,6 @@ namespace OpenRevelare.Core;
 /// <c>chroma_grade</c> take root: with no gamut to convert into, a scalar on the
 /// chroma vector was the only lever available for "the colours look wrong", and a
 /// scalar cannot express what is actually an anisotropic, per-hue gamut relationship.
-/// See docs/CALIBRATION.md.
 /// </summary>
 /// <param name="Name">Stable identifier, also used in project files.</param>
 /// <param name="Red">CIE xy of the red primary.</param>

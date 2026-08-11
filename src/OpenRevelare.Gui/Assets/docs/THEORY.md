@@ -292,7 +292,7 @@ $$T_\text{pos} = 10^{D_\text{adj}}$$
 
 一个 gamma 作用于三个通道，色度作为逐通道相对均值的偏差按比例跟随，与亮度自动同步。
 
-> 早期版本另有一个 `chroma_grade` 系数（默认 3.05），用于补偿色彩空间管理缺失导致的色度偏低。该缺失已由 `InputTransform` / `OutputRender` 的色域变换补上，参数随之移除。追溯见 [CALIBRATION.md](../../../../docs/CALIBRATION.md)。
+> 早期版本另有一个 `chroma_grade` 系数（默认 3.05），用于补偿色彩空间管理缺失导致的色度偏低。该缺失已由 `InputTransform` / `OutputRender` 的色域变换补上，参数随之移除。
 
 **grade（相纸号数）**：C-41 负片被故意设计为低对比度（胶片 $\gamma \approx 0.5\text{–}0.65$），因为它的最终目的是在高对比度相纸（$\gamma \approx 2.5\text{–}3.5$）上放大印相，整个印相链的综合 $\gamma$ 恢复到约 1.0。数字化时没有"高对比度相纸"这一环，纯反转（grade = 1.0）会输出一张发灰的低对比图像。grade = 1.65（$\approx 1/0.6$）补回典型 C-41 负片缺失的对比度，pivot 参数控制中间调的锚点位置，使改变 grade 时中间调亮度保持稳定。
 

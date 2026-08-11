@@ -20,8 +20,7 @@ namespace OpenRevelare.Core;
 /// Kodak Gold 200, Portra 160/400, Ultramax 400, Fuji 100, Lucky C200, and the motion-picture
 /// stocks 5207 and 5219. No print stage anywhere — these measure the NEGATIVE, which is what this
 /// pipeline works on. An earlier version of this file was fitted from ColorChecker datasets that
-/// turned out to describe densities on Endura Premier PAPER, and had to be withdrawn; see
-/// docs/CALIBRATION.md.
+/// turned out to describe densities on Endura Premier PAPER, and had to be withdrawn.
 ///
 /// WHAT THE AGREEMENT SHOWS. Reduced to their chroma action and normalised, ONE direction
 /// explains 99.01% of the variance across all eighteen, the worst individual agreement being

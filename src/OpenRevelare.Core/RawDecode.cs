@@ -127,7 +127,6 @@ public static class RawDecode
     /// whose primaries nothing had recorded. Calling the result "sRGB" was a label of
     /// convenience, and it is precisely the gap chroma_grade grew into: with no characterised
     /// input there was no conversion to perform, so a scalar was the only lever left.
-    /// See docs/CALIBRATION.md.
     ///
     /// LibRaw derives this from the camera's published colorimetry (its cam_xyz, composed with
     /// XYZ→sRGB). Rows sum to 1, so a neutral in camera space stays neutral in sRGB — the

@@ -187,7 +187,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 ### 成像
 
-- **密度域反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数），每一项都在界面中可调且有明确的物理含义。反转本身是 Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有独立的色度参数（早期版本有一个 `chroma_grade`，追溯后已移除，见 [docs/CALIBRATION.md](docs/CALIBRATION.md)）
+- **密度域反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数），每一项都在界面中可调且有明确的物理含义。反转本身是 Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有独立的色度参数（早期版本有一个 `chroma_grade`，补齐色彩管理后已移除）
 - **完整色彩管理**——链上每一段的色彩空间显式声明；导出可选 sRGB / Adobe RGB / Display P3 / Kodak Endura Premier（相纸）/ Kodak 2383（拷贝片），预览可设显示器空间与软打样
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡

@@ -4,7 +4,7 @@ Is there a universal C-41 crosstalk direction — asked of PAPER-FREE data this 
 The earlier attempt (universal_crosstalk.py) had to be withdrawn: every ColorChecker dataset it
 used describes densities on Kodak Endura Premier PAPER, so the matrix it fitted mapped paper to
 scene and the eight stocks' agreement was partly the shared print chain, not the film. See
-docs/CALIBRATION.md.
+the project history.
 
 DiVERE also ships something different: config/matrices/*.json, density correction matrices solved
 by users against real scans. Their names are scanner + film — 9000ed_g200_135, X5_5219_Daylight,

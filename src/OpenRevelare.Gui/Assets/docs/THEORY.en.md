@@ -502,8 +502,7 @@ follows proportionally and stays in step with luminance.
 
 > Earlier versions carried a `chroma_grade` coefficient (3.05 by default) to compensate for the
 > chroma shortfall caused by missing colour management. That gap is now filled by the gamut
-> conversion in `InputTransform` / `OutputRender`, and the parameter has been removed. The trace is
-> in [CALIBRATION.md](../../../../docs/CALIBRATION.md).
+> conversion in `InputTransform` / `OutputRender`, and the parameter has been removed.
 
 **Why there is no per-roll colour-chart calibration**
 

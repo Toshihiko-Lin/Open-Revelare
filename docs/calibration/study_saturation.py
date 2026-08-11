@@ -16,7 +16,7 @@ Cineon inversion does not lose saturation on a synthetic negative — it comes o
 11-14% OVER the true scene, and the scalar compensation required is 0.000, not
 3.05. It also measures that a scalar cannot flatten the per-patch error
 (mean 0.093, max 0.206), which is the anisotropy argument for doing a real
-colour-space conversion instead. See docs/CALIBRATION.md for the full account.
+colour-space conversion instead.
 
 --- original docstring follows ---
 

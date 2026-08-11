@@ -6,7 +6,7 @@ was originally fitted against — and measures the mean saturation of the 18
 chromatic patches twice: once in the Kodak Endura Premier paper space the data is
 natively expressed in, and once reinterpreted through the sRGB gamut.
 
-Result (see docs/CALIBRATION.md): the gamut difference accounts for about 6%, not
+Result: the gamut difference accounts for about 6%, not
 21%. This rules out "the deficit is just the narrow paper gamut" as an explanation
 — that hypothesis was raised and does not survive measurement. The origin of the
 remaining deficit is still unestablished.

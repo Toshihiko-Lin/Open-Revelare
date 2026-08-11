@@ -14,7 +14,6 @@ namespace OpenRevelare.Core;
 /// consistent by construction. That consistency is the whole point — three earlier attempts to
 /// insert an EXTERNAL matrix (the camera's own ColorMatrix) into this pipeline all failed on
 /// real film, because a matrix that did not participate in the calibration cannot agree with it.
-/// See docs/CALIBRATION.md.
 /// </summary>
 public static class InputTransform
 {

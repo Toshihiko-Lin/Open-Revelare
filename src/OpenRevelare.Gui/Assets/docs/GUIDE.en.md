@@ -236,7 +236,7 @@ its own, use the SceneBase **saturation** slider.
 
 > Earlier versions carried a `chroma_grade` parameter (3.05 by default) to compensate for the
 > chroma shortfall caused by missing colour management; with that gap filled, the parameter has
-> been removed — see [CALIBRATION.md](../../../../docs/CALIBRATION.md).
+> been removed.
 
 ---
 

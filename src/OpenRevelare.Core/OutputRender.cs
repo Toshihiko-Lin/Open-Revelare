@@ -30,7 +30,7 @@ public enum GamutMapping
 /// that is what we export", which left no place to express a gamut relationship and made a scalar
 /// on the density-domain chroma vector (chroma_grade) the only available lever for "the colours
 /// are wrong". A scalar cannot express what is anisotropic and hue-dependent; a matrix plus a
-/// gamut map can. See docs/CALIBRATION.md.
+/// gamut map can.
 /// </summary>
 public static class OutputRender
 {
