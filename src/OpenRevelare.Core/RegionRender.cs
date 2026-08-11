@@ -86,19 +86,40 @@ public static class RegionRender
     }
 
     /// <summary>
+    /// <see cref="RequiredSourceBounds"/> for the NEGATIVE patch: the ROI read straight against
+    /// the raw frame, because that view applies no geometry (see <see cref="RenderNegative"/>).
+    /// Callers that decode a region must use this one when asking for a negative, or they will
+    /// reserve the rectangle the ORIENTED frame would need and hand back the wrong pixels.
+    /// </summary>
+    public static (int X0, int Y0, int X1, int Y1) RequiredSourceBoundsNegative(
+        int srcW, int srcH, Roi roi)
+    {
+        int x0 = Math.Clamp((int)Math.Floor(roi.X * srcW), 0, srcW - 1);
+        int y0 = Math.Clamp((int)Math.Floor(roi.Y * srcH), 0, srcH - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((roi.X + roi.W) * srcW), x0 + 1, srcW);
+        int y1 = Math.Clamp((int)Math.Ceiling((roi.Y + roi.H) * srcH), y0 + 1, srcH);
+        return (x0, y0, x1, y1);
+    }
+
+    /// <summary>
     /// Render the patch. Returns the image plus the REALISED rectangle — the request is rounded
     /// to whole displayed pixels, and the caller must blit against what was actually produced,
     /// not what it asked for, or the patch lands fractionally off and shimmers against the
     /// preview underneath.
     /// </summary>
-    public static (ImageBuffer Image, Roi Realised) Render(ImageBuffer full, FrameParams cal, Roi roi)
+    public static (ImageBuffer Image, Roi Realised) Render(ImageBuffer full, FrameParams cal, Roi roi,
+                                                          bool negative = false)
     {
+        // The negative path reads the frame in its own coordinates, so hand it the whole buffer
+        // rather than the geometry-derived slice RequiredSourceBounds computes for the positive.
+        if (negative) return RenderNegative(full, 0, 0, full.Width, full.Height, cal, roi);
+
         var b = RequiredSourceBounds(full.Width, full.Height, cal, roi);
         int sw = b.X1 - b.X0, sh = b.Y1 - b.Y0;
         var slice = new ImageBuffer(sw, sh);
         for (int y = 0; y < sh; y++)
             Array.Copy(full.Data, ((b.Y0 + y) * full.Width + b.X0) * 3, slice.Data, y * sw * 3, sw * 3);
-        return RenderFromSlice(slice, b.X0, b.Y0, full.Width, full.Height, cal, roi);
+        return RenderFromSlice(slice, b.X0, b.Y0, full.Width, full.Height, cal, roi, negative);
     }
 
     /// <summary>
@@ -111,10 +132,18 @@ public static class RegionRender
     /// <param name="sourceY0">Slice origin in frame coordinates.</param>
     /// <param name="frameW">Full frame width — what the frame-global operators measure against.</param>
     /// <param name="frameH">Full frame height.</param>
+    /// <param name="negative">
+    /// Render the UN-INVERTED negative instead of the finished positive — what the film-base
+    /// sampling view shows. Hands off to <see cref="RenderNegative"/>, which applies the step-4
+    /// conversion and nothing else; see there for why not even geometry runs.
+    /// </param>
     public static (ImageBuffer Image, Roi Realised) RenderFromSlice(
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
-        FrameParams cal, Roi roi)
+        FrameParams cal, Roi roi, bool negative = false)
     {
+        if (negative)
+            return RenderNegative(source, sourceX0, sourceY0, frameW, frameH, cal, roi);
+
         var (rect, realised) = Realise(frameW, frameH, cal, roi);
         var b = SourceBounds(frameW, frameH, cal, rect);
 
@@ -164,6 +193,48 @@ public static class RegionRender
         if (cal.OutputIntent == OutputIntent.Basic)
             Stage2.ApplyChain(outImg.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return (outImg, realised);
+    }
+
+    /// <summary>
+    /// The patch for the FILM-BASE SAMPLING view: a slice of the raw negative, converted to the
+    /// output space and nothing more.
+    ///
+    /// Deliberately shares none of the positive path's machinery, because it has to match a view
+    /// that shares none of the pipeline. <c>ShowNegativeView</c> takes the PREVIEW BUFFER — the
+    /// bare decode — straight through <see cref="ColorPipeline.ToOutputSpace"/>. Everything else
+    /// (distortion, LCC, vignette, input transform, decouple, inversion, orientation, straighten,
+    /// crop, Stage 2) lives inside <see cref="Pipeline.ProcessFrame"/> and has therefore not run.
+    ///
+    /// So the ROI is in RAW FRAME coordinates here, not displayed ones: with no geometry applied
+    /// the two spaces are the same, and mapping through <see cref="Realise"/> would place the
+    /// patch by a rotation and crop the picture underneath has not been through.
+    /// </summary>
+    private static (ImageBuffer Image, Roi Realised) RenderNegative(
+        ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
+        FrameParams cal, Roi roi)
+    {
+        int x0 = Math.Clamp((int)Math.Floor(roi.X * frameW), 0, frameW - 1);
+        int y0 = Math.Clamp((int)Math.Floor(roi.Y * frameH), 0, frameH - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((roi.X + roi.W) * frameW), x0 + 1, frameW);
+        int y1 = Math.Clamp((int)Math.Ceiling((roi.Y + roi.H) * frameH), y0 + 1, frameH);
+
+        // Clamp to what the caller's slice actually covers — a region decode is only guaranteed
+        // to hold the bounds that were asked for, and reading past it would walk off the buffer.
+        x0 = Math.Max(x0, sourceX0);
+        y0 = Math.Max(y0, sourceY0);
+        x1 = Math.Min(x1, sourceX0 + source.Width);
+        y1 = Math.Min(y1, sourceY0 + source.Height);
+        if (x1 <= x0 || y1 <= y0) return (new ImageBuffer(1, 1), new Roi(0, 0, 1, 1));
+
+        int w = x1 - x0, h = y1 - y0;
+        var outImg = new ImageBuffer(w, h);
+        for (int y = 0; y < h; y++)
+            Array.Copy(source.Data, ((y0 + y - sourceY0) * source.Width + (x0 - sourceX0)) * 3,
+                       outImg.Data, y * w * 3, w * 3);
+
+        ColorPipeline.ToOutputSpace(outImg.Data, cal.ResolvedOutputSpace);
+        return (outImg, new Roi((double)x0 / frameW, (double)y0 / frameH,
+                                (double)w / frameW, (double)h / frameH));
     }
 
     // ── request → whole displayed pixels ─────────────────────────────────────────

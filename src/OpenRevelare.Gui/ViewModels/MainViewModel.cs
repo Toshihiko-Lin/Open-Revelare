@@ -1113,6 +1113,26 @@ public partial class MainViewModel : ViewModelBase
 
     // ── Sampling state ──────────────────────────────────────────────────────────
     private Bitmap? _savedPositive;                   // positive stashed while showing negative
+
+    /// <summary>
+    /// True while the preview is showing the UN-INVERTED negative (film-base sampling).
+    ///
+    /// The sharp patch used to be rendered through the full pipeline unconditionally, so zooming
+    /// past the patch threshold while picking the film base pasted the finished positive — masked
+    /// and inverted — over the negative it was meant to be sampled from. The patch now renders in
+    /// the same un-inverted form as the view around it (RegionRender's negative mode), so
+    /// pixel-peeping a film-base sample shows real grain instead of the wrong picture.
+    /// </summary>
+    private bool _showingNegative;
+
+    /// <summary>
+    /// True while the preview is showing the positive WITHOUT Stage-2 edits (before/after compare).
+    ///
+    /// Unlike the negative view this one has no patch: it strips Stage 2 out of the middle of a
+    /// chain <see cref="RegionRender"/> applies as a whole, and the compare is a momentary hold
+    /// rather than something to pixel-peep. The preview stands in, softer but truthful.
+    /// </summary>
+    private bool _showingBeforeEdits;
     [ObservableProperty] private string _filmBaseText = Loc.T("片基：默认（未采样）");
 
     /// <summary>Whether <see cref="FilmBaseText"/> is reporting a measured t_base rather than
@@ -1198,8 +1218,10 @@ public partial class MainViewModel : ViewModelBase
     {
         ImageBuffer? neg = _previewLinear;
         if (neg is null) return;
-        // The patch holds POSITIVE pixels; leaving it up would paste a bright rectangle over
-        // the negative. Same for the before/after compare below.
+        // The patch on screen holds POSITIVE pixels, so it goes; the flag makes the NEXT one
+        // render as a negative instead. Dropping it without the flag is not enough, because
+        // zooming in here asks for another one immediately.
+        _showingNegative = true;
         ClearSharpPatch();
         _savedPositive = PreviewImage;
         // The buffer is scene-linear ACEScg (pre-inversion). Step 4 takes it to the roll's output
@@ -1212,6 +1234,9 @@ public partial class MainViewModel : ViewModelBase
 
     public void ShowPositiveView()
     {
+        _showingNegative = false;
+        // The patch up now is a NEGATIVE one — it belongs to the view being left.
+        ClearSharpPatch();
         if (_savedPositive is not null) { PreviewImage = _savedPositive; _savedPositive = null; }
         ScheduleRender();
     }
@@ -1220,6 +1245,7 @@ public partial class MainViewModel : ViewModelBase
     public void ShowBeforeEdits()
     {
         if (_previewLinear is null) return;
+        _showingBeforeEdits = true;
         ClearSharpPatch();   // patch was rendered WITH the Stage-2 edits this view strips
         FrameParams p = BuildParams();
         RollFrame.ResetScene(p);   // strip every Stage-2 adjustment
@@ -1227,7 +1253,11 @@ public partial class MainViewModel : ViewModelBase
         PreviewImage = BitmapConvert.ToBitmap(pos);
     }
 
-    public void ShowAfterEdits() => ScheduleRender();   // re-render the fully edited positive
+    public void ShowAfterEdits()
+    {
+        _showingBeforeEdits = false;
+        ScheduleRender();   // re-render the fully edited positive
+    }
 
     // ══ Stage-1 sampling (reads the linear negative) ═══════════════════════════
     //
@@ -4013,6 +4043,11 @@ public partial class MainViewModel : ViewModelBase
     public async Task RequestSharpPatchAsync(RegionRender.Roi roi)
     {
         if (CurrentFrame is not { } frame || !HasImage) return;
+        // The before-edits view strips Stage 2 from a chain the region renderer applies whole, so
+        // there is no matching patch to render and the (soft) preview stands in. The NEGATIVE view
+        // does have one — see the negative flag threaded below.
+        if (_showingBeforeEdits) return;
+        bool negative = _showingNegative;
 
         FrameParams p = BuildParams();
         string srcPath = frame.Path;
@@ -4056,13 +4091,18 @@ public partial class MainViewModel : ViewModelBase
             var result = await Task.Run(() =>
             {
                 ImageBuffer img; RegionRender.Roi realised;
-                var need = RegionRender.RequiredSourceBounds(frameW, frameH, p, roi);
+                // Raw-frame bounds for the negative — that view applies no geometry, so the
+                // oriented rectangle would reserve (and return) the wrong part of the file.
+                var need = negative
+                    ? RegionRender.RequiredSourceBoundsNegative(frameW, frameH, roi)
+                    : RegionRender.RequiredSourceBounds(frameW, frameH, p, roi);
                 ImageBuffer? slice = RegionSliceFor(srcPath, need, frameW, frameH);
                 cts.Token.ThrowIfCancellationRequested();
                 if (slice is not null)
                 {
                     RegionSlot s = _regionSlot!;
-                    (img, realised) = RegionRender.RenderFromSlice(slice, s.X0, s.Y0, frameW, frameH, p, roi);
+                    (img, realised) = RegionRender.RenderFromSlice(slice, s.X0, s.Y0, frameW, frameH,
+                                                                   p, roi, negative);
                 }
                 else
                 {
@@ -4070,7 +4110,7 @@ public partial class MainViewModel : ViewModelBase
                     // to the whole frame, which is what this path always used to do.
                     ImageBuffer full = LoadFullLinear(srcPath);
                     cts.Token.ThrowIfCancellationRequested();
-                    (img, realised) = RegionRender.Render(full, p, roi);
+                    (img, realised) = RegionRender.Render(full, p, roi, negative);
                 }
                 cts.Token.ThrowIfCancellationRequested();
                 return new SharpPatch((Bitmap)BitmapConvert.ToBitmap(img),

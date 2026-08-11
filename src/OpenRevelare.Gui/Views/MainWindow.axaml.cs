@@ -500,10 +500,14 @@ public partial class MainWindow : Window
     private RegionRender.Roi? VisibleRoiNorm()
     {
         if (LetterboxRect() is not { } box || box.Width <= 0 || box.Height <= 0) return null;
+        // Viewport extent read from the same element the letterbox was measured in, so the two
+        // cannot disagree — see LetterboxRect.
+        double vw = Overlay.Bounds.Width > 0 ? Overlay.Bounds.Width : ViewPort.Bounds.Width;
+        double vh = Overlay.Bounds.Height > 0 ? Overlay.Bounds.Height : ViewPort.Bounds.Height;
         double x0 = ((0 - _pan.X) / _zoom - box.X) / box.Width;
         double y0 = ((0 - _pan.Y) / _zoom - box.Y) / box.Height;
-        double x1 = ((ViewPort.Bounds.Width - _pan.X) / _zoom - box.X) / box.Width;
-        double y1 = ((ViewPort.Bounds.Height - _pan.Y) / _zoom - box.Y) / box.Height;
+        double x1 = ((vw - _pan.X) / _zoom - box.X) / box.Width;
+        double y1 = ((vh - _pan.Y) / _zoom - box.Y) / box.Height;
         double mw = (x1 - x0) * SharpPatchMargin, mh = (y1 - y0) * SharpPatchMargin;
         x0 = Math.Clamp(x0 - mw, 0, 1); y0 = Math.Clamp(y0 - mh, 0, 1);
         x1 = Math.Clamp(x1 + mw, 0, 1); y1 = Math.Clamp(y1 + mh, 0, 1);
