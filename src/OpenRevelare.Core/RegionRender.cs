@@ -86,18 +86,20 @@ public static class RegionRender
     }
 
     /// <summary>
-    /// <see cref="RequiredSourceBounds"/> for the NEGATIVE patch: the ROI read straight against
-    /// the raw frame, because that view applies no geometry (see <see cref="RenderNegative"/>).
-    /// Callers that decode a region must use this one when asking for a negative, or they will
-    /// reserve the rectangle the ORIENTED frame would need and hand back the wrong pixels.
+    /// <see cref="RequiredSourceBounds"/> for the NEGATIVE patch: the ROI un-oriented onto the raw
+    /// frame, because that view applies ORIENTATION ONLY — no straighten, no crop (see
+    /// <see cref="RenderNegative"/>). Callers that decode a region must use this one when asking
+    /// for a negative, or they will reserve the rectangle the fully-geometried frame would need
+    /// and hand back the wrong pixels.
     /// </summary>
     public static (int X0, int Y0, int X1, int Y1) RequiredSourceBoundsNegative(
-        int srcW, int srcH, Roi roi)
+        int srcW, int srcH, FrameParams cal, Roi roi)
     {
-        int x0 = Math.Clamp((int)Math.Floor(roi.X * srcW), 0, srcW - 1);
-        int y0 = Math.Clamp((int)Math.Floor(roi.Y * srcH), 0, srcH - 1);
-        int x1 = Math.Clamp((int)Math.Ceiling((roi.X + roi.W) * srcW), x0 + 1, srcW);
-        int y1 = Math.Clamp((int)Math.Ceiling((roi.Y + roi.H) * srcH), y0 + 1, srcH);
+        Roi raw = UnorientRoi(roi, cal);
+        int x0 = Math.Clamp((int)Math.Floor(raw.X * srcW), 0, srcW - 1);
+        int y0 = Math.Clamp((int)Math.Floor(raw.Y * srcH), 0, srcH - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((raw.X + raw.W) * srcW), x0 + 1, srcW);
+        int y1 = Math.Clamp((int)Math.Ceiling((raw.Y + raw.H) * srcH), y0 + 1, srcH);
         return (x0, y0, x1, y1);
     }
 
@@ -196,27 +198,60 @@ public static class RegionRender
     }
 
     /// <summary>
-    /// The patch for the FILM-BASE SAMPLING view: a slice of the raw negative, converted to the
-    /// output space and nothing more.
+    /// A displayed-space (oriented) ROI expressed against the RAW frame's axes.
+    ///
+    /// The negative view applies orientation and nothing else, so this is the whole of the inverse
+    /// map: undo the flips, then the quarter turns — the reverse of the forward order, which runs
+    /// turns first and flips after. A quarter turn also swaps which normalised axis is which,
+    /// hence the W/H exchange on each step.
+    /// </summary>
+    public static Roi UnorientRoi(Roi roi, FrameParams cal)
+    {
+        if (cal.FlipV) roi = roi with { Y = 1.0 - roi.Y - roi.H };
+        if (cal.FlipH) roi = roi with { X = 1.0 - roi.X - roi.W };
+        for (int i = 0; i < (((cal.QuarterTurns % 4) + 4) % 4); i++)
+            roi = new Roi(roi.Y, 1.0 - roi.X - roi.W, roi.H, roi.W);   // undo one CW turn
+        return roi;
+    }
+
+    /// <summary>The inverse of <see cref="UnorientRoi"/>: a raw-frame ROI forward into the
+    /// displayed (oriented) space the caller blits against. One CW turn maps (u,v) → (1-v, u),
+    /// matching <see cref="Geometry.ApplyOrientation"/>'s pixel remap.</summary>
+    private static Roi OrientRoi(Roi roi, FrameParams cal)
+    {
+        for (int i = 0; i < (((cal.QuarterTurns % 4) + 4) % 4); i++)
+            roi = new Roi(1.0 - roi.Y - roi.H, roi.X, roi.H, roi.W);   // one turn CW
+        if (cal.FlipH) roi = roi with { X = 1.0 - roi.X - roi.W };
+        if (cal.FlipV) roi = roi with { Y = 1.0 - roi.Y - roi.H };
+        return roi;
+    }
+
+    /// <summary>
+    /// The patch for the FILM-BASE SAMPLING view: a slice of the raw negative, oriented to match
+    /// the view, converted to the output space, and nothing more.
     ///
     /// Deliberately shares none of the positive path's machinery, because it has to match a view
     /// that shares none of the pipeline. <c>ShowNegativeView</c> takes the PREVIEW BUFFER — the
-    /// bare decode — straight through <see cref="ColorPipeline.ToOutputSpace"/>. Everything else
-    /// (distortion, LCC, vignette, input transform, decouple, inversion, orientation, straighten,
-    /// crop, Stage 2) lives inside <see cref="Pipeline.ProcessFrame"/> and has therefore not run.
+    /// bare decode — turns it by the frame's orientation and runs it through
+    /// <see cref="ColorPipeline.ToOutputSpace"/>. Everything else (distortion, LCC, vignette,
+    /// input transform, decouple, inversion, straighten, crop, Stage 2) lives inside
+    /// <see cref="Pipeline.ProcessFrame"/> and has therefore not run.
     ///
-    /// So the ROI is in RAW FRAME coordinates here, not displayed ones: with no geometry applied
-    /// the two spaces are the same, and mapping through <see cref="Realise"/> would place the
-    /// patch by a rotation and crop the picture underneath has not been through.
+    /// ORIENTATION is the one piece of geometry that DOES apply, so the ROI arrives in displayed
+    /// coordinates like every other patch and is mapped back with <see cref="UnorientRoi"/> to
+    /// find the raw pixels. It cannot go through <see cref="Realise"/>, though: that also applies
+    /// the straighten rotation and the crop, neither of which the picture underneath has been
+    /// through.
     /// </summary>
     private static (ImageBuffer Image, Roi Realised) RenderNegative(
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
         FrameParams cal, Roi roi)
     {
-        int x0 = Math.Clamp((int)Math.Floor(roi.X * frameW), 0, frameW - 1);
-        int y0 = Math.Clamp((int)Math.Floor(roi.Y * frameH), 0, frameH - 1);
-        int x1 = Math.Clamp((int)Math.Ceiling((roi.X + roi.W) * frameW), x0 + 1, frameW);
-        int y1 = Math.Clamp((int)Math.Ceiling((roi.Y + roi.H) * frameH), y0 + 1, frameH);
+        Roi raw = UnorientRoi(roi, cal);
+        int x0 = Math.Clamp((int)Math.Floor(raw.X * frameW), 0, frameW - 1);
+        int y0 = Math.Clamp((int)Math.Floor(raw.Y * frameH), 0, frameH - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((raw.X + raw.W) * frameW), x0 + 1, frameW);
+        int y1 = Math.Clamp((int)Math.Ceiling((raw.Y + raw.H) * frameH), y0 + 1, frameH);
 
         // Clamp to what the caller's slice actually covers — a region decode is only guaranteed
         // to hold the bounds that were asked for, and reading past it would walk off the buffer.
@@ -232,9 +267,14 @@ public static class RegionRender
             Array.Copy(source.Data, ((y0 + y - sourceY0) * source.Width + (x0 - sourceX0)) * 3,
                        outImg.Data, y * w * 3, w * 3);
 
+        // Turn the patch the same way the view was turned, and report the realised rectangle in
+        // the displayed space the caller blits into. Rounding to whole RAW pixels above and
+        // mapping the result forward keeps the two consistent — reporting the requested ROI
+        // instead would land the patch fractionally off and shimmer against the preview.
+        outImg = Geometry.ApplyOrientation(outImg, cal.QuarterTurns, cal.FlipH, cal.FlipV);
         ColorPipeline.ToOutputSpace(outImg.Data, cal.ResolvedOutputSpace);
-        return (outImg, new Roi((double)x0 / frameW, (double)y0 / frameH,
-                                (double)w / frameW, (double)h / frameH));
+        return (outImg, OrientRoi(new Roi((double)x0 / frameW, (double)y0 / frameH,
+                                          (double)w / frameW, (double)h / frameH), cal));
     }
 
     // ── request → whole displayed pixels ─────────────────────────────────────────

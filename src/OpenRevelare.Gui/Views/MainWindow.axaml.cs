@@ -1216,6 +1216,12 @@ public partial class MainWindow : Window
         }
 
         var rect = ToNormalisedRect(_dragStart, end);
+        // BEFORE ExitMode, which restores the positive view and with it clears the negative flag.
+        // The rect was drawn on the ORIENTED negative, so it has to come back into the raw
+        // buffer's axes while the view that produced it is still the one on screen — mapping it
+        // after the teardown asks a positive-view question about a negative-view drag and the
+        // turn is silently skipped.
+        if (rect is { } r && Vm is not null) rect = Vm.UnorientNegativeSampleRect(r);
         ExitMode();
         if (rect is null || Vm is null) return;
 
