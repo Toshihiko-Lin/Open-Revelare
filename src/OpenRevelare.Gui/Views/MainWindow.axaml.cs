@@ -375,13 +375,15 @@ public partial class MainWindow : Window
         double mx = Math.Clamp(m.X, 0, 1), my = Math.Clamp(m.Y, 0, 1);
         var (x, y, w, h) = _cropDragStartRect;
         double x2 = x + w, y2 = y + h;
-        double? na = NormAspect();
 
         if (_cropHandle == "new")
         {
             double sx = _cropDragStartNorm.X, sy = _cropDragStartNorm.Y;
             double nw = Math.Abs(mx - sx), nh = Math.Abs(my - sy);
-            if (na is double a)
+            // A fresh rectangle is drawn corner-to-corner, so the drag states its own orientation
+            // the same way a corner handle does — offer the same swap.
+            MaybeSwapCropOrientation(nw, nh);
+            if (NormAspect() is double a)
             {
                 if (nw / Math.Max(nh, 1e-6) > a) nh = nw / a; else nw = nh * a;
             }
@@ -402,9 +404,14 @@ public partial class MainWindow : Window
         if (hd.Contains('t')) y = Math.Min(my, y2 - 0.01);
         if (hd.Contains('b')) y2 = Math.Max(my, y + 0.01);
         double rw = x2 - x, rh = y2 - y;
-        if (na is double asp)
+        bool corner = hd is "tl" or "tr" or "bl" or "br";
+        // Only a CORNER states an orientation: it is free in both axes, so the shape the pointer
+        // traces is a direction the user is asking for. An edge handle moves one axis only, so
+        // its "shape" is an artefact of the other axis standing still and swapping on it would
+        // fire on every ordinary resize.
+        if (corner) MaybeSwapCropOrientation(rw, rh);
+        if (NormAspect() is double asp)
         {
-            bool corner = hd is "tl" or "tr" or "bl" or "br";
             if (corner) { if (rw / Math.Max(rh, 1e-6) > asp) rh = rw / asp; else rw = rh * asp; }
             else if (hd is "l" or "r") rh = rw / asp;
             else rw = rh * asp;
@@ -414,6 +421,44 @@ public partial class MainWindow : Window
         }
         _cropDraft = (x, y, rw, rh);
     }
+
+    /// <summary>
+    /// Flip the locked preset between landscape and portrait when the corner drag has clearly
+    /// asked for the other one — Lightroom's behaviour, and the only way to reach 2:3 from a 3:2
+    /// preset without reaching for the 旋转 buttons (which turn the PICTURE, not the format).
+    ///
+    /// The test runs on the RAW dragged box, before the ratio lock rewrites it: once locked, every
+    /// box matches the current orientation exactly and there is nothing left to read the intent
+    /// from. <paramref name="dw"/>/<paramref name="dh"/> are normalised, so they are compared in
+    /// the frame's own aspect via <see cref="NormAspect"/> — comparing normalised numbers directly
+    /// would call every box on a 3:2 frame "landscape".
+    ///
+    /// HYSTERESIS is what makes it usable rather than twitchy. The swap needs the drag to be a
+    /// clear <see cref="OrientSwapMargin"/> past square, not merely across it: a bare crossing
+    /// test flutters between the two formats while the pointer sits near the diagonal, and each
+    /// flutter re-shapes the frame under the cursor. Requiring the margin means the frame holds
+    /// its orientation through the ambiguous zone and only commits once the drag means it.
+    /// </summary>
+    private void MaybeSwapCropOrientation(double dw, double dh)
+    {
+        if (_cropAspect is not double a || Math.Abs(a - 1.0) < 1e-6) return;   // free, or square
+        if (Vm?.CropFrameSize is not var (fw, fh) || fw <= 0 || fh <= 0) return;
+        if (dw <= 1e-6 || dh <= 1e-6) return;
+
+        // The dragged box's TRUE (on-screen) aspect, and the two the preset can present.
+        double dragged = (dw * fw) / (dh * fh);
+        bool wantLandscape = dragged > 1.0 + OrientSwapMargin;
+        bool wantPortrait = dragged < 1.0 / (1.0 + OrientSwapMargin);
+        if (!wantLandscape && !wantPortrait) return;   // inside the dead zone: hold
+
+        bool isLandscape = a > 1.0;
+        if (wantLandscape != isLandscape) _cropAspect = 1.0 / a;
+    }
+
+    /// <summary>How far past square a corner drag must go before the locked format flips
+    /// orientation. 0.12 ≈ a 1.12:1 box — wide enough that the frame does not flutter while the
+    /// pointer tracks the diagonal, narrow enough that asking for the turn feels immediate.</summary>
+    private const double OrientSwapMargin = 0.12;
 
     /// <summary>Draw the frame, the dim outside it, the thirds and the handles. Stroke and
     /// handle size are divided by the zoom so they stay constant on screen — this all lives
