@@ -345,6 +345,63 @@ Pushing both residuals below ΔE 2 needs an additional calibration from colour-c
 channel-mixing matrix applied in the density domain (i.e. modelling the second layer separately) —
 which is beyond what Path A does today, and a direction it could be extended in.
 
+**On calibrating to the Status M scale (assessment of a community suggestion)**
+
+A practitioner suggested that since narrow-band scanning reads close to Status M — the standardised
+narrow-band densitometry that Kodak's Vision 3 datasheets are plotted in — the datasheet could be
+used directly to calibrate the density conversion. The three parts of that idea verify as follows
+(script: `docs/calibration/status_m_scale.py`).
+
+**The second-layer residual really is matrix-shaped.** Fitting a 3×3 density-domain matrix to
+colour-chart density data for 8 C-41 emulsions removes 68–80% of the residual (RMS falls from
+~0.10–0.14 to ~0.03). A matrix is the right form for modelling this layer.
+
+**But what varies with the instrument is strength, not direction.** A controlled pair: the same
+Vision 3 5219 stock, the same daylight illuminant, solved independently on a Nikon 9000ED and on a
+Hasselblad X5 —
+
+$$M_{9000\text{ED}} = \begin{bmatrix} 1.1683 & 0.0863 & -0.0253 \\ 0.1650 & 0.6741 & 0.1108 \\ 0.2447 & -0.1499 & 1.0216 \end{bmatrix}, \qquad M_{X5} = \begin{bmatrix} 1.0717 & 0.0462 & -0.0879 \\ -0.1006 & 0.7614 & 0.1701 \\ 0.1500 & -0.3916 & 1.1930 \end{bmatrix}$$
+
+Taking the chroma action the way `paper_free_crosstalk.py` does ($P M P$, projecting out luminance),
+the two agree in **direction to cosine +0.9918** (7.3° apart) while their **strengths differ by 1.21×**
+(1.272 vs 1.533). Read element-wise, the B←G term's factor of 2.6 looks like a structural difference,
+but that is a strength difference amplified by one entry — normalise each matrix and they point
+essentially the same way.
+
+This matches what [`C41Crosstalk`](../../../OpenRevelare.Core/C41Crosstalk.cs) already establishes:
+across 18 matrices **one shared direction explains 99.01% of the variance**, while strength ranges
+0.99–1.89 — and the same film on the same scanner appears twice, at 1.41 and 1.79. The direction is
+physics (three subtractive dye layers read by three overlapping passbands); the strength depends on
+what target the person solving it declared.
+
+For scale, the published Status M → Print Density matrix — a pure standard-to-standard conversion —
+has $\|M-I\|$ of only 0.129, four times smaller than the matrices above: scale conversion and
+instrument correction really are different orders of magnitude.
+
+**Narrow-band ≠ Status M.** Status M is a set of **response** functions (filter × detector); a
+narrow-band LED is an **emission** spectrum. Both being narrow does not make them the same narrow.
+Status M's nominal peaks are R 644 nm / G 542 nm / B 435.7 nm, while typical commodity RGB LED panels
+peak at 630 / 525 / 465 nm — offsets of −14 / −17 / +29 nm. On dye absorption curves that move
+steeply across that span, an offset of that size is not a rounding error.
+
+**Conclusion**: the datasheet cannot **supply** the whole correction — it describes the film, while
+the correction's strength depends on the particular sensor and on the target one declares. But the
+direction is already given by `C41Crosstalk.Direction` as a compiled-in constant, so **the user
+shoots no calibration target and imports no chart to solve anything**. The datasheet's role is to
+define the target scale (so density stops being each camera's private units) and to supply
+$D_\text{min}$ / $D_\text{max}$ and toe/shoulder landmarks for **validation**.
+
+Strength is carried by the existing `grade` (the single Cineon gamma) rather than calibrated
+separately. That is not a shortcut: structurally strength is `target_chroma / negative_chroma`, so it
+is set by which target one declares rather than by any fixed property of the film or the rig — the
+same film on the same scanner appears twice among the 18 matrices, at 1.41 and 1.79. There is
+therefore no single correct value to measure, and calling it a "rig calibration" would be
+inaccurate; it is a parameter whose direction is physics and whose amount is declared.
+
+Turning strength into a measured quantity later would need a step wedge with known Status M
+densities plus a solver for it (neither exists in the codebase today), and would first have to
+answer the prior question of what chroma to target.
+
 ---
 
 ### Before step 4: the sprocket mask and automatic film-base detection
@@ -476,29 +533,95 @@ rather than forcing it into a linear or gamma space. Arithmetic in the density d
 a definite physical meaning, and every step can be traced back to some specific property of the
 film chemistry.
 
-**Luminance and chroma handled independently**
+**Two endpoints, per channel**
 
-The C-41 process compresses luminance and chroma by different amounts, and one uniform per-channel
-gamma cannot reconstruct both. Density is decomposed into a luminance component (the mean density
-of the three channels) and a chroma component (each channel's departure from that mean), controlled
-by two independent parameters:
-
-$$D_\text{mean} = \frac{D_R + D_G + D_B}{3}, \qquad D_\text{chroma} = D - D_\text{mean}$$
-
-$$D_\text{adj} = \text{pivot} + (D_\text{mean} - \text{pivot}) \times \text{grade} + D_\text{chroma} \times \frac{\text{chroma\_grade}}{\text{chroma\_amp}} - D_\text{max}$$
+$$D_\text{adj} = S_c \cdot D + b_c, \qquad S_c = \frac{\text{output range}}{D_{\max,c}},\quad b_c = -\text{output range}$$
 
 $$T_\text{pos} = 10^{D_\text{adj}}$$
 
-**grade (paper grade)**: C-41 negative is deliberately designed to be low-contrast (film
-$\gamma \approx 0.5\text{–}0.65$), because it was always going to be enlarged onto high-contrast
-paper ($\gamma \approx 2.5\text{–}3.5$), bringing the whole printing chain's combined $\gamma$ back
-to about 1.0. Digitising has no "high-contrast paper" link in it, so a plain inversion (grade =
-1.0) puts out a flat, grey, low-contrast image. grade = 1.65 ($\approx 1/0.6$) puts back the
-contrast a typical C-41 negative is missing, and the pivot parameter sets where the mid-tone anchor
-sits, so mid-tone brightness holds steady as grade is changed.
+The film base ($t_\text{base}$) has already put every channel's $D_\text{min}$ at zero, so only the
+highlight end remains to be stated: each channel is normalised by **its own measured**
+$D_{\max,c}$. Density 0 maps to $-\text{output range}$ (black) and density $D_{\max,c}$ maps to 0
+(white).
 
-One gamma applies to all three channels; chroma, being each channel's deviation from their mean,
-follows proportionally and stays in step with luminance.
+**There is no gamma parameter. The slope is what the two ends leave behind, not a separate knob.**
+The between-channel differences in that slope **are** the highlight colour balance — which is the
+Cineon / DaVinci shape: decode, invert, set the two ends, and leave the look to the output
+transform.
+
+> **A `grade` ("paper grade") parameter used to sit here; it has been removed.** The old form was
+> $D_\text{adj} = \text{pivot} + (D - \text{pivot}) \cdot \text{grade} - D_\max$ — one gamma across
+> all three channels, with chroma following proportionally. The reasoning is in the next section:
+> the "restore the contrast the paper would have added" argument does not hold, and measurement
+> showed a single scalar driving two independent quantities (luminance 1.010 vs chroma 1.347, a
+> ratio of 1.33) while the three dye layers do not share a gamma at all (channel spread 0.141), so
+> no single scalar could have linearised all three.
+>
+> `wb_high` / `wb_offset` are **kept**, but act on the endpoints instead:
+> $D_{\max,c} \to D_{\max,c}/wh_c$ at the highlight end, $D_{\min,c} \to -wo_c$ at the shadow end.
+> The slope is re-derived from the span, so both ends stay pinned — all four colour degrees of
+> freedom survive, they simply stop being a separate stage applied after the inversion. **The
+> calibration-order problem disappears with them**: each end is fixed independently, so there is no
+> longer a shadow-first-or-highlight-first question.
+>
+> Projects with no measured endpoints still render through the old form
+> (`DensityEndpoints.LegacyStep5`), bit for bit.
+
+**grade**: numerically $\approx 1/\gamma_\text{film}$; the pivot parameter sets where the mid-tone
+anchor sits, so mid-tone brightness holds steady as grade is changed.
+
+> **Earlier versions explained this parameter incorrectly; this is a correction.** The old text
+> argued that C-41 negative is low-contrast because it was destined for high-contrast paper
+> ($\gamma \approx 2.5\text{–}3.5$), and that grade "puts back" the contrast the missing paper
+> would have supplied. That argument fails on two counts:
+>
+> **Cineon never modelled paper.** Cineon log is a STORAGE ENCODING for scanned negative
+> density — it maps density 0–2.046 onto code values 95–685 and nothing else. There is no paper
+> stage in the standard, so a "Cineon density-domain inversion" cannot inherit a paper correction
+> from it. The other model this pipeline cites, darktable's **negadoctor, has no paper stage
+> either**: it does two-sided density calibration (`wb_high` / `offset`, the two borrowed in step
+> 5) plus a gamma.
+>
+> **And no paper is needed to explain it.** Negative density already records scene luminance in
+> full: $D \propto \gamma_\text{film} \cdot \log H$. Recovering the scene means **dividing by
+> $\gamma_\text{film}$** — a solve, not a compensation — and that holds whether $\gamma_\text{film}$
+> is 0.6 or 0.3, regardless of whether any paper exists downstream. grade $\approx 1.65$ is
+> numerically serviceable; its stated REASON was wrong.
+
+The distinction has consequences. `docs/calibration/grade_is_overloaded.py` quantifies three
+problems with the current implementation.
+
+**One knob drives two quantities.** Split $D$ into mean and chroma and the same grade multiplies
+both. Solved separately inside one consistent chain they want different gains — luminance 1.010,
+chroma 1.347, a ratio of **1.33**. They conflict unless that ratio is exactly 1.00.
+
+**The three dye layers do not share a gamma.** Per-channel slopes differ by **0.141** on average,
+with the red layer consistently steepest (Portra 160: R 1.318 / G 1.112 / B 1.121). No single
+scalar can linearise all three; the right shape is a **per-channel gamma**, and the
+luminance/chroma split above is a downstream symptom of the same fact.
+
+**The presets are darkroom vocabulary.** They read "soft — grade 0–1 / normal — grade 2–3 / hard —
+grade 4–5", so the user picks a print look rather than declaring their film's $\gamma$. A control
+standing for $1/\gamma_\text{film}$ would be solved per roll and vary by stock — Ektar 100 (1.54)
+and Portra 160 (1.82) sit 0.28 apart, more than a whole preset step.
+
+**Which means**: this parameter occupies a slot on the physics side (FilmBase) while behaving as a
+taste control. Either it becomes genuinely physical (a per-roll, per-channel $\gamma$ solve), or
+contrast moves to SceneBase, where the contrast and saturation sliders already live. What it should
+not keep doing is both at once under a darkroom name.
+
+> **The absolute $\gamma$ cannot come from that data.** Those ColorChecker sets describe densities
+> ON PAPER, so the print contrast is baked into both sides and solving a luminance slope returns
+> ≈1.0 by construction — circular. (This project already withdrew one fit for that mistake; see
+> `C41Crosstalk.cs`.) The ratio and the channel spread quoted above are chain-INTERNAL comparisons
+> and are not affected. Getting absolute per-channel $\gamma$ needs D-logE curves measured on the
+> negative — i.e. the film datasheet. Note this is the mirror image of the crosstalk matrix, which
+> is sensor-dominated and which a datasheet cannot supply (see `status_m_scale.py`).
+
+All of which is why the inversion no longer has a gamma at all: with per-channel endpoints the
+slope is a consequence of the two ends, the three channels get three slopes without anything
+having to ask for them, and the luminance/chroma split above stops being a question the pipeline
+needs a parameter to answer.
 
 > Earlier versions carried a `chroma_grade` coefficient (3.05 by default) to compensate for the
 > chroma shortfall caused by missing colour management. That gap is now filled by the gamut

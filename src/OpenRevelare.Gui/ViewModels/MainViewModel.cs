@@ -752,26 +752,13 @@ public partial class MainViewModel : ViewModelBase
     partial void OnTBaseGChanged(double value) => ScheduleRender();
     partial void OnTBaseBChanged(double value) => ScheduleRender();
     /// <summary>
-    /// d_max moved — drag pivot along with it, unless the user has taken manual control.
-    ///
-    /// pivot is not an independent number: it is the mid-tone anchor at 0.45·d_max, and holding
-    /// that relationship is the ONLY reason changing 反差 does not also change the picture's
-    /// brightness. Linking it once when a paper grade is picked is not enough — every later d_max
-    /// edit (the slider, 采样 D-max, 自动 D-max) leaves pivot behind at a value derived from the
-    /// OLD d_max. The picture drifts quietly, and then the next 反差 change re-links pivot in one
-    /// jump, which reads as "选个相纸号数把我的 D-max 改了". The source relinks on every emit
-    /// (roll_cal_panel.py::_emit); this is the same rule at the same place in the chain.
+    /// d_max moved. It is now the OUTPUT RANGE — how wide a span the roll's density is mapped
+    /// onto — rather than a subtracted white point, so nothing has to be relinked to it. The old
+    /// pivot-follows-d_max rule existed because pivot was a mid-tone anchor derived from d_max
+    /// and would otherwise drift; with the endpoint model there is no pivot and no grade, and the
+    /// slope comes from the measured endpoints instead.
     /// </summary>
-    partial void OnDMaxChanged(double value)
-    {
-        if (!IsManualGrade)
-        {
-            double linked = WbMath.LinkedPivot(value);
-            // Pivot's own handler schedules the render; don't queue a second one.
-            if (Math.Abs(Pivot - linked) > 1e-4) { Pivot = linked; return; }
-        }
-        ScheduleRender();
-    }
+    partial void OnDMaxChanged(double value) => ScheduleRender();
 
     partial void OnScanEvChanged(double value) => ScheduleRender();
 
@@ -791,23 +778,24 @@ public partial class MainViewModel : ViewModelBase
     partial void OnWbHighGChanged(double value) => ScheduleRender();
     partial void OnWbHighBChanged(double value) => ScheduleRender();
 
-    // 反差（相纸号数）：预设 + 手动 grade/pivot
-    [ObservableProperty] private int _gradePresetIndex = 1;         // 标准 2–3 号纸
-    [ObservableProperty] private bool _isManualGrade;
-    [ObservableProperty] private double _grade = 1.65;
-    [ObservableProperty] private double _pivot = 0.9;
-    partial void OnGradeChanged(double value) => ScheduleRender();
-    partial void OnPivotChanged(double value) => ScheduleRender();
-    partial void OnGradePresetIndexChanged(int value)
+    /// <summary>
+    /// 逐通道高光端点（D-max 采样或整卷自动标定的结果）；null 表示还没测过。
+    ///
+    /// 反相由两端决定：t_base 是黑端，这里是白端，斜率是两端相减的结果而不是另一个参数。
+    /// 通道间斜率之差就是高光色彩平衡——wb_high 作为微调写进端点，不再是独立阶段，因此也
+    /// 不存在"先标暗端还是先标亮端"的顺序问题。
+    /// </summary>
+    private double[]? _dMaxPerChannel;
+    public double[]? DMaxPerChannel
     {
-        var (_, grade) = WbMath.GradePresets[Math.Clamp(value, 0, WbMath.GradePresets.Length - 1)];
-        if (grade < 0) { IsManualGrade = true; return; }            // 手动 — reveal sliders, keep values
-        IsManualGrade = false;
-        // Preset: set grade AND auto-link pivot to lock the mid-tone (one render).
-        _renderCts?.Cancel();
-        Grade = grade;
-        Pivot = WbMath.LinkedPivot(DMax);
+        get => _dMaxPerChannel;
+        set { _dMaxPerChannel = value; OnPropertyChanged(nameof(EndpointText)); ScheduleRender(); }
     }
+
+    /// <summary>端点读数，显示在密度端点面板里。</summary>
+    public string EndpointText => _dMaxPerChannel is { Length: 3 } d
+        ? Loc.F($"D-max 逐通道 = {d[0]:F3}, {d[1]:F3}, {d[2]:F3}")
+        : Loc.T("尚未测得端点——请采样 D-max，或运行整卷自动标定");
 
     // ══ Stage 2 — 帧编辑 (SceneBase, positive domain, geomean-1 WB) ═════════════
     [ObservableProperty] private double _temp;                     // 色温（±250，log 空间）
@@ -1222,9 +1210,8 @@ public partial class MainViewModel : ViewModelBase
         WbOffset = WbOffArr(),
         WbHigh = WbHighArr(),
         ScanExposureEv = ScanEv,
-        Grade = Grade,
-        Pivot = Pivot,
         DMax = DMax,
+        DMaxPerChannel = DMaxPerChannel,
         // Stage 2 — 色温/色调 → geomean-1 gains; 黑/白场 → levels
         WbGains = WbMath.TempTintToGains(Temp, Tint),
         ExposureEv = ExposureEv,
@@ -1417,6 +1404,17 @@ public partial class MainViewModel : ViewModelBase
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
         FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
         _filmBaseSampled = true;
+        // The per-channel endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a
+        // new base invalidates them — they would sit off by exactly -log10(t_base_new/t_base_old).
+        // The legacy scalar d_max has the same dependency, but nothing downstream divides by it
+        // per channel, so the staleness never showed; the endpoint path normalises by these
+        // directly, where it would appear as a colour cast. Drop them rather than silently
+        // rendering from a stale measurement.
+        if (_dMaxPerChannel is not null)
+        {
+            _dMaxPerChannel = null;
+            FilmBaseText += Loc.T("（端点已失效，请重采 D-max）");
+        }
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -1427,8 +1425,24 @@ public partial class MainViewModel : ViewModelBase
         // re-ran LCC → vignette → decouple over it — ~20 MB and a full photometric pass for one
         // 0.4× comparison. Measuring on the preview rather than full-res is fine; the gate is a
         // loose heuristic and box-downsampling barely moves a 99.9th percentile.
+        // Compared on TOTAL transmission against a LOW threshold — both halves matter.
+        //
+        // Per channel was wrong because the base is orange: a real C-41 base at UniWB reads about
+        // (0.21, 0.18, 0.06), blue at 30% of red, while the frame's p99.9 comes from bare light
+        // panel and sprocket holes that carry no mask at all and are green-dominant on top of it.
+        // Testing channel-by-channel asks the mask's most-absorbed channel to rival an unfiltered
+        // one, which no correctly sampled base can do.
+        //
+        // 0.4 was wrong because the mask is DENSE (~0.5–0.8 D). Such a base transmits well under
+        // half of bare-panel light by construction, so demanding 40% demanded that the mask barely
+        // absorb. What actually separates "found the base" from "missed it" is that picture
+        // content is denser still: measured ratios run 0.19–0.61 for real bases against 0.05–0.11
+        // for a rect that landed on the picture or a shadow. 0.08 sits below the former and under
+        // the latter with room to spare.
         double[] br = ImageIo.BrightReference(src);
-        StatusText = tb[0] < br[0] * 0.4 || tb[1] < br[1] * 0.4 || tb[2] < br[2] * 0.4
+        double tbSum = tb[0] + tb[1] + tb[2];
+        double brSum = br[0] + br[1] + br[2];
+        StatusText = tbSum < brSum * 0.08
             ? Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采")
             : FilmBaseText;
     });
@@ -1455,8 +1469,14 @@ public partial class MainViewModel : ViewModelBase
     public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(Loc.T("D-max 采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
-        DMax = FilmBase.SampleDMaxFromRect(src, rect, TBaseArr());
-        StatusText = Loc.F($"D-max = {DMax:F3}（底片最暗区 = 场景高光端）");
+        // Keep all three channels. The scalar D_max is still set (it is the output range, and
+        // the UI shows it), but the per-channel endpoints are what the inversion normalises by
+        // when EndpointInversion is on — they carry the highlight colour balance that the
+        // .Max() collapse used to throw away for wb_high to re-measure separately.
+        double[] perCh = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
+        DMaxPerChannel = perCh;
+        DMax = perCh.Max();
+        StatusText = Loc.F($"D-max = {DMax:F3}（逐通道 {perCh[0]:F3} / {perCh[1]:F3} / {perCh[2]:F3}）");
     });
 
     /// <summary>
@@ -1769,6 +1789,14 @@ public partial class MainViewModel : ViewModelBase
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
 
             rollDMax = await Task.Run(() => FilmBase.DetectDMaxFromRoll(values, rollBase), ct);
+            // Roll-wide highlight endpoints, measured alongside the scalar. Endpoint inversion is
+            // the default path, so the auto chain has to produce these — without them a roll that
+            // was never hand-sampled would silently fall back to the legacy grade chain.
+            // Masked with the same two cuts the t_base / wb_high estimators use: the endpoints
+            // are DIVISORS per channel, so an opaque film-edge line would inflate them unequally
+            // and show up as a colour cast.
+            double[]? rollDMaxPerCh = await Task.Run(
+                () => FilmBase.DetectDMaxPerChannelFromRoll(values, rollBase, 90.0, masks, cut), ct);
 
             ct.ThrowIfCancellationRequested();
 
@@ -1781,6 +1809,7 @@ public partial class MainViewModel : ViewModelBase
                     WbHighR = rollWbHigh[0]; WbHighG = rollWbHigh[1]; WbHighB = rollWbHigh[2];
                 }
                 if (rollDMax is double dm) DMax = dm;
+                if (rollDMaxPerCh is not null) _dMaxPerChannel = rollDMaxPerCh;
                 // Levels are measured last and on the CURRENT frame's rendered positive, because
                 // they are the only step that reads output rather than negative density. With the
                 // three roll-wide values above already in place, that render is the roll's look,
@@ -1820,14 +1849,17 @@ public partial class MainViewModel : ViewModelBase
     private void ApplyAutoChainToRoll()
     {
         double[] tb = TBaseArr(), wh = WbHighArr();
-        double dmax = DMax, pivot = Pivot;
+        double dmax = DMax;
+        double[]? dmc = _dMaxPerChannel;
         double black = WbMath.BlackSliderToPoint(Black), white = WbMath.WhiteSliderToPoint(White);
         foreach (RollFrame f in Frames)
         {
             f.Params.TBase = (double[])tb.Clone();
             f.Params.WbHigh = (double[])wh.Clone();
             f.Params.DMax = dmax;
-            f.Params.Pivot = pivot;      // linked to d_max; see OnDMaxChanged
+            // Roll-uniform, exactly like d_max: the endpoints were measured across the roll, so a
+            // single flat-lit frame is not normalised on its own.
+            f.Params.DMaxPerChannel = dmc is null ? null : (double[])dmc.Clone();
             f.Params.BlackPoint = black;
             f.Params.WhitePoint = white;
         }
@@ -2023,7 +2055,10 @@ public partial class MainViewModel : ViewModelBase
         WbHigh = (double[])wbHigh.Clone(),
         WbOffset = WbOffArr(),
         ScanExposureEv = ScanEv,
-        Grade = Grade, Pivot = Pivot, DMax = iterDMax,   // adaptive d_max (highlight just touches 1)
+        DMax = iterDMax,   // adaptive d_max (highlight just touches 1)
+        // Must match BuildParams: the net judges a RENDERED positive, so the render it judges
+        // has to be the one the user is looking at.
+        DMaxPerChannel = DMaxPerChannel,
         // The frame's own value, NOT the 3.05 default — the worker's nn_cal is a `replace()` on the
         // frame's calibration that resets Stage 2 only, so chroma_grade survives it. It must match
         // BuildParams for the same reason DecoupleMatrix does: the net judges a rendered positive
@@ -2067,7 +2102,12 @@ public partial class MainViewModel : ViewModelBase
         StatusText = Loc.T("智能白平衡分析中 …");
         try
         {
-            double grade = Grade, pivot = Pivot;
+            // The solve needs the density→output SLOPE, which under the endpoint model is
+            // per-channel and comes from the endpoints rather than from a grade parameter. The
+            // mean is the right scalar here because the iteration only uses it to normalise a
+            // chroma-only delta, and that delta is re-derived from the render every round.
+            DensityEndpoints slopeRef = DensityEndpoints.For(BuildParams());
+            double grade = (slopeRef.Scale[0] + slopeRef.Scale[1] + slopeRef.Scale[2]) / 3.0;
             double[] tBase = TBaseArr(), wbOffset = WbOffArr();
             // raw — the pipeline decouples internally, which only holds because
             // BuildDeepWbRenderParams carries DecoupleMatrix. Do not drop it there.
@@ -2107,7 +2147,7 @@ public partial class MainViewModel : ViewModelBase
                 // while developing and compiles out of Release entirely.
                 Debug.WriteLine($"[AIWB] d_highlight={dHigh[0]:F4},{dHigh[1]:F4},{dHigh[2]:F4} " +
                                 $"geo wb_high={wh[0]:F4},{wh[1]:F4},{wh[2]:F4} " +
-                                $"grade={grade:F3} pivot={pivot:F3}");
+                                $"slope={grade:F3}");
 
                 // Step 2 — NN chroma-only iteration.
                 bool conv = false;
@@ -2115,7 +2155,10 @@ public partial class MainViewModel : ViewModelBase
                 {
                     double dWbMax = double.NegativeInfinity;
                     for (int c = 0; c < 3; c++) dWbMax = Math.Max(dWbMax, dHigh[c] * wh[c] + wbOffset[c]);
-                    double iterDMax = pivot * (1.0 - grade) + dWbMax * grade;
+                    // The output range that puts this iteration's highlight exactly at white.
+                    // Endpoint form: white lands at 0 when density == the span, so the range the
+                    // render needs IS the highlight density itself.
+                    double iterDMax = Math.Max(dWbMax, 1e-6);
 
                     ImageBuffer pos = Pipeline.ProcessFrame(neg, BuildDeepWbRenderParams(wh, iterDMax));
                     var (inp, outp) = corr.CorrectOnce(pos);
@@ -2358,7 +2401,8 @@ public partial class MainViewModel : ViewModelBase
         DMax = 2.0; ScanEv = 0;
         WbOffR = 0; WbOffG = 0; WbOffB = 0;
         WbHighR = 1.0; WbHighG = 1.0; WbHighB = 1.0;
-        GradePresetIndex = 1; IsManualGrade = false; Grade = 1.65; Pivot = 0.9;
+        // Cleared, then re-measured by the auto chain (or a D-max sample).
+        DMaxPerChannel = null;
         // Stage 2
         Temp = 0; Tint = 0; ExposureEv = 0;
         Black = 0; White = 0; Contrast = 0; Highlights = 0; Shadows = 0; Saturation = 0;
@@ -3239,10 +3283,10 @@ public partial class MainViewModel : ViewModelBase
         DMax = p.DMax; ScanEv = p.ScanExposureEv;
         WbOffR = p.WbOffset[0]; WbOffG = p.WbOffset[1]; WbOffB = p.WbOffset[2];
         WbHighR = p.WbHigh[0]; WbHighG = p.WbHigh[1]; WbHighB = p.WbHigh[2];
-        // Grade preset first (its handler may set grade/pivot), then override with the stored values.
-        GradePresetIndex = WbMath.GradeToPresetIndex(p.Grade);
-        IsManualGrade = GradePresetIndex == WbMath.GradePresets.Length - 1;
-        Grade = p.Grade; Pivot = p.Pivot;
+        // A project saved before endpoints existed carries no measurement. It renders through the
+        // legacy fallback in DensityEndpoints.For until the auto chain or a D-max sample supplies
+        // one, which is what moves such a roll onto the endpoint path.
+        DMaxPerChannel = p.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null;
         // Not a control — carried through so BuildParams can write back the per-input value
         // chosen at import (1.0 for scans, 3.05 for RAW) instead of the dataclass default.
         // Stage 2
@@ -3542,17 +3586,15 @@ public partial class MainViewModel : ViewModelBase
             if (Sync.CalFilmBase)
             {
                 d.TBase = (double[])s.TBase.Clone(); d.DMax = s.DMax; d.ScanExposureEv = s.ScanExposureEv;
-                // Same rule as OnDMaxChanged, at the one place d_max moves WITHOUT going through it:
-                // broadcasting 片基 but not 反差 would hand the target a new d_max on top of a pivot
-                // derived from its old one, stranding the mid-tone anchor. Only for a target sitting
-                // on a preset grade — a grade that matches no preset is the same signal LoadParams
-                // reads as 手动, and manual pivot is the user's to own.
-                if (!Sync.CalGrade
-                    && WbMath.GradeToPresetIndex(d.Grade) != WbMath.GradePresets.Length - 1)
-                    d.Pivot = WbMath.LinkedPivot(d.DMax);
+                // The endpoints travel with the film base: they are densities measured RELATIVE to
+                // it, so handing over a new t_base without them would leave the target normalising
+                // by a measurement taken against a different base.
+                d.DMaxPerChannel = s.DMaxPerChannel is { Length: 3 } e ? (double[])e.Clone() : null;
+                // The old "relink pivot when d_max moves" rule died with pivot; the slope now
+                // comes from the endpoints above, which are being copied in the same breath.
             }
             if (Sync.CalWb) { d.WbHigh = (double[])s.WbHigh.Clone(); d.WbOffset = (double[])s.WbOffset.Clone(); }
-            if (Sync.CalGrade) { d.Grade = s.Grade; d.Pivot = s.Pivot; d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
+            if (Sync.CalGrade) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
             if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
             if (Sync.CalSprocket) { d.SprocketEnabled = s.SprocketEnabled; d.SprocketThreshold = s.SprocketThreshold; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform

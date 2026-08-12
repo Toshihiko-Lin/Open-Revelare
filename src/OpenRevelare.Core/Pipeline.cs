@@ -75,7 +75,7 @@ public static class Pipeline
         // Handed to Invert rather than run as a second sweep: it is pointwise, so folding it
         // into the write that produces the value is free, whereas a standalone pass costs a
         // full read+write of the frame.
-        double blackFloor = Math.Pow(10.0, cal.Pivot * (1.0 - cal.Grade) - cal.DMax);
+        double blackFloor = DensityEndpoints.For(cal).BlackFloor;
         ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp, ResolveChromaMatrix(cal),
                                               applyBlackFloor ? blackFloor : null);
 

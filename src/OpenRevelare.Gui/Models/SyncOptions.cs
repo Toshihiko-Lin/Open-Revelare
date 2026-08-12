@@ -12,7 +12,7 @@ public sealed partial class SyncOptions : ObservableObject
     // Stage-1 calibration groups
     [ObservableProperty] private bool _calFilmBase = true;   // T_base / D_max / scan_ev
     [ObservableProperty] private bool _calWb = true;         // wb_high / wb_offset
-    [ObservableProperty] private bool _calGrade = true;      // grade / pivot / chroma
+    [ObservableProperty] private bool _calGrade = true;      // chroma channel scale
     [ObservableProperty] private bool _calLens = true;       // distortion / vignette / LCC
     [ObservableProperty] private bool _calSprocket = true;   // sprocket enable / threshold
 

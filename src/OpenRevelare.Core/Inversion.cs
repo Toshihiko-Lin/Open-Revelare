@@ -86,19 +86,30 @@ public static class Inversion
         // [0,1] (exact for 16-bit). Pre-inversion ops (vignette, later RAW
         // highlights) can push T above 1, where the LUT would clamp and get the
         // density wrong — those rare pixels compute steps 1–4 directly instead.
-        double floorV = Math.Pow(10.0, -cal.DMax);
+        // Per-channel: with measured endpoints the floor follows the channel, not d_max.
+        double floorV0 = Math.Pow(10.0, -DensityFloor(cal, 0));
+        double floorV1 = Math.Pow(10.0, -DensityFloor(cal, 1));
+        double floorV2 = Math.Pow(10.0, -DensityFloor(cal, 2));
         bool biasActive = cal.ScanExposureEv != 0.0;
         double biasV = cal.ScanExposureEv * Log10_2;
-        bool wbHighActive = !ApproxAll(cal.WbHigh, 1.0);
-        bool wbOffsetActive = cal.WbOffset.Any(x => Math.Abs(x) > Tol);
+        // Mirrors BuildDensityLuts: under the endpoint model these live in the endpoints.
+        bool endpointModel = cal.DMaxPerChannel is { Length: 3 };
+        bool wbHighActive = !endpointModel && !ApproxAll(cal.WbHigh, 1.0);
+        bool wbOffsetActive = !endpointModel && cal.WbOffset.Any(x => Math.Abs(x) > Tol);
         double wbOffMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
         double tb0 = cal.TBase[0], tb1 = cal.TBase[1], tb2 = cal.TBase[2];
         double wh0 = cal.WbHigh[0], wh1 = cal.WbHigh[1], wh2 = cal.WbHigh[2];
         double wo0 = cal.WbOffset[0] - wbOffMean, wo1 = cal.WbOffset[1] - wbOffMean, wo2 = cal.WbOffset[2] - wbOffMean;
 
-        double DirectDensity(double v, double tb, double wh, double woc)
+        // Canonical per-channel affine for the non-decomposed path. Hoisted out of the loop:
+        // three multiplies and three adds replace the pivot/grade/d_max arithmetic per pixel.
+        DensityEndpoints endpoints = DensityEndpoints.For(cal);
+        double es0 = endpoints.Scale[0], es1 = endpoints.Scale[1], es2 = endpoints.Scale[2];
+        double eo0 = endpoints.Offset[0], eo1 = endpoints.Offset[1], eo2 = endpoints.Offset[2];
+
+        double DirectDensity(double v, double tb, double wh, double woc, double flr)
         {
-            double d = -Math.Log10(Math.Max(v / tb, floorV));
+            double d = -Math.Log10(Math.Max(v / tb, flr));
             if (biasActive) d += biasV;
             if (wbHighActive) d *= wh;
             if (wbOffsetActive) d += woc;
@@ -125,9 +136,9 @@ public static class Inversion
                 // 1–4: per-channel density. LUT for input in [0,1] (exact); direct
                 // compute for T > 1 (vignette-boosted / RAW highlights).
                 float v0 = src[i], v1 = src[i + 1], v2 = src[i + 2];
-                double d0 = v0 <= 1.0f ? lut0[ToIndex(v0)] : DirectDensity(v0, tb0, wh0, wo0);
-                double d1 = v1 <= 1.0f ? lut1[ToIndex(v1)] : DirectDensity(v1, tb1, wh1, wo1);
-                double d2 = v2 <= 1.0f ? lut2[ToIndex(v2)] : DirectDensity(v2, tb2, wh2, wo2);
+                double d0 = v0 <= 1.0f ? lut0[ToIndex(v0)] : DirectDensity(v0, tb0, wh0, wo0, floorV0);
+                double d1 = v1 <= 1.0f ? lut1[ToIndex(v1)] : DirectDensity(v1, tb1, wh1, wo1, floorV1);
+                double d2 = v2 <= 1.0f ? lut2[ToIndex(v2)] : DirectDensity(v2, tb2, wh2, wo2, floorV2);
 
                 // 5: density-domain inversion.
                 double a0, a1, a2;
@@ -166,9 +177,14 @@ public static class Inversion
                 }
                 else
                 {
-                    a0 = pivot + (d0 - pivot) * grade - dMax;
-                    a1 = pivot + (d1 - pivot) * grade - dMax;
-                    a2 = pivot + (d2 - pivot) * grade - dMax;
+                    // Canonical per-channel affine (DensityEndpoints). For a legacy roll these
+                    // coefficients reduce to pivot + (d-pivot)*grade - d_max exactly, gating
+                    // included, so this path is bit-identical to what it replaced; for a roll
+                    // with measured per-channel endpoints it is the endpoint normalisation
+                    // itself, with no grade anywhere in it.
+                    a0 = es0 * d0 + eo0;
+                    a1 = es1 * d1 + eo1;
+                    a2 = es2 * d2 + eo2;
                 }
 
                 // 6: back to linear (+ black floor, when folded in).
@@ -221,13 +237,25 @@ public static class Inversion
     private sealed class DensityLutEntry
     {
         public double Tb0, Tb1, Tb2, Wh0, Wh1, Wh2, Wo0, Wo1, Wo2, ScanEv, DMax;
+        // Part of the key: it sets the per-channel density floor, so two rolls differing only
+        // here must not share tables.
+        public double[]? DMaxPerCh;
         public double[][] Luts = null!;
 
         public bool Matches(FrameParams c) =>
             Tb0 == c.TBase[0] && Tb1 == c.TBase[1] && Tb2 == c.TBase[2] &&
             Wh0 == c.WbHigh[0] && Wh1 == c.WbHigh[1] && Wh2 == c.WbHigh[2] &&
             Wo0 == c.WbOffset[0] && Wo1 == c.WbOffset[1] && Wo2 == c.WbOffset[2] &&
-            ScanEv == c.ScanExposureEv && DMax == c.DMax;
+            ScanEv == c.ScanExposureEv && DMax == c.DMax &&
+            SameEndpoints(DMaxPerCh, c.DMaxPerChannel);
+
+        private static bool SameEndpoints(double[]? a, double[]? b)
+        {
+            if (a is null || b is null) return a is null && b is null;
+            if (a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
+        }
     }
 
     private static DensityLutEntry? _lutCache;
@@ -245,6 +273,7 @@ public static class Inversion
             Wh0 = cal.WbHigh[0], Wh1 = cal.WbHigh[1], Wh2 = cal.WbHigh[2],
             Wo0 = cal.WbOffset[0], Wo1 = cal.WbOffset[1], Wo2 = cal.WbOffset[2],
             ScanEv = cal.ScanExposureEv, DMax = cal.DMax,
+            DMaxPerCh = cal.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null,
             Luts = BuildDensityLuts(cal),
         };
         _lutCache = entry;
@@ -254,11 +283,19 @@ public static class Inversion
     /// <summary>Precompute the per-channel T→density mapping (steps 1–4) for every 16-bit level.</summary>
     private static double[][] BuildDensityLuts(FrameParams cal)
     {
-        double floor = Math.Pow(10.0, -cal.DMax);
+        // The density floor is where the log is allowed to bottom out. In the legacy model that
+        // is d_max, because d_max IS the deepest density the roll reaches. With measured
+        // per-channel endpoints those are two different numbers — d_max becomes the OUTPUT range
+        // (where white lands) while the deepest density is dMaxPerChannel[c] — and clamping at
+        // the output range would truncate the highlight end before step 5 sees it, landing the
+        // darkest area short of white and tinted.
         bool biasActive = cal.ScanExposureEv != 0.0;
         double bias = cal.ScanExposureEv * Log10_2;
-        bool wbHighActive = !ApproxAll(cal.WbHigh, 1.0);
-        bool wbOffsetActive = cal.WbOffset.Any(x => Math.Abs(x) > Tol);
+        // Under the endpoint model wb_high / wb_offset are folded into the endpoints
+        // (DensityEndpoints.FromMeasured), so applying them here too would double them.
+        bool endpointModel = cal.DMaxPerChannel is { Length: 3 };
+        bool wbHighActive = !endpointModel && !ApproxAll(cal.WbHigh, 1.0);
+        bool wbOffsetActive = !endpointModel && cal.WbOffset.Any(x => Math.Abs(x) > Tol);
         double wbOffsetMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
 
         var luts = new double[3][];
@@ -267,6 +304,7 @@ public static class Inversion
             double tBase = cal.TBase[c];
             double wbHigh = cal.WbHigh[c];
             double wbOff = cal.WbOffset[c] - wbOffsetMean;
+            double floor = Math.Pow(10.0, -DensityFloor(cal, c));
             var lut = new double[LutSize];
             for (int idx = 0; idx < LutSize; idx++)
             {
@@ -281,6 +319,16 @@ public static class Inversion
         }
         return luts;
     }
+
+    /// <summary>
+    /// How deep density is allowed to go for channel <paramref name="c"/> — the measured
+    /// endpoint when the roll has one, otherwise d_max (which in the legacy model is the same
+    /// thing). Kept in one place because the LUT and the direct &gt;1 path must agree, and
+    /// because it is the exact spot where "deepest density" and "output range" stop being the
+    /// same number.
+    /// </summary>
+    private static double DensityFloor(FrameParams cal, int c) =>
+        cal.DMaxPerChannel is { Length: 3 } dm ? Math.Max(dm[c], 1e-6) : cal.DMax;
 
     private static bool ApproxAll(double[] v, double target)
     {

@@ -361,13 +361,8 @@
   "最亮点=白": "Brightest = white",
   "Deep-WB 神经网络推断白平衡（不需画面中有中性物）。建议先裁掉齿孔/片边。": "A neural network infers the white balance (nothing neutral has to be in the picture). Crop the sprockets and film edge away first.",
   "智能白平衡（Beta·请先裁切）": "Deep white balance (beta · crop first)",
-  "反差（相纸号数）": "Contrast (paper grade)",
-  "彩色负片本身低反差（为暗房放大设计）。反差 = 数字版相纸号数，补偿这一压缩。": "Colour negative film is low-contrast by design, for darkroom enlarging. Contrast is the digital paper grade that makes up for it.",
+  "（端点已失效，请重采 D-max）": " (endpoints invalidated — sample D-max again)",
   "反差": "Contrast",
-  "软 — 0–1 号纸": "Soft — grade 0–1",
-  "标准 — 2–3 号纸": "Normal — grade 2–3",
-  "硬 — 4–5 号纸": "Hard — grade 4–5",
-  "手动…": "Manual…",
   "齿孔遮罩": "Sprocket mask",
   "把齿孔/灯板等过亮区域（绝对亮度 > 阈值）标记为遮罩，反相后填白。": "Mark the over-bright areas — sprocket holes, the light panel — above an absolute-luminance threshold, and fill them white after inversion.",
   "启用齿孔遮罩": "Use the sprocket mask",
@@ -521,7 +516,6 @@
   "勾选「应用到整卷 / 复制·粘贴到选中」广播哪些项。几何默认不播。": "Which items “apply to the whole roll / copy·paste to the selection” carries. Geometry is left out by default.",
   "片基 T_base / D_max / 偏移": "Film base T_base / D_max / offset",
   "白平衡 wb_high / wb_offset": "White balance wb_high / wb_offset",
-  "反差 grade / pivot / chroma": "Contrast grade / pivot / chroma",
   "镜头 畸变 / 暗角 / LCC": "Lens distortion / vignetting / LCC",
   "齿孔 启用 / 阈值": "Sprockets on / threshold",
   "白平衡（色温 / 色调）": "White balance (temperature / tint)",
@@ -540,5 +534,9 @@
   "DNG Converter 第二步失败": "DNG Converter failed at step two",
   "无法启动 DNG Converter": "DNG Converter could not be started",
   "DNG Converter 超时": "DNG Converter timed out",
-  "DNG Converter 退出码 {0}": "DNG Converter exited with code {0}"
+  "DNG Converter 退出码 {0}": "DNG Converter exited with code {0}",
+  "密度端点": "Density endpoints",
+  "反相由两端决定：片基是黑端，D-max 是白端，逐通道各自归一化。斜率是这两端的结果，不是另设的参数——这是 Cineon / 达芬奇的做法，观感留给输出变换。": "The inversion is decided by its two ends: the film base is black, D-max is white, and each channel is normalised on its own. The slope is the result of those two ends rather than a separate parameter — the Cineon / DaVinci approach, with the look left to the output transform.",
+  "尚未测得端点——请采样 D-max，或运行整卷自动标定": "No endpoints measured yet — sample D-max, or run the roll-wide auto calibration",
+  "色度通道缩放": "Chroma channel scale"
 }

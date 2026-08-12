@@ -194,6 +194,126 @@ public static class FilmBase
     }
 
     /// <summary>
+    /// <see cref="DetectDMaxFromRoll"/> resolved per channel — the roll's highlight endpoints.
+    ///
+    /// The cross-frame percentile is taken per channel independently, exactly as the scalar
+    /// version takes it over frames: a roll-wide value so a single flat-lit frame is not
+    /// stretched on its own, which is what makes "roll-uniform" mean the same thing here as it
+    /// does for the scalar d_max.
+    /// </summary>
+    /// <param name="masks">Raw-domain frames the luma masks key off, where the sprocket
+    /// threshold is calibrated. Null = use <paramref name="images"/> for both.</param>
+    /// <param name="sprocketThreshold">Bright cut for light board / sprockets; null = no cut.</param>
+    public static double[]? DetectDMaxPerChannelFromRoll(
+        IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
+        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null)
+    {
+        var perFrame = new List<double[]>();
+        for (int i = 0; i < images.Count; i++)
+        {
+            ImageBuffer img = images[i];
+            ImageBuffer mask = masks is not null && i < masks.Count ? masks[i] : img;
+            bool[] keep = HighDensityKeepMask(mask, sprocketThreshold);
+
+            int n = img.PixelCount;
+
+            // Density ceiling, same constant and same reason as AutoWbHighFromRoll: an opaque
+            // sprocket / film-frame edge is fully light-blocking, so it slams into the -log10
+            // clamp (~6–10) far above any real picture tone (~1–1.5). The dark valley misses it
+            // whenever the histogram is not cleanly bimodal — which is exactly the case on rolls
+            // that kept the sprockets in frame — so the ceiling is what actually rejects it.
+            // Applied on TOTAL density so a pixel is judged as one physical sample, not per
+            // channel; dropping channels independently would bias the endpoints against each
+            // other, which is the very thing they are supposed to measure.
+            const double MaxRealDensity = 3.0;
+            var dens = new double[3][];
+            for (int c = 0; c < 3; c++) dens[c] = new double[n];
+            int k = 0;
+            for (int p = 0; p < n; p++)
+            {
+                if (!keep[p]) continue;
+                double d0 = -Math.Log10(Math.Max(img.Data[p * 3] / Math.Max(tBase[0], 1e-10), 1e-10));
+                double d1 = -Math.Log10(Math.Max(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10), 1e-10));
+                double d2 = -Math.Log10(Math.Max(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10), 1e-10));
+                if ((d0 + d1 + d2) / 3.0 >= MaxRealDensity) continue;
+                dens[0][k] = d0; dens[1][k] = d1; dens[2][k] = d2;
+                k++;
+            }
+            if (k == 0) continue;
+
+            var res = new double[3];
+            bool ok = true;
+            for (int c = 0; c < 3; c++)
+            {
+                var used = new double[k];
+                Array.Copy(dens[c], used, k);
+                res[c] = Percentile(used, 99.9);
+                if (!double.IsFinite(res[c]) || res[c] <= 0) { ok = false; break; }
+            }
+            if (ok) perFrame.Add(res);
+        }
+        if (perFrame.Count == 0) return null;
+
+        var outv = new double[3];
+        for (int c = 0; c < 3; c++)
+            outv[c] = Percentile(perFrame.Select(v => v[c]).ToArray(), rollPercentile);
+        return outv;
+    }
+
+    /// <summary>
+    /// Pixels admissible when measuring the HIGH-density end: everything except the light board /
+    /// sprockets (bright cut, dilated) and the opaque mask card / film-edge line (dark valley).
+    ///
+    /// The D_max detectors historically took no mask at all — they percentiled every pixel. That
+    /// was survivable while d_max was a scalar SUBTRACTED from the density (an inflated value
+    /// shifts the whole frame, and exposure pulls it back), but the endpoint model DIVIDES each
+    /// channel by its own value. An opaque edge line inflates the channels unequally, so it turns
+    /// into a colour cast that no exposure control can undo. The 99.9th percentile dodges dust; a
+    /// film-edge line is a whole column, not dust.
+    ///
+    /// Same two cuts as <see cref="AutoWbHighFromRoll"/>, on the raw-domain luma where the
+    /// sprocket threshold is calibrated.
+    /// </summary>
+    private static bool[] HighDensityKeepMask(ImageBuffer maskFrame, double? sprocketThreshold)
+    {
+        int w = maskFrame.Width, h = maskFrame.Height, n = w * h;
+        var keep = new bool[n];
+        Array.Fill(keep, true);
+
+        float[] d = maskFrame.Data;
+        var luma = new double[n];
+        for (int p = 0; p < n; p++)
+            luma[p] = ((double)d[p * 3] + d[p * 3 + 1] + d[p * 3 + 2]) / 3.0;
+
+        // Bright end: light board / sprockets, dilated ~5% to swallow the soft transition ring
+        // between the transmissive core and the opaque frame edge.
+        if (sprocketThreshold is double thr)
+        {
+            var board = new bool[n];
+            bool any = false;
+            for (int p = 0; p < n; p++) if (luma[p] > thr) { board[p] = true; any = true; }
+            if (any)
+            {
+                int radius = Math.Max(1, RoundHalfEven(Math.Min(h, w) * 0.05));
+                board = Dilate(board, w, h, radius);
+                for (int p = 0; p < n; p++) if (board[p]) keep[p] = false;
+            }
+        }
+
+        // Dark end: the opaque mask card / edge line — exactly the thing that would otherwise
+        // set the endpoint. <= 0 is the "no mask present" sentinel.
+        double darkValley = Sprocket.EstimateDarkValley(maskFrame);
+        if (darkValley > 0.0)
+            for (int p = 0; p < n; p++) if (!(luma[p] > darkValley)) keep[p] = false;
+
+        // Never hand back an empty selection — an all-masked frame should fall back to measuring
+        // everything rather than silently dropping out of the roll statistics.
+        for (int p = 0; p < n; p++) if (keep[p]) return keep;
+        Array.Fill(keep, true);
+        return keep;
+    }
+
+    /// <summary>
     /// Film-base transmittance from an unexposed (D_min) rect. The returned T_base
     /// encodes D_min removal AND shadow-end WB (the orange mask) at once.
     /// rect = (x, y, w, h) normalised to [0,1]. Returns (3,).
@@ -224,6 +344,30 @@ public static class FilmBase
     }
 
     /// <summary>
+    /// <see cref="DetectDMax"/> resolved PER CHANNEL — each channel's own 99.9th density
+    /// percentile rather than one percentile over all three pooled together.
+    ///
+    /// Pooling answers "how deep does this frame go", which is the right question for a scalar
+    /// d_max. It is the wrong question for endpoints: the three channels reach different
+    /// densities in the darkest area (that difference IS the highlight colour balance), and
+    /// pooling averages it away before it can be measured.
+    /// Must be called on the T_norm image (T / T_base), NOT on raw T.
+    /// </summary>
+    public static double[] DetectDMaxPerChannel(ImageBuffer image)
+    {
+        float[] d = image.Data;
+        int n = image.PixelCount;
+        var res = new double[3];
+        var col = new double[n];
+        for (int c = 0; c < 3; c++)
+        {
+            for (int p = 0; p < n; p++) col[p] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
+            res[c] = Percentile(col, 99.9);
+        }
+        return res;
+    }
+
+    /// <summary>
     /// Scalar D_max from a fully-exposed (shadow) rect: per-channel MEAN density, then the
     /// max across channels so no channel clips. The blur already suppresses dust, so the
     /// typical pixel of the selected "darkest area" inverts to T_pos = 1.0 (white) — which
@@ -232,10 +376,26 @@ public static class FilmBase
     /// </summary>
     public static double SampleDMaxFromRect(ImageBuffer image, (double X, double Y, double W, double H) rect,
                                             double[] tBase, double blurSigma = 3.0)
-    {
-        double[] meanD = RectMeanDensity(image, rect, tBase, blurSigma, "D_max sampling");
-        return meanD.Max();
-    }
+        => SampleDMaxPerChannelFromRect(image, rect, tBase, blurSigma).Max();
+
+    /// <summary>
+    /// The same shadow-rect measurement, WITHOUT the collapse to a scalar — the highlight
+    /// endpoint of each channel.
+    ///
+    /// This is not a new measurement. <see cref="SampleDMaxFromRect"/> already computes exactly
+    /// this and then discards two of the three numbers with <c>.Max()</c>; the colour information
+    /// it throws away is precisely what <c>wb_high</c> re-measures afterwards, from a different
+    /// rect, using this same <c>RectMeanDensity</c> helper. One physical quantity, measured
+    /// twice, is why the two ends compete and why calibration order changes the answer
+    /// (THEORY.md step 5: residual 0.7 versus 0.04 depending on which is solved first).
+    ///
+    /// Keeping the three values instead is what lets the highlight endpoint and its colour cast
+    /// be one fact rather than two — see <see cref="DensityEndpoints"/> for the algebra.
+    /// </summary>
+    public static double[] SampleDMaxPerChannelFromRect(
+        ImageBuffer image, (double X, double Y, double W, double H) rect,
+        double[] tBase, double blurSigma = 3.0)
+        => RectMeanDensity(image, rect, tBase, blurSigma, "D_max sampling");
 
     /// <summary>
     /// Highlight WB from a neutral rect in the HIGHLIGHTS. Solves wb_high so every channel of

@@ -770,24 +770,12 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 反差 -->
-                                <Expander Header="{i18n:T '反差（相纸号数）'}" IsExpanded="True">
+                                <!-- 密度端点 -->
+                                <Expander Header="{i18n:T '密度端点'}" IsExpanded="True">
                                     <StackPanel Spacing="4">
                                         <TextBlock Classes="groupHint"
-                                                   Text="{i18n:T '彩色负片本身低反差（为暗房放大设计）。反差 = 数字版相纸号数，补偿这一压缩。'}" />
-                                        <Grid ColumnDefinitions="Auto,*">
-                                            <TextBlock Grid.Column="0" Classes="fieldLabel" MinWidth="44" Text="{i18n:T '反差'}" />
-                                            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" SelectedIndex="{Binding GradePresetIndex}">
-                                                <ComboBoxItem Content="{i18n:T '软 — 0–1 号纸'}" />
-                                                <ComboBoxItem Content="{i18n:T '标准 — 2–3 号纸'}" />
-                                                <ComboBoxItem Content="{i18n:T '硬 — 4–5 号纸'}" />
-                                                <ComboBoxItem Content="{i18n:T '手动…'}" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <StackPanel Spacing="1" IsVisible="{Binding IsManualGrade}">
-                                            <ctl:SliderRow Label="grade" Minimum="0.1" Maximum="3" Decimals="2" Increment="0.01" DefaultValue="1.65" Value="{Binding Grade}" />
-                                            <ctl:SliderRow Label="pivot" Minimum="-2" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0.9" Value="{Binding Pivot}" />
-                                        </StackPanel>
+                                                   Text="{i18n:T '反相由两端决定：片基是黑端，D-max 是白端，逐通道各自归一化。斜率是这两端的结果，不是另设的参数——这是 Cineon / 达芬奇的做法，观感留给输出变换。'}" />
+                                        <TextBlock Classes="groupHint" Text="{Binding EndpointText}" />
                                     </StackPanel>
                                 </Expander>
 

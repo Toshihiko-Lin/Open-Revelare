@@ -263,7 +263,7 @@ The full derivation of every parameter lives in the in-app **Help → Theory**.
 3. **Light-source decoupling** (optional) — white light passes through, or RGB three-colour separation precisely measures and removes inter-dye crosstalk
 4. **Mask removal, into density** — sampled base transmittance cancels the mask; the signal moves to log density, built on the Cineon standard
 5. **Density-domain white balance** — shadows and highlights corrected separately, shadows first. That order is exactly what separates physical computation from eyeballing curves
-6. **Inversion** — restores the contrast and saturation the negative deliberately saved for the paper
+6. **Inversion** — solves back to scene luminance using the film's own gamma. Not "restoring contrast the paper would have added": Cineon is a storage encoding for density, and negadoctor likewise, neither carries a paper stage
 7. **Output** — a physically correct positive, ready for a grading suite or for direct export after Stage 2
 
 The in-app **Help → Guide / Theory** has the full usage instructions and derivations.

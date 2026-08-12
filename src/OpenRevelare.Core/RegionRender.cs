@@ -183,7 +183,7 @@ public static class RegionRender
         if (cal.DecoupleMatrix != null)
             Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
 
-        double blackFloor = Math.Pow(10.0, cal.Pivot * (1.0 - cal.Grade) - cal.DMax);
+        double blackFloor = DensityEndpoints.For(cal).BlackFloor;
         ImageBuffer inverted = Inversion.Invert(slice, cal, cal.DecoupleChromaAmp,
                                                 Pipeline.ResolveChromaMatrix(cal), blackFloor);
         if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);

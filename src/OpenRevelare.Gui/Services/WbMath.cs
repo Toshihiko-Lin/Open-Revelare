@@ -61,29 +61,4 @@ public static class WbMath
     public static double WhiteSliderToPoint(double w) => 1.0 - w * BwK;
     public static double WhitePointToSlider(double whitePoint) => Math.Clamp((1.0 - whitePoint) / BwK, -1.0, 1.0);
 
-    // ── Grade (相纸号数) presets + pivot link ─────────────────────────────────────
-    // C-41 film is deliberately low-contrast (γ≈0.6); grade ≈ 1/γ restores natural
-    // viewing contrast. Pivot is linked to d_max so a grade change rotates the tone
-    // curve about the mid-tone density (D_mid ≈ 0.45·d_max), holding mid-grey fixed.
-    public const double PivotDMaxRatio = 0.45;
-
-    public static double LinkedPivot(double dMax) => dMax * PivotDMaxRatio;
-
-    /// <summary>(label, grade); grade &lt; 0 is the "手动" sentinel that reveals the manual sliders.</summary>
-    public static readonly (string Label, double Grade)[] GradePresets =
-    {
-        ("软 — 0–1 号纸", 1.30),
-        ("标准 — 2–3 号纸", 1.65),
-        ("硬 — 4–5 号纸", 2.00),
-        ("手动…", -1.0),
-    };
-
-    /// <summary>Preset index matching a grade value, else the "手动" index.</summary>
-    public static int GradeToPresetIndex(double grade)
-    {
-        for (int i = 0; i < GradePresets.Length; i++)
-            if (GradePresets[i].Grade > 0 && Math.Abs(grade - GradePresets[i].Grade) < 1e-3)
-                return i;
-        return GradePresets.Length - 1;
-    }
 }

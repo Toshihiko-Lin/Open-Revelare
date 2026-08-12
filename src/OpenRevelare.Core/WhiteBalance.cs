@@ -67,7 +67,8 @@ public static class WhiteBalance
     /// </summary>
     public static double[][] SrgbToPreStep4Density(ImageBuffer srgb, double grade, double pivot,
                                                    double dMax, double? chromaGrade = null,
-                                                   double[]? ccs = null)
+                                                   double[]? ccs = null,
+                                                   DensityEndpoints? endpoints = null)
     {
         // NOTE: Python does np.log10 on a float32 array → the log is evaluated in SINGLE
         // precision and only then widened. Keep MathF here; computing in double would
@@ -90,10 +91,15 @@ public static class WhiteBalance
         var res = new double[n][];
         if (chromaGrade is null || chromaGrade == grade)
         {
+            // Per-channel affine inverse. Written as the general (scale, offset) form rather
+            // than in terms of grade/pivot/d_max so the endpoint model can supply its own
+            // coefficients — see the DensityEndpoints overload below. For the legacy parameters
+            // these are exactly LegacyStep5's, so this stays bit-identical.
+            var ep = endpoints ?? DensityEndpoints.LegacyStep5Of(grade, pivot, dMax);
             for (int p = 0; p < n; p++)
             {
                 var r = new double[3];
-                for (int c = 0; c < 3; c++) r[c] = (dAdj[p][c] + dMax - pivot) / grade + pivot;
+                for (int c = 0; c < 3; c++) r[c] = ep.Invert(c, dAdj[p][c]);
                 res[p] = r;
             }
             return res;
@@ -177,14 +183,18 @@ public static class WhiteBalance
         ImageBuffer inputSrgb, ImageBuffer outputSrgb,
         double grade, double pivot, double dMax,
         double? chromaGrade = null, double[]? ccs = null,
-        (double Lo, double Hi)? wbHighClip = null, (double Lo, double Hi)? wbOffsetClip = null)
+        (double Lo, double Hi)? wbHighClip = null, (double Lo, double Hi)? wbOffsetClip = null,
+        DensityEndpoints? endpoints = null)
     {
-        if (grade <= 0) throw new ArgumentException("grade must be positive for WB affine solve");
+        // grade is unused when endpoints are supplied — the slope lives in them instead — so the
+        // positivity check only applies to the legacy parameterisation.
+        if (endpoints is null && grade <= 0)
+            throw new ArgumentException("grade must be positive for WB affine solve");
         var hClip = wbHighClip ?? (0.5, 2.0);
         var oClip = wbOffsetClip ?? (-0.5, 0.5);
 
-        double[][] dIn = SrgbToPreStep4Density(inputSrgb, grade, pivot, dMax, chromaGrade, ccs);
-        double[][] dOut = SrgbToPreStep4Density(outputSrgb, grade, pivot, dMax, chromaGrade, ccs);
+        double[][] dIn = SrgbToPreStep4Density(inputSrgb, grade, pivot, dMax, chromaGrade, ccs, endpoints);
+        double[][] dOut = SrgbToPreStep4Density(outputSrgb, grade, pivot, dMax, chromaGrade, ccs, endpoints);
         bool[][] valid = ValidMask(inputSrgb, outputSrgb);
         return RegressAffine(dIn, dOut, valid, hClip, oClip);
     }

@@ -192,7 +192,7 @@ public static class Project
     private static JsonObject SerFrame(Frame e)
     {
         FrameParams p = e.Params;
-        return new JsonObject
+        var o = new JsonObject
         {
             ["filename"] = System.IO.Path.GetFileName(e.SourcePath),
             // FilmBase calibration
@@ -254,6 +254,14 @@ public static class Project
             ["is_virtual"] = e.IsVirtual,
             ["source_path"] = e.SourcePath,
         };
+
+        // Per-channel highlight endpoints. Not part of the Python schema, so written only when
+        // present rather than as a null — a roll that never used endpoint inversion stays
+        // byte-identical to what an older build produces, and the Python reader never meets a
+        // key it does not model. Absent on load = the legacy grade path.
+        if (p.DMaxPerChannel is { Length: 3 } dmc)
+            o["d_max_per_channel"] = new JsonArray(dmc[0], dmc[1], dmc[2]);
+        return o;
     }
 
     private static Frame DesFrame(JsonObject d)
@@ -262,6 +270,10 @@ public static class Project
         {
             TBase = Vec3(d, "t_base", 0.82, 0.51, 0.29),
             DMax = Dbl(d, "d_max", 2.0),
+            // Absent = null = the legacy grade path, so older projects render unchanged.
+            DMaxPerChannel = d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
+                ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
+                : null,
             WbHigh = Vec3(d, "wb_high", 1, 1, 1),
             WbOffset = Vec3(d, "wb_offset", 0, 0, 0),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),

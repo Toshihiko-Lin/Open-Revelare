@@ -33,6 +33,7 @@ static int Run(string[] args)
             case "--d-max": opts["d-max"] = Next(args, ref i, a); break;
             case "--grade": opts["grade"] = Next(args, ref i, a); break;
             case "--pivot": opts["pivot"] = Next(args, ref i, a); break;
+            case "--d-max-per-channel": opts["d-max-per-channel"] = Next(args, ref i, a); break;
             case "--scan-exposure-ev": opts["scan-exposure-ev"] = Next(args, ref i, a); break;
             case "--wb-gains": opts["wb-gains"] = Next(args, ref i, a); break;
             case "--exposure": opts["exposure"] = Next(args, ref i, a); break;
@@ -101,8 +102,11 @@ static int Run(string[] args)
     var cal = new FrameParams();
     if (opts.TryGetValue("t-base", out var tb)) cal.TBase = ParseTriple(tb);
     if (opts.TryGetValue("d-max", out var dm)) cal.DMax = ParseD(dm);
+    // --grade / --pivot drive the LEGACY path only; supplying per-channel endpoints selects the
+    // endpoint model, in which the slope comes from the endpoints and neither is consulted.
     if (opts.TryGetValue("grade", out var gr)) cal.Grade = ParseD(gr);
     if (opts.TryGetValue("pivot", out var pv)) cal.Pivot = ParseD(pv);
+    if (opts.TryGetValue("d-max-per-channel", out var dmc)) cal.DMaxPerChannel = ParseTriple(dmc);
     if (opts.TryGetValue("scan-exposure-ev", out var se)) cal.ScanExposureEv = ParseD(se);
     if (opts.TryGetValue("wb-gains", out var wg)) cal.WbGains = ParseTriple(wg);
     if (opts.TryGetValue("exposure", out var exv)) cal.ExposureEv = ParseD(exv);
@@ -586,7 +590,9 @@ static void PrintUsage()
         "  --input-srgb                treat input as sRGB-gamma (linearise on load)\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +
-        "  --d-max <v>                 physical max density\n" +
+        "  --d-max <v>                 output range (endpoint model) / max density (legacy)\n" +
+        "  --d-max-per-channel <r,g,b> per-channel highlight endpoints; selects the endpoint\n" +
+        "                              model, where grade/pivot are not consulted\n" +
         "  --grade <v>                 density-domain contrast (paper grade)\n" +
         "  --pivot <v>                 mid-tone anchor\n" +
         "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
