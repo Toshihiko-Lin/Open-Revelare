@@ -70,17 +70,10 @@ public static class Inversion
         double[][] dLut = DensityLuts(cal);
         double[] lut0 = dLut[0], lut1 = dLut[1], lut2 = dLut[2];
 
-        // Path A widened chroma by `amp`; undo that, relative to the single Cineon gamma.
-        double[] effChroma =
-        {
-            cal.Grade / amp[0],
-            cal.Grade / amp[1],
-            cal.Grade / amp[2],
-        };
+        // Path A widened chroma by `amp`; the decomposed branch divides it back out.
+        double ampC0 = amp[0], ampC1 = amp[1], ampC2 = amp[2];
 
         double cs0 = cal.ChromaChannelScale[0], cs1 = cal.ChromaChannelScale[1], cs2 = cal.ChromaChannelScale[2];
-        double pivot = cal.Pivot, grade = cal.Grade, dMax = cal.DMax;
-        double ec0 = effChroma[0], ec1 = effChroma[1], ec2 = effChroma[2];
 
         // Direct-compute params for the >1 fast path: the LUT only covers input
         // [0,1] (exact for 16-bit). Pre-inversion ops (vignette, later RAW
@@ -106,6 +99,11 @@ public static class Inversion
         DensityEndpoints endpoints = DensityEndpoints.For(cal);
         double es0 = endpoints.Scale[0], es1 = endpoints.Scale[1], es2 = endpoints.Scale[2];
         double eo0 = endpoints.Offset[0], eo1 = endpoints.Offset[1], eo2 = endpoints.Offset[2];
+        // The single multiplier the chroma matrix is scaled by. Under the legacy parameters every
+        // channel's slope IS grade, so this reduces to grade exactly; under measured endpoints the
+        // slopes differ and their mean is the scalar that keeps M's output inside the sum-zero
+        // plane (see the useMatrix branch).
+        double chromaSlope = (es0 + es1 + es2) / 3.0;
 
         double DirectDensity(double v, double tb, double wh, double woc, double flr)
         {
@@ -157,14 +155,22 @@ public static class Inversion
                     // branch below is the only consumer, for callers with no matrix.
                     if (useMatrix)
                     {
-                        double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * grade;
-                        double n1 = (m10 * c0 + m11 * c1 + m12 * c2) * grade;
-                        double n2 = (m20 * c0 + m21 * c1 + m22 * c2) * grade;
+                        // ONE scalar on the matrix output, not the per-channel slopes. M maps the
+                        // sum-zero plane to itself, so a single multiplier keeps the result summing
+                        // to zero — i.e. pure chroma. Scaling per channel instead would break that
+                        // (measured leak ~9e-3 on a typical pixel) and quietly push luminance
+                        // around, undoing the balance the endpoints just established.
+                        double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * chromaSlope;
+                        double n1 = (m10 * c0 + m11 * c1 + m12 * c2) * chromaSlope;
+                        double n2 = (m20 * c0 + m21 * c1 + m22 * c2) * chromaSlope;
                         c0 = n0; c1 = n1; c2 = n2;
                     }
                     else
                     {
-                        c0 *= ec0; c1 *= ec1; c2 *= ec2;
+                        // No matrix: chroma follows its own channel's slope, which is exactly what
+                        // the plain per-channel affine would have done (lum + S·c reconstructs
+                        // S·d + b identically), then the per-channel amp is applied on top.
+                        c0 *= es0 / ampC0; c1 *= es1 / ampC1; c2 *= es2 / ampC2;
                         if (!ampIdentity)
                         {
                             double cm = (c0 + c1 + c2) / 3.0;
@@ -172,8 +178,11 @@ public static class Inversion
                         }
                     }
 
-                    double lum = pivot + (dMean - pivot) * grade - dMax;
-                    a0 = lum + c0; a1 = lum + c1; a2 = lum + c2;
+                    // Luminance carries the per-channel endpoint affine — that is where the
+                    // highlight colour balance lives, so it must NOT collapse to one channel.
+                    a0 = es0 * dMean + eo0 + c0;
+                    a1 = es1 * dMean + eo1 + c1;
+                    a2 = es2 * dMean + eo2 + c2;
                 }
                 else
                 {
