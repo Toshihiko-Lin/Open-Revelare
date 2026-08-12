@@ -1,416 +1,377 @@
 # OpenRevelare — User Guide
 
-This document walks through the whole of OpenRevelare, from importing files to exporting finished
-pictures. For the algorithms behind it, see [THEORY.en.md](THEORY.en.md).
+The whole route, from copying the negative to exporting the positive. For the algorithms, see
+"Theory".
+
+One sentence on where this program stands: **the restoration is computed, the look is adjusted.**
+The first lives in the "Roll calibration" panel (Stage 1), the second in "Frame edit" (Stage 2), and
+neither contaminates the other.
 
 ---
 
-## Contents
+## 1. The three input routes
 
-- [OpenRevelare — User Guide](#openrevelare--user-guide)
-  - [Contents](#contents)
-  - [Before you start](#before-you-start)
-  - [Importing files](#importing-files)
-  - [FilmBase calibration](#filmbase-calibration)
-    - [1. Sample the film base (T\_base)](#1-sample-the-film-base-t_base)
-    - [2. Sample the shadow white balance (wb\_offset, optional)](#2-sample-the-shadow-white-balance-wb_offset-optional)
-    - [3. Sample the highlight white balance (wb\_high, optional)](#3-sample-the-highlight-white-balance-wb_high-optional)
-    - [4. Sample D\_max](#4-sample-d_max)
-    - [5. Sample the exposure offset (scan\_exposure\_ev, optional)](#5-sample-the-exposure-offset-scan_exposure_ev-optional)
-    - [6. Adjust grade (optional)](#6-adjust-grade-optional)
-  - [Preview and crop](#preview-and-crop)
-  - [SceneBase adjustments](#scenebase-adjustments)
-  - [Working on a whole roll](#working-on-a-whole-roll)
-  - [Export](#export)
-  - [Path A: the narrowband light-source workflow](#path-a-the-narrowband-light-source-workflow)
-  - [Troubleshooting](#troubleshooting)
+Settle which one you are on first; everything after this follows from it.
+
+| Route | Input | Light | Extra preparation |
+|---|---|---|---|
+| **Path B** | Camera RAW | Broad-spectrum (white panel) | None. Most people are here |
+| **Path A** | Camera RAW | Narrow-band (RGB LEDs) | Three calibration shots, see section 9 |
+| **TIFF** | Scanner TIFF | — | Keep the ICC profile, 16-bit if you can |
+
+Path A can measure the CFA's channel crosstalk and separate it out, at the cost of three extra
+shots. Path B and TIFF are identical as far as calibration goes.
 
 ---
 
-## Before you start
+## 2. Before you copy or scan
 
-**Copy setup (camera RAW)**
+How accurate the calibration can get is decided at capture. Time saved here is paid back with
+interest later.
 
-- Set the camera to **UniWB** — manual white balance with equal gain on every channel. The software
-  switches the camera's white balance off when it decodes, so a colour cast in the camera's own
-  preview is expected and does not affect the result.
-- Light the whole negative evenly with a light box or panel, and make sure the film-base areas
-  (sprocket holes, the blank edge) are well exposed — they are what T_base is sampled from later.
+### Copying with a camera (Path A / Path B)
 
-**Strongly recommended: shoot a frame that includes the film leader**
+**What to set white balance to**
 
-Every roll starts with a *leader*: a fully exposed area (pitch black, the densest part of the
-negative) sitting right beside an unexposed film-base area (the orange backing), with a clean
-boundary between them. It is the single place where every reference area the calibration needs
-appears at once:
+Anything. The decoder turns camera white balance off and works from a UniWB baseline, so whatever
+the camera is set to makes no difference to the result.
 
-- **T_base sample**: box the orange film-base area (the unexposed part / the darkest part after
-  inversion)
-- **D_max sample**: box the fully exposed pure-black area (the densest part / the brightest part
-  after inversion)
-- **wb_offset sample** (shadow-end white balance): that same pure-black base area also serves as
-  the shadow reference — an unexposed area should in theory be at equal D_min in all three
-  channels, which makes it a natural shadow end point
-- **wb_high sample** (highlight-end white balance): the leader itself (fully exposed, all three
-  channels at D_max) is the natural highlight reference — the leader is where the positive's
-  "white point" lives
+That said, **it is worth balancing against the copying panel once**: the camera's own preview and
+histogram then look normal, which makes judging exposure far more comfortable. This is purely for
+your own convenience.
 
-Ideally the T_base and wb_high samples come from the same film-base selection, and the D_max and
-wb_offset samples from the same pure-black selection — meaning one frame of the leader calibrates
-all four parameters, with no switching between frames. The remaining picture frames only need
-enough sprocket/blank edge left in them for a T_base sample.
+**Exposure**
 
-**Scanner TIFF**
+Expose so the **bare panel (an empty area with no film over it) just reaches the right-hand end of
+the histogram**. That puts everything the negative carries inside the sensor's usable range —
+neither wasting dynamic range nor pushing the dense end down into noise.
 
-When TIFF files are imported, the software **probes** the first file's metadata and shows it above
-the "scanner output encoding" box in the import dialog, for you to confirm: dimensions, bit depth,
-whether an ICC profile is embedded (with its name, and whether it carries a device primaries matrix
-— "+matrix"), and the inferred gamma type with its fitted value (e.g. `γ≈1.56`). The encoding
-option is **pre-selected** from that probe, so there is usually nothing to work out by hand:
+**What is what on a negative**
 
-- **Linear**: the scanner already put out linear light; no gamma conversion is done.
-- **sRGB gamma**: standard sRGB encoding; the inverse sRGB curve is applied to get back to linear.
-- **Auto-detect**: chosen automatically when the file carries an ICC with a non-standard device
-  gamma (the device profiles of professional scanners such as Flextight or Noritsu). The software
-  inverts the gamma per channel from the file's **own TRC curves**, then applies the ICC device
-  primaries matrix (rXYZ/gXYZ/bXYZ) to convert scanner device RGB into standard linear sRGB. Those
-  two steps together are what fixes the "brightness-dependent colour cast" caused by a scanner
-  whose three channels do not share one gamma. Without an ICC, or with the matrix tags missing,
-  each step falls back on its own.
+This decides where you aim later, so it is worth being explicit:
 
-The probe only pre-selects; you can override it. In roll mode the first file is probed and the
-result applied to the whole roll (same scanner, same settings, same parameters).
+| Area of the film | How it looks on the negative | On the positive |
+|---|---|---|
+| **Unexposed** (film base, gaps between sprockets) | **Semi-transparent** (the orange mask) | Black |
+| **Fully exposed** (the exposed patch on the leader) | **Dark / opaque** | White |
 
-**Colour management on the scan path**
+So: **shadow WB corresponds to the film base** (the semi-transparent part of the negative), and
+**highlight WB to the dark area** (the opaque part). That runs against intuition — take care not to
+swap them when sampling.
 
-Loading a scan reads its embedded ICC profile: first the profile's own three TRC curves linearise
-each channel, then the rXYZ/gXYZ/bXYZ matrix maps device RGB into linear sRGB. **The scan path is
-therefore colour-managed by construction.**
+**Strongly recommended: shoot one frame of the leader**
 
-Camera RAW gets no equivalent transform, and that is not a gap — the relative sensitivity
-differences between the camera's three channels are normalised out by the film base (dividing by
-T_base), and a base measured on the actual roll fits your real copying conditions better than a
-looked-up camera matrix would: the light source, the lens and the copy geometry are all normalised
-along with it.
+The leader puts a fully-exposed patch and an unexposed base patch side by side in one frame. A
+single leader frame carries every reference the calibration needs:
 
-When a file has no ICC, or the profile is LUT-only with no matrix tags, the corresponding step is
-skipped and the scanner's channel differences go uncorrected; pull back any resulting cast with
-SceneBase's saturation and white balance.
+| Sample | Where on the leader |
+|---|---|
+| Film base T_base | The semi-transparent orange base |
+| D_max | The dark, fully-exposed patch |
+| Shadow WB offset | The base area (same as T_base) |
+| Highlight WB high | The dark area (same as D_max) |
 
-> Note: with an 8-bit TIFF, the log-density arithmetic behind the inversion has only a limited
-> number of levels to work with in the shadows, and slight banding is possible. Export 16-bit from
-> the original scan where you can.
+**Also**
+
+- Focus on the emulsion, and stop down to the lens's sweet spot (usually f/5.6–f/8).
+- Shoot the whole roll on **one set of settings** — light, exposure and camera position all fixed. A
+  roll shares one set of Stage 1 parameters, and that is the premise.
+- Keep the film and lens as clean as you can. Dust degrades the accuracy of the auto analysis (below).
+
+### Scanner TIFF
+
+- Export **16-bit** if you can. 8-bit leaves the log-density maths with very few levels in the
+  shadows, which can band.
+- Turn off every automatic colour / contrast / inversion feature in the scanner software. What is
+  wanted is the rawest negative data available.
+- Keep the ICC profile. A scan with a full profile (including rXYZ/gXYZ/bXYZ) is carried correctly
+  into the working space, which makes that route colour-managed.
 
 ---
 
-## Importing files
+## 3. Importing
 
-Click "New project" on the toolbar, or File → New in the menu, to open the import dialog.
+**File → New roll…** (Ctrl+N), or the first toolbar button.
 
-**Choosing files**
+**Pick the files.** Drag them in or click "Add files…". RAW covers ARW / NEF / CR2 / CR3 / DNG /
+RAF / RW2 / ORF / PEF and others; TIFF covers .tif / .tiff. One roll cannot mix RAW and TIFF.
+Selecting several files puts you in roll mode.
 
-Drag files in, or click "Add files…". Supported formats:
-- RAW: ARW, NEF, CR2/CR3, DNG, RAF, RW2, ORF, PEF and other common formats
-- TIFF: .tif / .tiff from a scanner
+**Copying light source (camera RAW only)**: choose "Broad-spectrum (white light) — Path B" or
+"Narrow-band (RGB) — Path A". The latter also wants a calibration folder.
 
-One project can only hold one kind of file (RAW and TIFF cannot be mixed). Importing several files
-puts the project into **roll mode**, where the FilmBase parameters are shared.
+**Scanner output encoding (TIFF only)**
 
-**Light source (RAW only)**
+The software probes the first file and shows what it found — dimensions, bit depth, whether an ICC
+is embedded (and whether it carries a device-primaries matrix), the inferred gamma type and its
+fitted value (e.g. `γ≈1.56`) — then **pre-selects** accordingly. Usually you can leave it alone.
 
-- **Broadband source (white light)**: for copying on a tungsten or daylight light box. Goes
-  straight into the density pipeline, with no calibration shots. Recommended for most users.
-- **Narrowband source (RGB mix)**: for a monochromatic RGB LED light box; a folder
-  holding the three calibration shots must be supplied as well. See
-  "[Path A: the narrowband light-source workflow](#path-a-the-narrowband-light-source-workflow)".
+> With no ICC the samples are **taken as already linear**, with no inverse applied and no warning.
+> If your file is in fact gamma-encoded but carries no profile, set the encoding here by hand.
 
-**After the import: the sprocket-mask confirmation window**
+**Auto-analyse the roll and remove the mask**
 
-Once a RAW roll has been imported, the **sprocket mask** confirmation window opens by itself. The
-software picks the frame with the brightest film base in the whole roll — the worst case — and
-shows it there.
+Ticked by default. After import the software analyses the whole roll and measures the film base,
+white balance, D_max and the per-channel density endpoints.
 
-**The goal**: mark the **sprocket holes and the copy light source** (the most transmissive areas)
-with the green overlay, so they cannot contaminate the film-base calibration that follows, and so
-the sprockets are taken out.
+> **The auto analysis is not 100% accurate — treat it as a starting point, not a finish line.**
+> Common things that throw it off:
+>
+> - **An under-exposed leader** — the analysis assumes the leader's exposed patch really is fully
+>   exposed; if it is not, D_max is underestimated
+> - **A light blocker** or anything else in shot that should not be part of the statistics
+> - **Too much dust** — this hits the density endpoints in particular
+> - **Lens vignetting** — darkened edges contaminate the base and D_max statistics
+>
+> Vignetting can be partly corrected first with the **LCC flat field** under lens correction (shoot
+> an even light source with no film in the way), then re-run the analysis.
+>
+> Either way, check the result by hand afterwards and re-sample where needed.
 
-**What to do**: drag the threshold slider to move the dividing line; the green area refreshes as
-you go:
-- **Green SHOULD cover**: the sprocket holes and the bare light panel (the blown-out areas)
-- **Green should NOT cover**: the orange film base, or anything holding picture content
+Unticking it means **nothing is measured** — not even the film base. The roll opens on pipeline
+defaults and every value is yours to set.
 
-**How the threshold is found**: the software computes a starting threshold with a **bright-end
-valley detection** — it finds the deepest valley between the light-panel peak (the brightest area)
-and the film-base peak (the next brightest) and puts the boundary there, scanning from the bright
-end so that secondary valleys caused by the pure-black shadow end are avoided. That automatic value
-is usually close already; fine-tune it against what you actually see.
+**Strip splitting** (scans only; appears when one file holds several frames)
 
-**Special cases**:
-- If the margin between the light panel and the bright end of the film base is narrow (< 0.08), the
-  threshold needs careful adjustment. The reference figures (panel brightness, film-base bright end,
-  margin) are shown at the foot of the window.
-- If this roll has **no sprockets and no bare light source** (120 medium format, say, where the
-  picture covers the film completely), choose "**No sprockets on this roll (skip)**".
-- Closing the window or pressing Esc is the same as skipping; the sprocket mask stays off.
+Scanners routinely put a whole strip of negative into one image. The software detects how many
+frames each scan holds and opens a "Strip splitting" window to confirm:
 
-Click "**Confirm and continue**" when it looks right; that threshold is then applied across the
-whole roll.
+- **Drag the dividers** to adjust the boundaries. What you edit are **dividers**, not four-cornered
+  boxes: frames on a strip share their edges and are evenly pitched, so one number per boundary
+  describes the whole strip and makes overlaps and gaps unrepresentable.
+- **Double-click** to add or remove a divider. When detection is wrong it is normally wrong by one
+  divider — a blown highlight inside the picture reads like bare film base and one frame is reported
+  as two — so it costs one double-click.
+- **Frame count** can be typed directly.
+- **Do not split this one**: import this strip whole.
+- **Do not split any**: import every scan whole.
+- **Crop margin**: how much slack to leave around each frame. This is not the final crop — you can
+  still adjust it under "Geometry / cropping" once the roll is open.
 
-**Automatic film-base detection**: once the sprocket mask is confirmed, the software runs a
-film-base detection over the whole roll (using the sprocket threshold to exclude light-panel
-pixels) and writes the result into every frame's initial T_base. The result appears in the status
-bar and is **a starting point only — box the film base by hand and calibrate again** for an
-accurate one. Automatic detection can be turned off under Settings → Preferences.
+Splitting completes during import, so the main window is handed a finished frame list. A failed
+detection does not block the import: it falls back to one frame per file and says so in the status
+bar.
 
----
+**Sprocket mask confirmation** (pops up after a RAW import)
 
-## FilmBase calibration
+The software picks the frame with the brightest film base in the roll as a preview and marks the
+sprocket holes and light panel with a **red** overlay.
 
-The FilmBase panel holds every physical-reconstruction parameter, and corresponds to the first
-stage of the pipeline. Each parameter has its own "sample" button — click it, drag a rectangle on
-the preview, and the parameter is computed from that area.
+- Red **should** cover: sprocket holes, blown-out panel areas
+- Red should **not** cover: the orange film base, or anything with picture in it
 
-> The order matters. Work through the steps below in sequence.
+The threshold comes from a bright-end valley detection and is usually close enough. A narrow gap
+between panel and base (< 0.08) needs care; reference numbers are shown at the foot of the window.
 
-### 1. Sample the film base (T_base)
-
-Box an **unexposed film-base area** on the preview — usually the blank between sprocket holes, or
-the orange backing along the edge of the picture. The selection must not include any exposed
-picture content.
-
-The film-base sample is the most important step of the lot. It removes the orange mask and the
-D_min offset at once, and it is the physical reference every later density calculation rests on.
-
-### 2. Sample the shadow white balance (wb_offset, optional)
-
-Box a dark area that ought to be neutral grey or black (a fully exposed pure-black area, black
-fabric, deep shadow). The three channels' densities are lined up, taking the colour cast off the
-shadow end. **If you calibrated from the leader, the fully exposed area (pure black) is the ideal
-selection — it can be taken from the ideal darkest D_min area.**
-
-**Suggested order: sample the shadow WB first, then the highlight WB**, so the two ends do not
-interfere with each other.
-
-### 3. Sample the highlight white balance (wb_high, optional)
-
-Box a highlight that ought to be neutral white (white paper, a white wall, a grey card). The three
-channels' densities are lined up, taking the colour cast off the highlight end. **If you calibrated
-from the leader, the fully exposed area is the ideal selection — it can be taken from the D_max
-fully exposed area, where in the ideal case all three channels sit at D_max, making it a natural
-highlight reference.**
-
-### 4. Sample D_max
-
-Box the **darkest area** of the picture — usually an overexposed masked-off region, the outside of
-the sprockets, or the deepest shadow in the frame. D_max sets where the white point lands after
-inversion.
-
-In roll mode the software takes the maximum across every frame in the roll, so the white point is
-consistent throughout.
-
-### 5. Sample the exposure offset (scan_exposure_ev, optional)
-
-**What it is for**: pushing the film base exactly onto density = 0, so that the base areas come out
-pure black in the positive.
-
-The T_base sample removes the film base's *colour* (the orange offset), but it does not guarantee
-that the base's absolute brightness lands precisely on the density zero point. If the light box
-fluctuated during the copy, or the edge of the lens's focal field falls off slightly, the base area
-can be left with a residual density error, and the base then reads grey rather than black in the
-positive.
-
-What to do: box the **same film-base area** you used for T_base. The software measures its residual
-density relative to the current T_base, works out the overall EV compensation and writes it in. A
-positive value pushes the overall density up (compensating for a base that reads bright); a
-negative value pulls it down. It is usually close to 0; reach for this step when the base area in
-the positive still reads grey.
-
-### 6. Adjust grade (optional)
-
-- **grade**: controls the contrast of the positive, by analogy with paper grade in a traditional
-  darkroom. The default of 1.65 suits standard C-41 consumer colour negative; ECN-2 motion-picture
-  negative may want it lowered to 1.4–1.6.
-
-grade sets the chroma richness too — chroma follows luminance proportionally. To adjust richness on
-its own, use the SceneBase **saturation** slider.
-
-> Earlier versions carried a `chroma_grade` parameter (3.05 by default) to compensate for the
-> chroma shortfall caused by missing colour management; with that gap filled, the parameter has
-> been removed.
+If this roll has no sprockets and no panel showing (120 with full-frame coverage, say), click
+"**No sprockets on this roll (skip)**". Closing the window or pressing Esc skips it too.
 
 ---
 
-## Preview and crop
+## 4. Roll calibration (Stage 1)
 
-The preview switches to the positive as soon as the FilmBase calibration is done.
+The "**Roll calibration**" tab on the right. Every parameter here is an **objective physical
+property** of this roll of film.
 
-**Zoom and pan**: the mouse wheel zooms; drag to pan.
+> **Note: every control acts on the CURRENT frame only.** Once it is right, push it out with
+> "**Apply calibration to the whole roll**" — there is no "select on a grid of the whole roll".
 
-**Crop**: pick a format preset in the crop panel (135 full frame, half frame, XPan, 120 645/6×6 and
-so on), or drag the crop box by hand. Cropping is non-destructive and can be reset at any time.
+### 4.1 Film base and mask removal (T_base / D_max)
 
-**Rotate and flip**: the geometry panel handles horizontal/vertical flips and rotation by an
-arbitrary angle (for correcting a slight tilt in the copy setup).
+**Sample the film base** — click the button, then drag a rectangle over the **semi-transparent
+orange base**: between the sprocket holes, or the margin. It must contain **no picture at all**.
 
-**Sprocket mask**: once enabled, the software finds the sprocket areas and covers them in white, so
-they do not turn up in the exported file. The threshold parameter controls how sensitive the
-detection is, which helps with damaged or irregular sprockets.
+This is the most important step: it removes the orange mask and the D_min offset at once, and every
+density that follows is measured against it.
 
----
+> Hard to see? Press **N** for a temporary negative view (gamma-encoded, so the base is legible),
+> sample, then press N again.
 
-## SceneBase adjustments
+**Sample D_max** — select the **dark, fully-exposed area**, or the darkest part of the picture.
+There is also "**Auto-detect D_max**".
 
-The SceneBase panel holds the aesthetic adjustments. Every one of them previews live, and none of
-them touches FilmBase's physical reconstruction.
+> **D_max is also a parameter you can set by eye.** It decides where white lands after inversion, so
+> it drives the overall brightness of the picture: raise it and the picture darkens, lower it and it
+> brightens. It **usually does not affect colour** — the ratio between the three channels' endpoints
+> is unchanged, only the overall mapping range moves. For a brighter or darker result this is a more
+> "physical" control than exposure.
 
-| Parameter | What it does |
-|-----------|--------------|
-| White balance (temperature/tint) | White balance in the positive domain, for fine colour-temperature trims |
-| Exposure EV | Linear brightness scaling, for overall exposure |
-| Black / white point | Level stretching, mapped linearly |
-| Contrast | An S-curve that introduces no hue shift |
-| Saturation | Chroma scaling in the linear domain, not a rotation of the hue wheel |
+**Offset (scan_ev)** — a slider in the same panel with a sampling button beside it: select an area
+that should be pure film base and the zero point is corrected automatically. T_base removes the
+base's **colour** but does not guarantee its **absolute level**; a fluctuating panel or edge falloff
+can leave the base grey rather than black. Usually close to 0.
 
-**Output intent** (this changes what gets exported):
-- **NONE (linear)**: skips Stage 2 and writes out FilmBase's linear positive. Suited to taking the
-  picture on into DaVinci Resolve, Nuke or another professional grading tool.
-- **BASIC (sRGB gamma)**: runs the full Stage 2 and writes out a gamma-encoded standard image,
-  ready to share or print as it is.
+### 4.2 White balance
 
----
+The two ends are independent; the order does not matter.
 
-## Working on a whole roll
+**Shadow WB offset (additive)** — one manual button, "Select shadow WB": select the **base area**
+(the semi-transparent part of the negative).
 
-Importing several files puts the software into roll mode. The film strip runs down the left of the
-window; click a thumbnail to switch to that frame.
+> **Usually you do not need to touch this.** Film-base normalisation already handles the shadow-end
+> cast; this is here for when the **shadows are visibly off-colour**. If nothing looks wrong, leave
+> it alone.
 
-**Frame order**: an import is sorted by file name, with digit runs compared as numbers — so `DSC_9`
-comes before `DSC_10`, rather than the frames landing in whatever order they finished decoding. To
-arrange them any other way, drag a thumbnail in the film strip; a highlighted line shows where it
-would land, and releasing drops it there. A virtual copy always travels with the frame it was made
-from. Right-click → "Sort by file name" puts the whole roll back into name order. The order is
-saved with the project and sets the layout of the contact sheet.
+**Highlight WB high (multiplicative)** — three buttons, one manual and two automatic:
 
-**Applying a parameter to the whole roll**: in the FilmBase or SceneBase panel, every parameter has
-an "apply to the whole roll" button beside it. Clicking it copies the current frame's value for
-that parameter to every frame in the roll.
+| Button | Type | Use |
+|---|---|---|
+| **Select highlight** | Manual | Select the **dark area** of the negative (the positive's highlights) |
+| **Brightest = white** | Automatic | Treats the brightest point as pure white |
+| **Deep white balance (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
 
-**Viewing the whole roll (contact-sheet mode)**: click "View the whole roll" at the top of the film
-strip and the main preview becomes a grid of the entire roll. In that mode:
+For deep white balance, **crop the sprockets and film edge away first** or they will skew it.
 
-- **Sample across the whole roll**: T_base, D_max, wb and the rest can be boxed directly on the
-  contact sheet — the result is broadcast to every frame automatically, which is the fastest route
-  to one consistent calibration for the roll.
-- **Judge the overall look**: every frame renders live with the current parameters, so how
-  consistent the roll is can be seen at a glance.
-- Clicking any thumbnail leaves contact-sheet mode and jumps to that frame.
+### 4.3 Density endpoints (read-only)
 
-A suggested order for calibrating a roll:
-1. Enter contact-sheet mode and box a film-base area on the grid to sample T_base (broadcast to the
-   roll automatically).
-2. Box the darkest area on the same grid to sample D_max.
-3. Leave contact-sheet mode and trim the frames that need it individually (badly overexposed or
-   colour-cast ones).
-4. After the SceneBase adjustments, decide whether to apply them to the whole roll (usually they
-   stay per frame).
+**There is nothing to operate here.** The inversion is decided by its two ends: the film base is
+black, D-max is white, each channel is normalised on its own, and **the slope is what those two ends
+leave behind** — not an adjustable parameter.
 
-**Virtual copies**: to keep more than one set of SceneBase settings for a single frame, right-click
-its thumbnail and make a virtual copy. A virtual copy shares the original's FilmBase parameters and
-has its own SceneBase.
+The panel shows `D-max per channel = a, b, c`. The spread between those three is how large this
+roll's highlight cast actually is, and is worth a glance. If it says no endpoints have been
+measured, sample D-max once or re-run the roll analysis.
 
----
+> To change richness or contrast, go to **saturation** and **contrast** in Frame edit — that is the
+> aesthetic layer.
 
-## Export
+### 4.4 Lens correction (manual, optional)
 
-Click "Export" (or File → Export in the menu).
+Distortion, vignetting, **LCC flat field**. Besides fixing the optical faults themselves, the flat
+field improves the accuracy of the auto analysis — vignetting distorts the base and D_max statistics
+at the edges. The flat-field shot is an even light source photographed with no film in the way.
 
-**Format**:
-- **TIFF (16-bit)**: the highest quality, for grading afterwards or for archiving.
-- **JPEG (8-bit)**: smaller, for sharing and publishing on the web.
+### 4.5 Sprocket mask (optional)
 
-**Colour space**: sRGB (the default, universal) / Adobe RGB / Display P3 / Kodak Endura Premier
-(darkroom-print look) / Kodak 2383 (print-film look). The embedded ICC profile matches what was
-actually written. Colours the destination gamut cannot hold are desaturated toward the neutral of
-their own luminance — preserving hue and brightness — rather than clipped per channel.
-
-**Resolution**: unlimited.
-
-**Output folder**: it can be named at import time, or picked when you export. A roll export writes
-every frame into one folder, named automatically after the original files.
+Marks over-bright areas (absolute luminance > threshold) as masked and fills them white after
+inversion. "Show mask" lets you check the coverage (a red overlay).
 
 ---
 
-## Path A: the narrowband light-source workflow
+## 5. Geometry and cropping
 
-Path A is for copying negatives on a monochromatic RGB LED light box, where R, G and B are driven
-separately.
-
-**Shooting the calibration frames**
-
-With no film in place, light the bare box with the R lamp, the G lamp and the B lamp in turn and
-photograph it, giving three calibration shots. **They need no particular file names**; just put
-them in one folder and the software works out which is which by analysing the content (argmax).
-
-**Dimming (either approach works)**:
-- **White-light mode**: adjust the R/G/B intensities until the mixed light is pure white
-- **Neutral-base mode**: adjust the R/G/B intensities until the light through the film base is
-  neutral, cancelling the mask physically
-
-**Choosing Path A at import**
-
-Pick "Narrowband source (RGB mix)" among the light-source options in the import dialog, then choose
-the folder holding the calibration shots. The software identifies the three R/G/B frames and opens
-a confirmation dialog showing what it found and each frame's ROI mean. If it got one wrong, correct
-the channels from the drop-downs before confirming.
-
-**The calibration itself is the same as for white light**
-
-Once imported, the FilmBase calibration is exactly as it is on Path B: sample the film base, the
-white balance and D_max in turn. The decouple matrix was computed at import, and α (the decoupling
-strength) is determined adaptively by the software from samples across the roll — there is nothing
-to set by hand.
-
+- **Crop**: pick a format preset (135 full frame, half frame, XPan, 645, 6×6, 6×7, 6×9, 6×12 …) or
+  drag freely. Non-destructive, clearable at any time.
+- **Rotate and flip**: 90° either way, horizontal and vertical flips.
+- **Straighten**: drag a line along something that **should be horizontal** (a horizon) or
+  **should be vertical** (a door frame, a flagpole) and let go — it levels to it.
 
 ---
 
-## Troubleshooting
+## 6. Frame edit (Stage 2)
 
-**The positive has a colour cast / looks green**
+The "**Frame edit**" tab on the right. The aesthetic layer, **per frame**, and it does not touch
+Stage 1's physical restoration.
 
-The commonest cause is a T_base sample that caught some exposed content, or one taken over an area
-that is not uniform enough (a film-base edge with slight exposure on it). Sample the film base
-again, keeping the selection on completely unexposed orange backing.
+| Panel | What is in it |
+|---|---|
+| Colour cast (white balance) | Temperature / tint; or select a neutral area and solve with "Grey point" |
+| Tone | Black · shadows · highlights · white; with "Auto levels (0.1% / 99.9%)" |
+| — | Exposure, contrast, saturation |
+| Tone curve | M / R / G / B curves, with an optional "Preserve hue on the white curve" |
 
-**Highlights read grey; there is no pure white**
+The **output space** is chosen in the toolbar at the foot of the main window (sRGB / Display P3 /
+Adobe RGB). It is the target of step 4 in the Cineon chain: the inversion is converted into it,
+frame editing happens in it, and the export is written in it — **what you see is what you get**. The
+working space is ACEScg, so every choice here is a real gamut conversion. It is a roll-level
+parameter and is saved with the project. When in doubt, use sRGB.
 
-The D_max sample was not taken from a dark enough area, so the white point sits too low. Sample the
-darkest area of the picture again, or lower D_max a little.
+**Press K** for a before/after (the picture without Stage 2).
 
-**Colour comes out weak (ECN-2 motion-picture film)**
+---
 
-ECN-2's chroma characteristics differ from C-41's. The pipeline has no compensation parameter for
-this — each stock's difference comes through on its own, from its own density structure under the
-same grade. To adjust richness, use the SceneBase saturation slider; for a theatrical look, set
-the export colour space to Kodak 2383 (print film), which is the gamut a motion-picture negative
-actually targets.
+## 7. Working on the whole roll
 
-**The export looks weaker than the preview**
+The film strip is on the left; click a thumbnail to switch frames.
 
-The preview uses an approximate fast path and the export uses high-precision floating point; a
-slight difference between them is normal. If it is pronounced, check that the output intent is set
-the way you meant (BASIC / NONE).
+**Every panel control acts on the current frame only.** To push it out to others:
 
-**The corners are dark, or tinted**
+- **Apply calibration to the whole roll** / **Apply scene to the whole roll** — the buttons at the
+  foot of the panel
+- **Apply calibration to ticked frames** / **Apply scene to ticked frames** — tick the targets in
+  the film strip first
+- **Copy / paste** — the Edit menu or the film strip's right-click menu; which of the two gets
+  copied follows whichever panel you are in
+- **Choose what to sync…** — controls which fields all of the above carry
 
-Vignetting and colour non-uniformity from the copy lens. The "Lens correction (manual)" panel
-offers two routes: the vignette slider compensates the brightness falloff with a formula; if the
-corners also carry a colour cast, use the LCC flat field instead — shoot one blank light frame and
-load it, and the per-pixel brightness AND colour non-uniformity of this lens and stand are divided
-out, which is more accurate than any formula.
+**Frame order**: an import is sorted by file name with digit runs compared as numbers, so `DSC_9`
+comes before `DSC_10`. Drag a thumbnail to reorder by hand — a highlighted line shows where it will
+land, and a virtual copy travels with its parent. Right-click → "Sort by file name" puts it back.
+The order is saved with the project and sets the contact sheet's layout.
 
-**The frame edges bow**
+**Virtual copies**: to keep several Stage 2 treatments of one frame, right-click the thumbnail. A
+virtual copy inherits Stage 1 and keeps its own Stage 2.
 
-Barrel or pincushion distortion from the copy lens. Adjust the distortion slider in the "Lens
-correction (manual)" panel — negative corrects barrel, positive pincushion. The macro primes
-normally used for copying distort very little, and the value is fixed: measure once, type it in,
-and it holds for the whole roll.
+**Library (roll wall)**: press **G** to switch between library and editing. "Scan a folder into the
+library…" re-registers `.ncproj` files that have been scattered around.
+
+---
+
+## 8. Exporting
+
+**File → Export this frame…** (Ctrl+E) / **Export roll…** / **Export contact sheet…**
+
+**Format**: 16-bit TIFF (best quality, for further grading or archiving) or JPEG (smaller, for
+sharing).
+
+**Colour space** is not in the export dialog — it is the "output space" in the main window's footer,
+as in section 6. The export writes out the pixels you are looking at and attaches the matching ICC;
+colours the target gamut cannot hold are pulled toward the luminance-matched neutral axis (hue and
+luminance preserved) rather than clipped per channel.
+
+**Export as scene-linear ACEScg**: skips step 4 and frame editing entirely and writes the
+scene-linear data straight out, for DaVinci, Nuke and the like. These files carry no ICC and will
+look dark and flat in a viewer that does no colour management — that is expected.
+
+**Contact sheet**: tiles the whole roll into one grid. Roll info on the right (camera / film / ISO /
+roll no. / lab / process / date / location / notes) is burned onto the foot of the sheet as one
+identification strip. Never written to EXIF.
+
+> **Want the screen to be accurate? Calibrate the display.** The preview does no display colour
+> management — the bitmap goes to the system as-is and the panel lights up in its own primaries. The
+> right fix is a colorimeter: measure the screen, generate an ICC and register it as the system
+> display profile, after which every application benefits. Then set the output space to what you are
+> actually delivering (sRGB for the web, Adobe RGB for some print work).
+
+---
+
+## 9. Path A: narrow-band light (RGB panel)
+
+**Shoot the calibration frames**: with no film in the way, light the empty panel with the R lamp,
+the G lamp and the B lamp in turn — three shots. **No particular file names are needed**; put them
+in one folder and the software identifies which is which from their content.
+
+Both dimming approaches work:
+
+- **White-light mode**: set R/G/B so the mix is white
+- **Neutral-base mode**: set R/G/B so the film base transmits neutral (cancelling the mask
+  physically)
+
+**Import**: choose "Narrow-band (RGB)" as the light source and point at the calibration folder. The
+software identifies the three and shows a confirmation with each shot's ROI means; if it got one
+wrong, correct it per channel from the dropdown.
+
+**Calibration then proceeds exactly as for white light**: film base, white balance, D_max. The
+decouple matrix is computed at import, and the decouple strength α is determined adaptively from
+roll-wide samples — nothing to set by hand.
+
+---
+
+## 10. Keyboard
+
+| Key | Action |
+|---|---|
+| Ctrl+N / Ctrl+O | New roll / add images |
+| Ctrl+E | Export this frame |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| N | Temporary negative view (for aiming at the base) |
+| K | Before/after (without Stage 2) |
+| F / Ctrl+1 | Fit to window / actual pixels 100% |
+| G / D | Library / editing |
+| Esc | Cancel the current sampling |
+| Ctrl+Shift+T | Light/dark theme |
+| Ctrl+, | Preferences |
+
+Sampling: light up a sampling button (the dashed-rectangle icon), then drag a box on the preview;
+Esc cancels. Double-click a slider's label to reset it. Drag with the left button to pan once
+zoomed; the wheel zooms.
