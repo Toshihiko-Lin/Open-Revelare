@@ -229,14 +229,6 @@ public partial class MainViewModel : ViewModelBase
     private bool _paramsLoaded;
 
     /// <summary>
-    /// The current frame's chroma_grade. No control binds to it — it is set per input type at
-    /// import (1.0 for scans, 3.05 for RAW; a split whose stated justification did not survive
-    /// scrutiny, kept for project compatibility) and thereafter carried:
-    /// <see cref="LoadParams"/> reads it off the frame and BuildParams writes it back, so a
-    /// render of a scan never silently reverts to the RAW-calibrated default.
-    /// </summary>
-
-    /// <summary>
     /// The frame's own rect within its source file, or null when the frame owns the whole file.
     /// Split frames only — on an ordinary frame the file IS the frame.
     ///
@@ -2059,12 +2051,6 @@ public partial class MainViewModel : ViewModelBase
         // Must match BuildParams: the net judges a RENDERED positive, so the render it judges
         // has to be the one the user is looking at.
         DMaxPerChannel = DMaxPerChannel,
-        // The frame's own value, NOT the 3.05 default — the worker's nn_cal is a `replace()` on the
-        // frame's calibration that resets Stage 2 only, so chroma_grade survives it. It must match
-        // BuildParams for the same reason DecoupleMatrix does: the net judges a rendered positive
-        // and its gains are folded into wb_high, which then feeds a pipeline rendering at THIS
-        // value. On a scan (1.0) a hard-coded 3.05 would solve wb_high in a colour basis the
-        // renderer never produces.
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
@@ -3287,8 +3273,6 @@ public partial class MainViewModel : ViewModelBase
         // legacy fallback in DensityEndpoints.For until the auto chain or a D-max sample supplies
         // one, which is what moves such a roll onto the endpoint path.
         DMaxPerChannel = p.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null;
-        // Not a control — carried through so BuildParams can write back the per-input value
-        // chosen at import (1.0 for scans, 3.05 for RAW) instead of the dataclass default.
         // Stage 2
         var (temp, tint, _) = WbMath.GainsToTempTint(p.WbGains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
