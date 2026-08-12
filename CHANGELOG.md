@@ -2,83 +2,60 @@
 
 ## v1.2.2（2026-08-11）
 
-收尾 1.2.1 没修完的裁切问题，连带把**转过向**之后裁切与片基采样的错位一并修
-掉——同一类问题的根子。外加一处 TIFF 色彩管理的修正。
+裁切与片基采样修好了，转过向的照片也不再出错。另有一处 TIFF 色彩管理的修正。
 
 **修复**
 
-- **带 ICC 配置文件的 TIFF，色度被放大**。这类文件在加载时被转换到 sRGB 原色，但管线
-  的工作空间是 ACEScg；第 4 步随后又按 ACEScg → sRGB 转出去，等于逆了一个从未施加过的
-  变换。结果是色域被往外撑：红、蓝饱和度约 ×1.13，绿约 ×1.4，中性灰还会偏色。现在 ICC
-  矩阵直接落到工作空间。RAW 不受影响；不带配置文件的 TIFF 也照旧原样通过。
+- **带 ICC 配置文件的 TIFF，色度被放大**。红、蓝饱和度约 ×1.13，绿约 ×1.4，中性灰
+  还会偏色。RAW 不受影响；不带配置文件的 TIFF 也照旧原样通过。
 
   **注意**：已经按旧行为调过的 TIFF 卷，这次改动后画面会变，片基（t_base）需要重新取样。
-- **裁切后画面显示不正确**。裁切框在屏幕上是对的，应用后比例会变、位置也会漂：
-  macOS 上是框与指针不在同一个盒子里（选 1:1 预设尤其明显），转过向的帧上则是
-  裁切矩形被存成了原始轴向。后者本该存在「已转向」的坐标系里——管线先转向后裁切，
-  旋转按钮也按这个前提让裁切跟着画面走。往返自洽掩盖了它：重新打开裁切工具时又
-  转了回去，真正吃亏的是直接读这个矩形的渲染管线。
+- **裁切后画面显示不正确**。裁切框在屏幕上是对的，应用后比例会变、位置也会漂——
+  macOS 上尤其明显（选 1:1 预设时），转过向的照片上则必然出错。
 
-  **注意**：在转过向的帧上存过裁切的工程文件，里面存的就是错的矩形。这次修复后
-  按正确的读法解释，位置相当于变了，需要重裁；未转向时存的不受影响。
-- **负片视图与正片朝向对不上**。把横躺的扫描转正之后再点片基采样，预览会翻回未
-  转向的样子——负片视图原本完全跳过几何链，而正片走的是完整管线。现在跟随 90°
-  转向和翻转（拉直和裁切仍然不施加：前者会带进填充角，后者会把要采样的片基边缘
-  挡掉）。承上，框选坐标此前也没跟着映射，取样取的是原始缓冲区里对应的另一块——
-  通常是画面对角线另一头，几乎必然触发「采样区偏暗」的警告；D-max 和偏移采样同理。
-- **负片视图下放大，看到的是去色罩后的画面**。框选片基时放大到触发局部高清渲染，
-  那一块会变成处理完的正片，而不是正在取样的原始负片。按住对比看原片时同理。
+  **注意**：在转过向的帧上存过裁切的工程文件，里面存的是错的位置。这次修复后按
+  正确的位置解释，需要重裁；未转向时存的不受影响。
+- **片基采样在转过向的照片上取错位置**。把横躺的扫描转正之后再点片基采样，预览会
+  翻回未转向的样子，框选到的也是画面上另一块——通常是对角线另一头，几乎必然触发
+  「采样区偏暗」的警告。现在负片视图跟随转向与翻转，框选、D-max 和偏移采样都取到
+  框住的地方。
+- **负片视图下放大，看到的是去色罩后的画面**。框选片基时放大到一定程度，那一块会
+  变成处理完的正片，而不是正在取样的原始负片。按住对比看原片时同理。
 - 裁切或清除裁切后回到「适应窗口」，画面不再放大着偏在一边。
 
 **改进**
 
 - **拖角改变裁切框大小时，预设比例可以在横竖之间切换**（参考 Lightroom）。选了
   3:2 之后想要 2:3，以前只能去按旋转按钮——但那转的是画面，不是画幅。现在往竖长
-  方向拖过一定幅度，锁定的比例就翻成竖构图，往回拖再翻回来。只有**拖角**才触发：
-  边 handle 只动一个轴，那个「形状」是另一个轴不动造成的假象。切换带迟滞，指针
-  停在对角线附近时画框不会来回跳。
+  方向拖过一定幅度，锁定的比例就翻成竖构图，往回拖再翻回来。只有**拖角**才触发。
 
 ---
 
 **Fixed**
 
-- **Profiled TIFFs came out with amplified chroma.** A TIFF carrying an ICC profile was
-  converted into sRGB primaries on load, but the pipeline works in ACEScg — so step 4
-  then converted it ACEScg → sRGB, undoing a transform that had never been applied.
-  That stretched the gamut outward: saturation rose ~1.13× on red and blue, ~1.4× on
-  green, and neutrals picked up a cast. The ICC matrix now lands in the working space
-  directly. RAW was never affected, and TIFFs without a profile still pass through
-  untouched.
+- **Profiled TIFFs came out with amplified chroma.** Saturation rose ~1.13× on red and
+  blue, ~1.4× on green, and neutrals picked up a cast. RAW was never affected, and
+  TIFFs without a profile still pass through untouched.
 
   **Note**: rolls of TIFFs already adjusted against the old behaviour will shift, and
   their film base (t_base) needs re-sampling.
 - **The crop was not displayed correctly after applying it.** The frame looked right on
   screen, but the applied crop came out with a different ratio and drifted out of
-  position. On macOS the frame and the pointer were not in the same box (most visible
-  with the 1:1 preset); on a rotated frame the crop rect was stored against the raw
-  axes instead. It is meant to be stored against the ORIENTED frame — the pipeline
-  orients before it crops, and the rotate buttons carry the crop with the picture on
-  that assumption. A self-consistent round trip hid it: re-opening the crop tool
-  re-applied the turn, so what actually suffered was the render pipeline, which reads
-  the rect directly.
+  position — most visible on macOS (with the 1:1 preset), and always wrong on a rotated
+  photo.
 
-  **Note**: projects with a crop saved on a rotated frame hold a wrongly-stored rect.
-  After this fix those crops are read the correct way, which effectively moves them —
-  they need re-cropping. Crops saved with no rotation applied are unaffected.
-- **The negative view did not agree with the positive's orientation.** Straightening a
+  **Note**: projects with a crop saved on a rotated frame hold the wrong position.
+  After this fix those crops are read correctly and need re-cropping. Crops saved with
+  no rotation applied are unaffected.
+- **Film-base sampling picked the wrong region on a rotated photo.** Straightening a
   sideways scan and then arming the film-base tool flipped the preview back to its
-  un-rotated orientation — the negative view skipped the geometry chain entirely while
-  the positive went through the whole pipeline. It now follows the quarter turns and
-  flips (straighten and crop are still not applied: the first would bring in fill
-  corners, the second would hide the very film base being sampled). Following from
-  that, selection coordinates were not mapped with the picture either, so the sample
-  came from a different part of the raw buffer — usually the opposite corner, which
-  almost always tripped the "region looks too dark" warning. Same for the D-max and
-  offset samplers.
-- **Zooming in on the negative view showed the de-masked picture.** Zooming far enough
-  to trigger the sharp-patch render while picking the film base replaced that region
-  with the finished positive instead of the negative being sampled. Same for the
-  hold-to-compare view.
+  un-rotated orientation, and the selection landed somewhere else in the picture —
+  usually the opposite corner, which almost always tripped the "region looks too dark"
+  warning. The negative view now follows the turns and flips, and the selection, D-max
+  and offset samplers all sample where you drew.
+- **Zooming in on the negative view showed the de-masked picture.** Zooming in far
+  enough while picking the film base replaced that region with the finished positive
+  instead of the negative being sampled. Same for the hold-to-compare view.
 - Applying or clearing a crop now returns to fit, instead of leaving the picture
   magnified and off to one side.
 
@@ -88,9 +65,7 @@
   portrait** (as Lightroom does). Getting 2:3 out of a 3:2 preset previously meant
   reaching for the rotate buttons — but those turn the PICTURE, not the format. Drag
   far enough toward portrait and the locked ratio flips; drag back and it returns.
-  Only a CORNER triggers it: an edge handle moves one axis only, so its "shape" is an
-  artefact of the other axis standing still. The swap has hysteresis, so the frame
-  does not flutter while the pointer tracks the diagonal.
+  Only a CORNER triggers it.
 
 ## v1.2.1（2026-08-11）
 
