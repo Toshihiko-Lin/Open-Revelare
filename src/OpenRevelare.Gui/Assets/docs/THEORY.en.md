@@ -1,828 +1,610 @@
 # OpenRevelare — How It Works
 
-This document is for readers who want to understand OpenRevelare's internals; it walks through
-every physical and mathematical step between the RAW file and the finished positive. For how to
-operate it, see [GUIDE.en.md](GUIDE.en.md).
+This document specifies the colour transformations by which a digitised negative sample becomes a
+positive. For operating instructions, see [GUIDE.en.md](GUIDE.en.md).
+
+The processing chain consists of a front end and a core. The front end comprises three parallel
+paths (Path A / Path B / TIFF), all of which output linear light. The core is the Cineon
+density-domain inversion, which applies identical processing to the output of all three paths.
 
 ---
 
-## FilmBase and SceneBase: the philosophy behind the two-stage workflow
+## 1. Colour space division
 
-OpenRevelare splits the whole process into two stages of quite different character, matching the
-two areas of the interface.
+### 1.1 Chain structure
 
-**FilmBase (stage one) — physical reconstruction**
+```
+input primaries ─[input transform]─▶ working space ACEScg (scene-referred, linear)
+                              │  −log10
+                              ▼
+                        density domain: inversion / t_base / per-channel endpoints
+                        no colour operations
+                              │  10^x
+                              ▼
+                        ACEScg (linear positive)
+                              │
+                        [step 4: primaries and gamma together]
+                              ▼
+                        output space (display-encoded)
+                              │
+                          Stage 2 frame edits
+                              │
+                ┌─────────────┴─────────────┐
+                ▼                            ▼
+           exported file                  preview
+```
 
-Every FilmBase parameter describes an objective physical property of this roll of film: the optical
-density and colour of the film base ($T_\text{base}$), the maximum density the film can record
-($D_\text{max}$), the density balance between channels ($w_\text{high}$ / $w_\text{offset}$), and
-the contrast slope of the inversion (grade).
+### 1.2 Primaries in the density domain
 
-These parameters are not aesthetic choices; they are measurements. Same brand and batch of film,
-same processing, and the FilmBase parameters are in theory identical for every frame — which is
-what makes one calibration for a whole roll possible in the first place.
+$-\log_{10}$ is a per-channel change of scale and does not alter the chromatic meaning of a
+channel: the primaries entering the log domain are the primaries leaving it. All gamut conversion
+therefore sits at the input and output ends, and the density domain contains no colour operations.
 
-Once calibrated, what FilmBase puts out is a **physically correct linear positive**: transmittance
-faithfully reconstructed as linear light, colour structure coming from the dyes themselves, with no
-subjective flattery anywhere in it. That linear positive is exactly what the NONE output intent
-exports, and it is what you hand to DaVinci Resolve, Nuke or another professional grading tool.
+### 1.3 Working space and output space
 
-**SceneBase (stage two) — aesthetic adjustment**
+The two serve different functions and are declared separately.
 
-The SceneBase parameters are **subjective decisions**: colour-temperature preference, exposure
-brightness, contrast style, final saturation. One negative can carry entirely different SceneBase
-settings for different viewing purposes and different deliverables.
+**Working space** is the carrier through the inversion, set to ACEScg. Its gamut encloses every
+output space, so saturated dyes outside sRGB pass through the density domain intact and are placed
+by the output transform at the end of the chain.
 
-This stage works in the linear light domain throughout (the sRGB gamma encoding is the last step of
-all), every adjustment has a clear physical or perceptual meaning, and none of them are coupled to
-each other.
+**Output space** is the domain in which the Stage 2 adjustment controls are defined. Control
+semantics depend on a bounded display-referred space: contrast pivots on 0.5 as mid-grey, the
+levels endpoints are 0 and 1, and curve control points lie on a bounded perceptual ramp. ACEScg
+mid-grey 0.18 lands at 0.489 after step 4 converts it into the display space (Rec709 transfer
+function).
 
-**Why the split**
-
-The point of separating the two: the FilmBase calibration is objective, done once, shareable across
-a roll and reusable across projects; SceneBase is a per-frame creative decision that never
-contaminates the physical reconstruction layer. A "virtual copy" holds several sets of SceneBase
-settings against one negative while the FilmBase parameters stay shared.
-
----
-
-## The pipeline, step by step
-
-### Step 1: RAW decoding (linearisation)
-
-A RAW file holds the sensor's raw photon counts, in Bayer mosaic form. The camera body lays white
-balance, a tone curve and a colour matrix over them; for ordinary photography that is flattery, but
-for a negative inversion it is contamination — it distorts the physical transmittance of the film
-base.
-
-What the decode has to produce is the **camera's native linear light**: the camera white balance
-off (gain of 1 on every channel, i.e. UniWB), no colour matrix applied, gamma left at 1 (linear
-output), demosaicing by AHD, and a float32 image normalised to [0, 1] at the end.
-
-The white-light path (Path B) and the RGB decoupling path (Path A) both have to start from that
-same line. Bake the camera white balance in at decode time and the orange backing of the film base
-is stretched asymmetrically, in a way the later density normalisation cannot undo.
-
-Optional back ends:
-- **rawpy / LibRaw** (default): cross-platform, decodes the raw Bayer data directly.
-- **Adobe DNG Converter** (Windows, optional): a two-pass route (RAW → Bayer DNG → linear DNG)
-  using Adobe's demosaic for higher quality; EXIF is recognised automatically.
+ACEScg is scene-linear and unbounded, and therefore serves as the working space rather than the
+output space.
 
 ---
 
-### Step 1 (alternative path): loading and linearising scanner TIFF
+## 2. Input front ends
 
-A TIFF from a film scanner is the alternative input to a RAW decode. Like RAW, it has to be brought
-back to **linear light** before it enters the density inversion — because the first step of the
-inversion is $D = -\log_{10}(T)$, and that arithmetic assumes flatly that its input $T$ is linear
-transmittance. Get the gamma state wrong (treating something linear as sRGB, or the reverse) and
-$\log_{10}$ distorts the entire density curve, with more error in the shadows than in the
-highlights (a logarithm is more sensitive to small values), showing up as colour drift after the
-inversion. Which is why "is the input linear?" matters more than any grading parameter downstream.
+The three paths are parallel and all output linear light. They differ in how linearisation is
+performed, and in whether their output carries a colour space declaration.
 
-The gamma a scanner puts out does not come from the sensor (CCD/CMOS are linear in themselves) but
-from an output TRC curve the scanning software **applied deliberately** and wrote into the file's
-ICC profile. The software probes that and picks a linearisation accordingly:
+### 2.1 Path B — broad-spectrum copy (camera RAW)
 
-- **Parse the ICC's TRC curves**: read the profile's `rTRC`/`gTRC`/`bTRC` tags (both the `curv`
-  sampled-curve and `para` parametric-curve types are supported) and work out whether the transfer
-  function is linear, sRGB, γ≈2.2 or some other device gamma. The device profiles of professional
-  scanners (Flextight, Noritsu and the like) often carry a non-standard gamma — one measured
-  Flextight X5 came out at an equivalent γ≈1.5–1.6 — which is neither linear nor sRGB.
+A white light source (tungsten or daylight light box) approximates a continuous spectrum,
+illuminating all three CMY dye layers across every band simultaneously; the camera's three
+channels each read a mixed signal.
 
-- **Invert the gamma accurately, per channel**: where the curve is a non-standard device gamma, the
-  software builds the inverse mapping (`np.interp`) from the file's **own sampled TRC curves** and
-  takes the encoded values back to linear channel by channel (R/G/B each with its own curve),
-  rather than applying an approximate inverse sRGB curve. The three channels are handled
-  separately because a scanner's three channels differ in spectral response and gain, so their
-  curves genuinely differ.
+A RAW file stores the sensor's raw photon counts (Bayer mosaic). White balance, tone curves and
+colour matrices applied by the camera body alter the film base's physical transmittance, so
+decoding must take the camera's native linear light:
 
-- **Snap to linear when it is near enough**: if the curve's largest departure from the diagonal is
-  under roughly one 8-bit quantisation step (a tolerance of 0.004, i.e. γ≈1.01) and **all three
-  channels** satisfy that, it is treated as linear and the values are kept as they are — no point
-  running a meaningless inversion over an essentially linear curve and adding interpolation noise
-  for it. The test is per channel, so a channel with a real gamma is never silently skipped.
+- camera white balance off, all channel gains at 1 (UniWB)
+- no colour matrix applied
+- gamma of 1
+- AHD demosaic
+- output normalised to float32 in [0,1]
 
-- **Fallback**: with no ICC (or an ICC carrying no usable TRC tags), the samples are **taken as
-  already linear** — no inverse is applied and no warning is issued. That is a different fallback
-  from "assume sRGB gamma"; it is the one chosen because unprofiled scan TIFFs are usually linear
-  exports. A gamma-encoded file with no profile therefore needs checking at import.
+Decoding back ends: rawpy / LibRaw (default, cross-platform); Adobe DNG Converter (optional on
+Windows, via the two steps RAW → Bayer DNG → linear DNG, using the Adobe demosaic algorithm).
 
-- **Step 2: the device primaries matrix (ICC rXYZ/gXYZ/bXYZ)**: inverting the TRC only solves the
-  "encoding is non-linear" problem, but the difference in gamma between the three channels (the
-  Flextight measured at $\gamma_R \approx 1.62,\ \gamma_G \approx 1.51,\ \gamma_B \approx 1.56$)
-  means their relative gains after inversion differ too, and one TRC pass still does not leave the
-  three channels as proportional scalings of one physical spectral quantity. That produces colour
-  casts running in opposite directions at different brightnesses — correct the mid-tones with one
-  set of white balance parameters and the shadows or highlights still lean the other way, which no
-  linear WB can fix.
+Output sits in the camera's native primaries.
 
-  The root of it: the TRC differences between channels reflect an asymmetry in the scanner's
-  **spectral response and gain** themselves. That is a device primaries problem, not an encoding
-  one. The ICC specification records the two layers separately: the TRC tags describe the encoding
-  curve, and the rXYZ/gXYZ/bXYZ tags describe how the device primaries map to D50 CIE XYZ.
+### 2.2 Path A — narrow-spectrum copy (camera RAW + RGB separation)
 
-  Complete linearisation therefore takes two steps:
+Monochromatic RGB LEDs illuminate the negative in separation, each colour of light exciting
+principally the absorption of its corresponding dye layer. The decoding baseline matches Path B
+(the same UniWB starting point, a precondition for the calibration matrix acting on content
+frames), with channel-crosstalk separation added.
 
-  $$\text{linear device RGB} \xrightarrow{M = M_\text{D50→working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{linear working RGB (ACEScg)}$$
+#### 2.2.1 Physical basis of the separation
 
-  The matrix $M$ carries the scanner's linear device RGB into the **working space** (ACEScg), not
-  into sRGB. That distinction matters: a professional scanner's device primaries are typically
-  **wider than sRGB** (one measured set spans about 1.6× sRGB's primary triangle), so landing in
-  sRGB would clip the saturated dyes before the density maths ever ran.
+Under white light the responses of the three dye layers alias together at the sensor. Narrow-band
+R/G/B cuts the inter-layer coupling, making the aliasing a measurable linear mixture that can
+therefore be calibrated and inverted.
 
-  > Earlier versions did target sRGB here, and it was wrong in a way that only showed on profiled
-  > scanner TIFFs: those pixels entered the density maths carrying sRGB primaries, and step 4 then
-  > converted them ACEScg → sRGB — undoing a transform nobody had applied. Reinterpreting sRGB
-  > primaries as ACEScg stretches the gamut outward: saturation rose ~1.13× on red and blue, ~1.4×
-  > on green, and neutrals picked up a cast, because the residual has strong negative off-diagonals
-  > rather than being a scalar.
+#### 2.2.2 Calibration matrix
 
-  Measured on a Flextight X5 it came to roughly (quoted against the old sRGB target, for magnitude
-  only):
-
-  $$M \approx \begin{pmatrix} 1.258 & -0.158 & -0.099 \\ -0.174 & 1.241 & -0.068 \\ -0.001 & -0.166 & 1.166 \end{pmatrix}$$
-
-  The matrix is applied only when the ICC profile carries rXYZ/gXYZ/bXYZ tags (most professional
-  scanners do); with a LUT-only profile those tags are missing and step 2 is skipped, leaving the
-  file on its device-native primaries — **with no warning**.
-
-**How this relates to the RAW path**
-
-After the TRC inverse and the matrix, a fully profiled TIFF puts out **working-space (ACEScg)
-linear light**; the RAW path puts out the camera's own linear light. Both are linear, and both go
-straight into the density domain.
-
-What space a buffer is actually in when it reaches the density domain is not the same for all three
-inputs:
-
-| Input | On entering the density domain |
-|---|---|
-| TIFF whose ICC carries rXYZ/gXYZ/bXYZ | **Working space (ACEScg)**, via the device-primaries matrix |
-| TIFF with a LUT-only profile, or no ICC | Device-native primaries, unconverted |
-| RAW | Camera-native primaries, unconverted |
-
-Only the first genuinely sits in the space the pipeline declares it works in. The other two are
-treated as working-space data without having been converted: `InputTransform` (declared input
-primaries → ACEScg) only runs when `input_primaries` is set, and no control sets it today, so that
-step is skipped in practice.
-
-The gap does **not** affect the density inversion itself: the inversion only computes
-$D = -\log_{10}(T/T_\text{base})$, and $T_\text{base}$ and $D_{\max}$ are measured from the same
-buffer, so density is a self-referential ratio that assumes no colour space at all. What it does
-affect is the **output** side — step 4 interprets the buffer as ACEScg on the way to the output
-space, and for the latter two inputs that premise does not hold.
-
-> The historical justification for the camera path performing no equivalent transform was that the
-> relative sensitivity differences between the camera's three channels are normalised out by
-> $T_\text{base}$ (dividing by the film base), and that a base measured on the actual roll fits the
-> real copying conditions better than a looked-up camera matrix. That holds for **channel gain** —
-> a per-channel division does absorb the diagonal part — but it does not cover the **primaries**,
-> which are off-diagonal and cannot be absorbed by a division. So this remains a known gap rather
-> than a solved problem.
-
-A fully profiled scan is **colour-managed by construction** — the ICC's rXYZ/gXYZ/bXYZ tags describe
-the device primaries and are applied at decode. For the other two rows of the table above the
-primaries go uncorrected, so pull back any resulting cast with SceneBase's saturation and white
-balance.
-
-Scanner TIFF goes down Path B (the white-light path); lens correction and RGB decoupling are not used.
-
----
-
-### Known limitation: the input primaries are never declared
-
-The last two rows of the table above (TIFF without a full profile, and every RAW) go through no
-input colour transform, yet everything downstream treats them as working-space data. This section
-sets out what that actually costs, why the obvious fixes do not work, and what a correct fix needs.
-
-**Half the error is absorbed upstream.** Step 4 applies an ACEScg → output-space matrix to an
-unconverted buffer; for sRGB that is:
-
-$$M_{\text{ACEScg}\to\text{sRGB}} \approx \begin{pmatrix} 1.7313 & -0.6040 & -0.0801 \\ -0.1316 & 1.1348 & -0.0087 \\ -0.0246 & -0.1258 & 1.0656 \end{pmatrix}$$
-
-Its row sums are 1.047 / 0.995 / 0.915, so a neutral does shift
-($(0.5,0.5,0.5) \to (0.524, 0.497, 0.458)$, a warm cast of about 14%). That part never becomes
-visible, though: $T_\text{base}$ and the per-channel endpoints are both calibrated **on the rendered
-result** — the film base is made to read neutral, the darkest area likewise — and that is exactly
-the matrix's diagonal part, which a per-channel normalisation can absorb. It is why the picture
-looks right.
-
-What cannot be absorbed is the off-diagonal part. Dividing out the per-channel gain
-($M \cdot \operatorname{diag}(M)^{-1}$) leaves:
-
-$$\begin{pmatrix} 1 & -0.5323 & -0.0752 \\ -0.0760 & 1 & -0.0082 \\ -0.0142 & -0.1109 & 1 \end{pmatrix}$$
-
-The G→R term is **0.53**: a genuine hue and saturation error that no per-channel operation can
-reach. **So the gap is real, but confined to saturated colour rather than overall balance.**
-
-**Why not just declare sRGB by default.** That would apply a real transform to data that is not in
-sRGB — swapping one error for another, and changing how every existing roll renders.
-
-**Why the existing "solve the input primaries" route does not work either.**
-`docs/calibration/solve_input_primaries.py` fits DiVERE's Kodak Gold 200 dataset and drops MSE from
-1.178 to 0.847 (a 28% improvement), but the primaries it solves are:
-
-| | Solved | sRGB |
-|---|---|---|
-| R | (0.6352, 0.2960) | (0.64, 0.33) |
-| G | (0.0065, 0.4102) | (0.30, 0.60) |
-| B | (0.3249, 0.3265) | (0.15, 0.06) |
-
-The blue primary lands at $(0.325, 0.327)$ — essentially the white point (D65 is
-$(0.3127, 0.3290)$), and green sits on the edge of the spectral locus. The triangle they span is
-**7% of sRGB's area**, which is physically impossible. The optimiser used the primaries as free
-matrix coefficients to soak up the model's residual; it measured nothing about any sensor. Even at
-its own optimum it reaches a saturation of 0.5641 against a reference of 0.8102 — **70% of the
-target** — so the 28% is not "the colour is right now", it is a better fit to a model that is still
-far off.
-
-**The correct approach: the chart has to go through the film.**
-
-The quantity being solved for is the **equivalent primaries of the whole chain** — scene → film
-dyes → light source → lens → sensor CFA. Photographing a chart directly with the copy camera
-measures only "scene → lens → CFA", **with the dye layer missing**. And the dyes are not a filter
-that can be divided out afterwards: what the sensor sees IS the three dye densities, whose
-absorption bands overlap the CFA passbands, and **that overlap is precisely what has to be solved**
-(`FrameParams.InputPrimaries` puts it as "the EQUIVALENT primaries of the whole chain, sensor
-spectral response composed with the film's dye transmission").
-
-This is also why the three earlier attempts failed: a manufacturer's ColorMatrix describes **a real
-scene → sensor**, and a negative holds no scene, only dye densities. That matrix answers a different
-question from the one being asked here.
-
-The calibration is therefore:
-
-1. **Photograph a standard colour chart onto the film** (same emulsion, same process)
-2. **Copy that negative on the rig being calibrated** (same light source, lens, geometry)
-3. **Solve jointly with the density parameters** — the primaries cannot be solved on their own; they
-   have to be optimised together with $T_\text{base}$ and the endpoints so that the transform and
-   the inversion are consistent by construction (this is what DiVERE's
-   `divere/utils/ccm_optimizer` does, and where its `primaries_xy` comes from)
-4. One calibration per copying rig and emulsion
-
-Step 3 is the crux, and the reason the earlier attempts failed: a matrix that **did not take part in
-the calibration** cannot agree with it.
-
-This is the same shape of problem as the Status M question earlier: both need a measured reference
-plus a joint solve, and neither can be settled by a lookup or a default value.
-
----
-
-### Step 2: lens correction (optional, linear domain)
-
-Every correction happens in the **linear light domain**, after the decode and before the inversion,
-which is the only correct moment for it — distortion and vignetting are linear optical effects, and
-correcting them after the log transform would have $-\log_{10}$ amplify them non-linearly.
-
-- **Distortion**: a single-parameter radial model ($k_1 < 0$ corrects barrel, $k_1 > 0$
-  pincushion), backward-mapped with bilinear sampling; out-of-bounds samples clamp to the edge.
-- **Vignetting**: a radial gain model, with `VignetteAmount` setting how much the corners are
-  lifted and `VignetteFalloff` how steep the falloff is.
-- **LCC flat-field**: not a model but a **measurement** — shoot one blank, featureless light frame
-  and it records this particular lens-and-stand's per-pixel brightness AND colour non-uniformity;
-  the correction is a per-channel divide by the mean-normalised flat field. More accurate than the
-  formulaic vignette, because it takes out colour non-uniformity along with brightness.
-
-All three are **manual parameters**; there is no EXIF-driven lens-database matching. A copy setup
-normally uses a macro prime whose distortion is small and fixed — measure it once and type it in —
-and a flat field is far more specific to your copy stand than any generic database entry could be.
-
----
-
-### Step 3: the light-source branch
-
-#### Path B — broadband source (white light, recommended)
-
-White light (a tungsten or daylight box) approximates a continuous spectrum and lights all three
-CMY dye layers evenly across the band. The camera's three sensor channels each read the mixed
-signal, and it goes straight into the density domain with no extra calibration.
-
-#### Path A — narrowband source (RGB mix)
-
-Monochromatic RGB LEDs light the negative one band at a time, so each colour of light mainly
-excites the absorption of its corresponding dye layer, which makes the **channel crosstalk** at the
-sensor measurable and separable exactly.
-
-**Automatic identification of the RGB calibration shots** (commit 8cd2638)
-
-Early versions required the calibration shots to be named `R.ARW` / `G.ARW` / `B.ARW`, which raised
-the bar for using it. The improved implementation identifies them **by content** (argmax):
-
-1. **ROI sampling**: for each candidate image, the mean of the three RGB channels is taken over the
-   central region (50% × 50%), giving a vector $v = [R, G, B]$.
-2. **Argmax classification**: compute $\text{argmax}(v)$ — whichever channel is largest names the
-   colour of that calibration shot. The physical basis: when the R lamp lights the bare box, the
-   sensor's R channel reads far higher than G or B; the G and B lamps likewise.
-3. **Uniqueness check**: the three images' argmax values must all differ (one R, one G, one B);
-   otherwise identification fails and an error is raised.
-4. **GUI confirmation**: the result is shown in a dialog listing each image's ROI mean (e.g.
-   `R=245 G=78 B=52`), and the channels can be corrected from drop-downs before confirming.
-
-**Both dimming modes work**
-
-Path A supports two light-source configurations, and identifies both correctly:
-- **White-light mode**: R/G/B intensities adjusted until the mixed light is pure white. The
-  calibration shots' argmax still holds, because even with the three intensities close together
-  each channel's maximum still corresponds to the lamp that excited it.
-- **Neutral-base mode**: R/G/B intensities adjusted until the light through the film base is
-  neutral, cancelling the mask physically. The three calibration shots then differ in absolute
-  brightness, but the argmax relationship is unchanged.
-
-**Building the calibration matrix**: three calibration shots are taken with no film in place (the R
-lamp, the G lamp and the B lamp each lighting a blank area in front of the lens on its own), and
-each gives a vector of the sensor's three channel means, $v_R,\ v_G,\ v_B$. Those three vectors are
-stacked into an observation matrix, inverted, and each row divided by its own sum, giving the
-decouple matrix $M$:
+Three calibration frames containing no film are captured (R, G and B lamps each illuminating a
+blank area separately), each yielding a mean sensor vector across the three channels $v_R,\ v_G,\
+v_B$. These are assembled into an observation matrix, inverted, and each row divided by its row
+sum:
 
 $$M_\text{obs} = [v_R \mid v_G \mid v_B], \qquad M = \text{rowNorm}(M_\text{obs}^{-1})$$
 
-The mathematical shape of $M$: diagonal elements > 1 (each light mainly excites its own channel),
-off-diagonal elements negative (crosstalk subtracted), row sums = 1.
+Properties of $M$: diagonal elements > 1, off-diagonal elements negative, row sums of 1.
 
-**Two ways of implementing the decoupling**
+Calibration frames are assigned by content recognition: the mean of the three channels is taken
+over a central 40%–60% window and classified by $\text{argmax}$. With the R lamp illuminating a
+blank light box, the sensor's R channel reads higher than G/B; the G and B lamps follow the same
+relation. The relation holds under both the white-light mode and the base-neutral mode.
 
-The software offers two implementations, switchable in the preferences. Both use the same
-calibration matrix $M$; what differs is the signal domain the matrix acts in.
+#### 2.2.3 Domain of matrix application
 
----
+Two implementations use the same $M$, applied in different signal domains.
 
-**Option one: linear-domain decoupling (default, physically correct)**
-
-Channel crosstalk in a CFA sensor happens at photoelectric conversion — physically it is a linear
-superposition. So applying the matrix directly to linear transmittance is the physically exact
-thing to do:
+**Linear domain (default)**: CFA channel crosstalk occurs at the photoelectric conversion stage
+and is a linear superposition, so the matrix is applied to linear transmittance:
 
 $$T_\text{dec} = T_\text{raw} \cdot M^T$$
 
-which is equivalent to undoing the linear mixing at the sensor outright.
-
-**Per-pixel gamut mapping**: $M$'s off-diagonal elements are negative, so where a channel's
-original value is close to zero (shadows, high-density areas) the matrix multiplication can push it
-below 0. To keep the following $-\log_{10}$ from catastrophically amplifying a negative or
-vanishingly small value, for every pixel about to produce a negative channel a blend coefficient
-$\alpha$ is computed that puts the smallest channel exactly at $\varepsilon$ ($10^{-6}$):
+The off-diagonal elements of $M$ are negative, so a channel may fall below 0 in the shadows. So
+that the subsequent $-\log_{10}$ acts on positive values, a blend coefficient bringing the minimum
+channel to $\varepsilon = 10^{-6}$ is computed for each pixel that would carry a negative channel:
 
 $$T_\text{out}[i] = (1 - \alpha_i)\,T_\text{raw}[i] + \alpha_i\,T_\text{dec}[i], \qquad \alpha_i = \min_c \frac{T_\text{raw}[i,c] - \varepsilon}{T_\text{raw}[i,c] - T_\text{dec}[i,c]}$$
 
-Highlights and mid-tones therefore get the full decoupling ($\alpha = 1$), and only the very
-darkest pixels are pulled back locally, by as little as possible.
+Highlights and mid-tones take $\alpha = 1$ and are fully decoupled; only the deepest shadow pixels
+retreat locally. The operation is per-pixel and contains no cross-pixel statistic. For film with a
+base transmittance of 0.2–0.8 and a content density range of 0.3–2.5, measured impact is under 1%
+of pixels, corresponding to densities > 2.5D, which map to near-white highlights in the positive.
 
-**chroma_amp compensation**: small differences between channels in the linear domain are amplified
-non-linearly by $-\log_{10}$ once in the density domain. Decoupling separates the channels more
-thoroughly → density chroma widens → without compensation the inversion oversaturates. The
-amplification is measured:
+**Density domain**: after conversion into the density domain, luminance and chroma are separated
+and the matrix acts on chroma alone:
 
-$$\text{chroma\_amp} = \frac{\text{std}(D_\text{chroma,\ after})}{\text{std}(D_\text{chroma,\ before})}$$
+$$D_\text{mean} = \tfrac{1}{3}(D_R + D_G + D_B), \qquad D_\text{chroma} = D - D_\text{mean}$$
+$$D'_\text{chroma} = D_\text{chroma}\,M^T - \overline{D_\text{chroma}\,M^T}, \qquad D_\text{out} = D_\text{mean} + D'_\text{chroma}$$
 
-and `grade` is divided by it when applied to the chroma component, so a decoupled roll and a white-light roll
-arrive at the same saturation.
-
-**Characteristics**:
-- Physically exact — it corresponds directly to the linear nature of CFA crosstalk
-- Highlights and mid-tones fully decoupled, shadows giving ground only as far as needed
-- Independent of $T_\text{base}$ (the matrix acts on raw transmittance directly)
-- Needs the gamut-mapping safety net plus the chroma_amp compensation (more complex code)
-
----
-
-**Option two: density-domain decoupling (conservative, no risk of negatives)**
-
-The signal is taken into the density domain first, luminance separated from chroma, and the matrix
-applied to the chroma component:
-
-$$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
-$$D_\text{mean} = \frac{D_R + D_G + D_B}{3}, \qquad D_\text{chroma} = D - D_\text{mean}$$
-$$D'_\text{chroma} = D_\text{chroma}\,M^T - \overline{D_\text{chroma}\,M^T}$$
-$$D_\text{out} = D_\text{mean} + D'_\text{chroma}$$
-
-and then back to linear: $T_\text{dec} = 10^{-D_\text{out}} \cdot T_\text{base\_approx}$
-
-Because the matrix acts on density chroma (a zero-mean component), the output density is always
-dominated by $D_\text{mean}$, which is positive — there is no way to arrive at a negative value or
-a catastrophic near-zero.
-
-**Characteristics**:
-- No gamut mapping needed — operating in the density domain is safe by construction
-- Globally consistent; there is no "some pixels give ground" non-uniformity
-- **Physically inexact** — CFA crosstalk is a linear-domain phenomenon, and doing matrix arithmetic
-  in the log domain applies a non-linear distortion to the mixing relationship. The crosstalk
-  proportions are the same in shadows and highlights, but the numerical ranges in the density
-  domain differ greatly between highlights (low density) and shadows (high density), so the
-  matrix's actual effect at the two ends is asymmetric
-- Depends on $T_\text{base\_approx}$ (a normalisation reference has to be estimated)
-- May need a global alpha attenuation (when extreme chroma drives a density negative), at which
-  point every pixel is discounted equally and the decoupling is incomplete
-
----
-
-**The two options side by side**
+Output density is dominated by the positive $D_\text{mean}$ and no negative values arise. The
+matrix acts in the log domain, so the linear proportionality of the crosstalk is subject to
+nonlinear distortion; the numeric ranges of highlights (low density) and shadows (high density)
+differ considerably, so the matrix acts asymmetrically at the two ends. This implementation
+depends on an estimated $T_\text{base}$, and extreme chroma requires a global alpha attenuation,
+applied uniformly to all pixels.
 
 | | Linear domain (default) | Density domain |
 |---|---|---|
-| Physical correctness | Exact (matches linear CFA crosstalk) | Approximate (operating in the wrong domain) |
-| Risk of negatives / blow-up | Yes, backstopped by gamut mapping | None |
-| Information altered | Local pull-back on the very darkest pixels (negligible) | Non-linear distortion accepted on every pixel (silently) |
-| Completeness of decoupling | 99%+ of pixels fully decoupled | Possibly attenuated globally to 70–90% |
-| Dependence on T_base | None | Yes |
-| When to use | Recommended generally | A fallback if the linear domain misbehaves |
+| Correspondence to CFA crosstalk | exact | approximate (log domain) |
+| Negative-value risk | handled by gamut mapping | none |
+| Information change | local retreat on deepest shadows | nonlinear distortion on all pixels |
+| Decoupling completeness | 99%+ of pixels fully decoupled | may attenuate globally to 70–90% |
+| Dependence on $T_\text{base}$ | none | yes |
 
-How to choose: for the overwhelming majority of film (film-base transmittance 0.2–0.8, content
-density range 0.3–2.5), the linear-domain option's gamut mapping touches under 1% of pixels
-(verified), and the density range those pixels sit in (> 2.5D) maps to near-pure-white highlights
-in the positive, indistinguishable to the eye. The density-domain option is kept as a conservative
-fallback for unusual cases (a badly underexposed roll, an unconventional emulsion).
+#### 2.2.4 chroma_amp
 
-**The limits of Path A's accuracy**
+Channel differences in the linear domain are amplified nonlinearly by $-\log_{10}$ in the density
+domain: decoupling raises the degree of channel separation, and density chroma widens accordingly.
+The amplification factor is
 
-What Path A solves is the spectral coupling at the **light-source-and-film** level: in white light
-every wavelength passes through all three CMY dye layers at once, and the sensor signal is an
-aliasing of the joint response of all three; narrowband R/G/B physically cuts the inter-layer
-coupling, and the decouple matrix quantifies and separates that aliasing in the density domain.
-That is the whole of the crosstalk Path A can deal with.
+$$\text{chroma\_amp} = \frac{\text{std}(D_\text{chroma,\ after})}{\text{std}(D_\text{chroma,\ before})}$$
 
-A copy setup does, however, contain a second layer of crosstalk — the **spectral mismatch at the
-sensor-and-paper level**. The orange backing of colour negative film (the mask) was designed
-chemically for the spectral response of silver-halide printing paper: the paper's cyan dye absorbs
-extra red light, and the orange backing cancels it with a matching complementary density so the
-print comes out neutral. A digital sensor's CFA has different spectral curves from printing paper,
-so that cancellation does not hold in the digital domain and a systematic colour cast results. Path
-A's decouple matrix comes from a calibration of the light-source response and carries no
-information about the relationship between the sensor's spectra and the paper's, so it cannot
-compensate for that second mismatch.
+It is divided back out of the chroma component during inversion (see 4.5). This term corrects a
+narrow-band light-source characteristic and is unrelated to the film.
 
-Once the first layer has been dealt with on its own, the residual of the second remains, typically
-around ΔE 3–6 (depending on how far the sensor's spectra depart from the reference paper's).
-Pushing both residuals below ΔE 2 needs an additional calibration from colour-chart data and a
-channel-mixing matrix applied in the density domain (i.e. modelling the second layer separately) —
-which is beyond what Path A does today, and a direction it could be extended in.
+Output sits in the camera's native primaries.
 
-**On calibrating to the Status M scale (assessment of a community suggestion)**
+### 2.3 TIFF — scanner output
 
-A practitioner suggested that since narrow-band scanning reads close to Status M — the standardised
-narrow-band densitometry that Kodak's Vision 3 datasheets are plotted in — the datasheet could be
-used directly to calibrate the density conversion. The three parts of that idea verify as follows
-(script: `docs/calibration/status_m_scale.py`).
+The first step of the inversion, $D = -\log_{10}(T)$, requires linear transmittance as input. The
+logarithm is more sensitive at small values, so a gamma deviation is amplified more in the shadows
+than in the highlights, appearing as colour drift after inversion.
 
-**The second-layer residual really is matrix-shaped.** Fitting a 3×3 density-domain matrix to
-colour-chart density data for 8 C-41 emulsions removes 68–80% of the residual (RMS falls from
-~0.10–0.14 to ~0.03). A matrix is the right form for modelling this layer.
+Scanner gamma originates from an output TRC curve applied by the scanning software and written
+into the ICC profile; the sensor (CCD/CMOS) is itself linear. This is the only one of the three
+paths that carries a colour declaration, read in two steps.
 
-**But what varies with the instrument is strength, not direction.** A controlled pair: the same
-Vision 3 5219 stock, the same daylight illuminant, solved independently on a Nikon 9000ED and on a
-Hasselblad X5 —
+#### 2.3.1 Step 1: TRC inversion
 
-$$M_{9000\text{ED}} = \begin{bmatrix} 1.1683 & 0.0863 & -0.0253 \\ 0.1650 & 0.6741 & 0.1108 \\ 0.2447 & -0.1499 & 1.0216 \end{bmatrix}, \qquad M_{X5} = \begin{bmatrix} 1.0717 & 0.0462 & -0.0879 \\ -0.1006 & 0.7614 & 0.1701 \\ 0.1500 & -0.3916 & 1.1930 \end{bmatrix}$$
+The profile's `rTRC`/`gTRC`/`bTRC` tags are read (both `curv` sampled curves and `para` parametric
+curves are supported), an inverse mapping is built from the file's own curves, and each channel is
+restored to linear separately. The channels are handled separately because the scanner's three
+channels differ in spectral response and gain, so their curves differ (Flextight X5 measured at
+$\gamma_R \approx 1.62,\ \gamma_G \approx 1.51,\ \gamma_B \approx 1.56$). Lookup-table sampling
+density keeps the maximum error below half a 16-bit code level.
 
-Taking the chroma action the way `paper_free_crosstalk.py` does ($P M P$, projecting out luminance),
-the two agree in **direction to cosine +0.9918** (7.3° apart) while their **strengths differ by 1.21×**
-(1.272 vs 1.533). Read element-wise, the B←G term's factor of 2.6 looks like a structural difference,
-but that is a strength difference amplified by one entry — normalise each matrix and they point
-essentially the same way.
+When a curve's maximum deviation from the diagonal is below 0.004 (about one 8-bit quantisation
+step, corresponding to γ≈1.01) and all three channels satisfy this, it is judged linear and the
+original values are retained. The judgement is made per channel.
 
-This matches what [`C41Crosstalk`](../../../OpenRevelare.Core/C41Crosstalk.cs) already establishes:
-across 18 matrices **one shared direction explains 99.01% of the variance**, while strength ranges
-0.99–1.89 — and the same film on the same scanner appears twice, at 1.41 and 1.79. The direction is
-physics (three subtractive dye layers read by three overlapping passbands); the strength depends on
-what target the person solving it declared.
+When a file has no ICC profile, or no usable TRC tags, samples are treated as linear.
 
-For scale, the published Status M → Print Density matrix — a pure standard-to-standard conversion —
-has $\|M-I\|$ of only 0.129, four times smaller than the matrices above: scale conversion and
-instrument correction really are different orders of magnitude.
+#### 2.3.2 Step 2: device primaries matrix
 
-**Narrow-band ≠ Status M.** Status M is a set of **response** functions (filter × detector); a
-narrow-band LED is an **emission** spectrum. Both being narrow does not make them the same narrow.
-Status M's nominal peaks are R 644 nm / G 542 nm / B 435.7 nm, while typical commodity RGB LED panels
-peak at 630 / 525 / 465 nm — offsets of −14 / −17 / +29 nm. On dye absorption curves that move
-steeply across that span, an offset of that size is not a rounding error.
+The TRC inversion addresses encoding nonlinearity. Because the three gammas differ, the relative
+gain of each channel after inversion also differs, so after a single TRC the three channels are
+still not proportionally scaled versions of the same physical spectral quantity. This produces
+colour casts of opposite direction in different luminance regions, which linear white balance
+cannot correct.
 
-**Conclusion**: the datasheet cannot **supply** the whole correction — it describes the film, while
-the correction's strength depends on the particular sensor and on the target one declares. But the
-direction is already given by `C41Crosstalk.Direction` as a compiled-in constant, so **the user
-shoots no calibration target and imports no chart to solve anything**. The datasheet's role is to
-define the target scale (so density stops being each camera's private units) and to supply
-$D_\text{min}$ / $D_\text{max}$ and toe/shoulder landmarks for **validation**.
+The cause is asymmetry in the scanner's own per-channel spectral response and gain, which belongs
+to device primaries. The ICC specification records the two layers separately: the TRC describes
+the encoding curve, and rXYZ/gXYZ/bXYZ describe the mapping from device primaries to D50 CIE XYZ.
+Complete linearisation is therefore two steps:
 
-Strength is carried by the existing `grade` (the single Cineon gamma) rather than calibrated
-separately. That is not a shortcut: structurally strength is `target_chroma / negative_chroma`, so it
-is set by which target one declares rather than by any fixed property of the film or the rig — the
-same film on the same scanner appears twice among the 18 matrices, at 1.41 and 1.79. There is
-therefore no single correct value to measure, and calling it a "rig calibration" would be
-inaccurate; it is a parameter whose direction is physics and whose amount is declared.
+$$\text{linear device RGB} \xrightarrow{M = M_\text{D50→working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{working-space linear RGB (ACEScg)}$$
 
-Turning strength into a measured quantity later would need a step wedge with known Status M
-densities plus a solver for it (neither exists in the codebase today), and would first have to
-answer the prior question of what chroma to target.
+The matrix targets the working space. Professional scanners' device primaries are typically wider
+than sRGB (one unit measured at about 1.6× sRGB's primary-triangle area), so the target gamut must
+be wide enough for the excess dye to enter the density computation. The matrix has two stages:
+Bradford-adapt the D50 PCS to the working-space white point (ACEScg sits at ~D60), then convert
+XYZ → working-space RGB. The target is derived from `ColorPipeline.Working`.
+
+When a LUT-only profile lacks these tags, step 2 is skipped and the file retains its device native
+primaries.
+
+TIFF uses the white-light model and contains no RGB decoupling.
+
+### 2.4 State at which the three paths converge
+
+| Front end | Primaries on entry to the density domain |
+|---|---|
+| TIFF, ICC containing rXYZ/gXYZ/bXYZ | working space ACEScg, carried in by the device primaries matrix |
+| TIFF, LUT-only or no ICC | device native primaries |
+| Path A / Path B (RAW) | camera native primaries |
+
+Only the first sits in the pipeline's declared working space. The others are processed as working
+space: `InputTransform` (which carries declared input primaries into ACEScg) is conditioned on
+`FrameParams.InputPrimaries`, and that quantity currently has no entry point.
+
+This state does not affect the density inversion. The inversion is $D = -\log_{10}(T/T_\text{base})$,
+where $T_\text{base}$ and the per-channel endpoints are taken from the same buffer; density is a
+self-referential ratio and depends on no colour space assumption. The effect lies on the output
+side, where step 4 interprets the buffer as ACEScg. Magnitudes are given in section 3.
 
 ---
 
-### Before step 4: the sprocket mask and automatic film-base detection
+## 3. Known limitation: input primaries are not declared
 
-Before the film-base normalisation, the software has to deal with the sprocket holes and the bare
-light panel in the copied picture — areas with no emulsion on them at all, "fully transmissive", at
-a brightness near 1.0, far above the film base (the orange backing, transmitting roughly 0.2–0.8).
-Left undistinguished, they contaminate the film-base sample.
+### 3.1 The absorbed component of the error
 
-**The sprocket mask**: the software builds a binary mask from a brightness threshold, excluding
-pixels above it (sprockets, light panel) and keeping the ones that genuinely belong to the film.
-The threshold is detected automatically by histogram analysis (finding the valley between the
-light-panel peak and the film-base peak), but it depends on how even the light is and on the
-exposure, and is **not 100% reliable**. It can be fine-tuned by hand in the confirmation window.
+Step 4 applies the ACEScg → output space matrix to an unconverted buffer; taking sRGB as the
+example:
 
-**Automatic film-base detection**: once the sprocket mask is confirmed, the software runs a
-film-base detection over the whole roll — with the light panel excluded by the mask, a bright-end
-sample is taken frame by frame, and the median across the roll becomes the initial $T_\text{base}$.
+$$M_{\text{ACEScg}\to\text{sRGB}} \approx \begin{pmatrix} 1.7313 & -0.6040 & -0.0801 \\ -0.1316 & 1.1348 & -0.0087 \\ -0.0246 & -0.1258 & 1.0656 \end{pmatrix}$$
 
-Sampling a frame is subject to two constraints:
+Its row sums are 1.047 / 0.995 / 0.915, corresponding to roughly a 14% warm cast on neutral grey.
+This component does not appear in the result: $T_\text{base}$ and the per-channel endpoints are
+calibrated against the rendered output (film base read as neutral, darkest area read as neutral),
+which corresponds to the matrix's diagonal part and is absorbed by per-channel normalisation.
 
-- **Co-sited sampling**: the kept pixels are sorted by brightness, a stretch at the bright end is
-  taken, and the three channel means are computed over **that same set of pixels**. The film base is
-  one physical material, so all three channels have to be read from the same place; take a
-  percentile independently per channel and R, G and B come from three different points in the
-  picture, branding a false colour cast into the reference that every later density division rests
-  on. (The same reasoning applies to automatic highlight white balance, `HighlightDensityFromRoll`.)
-- **Spike guard**: with brightness quantised to 16 bits, if any single quantisation bucket holds
-  more than 10× the sampling depth on its own while the cumulative count so far is still under 20×,
-  the whole bucket is skipped. A clipped light panel, specular highlights and a solid-colour border
-  all pile into one bucket and monopolise the bright end; real film base carries grain and an
-  illumination gradient, spreads over several buckets, and is unaffected.
+### 3.2 The residual component
 
-Even so, the result is **a starting point only**: automatic detection assumes the film base is the
-brightest non-panel area in the roll, and if some frames hold unclipped blown highlights (sky,
-lamps) those get mixed in. **Box the film base by hand and calibrate again** for an accurate result.
+The off-diagonal residual after dividing out the per-channel gains ($M \cdot
+\operatorname{diag}(M)^{-1}$):
+
+$$\begin{pmatrix} 1 & -0.5323 & -0.0752 \\ -0.0760 & 1 & -0.0082 \\ -0.0142 & -0.1109 & 1 \end{pmatrix}$$
+
+The G→R term is 0.53, constituting hue and saturation error, and no per-channel operation acts on
+this component. The error is confined to saturated colour and does not include an overall cast.
+
+### 3.3 Conditions for a solution
+
+The quantity to be solved is the equivalent primaries of the whole chain: scene → film dye → light
+source → lens → sensor CFA. The dye layer cannot be separated after the fact: what the sensor
+reads is the density of three dye layers, whose absorption bands overlap the CFA passbands, and
+that overlap is the object of the solve (`FrameParams.InputPrimaries` is defined as "the
+EQUIVALENT primaries of the whole chain, sensor spectral response composed with the film's dye
+transmission").
+
+Calibration condition: the chart must pass through the film. A standard colour chart is
+photographed on the emulsion being calibrated, that negative is copied on the copy rig being
+calibrated, and the primaries are solved jointly with $T_\text{base}$ and the endpoints so that
+the transform and the inversion are mutually consistent (DiVERE's `divere/utils/ccm_optimizer`
+uses this method, and its `primaries_xy` is derived this way). One calibration per copy rig and
+per emulsion.
+
+The joint solve is a necessary condition: the matrix must participate in the calibration to be
+consistent with its result. $T_\text{base}$ and `InputPrimaries` are therefore mutually coupled —
+the base is sampled in the space the primaries declaration defines — and the two must be
+established together.
 
 ---
 
-### Step 4: film-base normalisation and the density conversion
+## 4. Core: Cineon density-domain inversion
 
-**What the film base (the D_min area) is physically made of**
+Processing is identical once the three front ends converge.
 
-A colour negative's film base is the **unexposed area**, and it is not truly "clear". It has two
-parts:
+### 4.1 Film-base normalisation (shadow endpoint)
 
-1. **The slight absorption of the base material itself**: cellulose acetate or polyester absorbs
-   blue light slightly, which leaves the base a little yellow.
-2. **The orange anti-halation layer (particular to colour negative)**: to control halation between
-   dye layers, manufacturers put orange couplers behind the emulsion. That orange backing leaves
-   the base's three transmittances badly unequal, usually $T_R > T_G > T_B$.
+The base of a colour negative is the unexposed region and is not transparent. It has two
+components: slight absorption of blue light by the base material itself (rendering the base
+yellowish), and the orange anti-halation layer — an orange coupler placed behind the emulsion
+layers to control halation between dye layers. Their sum gives three channel transmittances that
+may differ by a factor of two to three, typically $T_R > T_G > T_B$.
 
-Together they mean that, as far as the copying camera is concerned, the film base is a coloured
-translucent body whose transmittance can differ two- or threefold between colour channels. Without
-removing it, every later density calculation rests on a tilted reference, and every density value
-carries a systematic per-channel bias.
-
-The film-base transmittance vector $T_\text{base} = [T_R, T_G, T_B]$ is sampled from an unexposed
-edge area of the negative, and each frame is normalised per channel:
+Each channel is normalised by the sampled $T_\text{base} = [T_R, T_G, T_B]$:
 
 $$T_\text{norm} = T / T_\text{base}$$
 
-which does two things at once: it removes $D_\text{min}$ (after normalisation, a blank area
-transmits 1 in every channel, i.e. density = 0), and it removes the orange cast at the shadow end
-(each channel divided by its own base value cancels the orange offset physically).
+The operation removes two things at once: $D_\text{min}$ (blank areas take a transmittance of 1 in
+every channel and a density of 0), and the orange cast at the shadow end (each channel is divided
+by its corresponding base value).
 
-Then into the density domain. Optical density is defined as the negative logarithm of
-transmittance, with a floor to keep the arithmetic from overflowing:
+This step is the shadow endpoint: $D_\text{min}$ is fixed at 0 for every channel and the mask is
+removed with it, so only the highlight end remains to be declared.
 
-$$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
+### 4.2 Conversion to the density domain
 
-Density normally runs from 0 (fully clear) to over 3.0 (very high density); the floor prevents
-$\log(0) = -\infty$.
+Optical density is the negative logarithm of transmittance, with a lower clamp:
 
----
+$$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_{\text{floor},c}})\bigr)$$
 
-### Step 5: white balance in the density domain (both ends)
+The clamp floor $D_{\text{floor},c}$ takes that channel's measured deepest density $D_{\max,c}$,
+which is a different quantity from the output range (see 4.3). The physical range of density is
+typically 0 (fully transparent) to above 3.0.
 
-White balance in the density domain has two independent corrections, matching the Negadoctor
-two-ended calibration model. For each channel $c$:
+The film-base divide, the logarithm and the scan-exposure compensation are folded into a
+per-channel 65536-entry lookup table. A 16-bit input holds only 65536 distinct values, so the
+lookup is exact. Pixels raised above 1 by vignette correction fall outside the table and are
+computed directly.
 
-$$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
+### 4.3 Highlight endpoint
 
-**$w_\text{offset}$ (shadow end, additive)**: sampled on a dark area that ought to read neutral grey
-in the positive, lining the three channels' densities up with the highest of them and removing the
-shadow-end cast. An additive correction cannot diverge in a high-density area, which is why
-**$w_\text{offset}$ is calibrated first**.
+The quantity declared at the highlight end is each channel's deepest density $D_{\max,c}$, taken
+as the per-channel mean density over the darkest area of the normalised image — three values. The
+three channels' deepest densities differ, and that difference is the highlight colour balance, so
+retaining all three makes the highlight endpoint and the highlight cast one fact.
 
-**$w_\text{high}$ (highlight end, multiplicative)**: sampled on a highlight that ought to read
-neutral white in the positive, solved with the $w_\text{offset}$ already set folded in, so that
-$(D \times w_\text{high} + w_\text{offset})$ comes out level across the three channels. The
-multiplicative term is calibrated second and reads the existing $w_\text{offset}$, so the two never
-interfere.
+In roll mode the 90th percentile across frames is taken per channel. $D_{\max}$ is a property of
+the film and its development rather than of any single scene, so one value is taken for the roll;
+this percentile makes the result correspond to those frames that do contain a deep black region.
 
-Why the order matters: calibrate $w_\text{high}$ first and $w_\text{offset}$ second, and the second
-moves the densities the first had lined up, so the two ends fight each other (a residual density
-error of about 0.7 in measurement). Shadows first, highlights second, and the final residual is
-about 0.04.
+Sampling excludes two classes of pixel: light board and sprockets (by a luma cut), and pixels
+whose total density exceeds 3.0 — fully opaque sprockets or frame edges reach the $-\log_{10}$
+clamp (about 6–10), well above real picture tones (about 1–1.5). The criterion is the total
+density across the three channels, taken or rejected per pixel, so that the relationship between
+the three endpoints is not biased by per-channel independent rejection.
 
----
+The scalar $D_\text{max}$ is a separate quantity: the output range, which determines where density
+0 is mapped, uniform across the roll.
 
-### Step 6: D_max calibration
+### 4.4 Endpoint nudges
 
-$D_\text{max}$ is the film's physical density range (the density at its darkest point), and it
-decides where the maximum brightness after inversion gets mapped to 1.0 (white).
+$w_\text{offset}$ (shadow end) and $w_\text{high}$ (highlight end) act per channel on the measured
+endpoints:
 
-It is sampled from the darkest area of the already-normalised image ($T_\text{norm}$): the mean
-density of each channel is taken, and then the largest of the three, which guarantees no channel is
-clipped:
+$$w_\text{offset}[c]:\ D_{\min,c} \to -w o_c \qquad w_\text{high}[c]:\ D_{\max,c} \to D_{\max,c}/wh_c$$
 
-$$D_\text{max} = \max_c\!\bigl(\overline{D_c}\;\big|_\text{shadow region}\bigr)$$
+The slope is subsequently derived from the span, so both ends stay independently pinned: black
+lands at the bottom of the output range and white at 0, regardless of the nudge values. The two
+terms therefore act on colour alone.
 
-In roll mode $D_\text{max}$ is the maximum across every frame in the roll, so shadow density stays
-consistent throughout (otherwise the shadows vary in brightness frame to frame).
+Consequently the two carry no calibration-order dependency; the shadow end and the highlight end
+are determined independently.
 
----
+### 4.5 The inversion
 
-### Step 7: the Cineon density-domain inversion
+Each channel is one affine map:
 
-This is the core algorithm. It follows the Cineon log-density principle, mapping the negative's
-measured densities to positive densities and then back to linear light.
+$$D_\text{adj} = S_c \cdot D + b_c, \qquad T_\text{pos} = 10^{D_\text{adj}}$$
 
-**Where the Cineon principle comes from**
+The span is determined by that channel's two endpoints:
 
-The Cineon log encoding standard was drawn up by Kodak in the 1990s for digitising motion-picture
-film. The idea at its centre: express the film's optical density on a log scale so that the digital
-encoding corresponds directly to the photochemistry (the density-exposure curve being logarithmic),
-rather than forcing it into a linear or gamma space. Arithmetic in the density domain therefore has
-a definite physical meaning, and every step can be traced back to some specific property of the
-film chemistry.
+$$S_c = \frac{\text{output range}}{D_{\max,c}/wh_c - (-wo_c)}, \qquad b_c = -\text{output range} - S_c \cdot (-wo_c)$$
 
-**Two endpoints, per channel**
+The lower density endpoint maps to $-\text{output range}$ (black) and the upper to 0 (white).
 
-$$D_\text{adj} = S_c \cdot D + b_c, \qquad S_c = \frac{\text{output range}}{D_{\max,c}},\quad b_c = -\text{output range}$$
+The slope is a quantity derived from the difference of the two ends, not an independent parameter.
+Deriving it from the span is what keeps both ends pinned. The three channels retain four colour
+degrees of freedom: the shared part of the slope is the density range and its between-channel
+difference is the highlight cast; the shared part of the offset is the black level and its
+between-channel difference is the shadow cast. This form matches Cineon / DaVinci — decode,
+invert, set the black and white ends, with the look carried by the output transform.
 
-$$T_\text{pos} = 10^{D_\text{adj}}$$
+The Cineon log encoding standard was defined by Kodak in the 1990s for the digitisation of motion
+picture film, expressing optical density on a logarithmic scale so that the digital encoding
+corresponds to the film's photochemistry (the logarithmic density–exposure relation). The standard
+is itself a storage encoding, mapping density 0–2.046 to code values 95–685. The other model this
+pipeline references, darktable negadoctor, uses two-ended density calibration plus a single gamma.
+Both complete the inversion and three-channel alignment in the density domain.
 
-The film base ($t_\text{base}$) has already put every channel's $D_\text{min}$ at zero, so only the
-highlight end remains to be stated: each channel is normalised by **its own measured**
-$D_{\max,c}$. Density 0 maps to $-\text{output range}$ (black) and density $D_{\max,c}$ maps to 0
-(white).
+#### 4.5.1 Basis for per-channel slopes
 
-**There is no gamma parameter. The slope is what the two ends leave behind, not a separate knob.**
-The between-channel differences in that slope **are** the highlight colour balance — which is the
-Cineon / DaVinci shape: decode, invert, set the two ends, and leave the look to the output
-transform.
+Negative density records scene luminance by the relation $D \propto \gamma_\text{film} \cdot \log
+H$, and reconstructing the scene corresponds to dividing by $\gamma_\text{film}$. That quantity is
+per-channel: `docs/calibration/grade_is_overloaded.py` solves the slope per channel and finds a
+mean between-channel spread of 0.141, with the red layer steepest (Portra 160 at R 1.318 / G 1.112
+/ B 1.121). The same fact appears in the luminance/chroma decomposition: solved separately within
+one chain, the gains are 1.010 and 1.347, a ratio of 1.33. The form of this solve is therefore
+per-channel, i.e. three slopes each derived from its own endpoints.
 
-> **A `grade` ("paper grade") parameter used to sit here; it has been removed.** The old form was
-> $D_\text{adj} = \text{pivot} + (D - \text{pivot}) \cdot \text{grade} - D_\max$ — one gamma across
-> all three channels, with chroma following proportionally. The reasoning is in the next section:
-> the "restore the contrast the paper would have added" argument does not hold, and measurement
-> showed a single scalar driving two independent quantities (luminance 1.010 vs chroma 1.347, a
-> ratio of 1.33) while the three dye layers do not share a gamma at all (channel spread 0.141), so
-> no single scalar could have linearised all three.
->
-> `wb_high` / `wb_offset` are **kept**, but act on the endpoints instead:
-> $D_{\max,c} \to D_{\max,c}/wh_c$ at the highlight end, $D_{\min,c} \to -wo_c$ at the shadow end.
-> The slope is re-derived from the span, so both ends stay pinned — all four colour degrees of
-> freedom survive, they simply stop being a separate stage applied after the inversion. **The
-> calibration-order problem disappears with them**: each end is fixed independently, so there is no
-> longer a shadow-first-or-highlight-first question.
->
-> Projects with no measured endpoints still render through the old form
-> (`DensityEndpoints.LegacyStep5`), bit for bit.
+Absolute $\gamma$ values cannot be obtained from the above data: that chart data describes
+densities on PAPER, with paper contrast already present on both sides of the observation, so
+solving a luminance slope from it returns a circular result of ≈1.0. The ratios and
+between-channel spreads cited above are comparisons internal to the chain and are not subject to
+this limit. Absolute per-channel $\gamma$ requires the negative's D-logE curve, i.e. the film
+datasheet, which is the authoritative content of a datasheet (the opposite of the crosstalk
+matrix, which is dominated by the sensor).
 
-**grade**: numerically $\approx 1/\gamma_\text{film}$; the pivot parameter sets where the mid-tone
-anchor sits, so mid-tone brightness holds steady as grade is changed.
+#### 4.5.2 Black-floor normalisation
 
-> **Earlier versions explained this parameter incorrectly; this is a correction.** The old text
-> argued that C-41 negative is low-contrast because it was destined for high-contrast paper
-> ($\gamma \approx 2.5\text{–}3.5$), and that grade "puts back" the contrast the missing paper
-> would have supplied. That argument fails on two counts:
->
-> **Cineon never modelled paper.** Cineon log is a STORAGE ENCODING for scanned negative
-> density — it maps density 0–2.046 onto code values 95–685 and nothing else. There is no paper
-> stage in the standard, so a "Cineon density-domain inversion" cannot inherit a paper correction
-> from it. The other model this pipeline cites, darktable's **negadoctor, has no paper stage
-> either**: it does two-sided density calibration (`wb_high` / `offset`, the two borrowed in step
-> 5) plus a gamma.
->
-> **And no paper is needed to explain it.** Negative density already records scene luminance in
-> full: $D \propto \gamma_\text{film} \cdot \log H$. Recovering the scene means **dividing by
-> $\gamma_\text{film}$** — a solve, not a compensation — and that holds whether $\gamma_\text{film}$
-> is 0.6 or 0.3, regardless of whether any paper exists downstream. grade $\approx 1.65$ is
-> numerically serviceable; its stated REASON was wrong.
+The film base ($D=0$) corresponds to $T_\text{pos} = 10^{b_c}$ and is mapped to pure black so that
+the sampled base lands at 0: $(v - \text{floor})/(1-\text{floor})$, clamped below at 0 with no
+upper clamp. The floor takes the deepest $b_c$ of the three channels: the shadow nudge places each
+channel's black at a different point, and taking the deepest keeps every channel's shadow detail
+above the clamp. The step is folded into the write stage of the inversion.
 
-The distinction has consequences. `docs/calibration/grade_is_overloaded.py` quantifies three
-problems with the current implementation.
+#### 4.5.3 Path A branch
 
-**One knob drives two quantities.** Split $D$ into mean and chroma and the same grade multiplies
-both. Solved separately inside one consistent chain they want different gains — luminance 1.010,
-chroma 1.347, a ratio of **1.33**. They conflict unless that ratio is exactly 1.00.
+RGB light-box rolls take the luminance/chroma decomposition here in order to apply the chroma
+compensation matrix or per-channel amp produced by the decouple calibration.
 
-**The three dye layers do not share a gamma.** Per-channel slopes differ by **0.141** on average,
-with the red layer consistently steepest (Portra 160: R 1.318 / G 1.112 / B 1.121). No single
-scalar can linearise all three; the right shape is a **per-channel gamma**, and the
-luminance/chroma split above is a downstream symptom of the same fact.
+With a matrix, the matrix output is multiplied by a single scalar (the mean of the three channel
+slopes). The matrix maps the sum-zero plane to itself, and a single multiplier keeps the result
+summing to zero, i.e. pure chroma; luminance is determined by the endpoint affine and is not
+disturbed by the chroma compensation.
 
-**The presets are darkroom vocabulary.** They read "soft — grade 0–1 / normal — grade 2–3 / hard —
-grade 4–5", so the user picks a print look rather than declaring their film's $\gamma$. A control
-standing for $1/\gamma_\text{film}$ would be solved per roll and vary by stock — Ektar 100 (1.54)
-and Portra 160 (1.82) sit 0.28 apart, more than a whole preset step.
+With a per-channel amp only, chroma follows its own channel's slope (identical to the result of
+the plain per-channel affine), is divided by the amp, and has its mean removed again.
 
-**Which means**: this parameter occupies a slot on the physics side (FilmBase) while behaving as a
-taste control. Either it becomes genuinely physical (a per-roll, per-channel $\gamma$ solve), or
-contrast moves to SceneBase, where the contrast and saturation sliders already live. What it should
-not keep doing is both at once under a darkroom name.
+The matrix and the amp are alternatives: the chroma compensation matrix is built from
+$1/\text{amp}_{Yb}$ and $1/\text{amp}_{Rg}$ and already carries the amplification per chroma axis.
 
-> **The absolute $\gamma$ cannot come from that data.** Those ColorChecker sets describe densities
-> ON PAPER, so the print contrast is baked into both sides and solving a luminance slope returns
-> ≈1.0 by construction — circular. (This project already withdrew one fit for that mistake; see
-> `C41Crosstalk.cs`.) The ratio and the channel spread quoted above are chain-INTERNAL comparisons
-> and are not affected. Getting absolute per-channel $\gamma$ needs D-logE curves measured on the
-> negative — i.e. the film datasheet. Note this is the mirror image of the crosstalk matrix, which
-> is sensor-dominated and which a datasheet cannot supply (see `status_m_scale.py`).
+### 4.6 Parameter differences for ECN-2
 
-All of which is why the inversion no longer has a gamma at all: with per-channel endpoints the
-slope is a consequence of the two ends, the three channels get three slopes without anything
-having to ask for them, and the luminance/chroma split above stops being a question the pipeline
-needs a parameter to answer.
+ECN-2 is Kodak's development process for motion picture negative (Kodak Vision 3, Fuji Eterna,
+Kodak 5219 and others). The Cineon standard was designed for the digitisation of ECN-2 motion
+picture film.
 
-> Earlier versions carried a `chroma_grade` coefficient (3.05 by default) to compensate for the
-> chroma shortfall caused by missing colour management. That gap is now filled by the gamut
-> conversion in `InputTransform` / `OutputRender`, and the parameter has been removed.
+**Base colour ($T_\text{base}$)**: C-41's orange mask is the result of a standardised process and
+varies little between manufacturers. ECN-2 base carries a rem-jet antistatic backing (a carbon
+black coating, removed mechanically during development), after whose removal a residual
+brown-red/magenta cast is common, giving three-channel ratios noticeably different from C-41;
+residue is more common still when developed in a C-41-compatible process (cross-process).
 
-**Why there is no per-roll colour-chart calibration**
+**Dynamic range ($D_{\max,c}$)**: motion picture film targets theatrical projection and the
+digital intermediate (DI), with a dynamic range typically half a stop to a stop above C-41
+consumer negative, and typical endpoints of about 2.5–3.0 (C-41 about 2.0–2.5). The slope is
+derived from measured endpoints, so the mapping adapts automatically once the endpoints change.
 
-The most accurate route available is to measure per roll — shoot a ColorChecker on one frame of
-every roll, copy it after processing, and solve from the chart data for this roll's actual
-parameters under this development. That is what [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
-does.
-
-OpenRevelare does not, because of what it costs to use: buying a ColorChecker, giving up a frame on
-every roll to it, and copying it separately after processing is a workflow cost far beyond what
-most film photographers need in accuracy.
-
-**If you need absolute rigour**: for a workflow that needs traceable colour accuracy — copying
-cultural artefacts, commercial archives, scientific use — use DiVERE directly.
-
-**chroma_amp (RGB path only)**: the RGB decouple matrix amplifies chroma further in the density
-domain (about 2×), and without compensation Path A's output oversaturates. The pipeline measures
-the ratio of chroma standard deviations before and after decoupling (averaged over the three
-channels) and divides grade by it when applied to chroma, so Path A and Path B come out at the
-same saturation automatically.
-
-#### What is particular about ECN-2 motion-picture film
-
-ECN-2 is Kodak's process for motion-picture negative (Kodak Vision 3, Fuji Eterna, Kodak 5219 and
-the like all belong to it). The Cineon standard was itself designed for the digital scanning of
-ECN-2 motion-picture film — in that sense ECN-2 is the *native* case for Cineon density-domain
-processing, and C-41 is borrowing it.
-
-Several differences between ECN-2 and C-41 bear on OpenRevelare's settings:
-
-**The film base is a different colour ($T_\text{base}$)**: C-41's orange backing is a standardised
-result of a settled process, and varies little between brands. ECN-2 film carries a rem-jet
-antistatic backing (a carbon-black coating that has to be removed mechanically during processing).
-Once the rem-jet is off, the base often keeps a residual brown-red or magenta cast, and its
-channel ratios differ noticeably from C-41's. Processed at home in a C-41-compatible chemistry
-(so-called cross-processing), incompletely removed rem-jet is commoner still and the base colour is
-harder to predict. Sampling $T_\text{base}$ accurately therefore matters more with ECN-2.
-
-**A wider dynamic range ($D_\text{max}$)**: motion-picture film is designed for theatrical
-projection and a digital intermediate workflow, and has to hold extreme scenes from deep shadow to
-strong highlight; its dynamic range is usually half a stop to a stop above C-41 consumer colour
-negative. The D_max sample comes out larger (typically about 2.5–3.0, against about 2.0–2.5 for
-C-41), and how far the grade parameter should adjust contrast needs reassessing with it.
-
-**Chroma**: ECN-2's DIR coupler formulation and dye layer structure differ from C-41's, and
-motion-picture film's logic for handling saturation comes from theatrical print standards, not
-C-41's consumer-photography logic. The pipeline carries no compensation parameter for it — each
-stock's difference comes through on its own, out of its own density structure under the same grade.
-Adjust richness on the SceneBase saturation slider; for a theatrical look, export into the Kodak
-2383 print-film gamut, which is what a motion-picture negative actually targets.
-
-The corresponding fix for ECN-2 is to render into the Kodak 2383 print film gamut, which is
-precisely the target gamut a motion-picture negative has in the theatrical chain.
+**Chroma**: ECN-2's DIR coupler formulation and dye layer structure differ from C-41, and its
+saturation logic derives from theatrical printing standards. The pipeline provides no
+corresponding compensation parameter; each roll's difference is presented by its own density
+structure under the same endpoint model. The theatrical look comes from the print stock's density
+curves and a 3D LUT rather than from primary coordinates; the corresponding procedure is to export
+scene-linear ACEScg and apply a 2383 print LUT in a grading application.
 
 ---
 
-### Step 8: Stage 2 post-processing (the BASIC output intent)
+## 5. Precision boundary of Path A, and Status M
 
-With the output intent set to **NONE (linear export)**, Stage 2 is skipped and the linear positive
-from the previous step is written out as it is. That is FilmBase's standalone output, ready for
-professional grading software.
+### 5.1 The second layer of crosstalk
 
-With the output intent set to **BASIC**, the following chain runs (all in the linear light domain,
-except the last step):
+Path A addresses spectral coupling at the light-source/film level. A second spectral mismatch
+exists in the system, at the sensor/paper level: the orange mask of a colour negative is designed
+for the spectral response of silver-halide paper, whose cyan dye absorbs additional red light, and
+the mask cancels this with a corresponding complementary density so that the print reads neutral.
+A digital sensor's CFA differs from silver-halide paper's spectral curves, so this cancellation
+fails in the digital domain and produces a systematic cast. Path A's decouple matrix describes the
+relationship between light source and dye and contains no information about the relationship
+between sensor and paper.
 
-1. **White balance gain**: positive-domain white balance on the final positive, for fine
-   colour-temperature trims.
-2. **Exposure compensation**: linear multiplicative scaling, for overall brightness.
-3. **Levels**: black-point/white-point stretching, mapped linearly into [0, 1].
-4. **Contrast**: an S-curve; adjusted in the linear domain it introduces no hue shift.
-5. **Saturation**: chroma deviation scaled along the luminance axis in linear light RGB, which has
-   a physical meaning (this is not a rotation of the hue-saturation wheel).
-6. **sRGB TRC (gamma)**: the last step, the IEC 61966-2-1 standard transfer function, encoding
-   linear light into display gamma.
+After the first layer is handled, the second-layer residual is typically ΔE 3–6. Reducing it to
+ΔE < 2 requires calibrating from chart data and applying a density-domain channel mixing matrix,
+i.e. modelling the second layer separately.
+
+### 5.2 Form of this layer
+
+Fitting a 3×3 density-domain matrix to chart density data for 8 C-41 emulsions reduces the
+residual by 68–80% (RMS from ~0.10–0.14 to ~0.03).
+
+### 5.3 Separation of direction and strength
+
+The same Vision 3 5219 under daylight, solved independently on a Nikon 9000ED and a Hasselblad X5:
+
+$$M_{9000\text{ED}} = \begin{bmatrix} 1.1683 & 0.0863 & -0.0253 \\ 0.1650 & 0.6741 & 0.1108 \\ 0.2447 & -0.1499 & 1.0216 \end{bmatrix}, \qquad M_{X5} = \begin{bmatrix} 1.0717 & 0.0462 & -0.0879 \\ -0.1006 & 0.7614 & 0.1701 \\ 0.1500 & -0.3916 & 1.1930 \end{bmatrix}$$
+
+Taking the chroma action ($P M P$, projecting out luminance), their direction cosine is +0.9918
+(an angle of 7.3°) and their strengths differ by a factor of 1.21 (1.272 against 1.533).
+
+[`C41Crosstalk`](../../../OpenRevelare.Core/C41Crosstalk.cs) records the same conclusion over a
+larger sample: across 18 matrices a single common direction explains 99.01% of the variance (worst
+individual agreement cosine 0.9798), with strength distributed over 0.99–1.89. That sample spans
+different scanners, different manufacturers' dye sets and different processes (5207 appears
+developed both C-41 and ECN-2, and both land on this direction). The direction is universal by
+structural cause: three subtractive dye layers read by three sensor channels whose passbands
+overlap. Strength is structurally equal to `target chroma / negative chroma` and depends on the
+target declared by the calibration.
+
+For comparison, the published Status M → Print Density matrix (a conversion between standard
+scales) has $\|M-I\|$ of 0.129, one quarter of the instrument matrices above.
+
+### 5.4 Relation between narrow-band light and Status M
+
+Status M is a set of response functions (filter × detector); narrow-band LEDs are an emission
+spectrum. Status M's nominal peaks are R 644 nm / G 542 nm / B 435.7 nm, while commercially
+available RGB LED panels peak typically at 630 / 525 / 465 nm, deviations of −14 / −17 / +29 nm.
+In regions where dye absorption curves are steep, a shift of this magnitude produces a measurable
+difference.
+
+### 5.5 Current implementation state
+
+The datasheet serves to define the target scale and to supply $D_\text{min}$ / $D_\text{max}$ and
+the toe and shoulder positions as verification data. Correction strength depends on the specific
+sensor and the declared target and comes from measurement.
+
+`C41Crosstalk.Direction` compiles the common direction in as a constant (switched by
+`FrameParams.UseC41Crosstalk`), which currently has no interface entry point and is off by
+default. Path A rolls ignore it, as their own `DecoupleChromaMatrix` already occupies the same
+slot in the inversion and is measured from that roll's light source. Turning strength into a
+measured quantity requires a calibration wedge of known Status M density and a corresponding
+solver (neither of which exists at present), and requires the target chroma to be determined
+first.
 
 ---
 
-### Step 9: export
+## 6. Output: step 4 and Stage 2
 
-**TIFF (16-bit)**: AdobeRGB (1998) gamut, $\gamma = 563/256 \approx 2.199$; ICC profile embedded;
-16-bit depth to keep highlight gradation and headroom for grading.
+The inversion outputs an ACEScg linear positive. Under the NONE output intent, processing ends
+here and the result is exported directly.
 
-**JPEG (sRGB)**: sRGB gamut, the IEC 61966-2-1 TRC; sRGB ICC profile embedded; TurboJPEG
-acceleration supported underneath (an optional dependency).
+Under the BASIC output intent, a two-part post-process runs, divided according to the physical
+nature of each operation.
 
-**Global consistency in roll mode**: $T_\text{base}$, $D_\text{max}$, the decouple matrix, $\alpha$
-and chroma_amp are all computed at roll level, and every frame shares one set of parameters, so the
-roll's colour does not jump frame to frame — ready to go straight onto a contact sheet.
+### 6.1 Part one (linear light)
+
+White balance gains and exposure compensation. Both scale light — a gain of 2 corresponds to twice
+the photons — which in the linear domain is a single multiplication (linear 0.25 × 2 encodes to
+0.735).
+
+### 6.2 Step 4 (conversion)
+
+Primaries and transfer function are converted together, entering the output space. The step
+changes gamut and gamma at once.
+
+### 6.3 Part two (display space)
+
+Levels, contrast, highlights/shadows, curves and saturation. These are perceptual operations whose
+definitions hold in the encoded domain: contrast pivots on 0.5 as mid-grey, the levels endpoints
+are 0 and 1, and curve control points lie on a bounded perceptual ramp. Display mid-grey through
+contrast = 0.5 outputs 0.5000 under the two-part chain.
+
+Encoding occurs exactly once in the chain and sits in the middle, so the data is already in the
+corresponding domain when it reaches the curve. The curve's companding is fixed at gamma 2.2 and
+is not derived from the output space: that constant defines the semantics of saved curve control
+points, so the same curve represents the same shape after the output space is changed.
+
+Samples outside [0,1] pass through the curve without truncation, as the curve is defined only on
+[0,1], and the headroom of a wide working space is thereby retained (an ACEScg red reaches 1.23 on
+the sRGB scale). Negatives are clamped: powers of a negative base are undefined, and a negative
+indicates the colour has left the gamut entirely, which the output stage handles.
+
+Encoding precedes these operations, and operations after it may exceed range; contrast is one such
+(measured at 1.049 for a setting of 0.2, as rotating about mid-grey lifts highlights past the
+white point). Display-domain encoded values are undefined outside [0,1], so an explicit clamp is
+applied at the end of the chain.
+
+The seven operations are fused into a single pass: each is per-pixel, a full frame read and write
+at 24 MP is 288 MB per pass, and fusing completes all of the arithmetic in one read and write.
+The chain is bandwidth-bound.
+
+`display_referred_stage2` is saved with the roll (true for new rolls): the semantics of the slider
+values depend on the domain they act in, and are pinned together with the project.
+
+### 6.4 Output space
+
+The output space is selected in the main window from sRGB (default), Display P3 and Adobe RGB. It
+is a roll parameter and is saved into the project: Stage 2 runs inside it, so changing it changes
+the rendered result. On a change the slider values are retained and the picture changes with them,
+the values meaning "this much adjustment in the current output space". One output space applies
+across the roll, so that the frames of a contact sheet are comparable.
+
+`ColorSpaces` additionally registers Rec709 and two Kodak dye-set spaces (Kodak Endura Premier,
+Kodak 2383) so that older projects parse; these are migrated to sRGB on load, with a note in the
+status bar. Rec709 shares sRGB's primaries and differs only in transfer function. The two Kodak
+spaces describe the dye set's encoding primaries (measured primary-triangle areas of 127% and 141%
+of sRGB) rather than the medium's reproducible gamut; the look of a darkroom enlargement or a
+theatrical projection resides in density curves and a 3D LUT.
+
+### 6.5 Gamut mapping
+
+Colours outside the destination gamut contract toward the luminance-matched neutral axis,
+preserving hue and luminance, with in-gamut pixels unaffected. Expressed as "grey + t·(colour −
+grey)", the smallest $t$ bringing the worst channel exactly to the boundary has a closed form, so
+the step is a constant number of arithmetic operations rather than an iterative search. Pixels
+brighter than the destination white are tone-limited first and then desaturated against the
+limited grey. The working space ACEScg is wider than every output space, so this step occurs in
+actual processing.
+
+### 6.6 Export and preview
+
+Stage 2 completes in the destination space, so export performs no further conversion and only
+attaches the corresponding ICC profile to the file; the pixels on screen are the pixels in the
+file. Containers are 16-bit TIFF and 8-bit JPEG.
+
+The preview bitmap is submitted to the compositor without a profile and the values reach the panel
+unaltered. On-screen accuracy is handled at the operating-system level: a colorimeter measurement
+generates an ICC profile (containing that panel's per-channel TRC, real primaries and white
+point), which is registered as the system display profile, and the operating system performs the
+conversion centrally.
+
+### 6.7 Roll-wide consistency
+
+$T_\text{base}$, the per-channel endpoints $D_{\max,c}$, the output range, the decouple matrix,
+$\alpha$ and chroma_amp are all computed at roll level, and all frames share one set of
+parameters.
