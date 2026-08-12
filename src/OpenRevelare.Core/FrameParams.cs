@@ -153,6 +153,22 @@ public sealed class FrameParams
     ///
     /// COUPLED TO t_base. The base is sampled in whatever space this declares, so changing one
     /// invalidates the other. Both are roll-level calibration and must be re-established together.
+    ///
+    /// NOTHING SETS THIS TODAY, and that is deliberate rather than an oversight. Two shortcuts
+    /// look obvious and are both wrong:
+    ///
+    ///   • Defaulting it to sRGB would apply a real transform to data that is not in sRGB —
+    ///     swapping one error for another and re-rendering every existing roll.
+    ///   • Solving it from a chart the way docs/calibration/solve_input_primaries.py does returns
+    ///     a blue primary sitting on the white point and a triangle spanning 7% of sRGB's area.
+    ///     The optimiser used the primaries as free matrix coefficients to absorb the model's
+    ///     residual; it measured nothing about any sensor.
+    ///
+    /// The real calibration needs a chart PHOTOGRAPHED ONTO the film, copied on the rig being
+    /// calibrated, and solved JOINTLY with t_base and the endpoints — see THEORY.md, "Known
+    /// limitation: the input primaries are never declared". Until that exists, leaving this null
+    /// costs an off-diagonal residual on saturated colour (~0.53 on G→R); the diagonal part is
+    /// absorbed by t_base and the endpoints, which is why the picture still looks right.
     /// </summary>
     public double[,]? InputPrimaries { get; set; }
 

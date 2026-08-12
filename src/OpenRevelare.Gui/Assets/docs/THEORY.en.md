@@ -190,6 +190,85 @@ Scanner TIFF goes down Path B (the white-light path); lens correction and RGB de
 
 ---
 
+### Known limitation: the input primaries are never declared
+
+The last two rows of the table above (TIFF without a full profile, and every RAW) go through no
+input colour transform, yet everything downstream treats them as working-space data. This section
+sets out what that actually costs, why the obvious fixes do not work, and what a correct fix needs.
+
+**Half the error is absorbed upstream.** Step 4 applies an ACEScg → output-space matrix to an
+unconverted buffer; for sRGB that is:
+
+$$M_{\text{ACEScg}\to\text{sRGB}} \approx \begin{pmatrix} 1.7313 & -0.6040 & -0.0801 \\ -0.1316 & 1.1348 & -0.0087 \\ -0.0246 & -0.1258 & 1.0656 \end{pmatrix}$$
+
+Its row sums are 1.047 / 0.995 / 0.915, so a neutral does shift
+($(0.5,0.5,0.5) \to (0.524, 0.497, 0.458)$, a warm cast of about 14%). That part never becomes
+visible, though: $T_\text{base}$ and the per-channel endpoints are both calibrated **on the rendered
+result** — the film base is made to read neutral, the darkest area likewise — and that is exactly
+the matrix's diagonal part, which a per-channel normalisation can absorb. It is why the picture
+looks right.
+
+What cannot be absorbed is the off-diagonal part. Dividing out the per-channel gain
+($M \cdot \operatorname{diag}(M)^{-1}$) leaves:
+
+$$\begin{pmatrix} 1 & -0.5323 & -0.0752 \\ -0.0760 & 1 & -0.0082 \\ -0.0142 & -0.1109 & 1 \end{pmatrix}$$
+
+The G→R term is **0.53**: a genuine hue and saturation error that no per-channel operation can
+reach. **So the gap is real, but confined to saturated colour rather than overall balance.**
+
+**Why not just declare sRGB by default.** That would apply a real transform to data that is not in
+sRGB — swapping one error for another, and changing how every existing roll renders.
+
+**Why the existing "solve the input primaries" route does not work either.**
+`docs/calibration/solve_input_primaries.py` fits DiVERE's Kodak Gold 200 dataset and drops MSE from
+1.178 to 0.847 (a 28% improvement), but the primaries it solves are:
+
+| | Solved | sRGB |
+|---|---|---|
+| R | (0.6352, 0.2960) | (0.64, 0.33) |
+| G | (0.0065, 0.4102) | (0.30, 0.60) |
+| B | (0.3249, 0.3265) | (0.15, 0.06) |
+
+The blue primary lands at $(0.325, 0.327)$ — essentially the white point (D65 is
+$(0.3127, 0.3290)$), and green sits on the edge of the spectral locus. The triangle they span is
+**7% of sRGB's area**, which is physically impossible. The optimiser used the primaries as free
+matrix coefficients to soak up the model's residual; it measured nothing about any sensor. Even at
+its own optimum it reaches a saturation of 0.5641 against a reference of 0.8102 — **70% of the
+target** — so the 28% is not "the colour is right now", it is a better fit to a model that is still
+far off.
+
+**The correct approach: the chart has to go through the film.**
+
+The quantity being solved for is the **equivalent primaries of the whole chain** — scene → film
+dyes → light source → lens → sensor CFA. Photographing a chart directly with the copy camera
+measures only "scene → lens → CFA", **with the dye layer missing**. And the dyes are not a filter
+that can be divided out afterwards: what the sensor sees IS the three dye densities, whose
+absorption bands overlap the CFA passbands, and **that overlap is precisely what has to be solved**
+(`FrameParams.InputPrimaries` puts it as "the EQUIVALENT primaries of the whole chain, sensor
+spectral response composed with the film's dye transmission").
+
+This is also why the three earlier attempts failed: a manufacturer's ColorMatrix describes **a real
+scene → sensor**, and a negative holds no scene, only dye densities. That matrix answers a different
+question from the one being asked here.
+
+The calibration is therefore:
+
+1. **Photograph a standard colour chart onto the film** (same emulsion, same process)
+2. **Copy that negative on the rig being calibrated** (same light source, lens, geometry)
+3. **Solve jointly with the density parameters** — the primaries cannot be solved on their own; they
+   have to be optimised together with $T_\text{base}$ and the endpoints so that the transform and
+   the inversion are consistent by construction (this is what DiVERE's
+   `divere/utils/ccm_optimizer` does, and where its `primaries_xy` comes from)
+4. One calibration per copying rig and emulsion
+
+Step 3 is the crux, and the reason the earlier attempts failed: a matrix that **did not take part in
+the calibration** cannot agree with it.
+
+This is the same shape of problem as the Status M question earlier: both need a measured reference
+plus a joint solve, and neither can be settled by a lookup or a default value.
+
+---
+
 ### Step 2: lens correction (optional, linear domain)
 
 Every correction happens in the **linear light domain**, after the decode and before the inversion,
