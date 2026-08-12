@@ -10,8 +10,12 @@ namespace OpenRevelare.Gui.Views;
 
 /// <summary>
 /// 文档查看器 — shows the bundled GUIDE.md (操作指南) and THEORY.md (技术原理) in scrollable,
-/// selectable panes. Port of Python's <c>gui/help_viewer.py</c>. Markdown is shown as lightly
-/// formatted text (Avalonia has no MathML renderer, so LaTeX stays as source — the prose reads fine).
+/// selectable panes. Port of Python's <c>gui/help_viewer.py</c>.
+///
+/// Rendered through <see cref="Services.MarkdownView"/> rather than shown as source: these files
+/// are the program's own account of what it does, and reading 182 bold spans and 18 tables as raw
+/// markup is materially harder than reading the same text on disk. LaTeX still stays as source —
+/// Avalonia has no math renderer — but is set apart as a formula block instead of running inline.
 /// </summary>
 public sealed class DocDialog : Window
 {
@@ -52,16 +56,7 @@ public sealed class DocDialog : Window
         }
         catch (Exception ex) { text = Loc.T("无法载入文档：") + ex.Message; }
 
-        var body = new SelectableTextBlock
-        {
-            Text = text,
-            TextWrapping = TextWrapping.Wrap,
-            FontFamily = new FontFamily("Consolas, Cascadia Code, PingFang SC, Microsoft YaHei, monospace"),
-            FontSize = 12.5,
-            LineHeight = 20,
-            Margin = new Thickness(14),
-        };
-        return new ScrollViewer { Content = body, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        return Services.MarkdownView.Render(text);
     }
 
     private static Stream OpenDoc(string asset)

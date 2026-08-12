@@ -443,5 +443,12 @@
             <Setter Property="Background" Value="{DynamicResource BorderSoftBrush}" />
             <Setter Property="Height" Value="1" />
         </Style>
+        <!-- Document viewer's table of contents: a flat list that only reacts on hover. -->
+        <Style Selector="Button.tocLink">
+            <Setter Property="CornerRadius" Value="3" />
+        </Style>
+        <Style Selector="Button.tocLink:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+        </Style>
     </Application.Styles>
 </Application>
