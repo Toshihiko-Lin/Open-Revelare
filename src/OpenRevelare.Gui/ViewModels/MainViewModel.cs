@@ -511,6 +511,12 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnCurrentFrameChanged(RollFrame? value)
     {
+        // A reorder pulls the selected frame out of Frames and puts it back, which the strip's
+        // SelectedItem binding reports as null-then-reselect. Nothing about the frame changed, so
+        // neither half of that is a real switch: folding params against the null would run with no
+        // outgoing frame, and the re-select would re-render a frame already on screen.
+        if (_reordering) return;
+
         // Persist the outgoing frame's live edits before swapping in the new one.
         // Skipped during a restore switch — the frames already hold the restored params.
         if (_prevFrame is not null && HasImage && !_restoring)
@@ -522,6 +528,9 @@ public partial class MainViewModel : ViewModelBase
         _prevFrame = value;
         if (value is not null) _ = SwitchFrameAsync(value);
     }
+
+    /// <summary>True while <see cref="Reorder"/> is shuffling Frames — see the guard above.</summary>
+    private bool _reordering;
 
     // ══ Undo / redo (full-roll snapshots, coalesced) ════════════════════════════
     private sealed record RollSnapshot(FrameParams[] Params, int Index);
@@ -3088,7 +3097,13 @@ public partial class MainViewModel : ViewModelBase
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
         Frames.Clear();
-        foreach (string p in paths) AddFramesForPath(p);
+        // File-name order, not the order the paths arrived in. A folder import is already sorted,
+        // but a hand-picked selection comes back in whatever order the platform picker chose, and
+        // a roll assembled from several adds arrives in add order — the strip would then read as
+        // the order the files were TOUCHED rather than the order they were shot. Sorting the paths
+        // rather than the finished frames keeps each split scan's virtual copies next to their
+        // parent, since they are all contributed by one path.
+        foreach (string p in SortedByName(paths)) AddFramesForPath(p);
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
@@ -3099,6 +3114,14 @@ public partial class MainViewModel : ViewModelBase
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
+    }
+
+    /// <summary>Source paths in film-strip order — by file name, numerically aware.</summary>
+    private static List<string> SortedByName(IEnumerable<string> paths)
+    {
+        var list = paths.ToList();
+        list.Sort(NaturalOrder.Instance);
+        return list;
     }
 
     /// <summary>
@@ -3725,7 +3748,10 @@ public partial class MainViewModel : ViewModelBase
         RollFrame.ResetScene(template);
         template.CropRect = null; template.Rotation = 0;   // geometry is per-scan; don't inherit crop/straighten
 
-        foreach (string p in toAdd)
+        // The batch is sorted, but appended rather than merged into the existing frames: the roll's
+        // order is the user's to own once they have dragged anything, and re-sorting the whole
+        // strip on every add would undo that silently.
+        foreach (string p in SortedByName(toAdd))
             Frames.Add(new RollFrame(p) { Params = template.Clone() });
 
         ResetUndoAfterStructural();
@@ -3749,6 +3775,132 @@ public partial class MainViewModel : ViewModelBase
         CurrentFrame = copy;             // switch to the copy so it can be adjusted immediately
         StatusText = Loc.T("已创建虚拟副本（继承标定、场景已重置）");
         RestartThumbnails();
+    }
+
+    /// <summary>
+    /// Drag-reorder: move the frame at <paramref name="from"/> into the gap
+    /// <paramref name="insertAt"/>.
+    ///
+    /// <paramref name="insertAt"/> is an INSERTION POINT, not an item index: it counts the gaps
+    /// between frames, so 0 is above the first frame and <c>Frames.Count</c> is below the last.
+    /// Taking an item index instead is what makes a drag ambiguous — index 2 cannot say whether
+    /// the frame belongs above or below the frame already sitting there, and resolving it by
+    /// direction puts every forward drag one slot too far.
+    ///
+    /// A real frame travels with its virtual copies. They are alternate looks at ONE negative, so
+    /// splitting them across the roll would put the same photograph in two places — and on a split
+    /// scan the copies are separate negatives that only share a file, which makes the group the
+    /// physical strip. Dragging a copy therefore moves its whole group too, from wherever the
+    /// group starts, rather than tearing it out on its own.
+    ///
+    /// Reordering does not touch any frame's params, so unlike the other structural edits it does
+    /// not have to re-baseline undo — the index-keyed snapshots would be wrong for exactly one
+    /// step, which is the strip's own order, and that is what <see cref="MarkRollDirty"/> persists.
+    /// </summary>
+    public void MoveFrame(int from, int insertAt)
+    {
+        if (from < 0 || from >= Frames.Count) return;
+        (int start, int count) = GroupAt(from);
+        int gap = Math.Clamp(insertAt, 0, Frames.Count);
+        // Snap the gap to a group boundary: dropping between a frame and its own virtual copy
+        // would otherwise split the group the move is trying to keep together.
+        if (gap > 0 && gap < Frames.Count)
+        {
+            (int gStart, int gCount) = GroupAt(gap);
+            if (gap > gStart) gap = gStart + gCount;   // inside a group → past its end
+        }
+        // A drop anywhere inside the moving group's own span leaves the roll as it is.
+        if (gap >= start && gap <= start + count) return;
+        // Re-express the gap for the list WITHOUT the moving group, which is what the insert below
+        // runs against: everything after the group shifts down by its length once it is lifted out.
+        int target = gap > start ? gap - count : gap;
+
+        var moving = new List<RollFrame>(count);
+        for (int i = 0; i < count; i++) moving.Add(Frames[start + i]);
+        Reorder(() =>
+        {
+            for (int i = count - 1; i >= 0; i--) Frames.RemoveAt(start + i);
+            int at = Math.Clamp(target, 0, Frames.Count);
+            for (int i = 0; i < count; i++) Frames.Insert(at + i, moving[i]);
+        });
+
+        MarkRollDirty();   // frame order is saved with the project
+        StatusText = Loc.T("已调整帧顺序");
+    }
+
+    /// <summary>
+    /// Rearrange <see cref="Frames"/> without disturbing the current frame.
+    ///
+    /// The film strip binds SelectedItem to CurrentFrame, so taking the selected frame out of the
+    /// collection makes the ListBox push null back through the binding — and re-inserting it pushes
+    /// it in again as a "new" selection. That round-trip runs the whole frame-switch path: the
+    /// outgoing frame's live edits get folded in against a null _prevFrame, and the frame is
+    /// re-decoded to arrive at the state it was already in. Reordering changes no pixels, so the
+    /// selection is restored by hand afterwards and the switch is suppressed while it happens.
+    /// </summary>
+    private void Reorder(Action shuffle)
+    {
+        RollFrame? keep = CurrentFrame;
+        _reordering = true;
+        try
+        {
+            shuffle();
+            CurrentFrame = keep;   // the binding may have nulled it while the frame was out
+        }
+        finally { _reordering = false; }
+        _prevFrame = CurrentFrame;   // the outgoing-frame link the next real switch relies on
+    }
+
+    /// <summary>Put the whole roll back into file-name order, groups intact.</summary>
+    public void SortFramesByName()
+    {
+        if (Frames.Count < 2) return;
+        var groups = new List<List<RollFrame>>();
+        for (int i = 0; i < Frames.Count;)
+        {
+            (int start, int count) = GroupAt(i);
+            var g = new List<RollFrame>(count);
+            for (int k = 0; k < count; k++) g.Add(Frames[start + k]);
+            groups.Add(g);
+            i = start + count;
+        }
+        List<RollFrame> sorted = groups
+            .OrderBy(g => g[0].Path, NaturalOrder.Instance)
+            .SelectMany(g => g)
+            .ToList();
+        // Already in order: say so rather than dirtying the roll and rewriting the project file
+        // for a no-op — the sheet cover would be regenerated too.
+        if (sorted.SequenceEqual(Frames)) { StatusText = Loc.T("已经是文件名顺序"); return; }
+
+        Reorder(() =>
+        {
+            Frames.Clear();
+            foreach (RollFrame f in sorted) Frames.Add(f);
+        });
+
+        MarkRollDirty();
+        StatusText = Loc.T("已按文件名排序");
+    }
+
+    /// <summary>
+    /// The contiguous run of frames sharing the source file of <paramref name="index"/> — a real
+    /// frame plus the virtual copies that follow it. Returns just that one frame when the run is
+    /// broken, which is what an older project reordered by hand can look like.
+    /// </summary>
+    private (int Start, int Count) GroupAt(int index)
+    {
+        string path = Frames[index].Path;
+        int start = index;
+        while (start > 0 &&
+               Frames[start].IsVirtual &&
+               string.Equals(Frames[start - 1].Path, path, StringComparison.OrdinalIgnoreCase))
+            start--;
+        int end = start;
+        while (end + 1 < Frames.Count &&
+               Frames[end + 1].IsVirtual &&
+               string.Equals(Frames[end + 1].Path, path, StringComparison.OrdinalIgnoreCase))
+            end++;
+        return (start, end - start + 1);
     }
 
     /// <summary>Remove the current frame. Removing a real frame also drops every virtual copy of it.</summary>

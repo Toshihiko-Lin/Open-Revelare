@@ -47,6 +47,8 @@
     <StreamGeometry x:Key="IcoCheck">M3.5 8.5L6.5 11.5L12.5 4.5</StreamGeometry>
     <StreamGeometry x:Key="IcoLayers">M8 2L14 5.5L8 9L2 5.5ZM2 9.5L8 13L14 9.5</StreamGeometry>
     <StreamGeometry x:Key="IcoTrash">M3 4.5H13M6.5 4.5V3A0.5 0.5 0 0 1 7 2.5H9A0.5 0.5 0 0 1 9.5 3V4.5M4.5 4.5V13A1 1 0 0 0 5.5 14H10.5A1 1 0 0 0 11.5 13V4.5M6.8 7V11.5M9.2 7V11.5</StreamGeometry>
+    <!-- Shortest-to-longest bars beside a down arrow: sort ascending. -->
+    <StreamGeometry x:Key="IcoSort">M2.5 4H7.5M2.5 8H9.5M2.5 12H11.5M13 3V12M11 10L13 12L15 10</StreamGeometry>
 
     <!-- ── Output ──────────────────────────────────────────────────────────── -->
     <StreamGeometry x:Key="IcoExport">M8 2.5V10M5.2 7.3L8 10.1L10.8 7.3M2.5 11V12.5A1 1 0 0 0 3.5 13.5H12.5A1 1 0 0 0 13.5 12.5V11</StreamGeometry>

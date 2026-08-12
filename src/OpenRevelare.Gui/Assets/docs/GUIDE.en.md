@@ -284,6 +284,13 @@ them touches FilmBase's physical reconstruction.
 Importing several files puts the software into roll mode. The film strip runs down the left of the
 window; click a thumbnail to switch to that frame.
 
+**Frame order**: an import is sorted by file name, with digit runs compared as numbers — so `DSC_9`
+comes before `DSC_10`, rather than the frames landing in whatever order they finished decoding. To
+arrange them any other way, drag a thumbnail in the film strip; a highlighted line shows where it
+would land, and releasing drops it there. A virtual copy always travels with the frame it was made
+from. Right-click → "Sort by file name" puts the whole roll back into name order. The order is
+saved with the project and sets the layout of the contact sheet.
+
 **Applying a parameter to the whole roll**: in the FilmBase or SceneBase panel, every parameter has
 an "apply to the whole roll" button beside it. Clicking it copies the current frame's value for
 that parameter to every frame in the roll.

@@ -91,6 +91,13 @@ public partial class MainWindow : Window
         FilmStrip.AddHandler(PointerPressedEvent, OnFilmStripPointerPressed,
                              RoutingStrategies.Tunnel);
 
+        // Drag-to-reorder. Tunnelled like the above so the gesture is seen before the ListBox
+        // turns the press into a selection change, and handled on the ListBox rather than on the
+        // items so a drag that leaves the thumbnail it started on keeps tracking.
+        FilmStrip.AddHandler(PointerMovedEvent, OnFilmStripPointerMoved, RoutingStrategies.Tunnel);
+        FilmStrip.AddHandler(PointerReleasedEvent, OnFilmStripPointerReleased, RoutingStrategies.Tunnel);
+        FilmStrip.PointerCaptureLost += (_, _) => EndFrameDrag(commit: false);
+
         // Crop handles: eight identical squares, built here rather than in XAML because they
         // are positioned entirely from code anyway and eight near-duplicate elements in the
         // markup would only be noise.
@@ -1041,13 +1048,152 @@ public partial class MainWindow : Window
                     mi.IsChecked = string.Equals(hex, cur, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Select the thumbnail under a right-click before its context menu opens.</summary>
+    // ── Film strip: right-click selection + drag-to-reorder ─────────────────────
+    // A press arms the drag but does not start it: the strip's primary job is still selecting a
+    // frame, and a click that wanders a pixel must stay a click. The drag begins only once the
+    // pointer has moved past the threshold, so a plain click never reorders anything.
+    private int _dragFrom = -1;        // index the drag started on, -1 when nothing is armed
+    private Point _dragOrigin;
+    private Point _dragPos;            // latest pointer position, for the auto-scroll timer
+    private bool _frameDragActive;     // past the threshold — the drop line is showing
+    private DispatcherTimer? _dragScroll;
+    private const double FrameDragThreshold = 5;
+
+    /// <summary>Select the thumbnail under a right-click before its context menu opens, and arm a
+    /// left-press for a possible reorder drag.</summary>
     private void OnFilmStripPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(FilmStrip).Properties.IsRightButtonPressed) return;
+        var props = e.GetCurrentPoint(FilmStrip).Properties;
         if (e.Source is not Visual v) return;
         ListBoxItem? item = v.GetSelfAndVisualAncestors().OfType<ListBoxItem>().FirstOrDefault();
-        if (item?.DataContext is Models.RollFrame frame) FilmStrip.SelectedItem = frame;
+        if (item?.DataContext is not Models.RollFrame frame) return;
+
+        if (props.IsRightButtonPressed) { FilmStrip.SelectedItem = frame; return; }
+        if (!props.IsLeftButtonPressed) return;
+        // The per-thumbnail tick box is a control in its own right; dragging from it would make
+        // the checkbox impossible to hit without also nudging the roll's order.
+        if (v.GetSelfAndVisualAncestors().OfType<CheckBox>().Any()) return;
+
+        _dragFrom = Vm?.Frames.IndexOf(frame) ?? -1;
+        _dragOrigin = _dragPos = e.GetPosition(FilmStrip);
+    }
+
+    private void OnFilmStripPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragFrom < 0) return;
+        if (!e.GetCurrentPoint(FilmStrip).Properties.IsLeftButtonPressed)
+        {
+            EndFrameDrag(commit: false);   // the button went up somewhere we never saw
+            return;
+        }
+
+        Point p = e.GetPosition(FilmStrip);
+        if (!_frameDragActive)
+        {
+            if (Math.Abs(p.Y - _dragOrigin.Y) < FrameDragThreshold &&
+                Math.Abs(p.X - _dragOrigin.X) < FrameDragThreshold) return;
+            _frameDragActive = true;
+            e.Pointer.Capture(FilmStrip);   // keep the gesture even when it leaves the strip
+            _dragScroll ??= new DispatcherTimer(TimeSpan.FromMilliseconds(40),
+                                                DispatcherPriority.Normal, (_, _) => AutoScrollStrip());
+            _dragScroll.Start();
+        }
+        _dragPos = p;
+        ShowDropLine(p);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Scroll the strip while a drag rests near its top or bottom edge, on a timer rather than on
+    /// pointer movement — the pointer is usually held STILL at the edge while waiting for the roll
+    /// to come round, which produces no move events to scroll from.
+    ///
+    /// The ListBox virtualises, so only the visible thumbnails exist as controls and a drop can
+    /// only ever be aimed at one of them. Without this, a 36-frame roll could not have frame 30
+    /// dragged to the front at all — the target is simply not realised.
+    /// </summary>
+    private void AutoScrollStrip()
+    {
+        if (!_frameDragActive || FilmStrip.Scroll is not { } scroll) return;
+        const double Edge = 28, Step = 16;
+        double dy = _dragPos.Y < Edge ? -Step
+                  : _dragPos.Y > FilmStrip.Bounds.Height - Edge ? Step
+                  : 0;
+        if (dy == 0) return;
+        Vector o = scroll.Offset;
+        double max = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
+        double y = Math.Clamp(o.Y + dy, 0, max);
+        if (y == o.Y) return;
+        scroll.Offset = o.WithY(y);
+        ShowDropLine(_dragPos);   // the item under the pointer changed without the pointer moving
+    }
+
+    private void OnFilmStripPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_frameDragActive) e.Handled = true;   // this release finished a drag, not a click
+        EndFrameDrag(commit: true, drop: e.GetPosition(FilmStrip));
+    }
+
+    /// <summary>
+    /// Finish (or abandon) a reorder. <paramref name="commit"/> is false when the gesture was
+    /// interrupted — a lost capture or a button we never saw released — in which case the roll is
+    /// left exactly as it was rather than reordered from a stale pointer position.
+    /// </summary>
+    private void EndFrameDrag(bool commit, Point? drop = null)
+    {
+        bool wasDragging = _frameDragActive;
+        int from = _dragFrom;
+        _dragFrom = -1;
+        _frameDragActive = false;
+        _dragScroll?.Stop();
+        DropLine.IsVisible = false;
+        if (!wasDragging || !commit || drop is not { } pos || from < 0) return;
+        if (DropTarget(pos) is { } to) Vm?.MoveFrame(from, to);
+    }
+
+    /// <summary>Position the insertion line for a pointer at <paramref name="p"/>.</summary>
+    private void ShowDropLine(Point p)
+    {
+        if (NearestItem(p) is not { } hit) { DropLine.IsVisible = false; return; }
+        (ListBoxItem item, bool after) = hit;
+        Point origin = item.TranslatePoint(default, FilmStrip) ?? default;
+        DropLine.Margin = new Thickness(6, origin.Y + (after ? item.Bounds.Height : 0) - 1, 6, 0);
+        DropLine.IsVisible = true;
+    }
+
+    /// <summary>The insertion point (a gap between frames, 0..Count) a drop at <paramref name="p"/>
+    /// means, or null if the pointer is not over the strip's items at all. This is the same gap the
+    /// drop line was drawn in, so what the user saw is what they get.</summary>
+    private int? DropTarget(Point p)
+    {
+        if (NearestItem(p) is not { } hit) return null;
+        if (hit.Item.DataContext is not Models.RollFrame frame || Vm is null) return null;
+        int idx = Vm.Frames.IndexOf(frame);
+        return hit.After ? idx + 1 : idx;
+    }
+
+    /// <summary>
+    /// The strip item nearest <paramref name="p"/>, and whether the pointer sits in its lower half
+    /// (so the frame belongs after it). Falls back to the closest item vertically when the pointer
+    /// is in the padding between two, which is where a slow drag spends much of its time.
+    /// </summary>
+    private (ListBoxItem Item, bool After)? NearestItem(Point p)
+    {
+        ListBoxItem? best = null;
+        double bestDist = double.MaxValue;
+        bool after = false;
+        foreach (ListBoxItem item in FilmStrip.GetVisualDescendants().OfType<ListBoxItem>())
+        {
+            if (!item.IsVisible || item.Bounds.Height <= 0) continue;
+            Point origin = item.TranslatePoint(default, FilmStrip) ?? default;
+            double top = origin.Y, mid = top + item.Bounds.Height / 2, bottom = top + item.Bounds.Height;
+            double dist = p.Y < top ? top - p.Y : p.Y > bottom ? p.Y - bottom : 0;
+            if (dist >= bestDist) continue;
+            bestDist = dist;
+            best = item;
+            after = p.Y > mid;
+        }
+        return best is null ? null : (best, after);
     }
 
     private async void OnHelpClick(object? sender, RoutedEventArgs e) => await InfoDialog.Help().ShowDialog(this);
@@ -1604,6 +1750,7 @@ public partial class MainWindow : Window
 
     private void OnVirtualCopyClick(object? sender, RoutedEventArgs e) => Vm?.CreateVirtualCopyOfCurrent();
     private void OnRemoveFrameClick(object? sender, RoutedEventArgs e) => Vm?.RemoveCurrentFrame();
+    private void OnSortFramesClick(object? sender, RoutedEventArgs e) => Vm?.SortFramesByName();
 
     private async void OnExportClick(object? sender, RoutedEventArgs e)
     {

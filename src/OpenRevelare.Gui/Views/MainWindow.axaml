@@ -255,6 +255,7 @@
                  buttons stealing the top of the strip; they are right-click items now
                  (same as the Python build), so the strip is all thumbnails. -->
             <Border Grid.Column="0" Background="{DynamicResource Panel2Brush}" IsVisible="{Binding HasImage}">
+              <Panel>
                 <ListBox Name="FilmStrip" Classes="filmstrip" ItemsSource="{Binding Frames}"
                          SelectedItem="{Binding CurrentFrame}" Background="Transparent" Padding="4"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -299,6 +300,13 @@
                                       IsEnabled="{Binding HasSceneClipboard}" />
                             <MenuItem Header="{i18n:T '应用场景到整卷'}" Click="OnApplySceneToRollClick" />
                             <Separator />
+                            <MenuItem Header="{i18n:T '按文件名排序'}" Click="OnSortFramesClick"
+                                      ToolTip.Tip="{i18n:T '把整卷恢复成文件名顺序（撤销手动排序）'}">
+                                <MenuItem.Icon>
+                                    <ctl:Icon Data="{StaticResource IcoSort}" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <Separator />
                             <MenuItem Header="{i18n:T '选择同步项…'}" Click="OnSyncOptionsClick" />
                         </ContextMenu>
                     </ListBox.ContextMenu>
@@ -327,6 +335,14 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
+
+                <!-- Where a dragged thumbnail would land. Hit-test invisible so it never eats the
+                     pointer events the drag itself is being tracked with. -->
+                <Rectangle Name="DropLine" IsVisible="False" IsHitTestVisible="False"
+                           Height="2" Margin="6,0" VerticalAlignment="Top"
+                           HorizontalAlignment="Stretch"
+                           Fill="{DynamicResource AccentBrush}" />
+              </Panel>
             </Border>
             <GridSplitter Grid.Column="1" Width="1" Background="{DynamicResource BorderSoftBrush}" />
 
