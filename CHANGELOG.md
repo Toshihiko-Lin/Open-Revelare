@@ -1,5 +1,35 @@
 # OpenRevelare — 更新日志
 
+## 待发布
+
+胶片条的帧顺序现在是可控的。
+
+**新增**
+
+- **拖动缩略图调整帧顺序**。高亮横线指示落点，拖到顶端或底端会自动滚动。虚拟副本
+  跟着母帧一起移动。顺序随工程保存，也决定印样的排列，右键「按文件名排序」可恢复。
+
+**修复**
+
+- **导入后缩略图不按文件名排序**。手选多个文件、或分多次添加攒起来的卷会乱序
+  （文件夹导入本来就是排好的）。现在统一按文件名排，向已有的卷添加图像时只把新增的这批排好追加在末尾，不重排整卷。
+
+---
+
+**Added**
+
+- **Drag a thumbnail to reorder frames.** A highlighted line shows where it would land,
+  and dragging to an edge scrolls the strip. A virtual copy travels with its parent frame.
+  The order is saved with the project and sets the contact sheet's layout; right-click →
+  "Sort by file name" puts it back.
+
+**Fixed**
+
+- **Thumbnails were not sorted by file name after an import.** Hand-picking several files,
+  or building a roll up over several adds, left it scrambled (a folder import was already
+  sorted). Everything is now sorted by file name with digit runs compared as numbers. Adding to an existing roll sorts only the new batch and
+  appends it, leaving the rest of the order alone.
+
 ## v1.2.2（2026-08-11）
 
 裁切与片基采样修好了，转过向的照片也不再出错。另有一处 TIFF 色彩管理的修正。
