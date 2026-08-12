@@ -1,5 +1,80 @@
 # OpenRevelare — 更新日志
 
+## 待发布
+
+旋转相关的三处修复。1.2.2 把裁切在 macOS 上的表现修好了，但**转过向**之后
+裁切和片基采样仍然是错的——这次是同一类问题的根子。
+
+**修复**
+
+- **转过向的照片，裁切出来比例和位置都不对**。屏幕上的裁切框是对的，应用后却
+  长宽轴对调、位置偏移。裁切矩形本该存在「已转向」的坐标系里（管线是先转向后
+  裁切，旋转按钮也按这个前提让裁切跟着画面走），但存之前朝向被脱掉了却没转
+  回来。重新打开裁切工具看着是对的——读取时又转了回去，往返自洽，所以一直没
+  露馅；真正吃亏的是直接读这个矩形的地方，也就是渲染管线本身。
+
+  **注意**：在转过向的帧上存过裁切的工程文件，里面的裁切矩形存的就是错的。
+  这次修复后重新打开，那些裁切会按正确的读法解释，位置相当于变了，需要重裁。
+  未转向时存的裁切不受影响。
+- **重新采集片基时，负片画面没有跟着一起转**。把横躺的扫描转正之后再点片基
+  采样，预览会翻回未转向的样子。负片视图原本完全跳过几何链，而正片是走完整
+  管线的，两边朝向对不上。现在负片视图跟随 90° 转向和翻转（拉直和裁切仍然不
+  施加：前者会带进填充角，后者会把要采样的片基边缘挡掉），局部高清渲染同步
+  跟进。
+- **承上，负片转向后框选的采样区域取错了地方**。画面转对了，但框选坐标没跟着
+  映射，取样取的是原始缓冲区里对应的另一块——通常是画面对角线另一头，几乎必然
+  触发「采样区偏暗」的警告。D-max 和偏移采样同理。
+
+**改进**
+
+- **拖角改变裁切框大小时，预设比例可以在横竖之间切换**（参考 Lightroom）。选了
+  3:2 之后想要 2:3，以前只能去按旋转按钮——但那转的是画面，不是画幅。现在往竖长
+  方向拖过一定幅度，锁定的比例就翻成竖构图，往回拖再翻回来。只有**拖角**才触发：
+  边handle 只动一个轴，那个「形状」是另一个轴不动造成的假象。切换带迟滞，指针
+  停在对角线附近时画框不会来回跳。
+
+---
+
+**Fixed**
+
+- **A crop applied to a rotated photo came out with the wrong ratio and position.**
+  The frame looked right on screen, but what landed had its axes swapped and had
+  drifted. The crop rect is meant to be stored against the ORIENTED frame — the
+  pipeline orients before it crops, and the rotate buttons carry the crop with the
+  picture on that assumption — but the orientation was stripped off before storing
+  and never put back. Re-opening the crop tool looked correct, because reading it
+  back re-applied the turn; the round trip was self-consistent, which is what hid
+  this. What actually suffered was everything reading the rect directly, the render
+  pipeline included.
+
+  **Note**: projects with a crop saved on a rotated frame hold a wrongly-stored
+  rect. After this fix those crops are read the correct way, which effectively moves
+  them — they need re-cropping. Crops saved with no rotation applied are unaffected.
+- **Re-sampling the film base showed a negative that had not been turned with the
+  picture.** Straightening a sideways scan and then arming the film-base tool flipped
+  the preview back to its un-rotated orientation. The negative view skipped the
+  geometry chain entirely while the positive went through the whole pipeline, so the
+  two disagreed. The negative view now follows the quarter turns and flips (straighten
+  and crop are still not applied: the first would bring in fill corners, the second
+  would hide the very film base being sampled), and the sharp-patch render follows it.
+- **Following from the above, a selection drawn on the turned negative sampled the
+  wrong region.** The picture was turned but the selection coordinates were not mapped
+  with it, so the sample came from a different part of the raw buffer — usually the
+  opposite corner, which almost always tripped the "region looks too dark" warning.
+  Same for the D-max and offset samplers.
+
+**Improved**
+
+- **Dragging a corner handle can now flip a preset ratio between landscape and
+  portrait** (as Lightroom does). Getting 2:3 out of a 3:2 preset previously meant
+  reaching for the rotate buttons — but those turn the PICTURE, not the format. Drag
+  far enough toward portrait and the locked ratio flips; drag back and it returns.
+  Only a CORNER triggers it: an edge handle moves one axis only, so its "shape" is an
+  artefact of the other axis standing still. The swap has hysteresis, so the frame
+  does not flutter while the pointer tracks the diagonal.
+
+---
+
 ## v1.2.2（2026-08-11）
 
 接着修 1.2.1 没修完的裁切问题，外加一处 TIFF 色彩管理的修正。
