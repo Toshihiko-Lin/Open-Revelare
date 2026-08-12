@@ -1049,23 +1049,49 @@ public partial class MainViewModel : ViewModelBase
     // this wrong does not look like an error: the crop simply frames the wrong part of the picture,
     // which is precisely the class of bug the orientation comment above records.
 
-    /// <summary>A stored (whole-file) rect as the view should draw it, or null if there is none.</summary>
+    /// <summary>
+    /// A stored (oriented-frame) rect as the view should draw it, or null if there is none.
+    ///
+    /// Must be the exact inverse of <see cref="FromDisplay"/>, so it mirrors its structure: the
+    /// identity on an ordinary frame — the stored space and the drawn space are both the oriented
+    /// frame — and a down-to-file / relative-to-box / back-out round trip on a split one.
+    /// </summary>
     private (double X, double Y, double W, double H)? ToDisplay(
         (double X, double Y, double W, double H)? rect)
-        => _previewMargin is { } box && rect is { } r
-               ? OrientRect(Relative(r, box), BuildParams())
-               : OrientRect(rect, BuildParams());
+    {
+        if (_previewMargin is not { } box || rect is not { } r) return rect;
+        FrameParams p = BuildParams();
+        return OrientRect(Relative(UnorientRect(r, p)!.Value, box), p);
+    }
 
-    /// <summary>The inverse of <see cref="ToDisplay"/>: what the view drew, as a storable rect.</summary>
+    /// <summary>
+    /// The inverse of <see cref="ToDisplay"/>: what the view drew, as a storable rect.
+    ///
+    /// The stored rect lives in the ORIENTED frame (see <see cref="SplitRectOf"/> for why — it is
+    /// what makes <see cref="RotateCropCw"/> and the pipeline's orient-then-crop order agree), and
+    /// the view already draws in that space. So on an ordinary frame this is the IDENTITY, and the
+    /// un-orient exists solely to reach the margin box, which is a FILE-space rect: down to file
+    /// space, in against the box, then back out to oriented space — the same three steps
+    /// <see cref="ForRegion"/> takes, in the same order.
+    ///
+    /// That closing re-orient used to be missing. The round trip through <see cref="ToDisplay"/>
+    /// still looked right (it re-oriented on the way back out), which is what hid it — but
+    /// everything that reads <see cref="_cropRect"/> DIRECTLY got a raw-axes rect where an
+    /// oriented one was promised: <see cref="Pipeline.ProcessFrame"/>, which crops after
+    /// orienting, and the rotate buttons, which turn the stored rect with the picture. Crop a
+    /// rotated frame and the applied result came out with the axes swapped and the position
+    /// drifted — the frame on screen was right, what landed was not.
+    /// </summary>
     private (double X, double Y, double W, double H) FromDisplay(
         (double X, double Y, double W, double H) rect)
     {
+        if (_previewMargin is not { } box) return rect;   // ordinary frame: already oriented
         FrameParams p = BuildParams();
         // Undo the orientation in reverse order: the forward direction is turns then flips.
         if (p.FlipV) rect = FlipCropV(rect);
         if (p.FlipH) rect = FlipCropH(rect);
         for (int i = 0; i < (((p.QuarterTurns % 4) + 4) % 4); i++) rect = RotateCropCcw(rect);
-        return _previewMargin is { } box ? Absolute(rect, box) : rect;
+        return OrientRect(Absolute(rect, box), p)!.Value;
     }
 
     /// <summary>The stored crop, so re-entering the crop tool ADJUSTS the existing frame instead
@@ -1216,20 +1242,81 @@ public partial class MainViewModel : ViewModelBase
     // ── Sampling view: show the NEGATIVE while picking the film base ─────────────
     public void ShowNegativeView()
     {
-        ImageBuffer? neg = _previewLinear;
-        if (neg is null) return;
+        if (_previewLinear is null) return;
         // The patch on screen holds POSITIVE pixels, so it goes; the flag makes the NEXT one
         // render as a negative instead. Dropping it without the flag is not enough, because
         // zooming in here asks for another one immediately.
         _showingNegative = true;
         ClearSharpPatch();
         _savedPositive = PreviewImage;
+        RefreshNegativeView();
+    }
+
+    /// <summary>
+    /// (Re)draw the negative into <see cref="PreviewImage"/>.
+    ///
+    /// Split out from <see cref="ShowNegativeView"/> because the view is not static: turning the
+    /// frame while it is up has to move the negative with it, and that arrives through
+    /// <see cref="ScheduleRender"/> rather than through arming the tool again. Only the drawing is
+    /// shared — the flag, the saved positive and the patch are entry-time concerns.
+    /// </summary>
+    private void RefreshNegativeView()
+    {
+        if (_previewLinear is not { } neg) return;
         // The buffer is scene-linear ACEScg (pre-inversion). Step 4 takes it to the roll's output
         // space, which is the space BitmapConvert is expecting — applying a bare sRGB gamma here
         // would encode the right curve onto the wrong primaries.
         var disp = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
+        // ORIENTED to match the positive that was just on screen. Everything else in the pipeline
+        // is deliberately skipped here (that is the point of the view), but orientation is not a
+        // photometric step — it is which way up the picture is, and the user has already answered
+        // that. Leaving it off meant turning a sideways scan upright and then having the negative
+        // flop back onto its side the moment the film-base tool was armed.
+        disp = OrientForNegative(disp);
         ColorPipeline.ToOutputSpace(disp.Data, CurrentOutputSpace);
         PreviewImage = BitmapConvert.ToBitmap(disp);
+    }
+
+    /// <summary>
+    /// The orientation half of the geometry chain, applied to a negative-view buffer.
+    ///
+    /// Quarter turns and flips only — NOT straighten, and NOT crop. The straighten angle would
+    /// bring in fill corners and a crop would hide the very film base being sampled (it lives in
+    /// the frame's margins), and neither is needed to answer "which way up is this". Keeping the
+    /// buffer's content complete is also what lets <see cref="UnorientNegativeSampleRect"/> be a pure
+    /// coordinate map: the pixels are permuted, never resampled or dropped.
+    /// </summary>
+    private ImageBuffer OrientForNegative(ImageBuffer img)
+        => _quarterTurns % 4 == 0 && !_flipH && !_flipV
+               ? img
+               : Geometry.ApplyOrientation(img, _quarterTurns, _flipH, _flipV);
+
+    /// <summary>
+    /// A rect drawn on the ORIENTED negative view, mapped back into the raw preview buffer's own
+    /// axes — which is where every Stage-1 sampler reads.
+    ///
+    /// <see cref="ShowNegativeView"/> turns the pixels on screen; the samplers do not turn with
+    /// them, because <see cref="Stage1Source"/> works on <see cref="_previewLinear"/> as decoded.
+    /// So the selection has to come back the other way, or picking the orange base in the corner
+    /// of an upright scan would average a rectangle from the opposite corner of the strip.
+    ///
+    /// CALLED FROM THE VIEW, at pointer-release, and deliberately NOT from inside each sampler:
+    /// the release handler runs <c>ExitMode</c> — which restores the positive view and clears
+    /// <see cref="_showingNegative"/> — BEFORE dispatching to the sampler, so a flag check made
+    /// inside the sampler always sees false and skips the turn. The question "was this drawn on
+    /// the negative?" can only be asked while that view is still up.
+    ///
+    /// A no-op in the positive view: those rects are normalised against the displayed frame the
+    /// pipeline itself produced, so they need no correction.
+    /// </summary>
+    public (double X, double Y, double W, double H) UnorientNegativeSampleRect(
+        (double X, double Y, double W, double H) rect)
+    {
+        if (!_showingNegative) return rect;
+        if (_flipV) rect = FlipCropV(rect);
+        if (_flipH) rect = FlipCropH(rect);
+        for (int i = 0; i < (((_quarterTurns % 4) + 4) % 4); i++) rect = RotateCropCcw(rect);
+        return rect;
     }
 
     public void ShowPositiveView()
@@ -4091,10 +4178,11 @@ public partial class MainViewModel : ViewModelBase
             var result = await Task.Run(() =>
             {
                 ImageBuffer img; RegionRender.Roi realised;
-                // Raw-frame bounds for the negative — that view applies no geometry, so the
-                // oriented rectangle would reserve (and return) the wrong part of the file.
+                // Orientation-only bounds for the negative — that view applies no straighten and
+                // no crop, so the fully-geometried rectangle would reserve (and return) the wrong
+                // part of the file.
                 var need = negative
-                    ? RegionRender.RequiredSourceBoundsNegative(frameW, frameH, roi)
+                    ? RegionRender.RequiredSourceBoundsNegative(frameW, frameH, p, roi)
                     : RegionRender.RequiredSourceBounds(frameW, frameH, p, roi);
                 ImageBuffer? slice = RegionSliceFor(srcPath, need, frameW, frameH);
                 cts.Token.ThrowIfCancellationRequested();
@@ -4216,6 +4304,12 @@ public partial class MainViewModel : ViewModelBase
         // this method, and hooking them individually is how one gets missed.
         if (ShowSprocketMask) UpdateSprocketOverlay();
         if (!_restoring) MarkEdit();   // a real, user-driven param change → undo-committable
+        // The negative view owns the screen while it is up, so a render must not push a positive
+        // into it — rotating mid-sampling did exactly that, replacing the negative being sampled
+        // with the finished picture. Orientation is the one parameter the view does follow, so it
+        // is re-derived here rather than skipped; everything else the view ignores anyway, which
+        // makes this cheap and correct for both.
+        if (_showingNegative) { RefreshNegativeView(); return; }
         if (_interacting) { RenderInteractive(); return; }
         _renderCts?.Cancel();
         var cts = new CancellationTokenSource();
