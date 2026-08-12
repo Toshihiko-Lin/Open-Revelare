@@ -7,65 +7,52 @@
 **修复**
 
 - **带 ICC 配置文件的 TIFF，色度被放大**。红、蓝饱和度约 ×1.13，绿约 ×1.4，中性灰
-  还会偏色。RAW 不受影响；不带配置文件的 TIFF 也照旧原样通过。
+  还会偏色。RAW 与不带配置文件的 TIFF 不受影响。
 
-  **注意**：已经按旧行为调过的 TIFF 卷，这次改动后画面会变，片基（t_base）需要重新取样。
-- **裁切后画面显示不正确**。裁切框在屏幕上是对的，应用后比例会变、位置也会漂——
-  macOS 上尤其明显（选 1:1 预设时），转过向的照片上则必然出错。
+  **注意**：已经按旧行为调过的 TIFF 卷，画面会变，片基（t_base）需要重新取样。
+- **裁切后比例和位置都不对**。macOS 上尤其明显（选 1:1 预设时），转过向的照片上必然出错。
 
-  **注意**：在转过向的帧上存过裁切的工程文件，里面存的是错的位置。这次修复后按
-  正确的位置解释，需要重裁；未转向时存的不受影响。
-- **片基采样在转过向的照片上取错位置**。把横躺的扫描转正之后再点片基采样，预览会
-  翻回未转向的样子，框选到的也是画面上另一块——通常是对角线另一头，几乎必然触发
-  「采样区偏暗」的警告。现在负片视图跟随转向与翻转，框选、D-max 和偏移采样都取到
-  框住的地方。
-- **负片视图下放大，看到的是去色罩后的画面**。框选片基时放大到一定程度，那一块会
-  变成处理完的正片，而不是正在取样的原始负片。按住对比看原片时同理。
+  **注意**：在转过向的帧上存过裁切的工程文件需要重裁；未转向时存的不受影响。
+- **转过向的照片，片基采样取错位置**。负片预览会翻回未转向的样子，框选到的是画面上
+  另一块。现在负片视图跟随转向与翻转，框选、D-max 和偏移采样都取到框住的地方。
+- **负片视图下放大，看到的是去色罩后的正片**。按住对比看原片时同理。
 - 裁切或清除裁切后回到「适应窗口」，画面不再放大着偏在一边。
 
 **改进**
 
-- **拖角改变裁切框大小时，预设比例可以在横竖之间切换**（参考 Lightroom）。选了
-  3:2 之后想要 2:3，以前只能去按旋转按钮——但那转的是画面，不是画幅。现在往竖长
-  方向拖过一定幅度，锁定的比例就翻成竖构图，往回拖再翻回来。只有**拖角**才触发。
+- **拖角改变裁切框大小时，预设比例可在横竖之间切换**（参考 Lightroom）。选了 3:2 之后
+  想要 2:3，往竖长方向拖过一定幅度即可翻转，往回拖再翻回来。只有**拖角**才触发。
 
 ---
 
 **Fixed**
 
 - **Profiled TIFFs came out with amplified chroma.** Saturation rose ~1.13× on red and
-  blue, ~1.4× on green, and neutrals picked up a cast. RAW was never affected, and
-  TIFFs without a profile still pass through untouched.
+  blue, ~1.4× on green, and neutrals picked up a cast. RAW and TIFFs without a profile
+  are unaffected.
 
   **Note**: rolls of TIFFs already adjusted against the old behaviour will shift, and
   their film base (t_base) needs re-sampling.
-- **The crop was not displayed correctly after applying it.** The frame looked right on
-  screen, but the applied crop came out with a different ratio and drifted out of
-  position — most visible on macOS (with the 1:1 preset), and always wrong on a rotated
-  photo.
+- **A crop applied with the wrong ratio and position.** Most visible on macOS (with the
+  1:1 preset), and always wrong on a rotated photo.
 
-  **Note**: projects with a crop saved on a rotated frame hold the wrong position.
-  After this fix those crops are read correctly and need re-cropping. Crops saved with
-  no rotation applied are unaffected.
-- **Film-base sampling picked the wrong region on a rotated photo.** Straightening a
-  sideways scan and then arming the film-base tool flipped the preview back to its
-  un-rotated orientation, and the selection landed somewhere else in the picture —
-  usually the opposite corner, which almost always tripped the "region looks too dark"
-  warning. The negative view now follows the turns and flips, and the selection, D-max
-  and offset samplers all sample where you drew.
-- **Zooming in on the negative view showed the de-masked picture.** Zooming in far
-  enough while picking the film base replaced that region with the finished positive
-  instead of the negative being sampled. Same for the hold-to-compare view.
+  **Note**: projects with a crop saved on a rotated frame need re-cropping. Crops saved
+  with no rotation applied are unaffected.
+- **Film-base sampling picked the wrong region on a rotated photo.** The negative
+  preview flipped back to its un-rotated orientation and the selection landed elsewhere
+  in the picture. The negative view now follows the turns and flips, and the selection,
+  D-max and offset samplers all sample where you drew.
+- **Zooming in on the negative view showed the de-masked positive.** Same for the
+  hold-to-compare view.
 - Applying or clearing a crop now returns to fit, instead of leaving the picture
   magnified and off to one side.
 
 **Improved**
 
 - **Dragging a corner handle can now flip a preset ratio between landscape and
-  portrait** (as Lightroom does). Getting 2:3 out of a 3:2 preset previously meant
-  reaching for the rotate buttons — but those turn the PICTURE, not the format. Drag
-  far enough toward portrait and the locked ratio flips; drag back and it returns.
-  Only a CORNER triggers it.
+  portrait** (as Lightroom does). Getting 2:3 out of a 3:2 preset: drag far enough
+  toward portrait and the locked ratio flips; drag back and it returns. Only a CORNER
+  triggers it.
 
 ## v1.2.1（2026-08-11）
 
