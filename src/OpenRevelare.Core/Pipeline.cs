@@ -54,9 +54,15 @@ public static class Pipeline
         if (cal.SprocketEnabled && cal.SprocketThreshold is double thr)
             sprocketMask = Sprocket.MakeMask(src.Data, src.PixelCount, (float)thr);
 
-        // ── Input colour space: declared primaries → sRGB, on the NEGATIVE ────────
+        // ── Input colour space: declared primaries → WORKING (ACEScg), on the NEGATIVE ──
         // Before the inversion, because that is where t_base and the rest of Stage 1 are
         // calibrated; and before decouple, because decouple's matrix is solved in this space.
+        //
+        // Skipped entirely when InputPrimaries is null, which is every roll today — nothing
+        // sets it. A profiled scanner TIFF is already carried into the working space by
+        // IccRead.ReadMatrix at load; RAW and unprofiled TIFF are not, and are treated as
+        // working-space data without being converted. That gap does not affect the density
+        // inversion (which is self-referential through t_base) but it does affect step 4.
         if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
             InputTransform.Apply(src.Data, inputM);
 

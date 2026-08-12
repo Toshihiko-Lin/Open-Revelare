@@ -103,8 +103,10 @@ ICC profile. The software probes that and picks a linearisation accordingly:
   running a meaningless inversion over an essentially linear curve and adding interpolation noise
   for it. The test is per channel, so a channel with a real gamma is never silently skipped.
 
-- **Fallback**: with no ICC, or with no usable TRC tags, a warning is issued and standard sRGB gamma
-  is assumed (the reasonable default for most non-linear scan output).
+- **Fallback**: with no ICC (or an ICC carrying no usable TRC tags), the samples are **taken as
+  already linear** — no inverse is applied and no warning is issued. That is a different fallback
+  from "assume sRGB gamma"; it is the one chosen because unprofiled scan TIFFs are usually linear
+  exports. A gamma-encoded file with no profile therefore needs checking at import.
 
 - **Step 2: the device primaries matrix (ICC rXYZ/gXYZ/bXYZ)**: inverting the TRC only solves the
   "encoding is non-linear" problem, but the difference in gamma between the three channels (the
@@ -122,36 +124,67 @@ ICC profile. The software probes that and picks a linearisation accordingly:
 
   Complete linearisation therefore takes two steps:
 
-  $$\text{linear device RGB} \xrightarrow{M = M_\text{sRGB→D50}^{-1} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{linear sRGB}$$
+  $$\text{linear device RGB} \xrightarrow{M = M_\text{D50→working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{linear working RGB (ACEScg)}$$
 
-  The matrix $M$ converts the scanner's linear device RGB into standard linear sRGB (both under the
-  D50 white point). Measured on a Flextight X5 it comes to roughly:
+  The matrix $M$ carries the scanner's linear device RGB into the **working space** (ACEScg), not
+  into sRGB. That distinction matters: a professional scanner's device primaries are typically
+  **wider than sRGB** (one measured set spans about 1.6× sRGB's primary triangle), so landing in
+  sRGB would clip the saturated dyes before the density maths ever ran.
+
+  > Earlier versions did target sRGB here, and it was wrong in a way that only showed on profiled
+  > scanner TIFFs: those pixels entered the density maths carrying sRGB primaries, and step 4 then
+  > converted them ACEScg → sRGB — undoing a transform nobody had applied. Reinterpreting sRGB
+  > primaries as ACEScg stretches the gamut outward: saturation rose ~1.13× on red and blue, ~1.4×
+  > on green, and neutrals picked up a cast, because the residual has strong negative off-diagonals
+  > rather than being a scalar.
+
+  Measured on a Flextight X5 it came to roughly (quoted against the old sRGB target, for magnitude
+  only):
 
   $$M \approx \begin{pmatrix} 1.258 & -0.158 & -0.099 \\ -0.174 & 1.241 & -0.068 \\ -0.001 & -0.166 & 1.166 \end{pmatrix}$$
 
   The matrix is applied only when the ICC profile carries rXYZ/gXYZ/bXYZ tags (most professional
-  scanners do); with a LUT-only profile those tags are missing, and step 2 is skipped with a
-  warning.
+  scanners do); with a LUT-only profile those tags are missing and step 2 is skipped, leaving the
+  file on its device-native primaries — **with no warning**.
 
 **How this relates to the RAW path**
 
-After the TRC inverse and the matrix, the TIFF path puts out **standard linear sRGB**; the RAW path
-puts out the camera's own linear light. Both are linear, and both go straight into the density
-domain.
+After the TRC inverse and the matrix, a fully profiled TIFF puts out **working-space (ACEScg)
+linear light**; the RAW path puts out the camera's own linear light. Both are linear, and both go
+straight into the density domain.
 
-Beyond that the two paths differ in nothing to do with chroma.
+What space a buffer is actually in when it reaches the density domain is not the same for all three
+inputs:
 
-Worth noting: the scan path is **colour-managed by construction** — the ICC's rXYZ/gXYZ/bXYZ tags
-describe the device primaries and are applied at decode. The camera path performs no equivalent
-transform, and that is not a gap: the relative sensitivity differences between the camera's three
-channels are normalised out by $T_\text{base}$ (dividing by the film base), and a base measured on
-the actual roll fits the real copying conditions better than a looked-up camera matrix — the light
-source, the lens and the copy geometry are all normalised along with it.
+| Input | On entering the density domain |
+|---|---|
+| TIFF whose ICC carries rXYZ/gXYZ/bXYZ | **Working space (ACEScg)**, via the device-primaries matrix |
+| TIFF with a LUT-only profile, or no ICC | Device-native primaries, unconverted |
+| RAW | Camera-native primaries, unconverted |
 
-When a file carries no ICC profile, its samples are taken as already linear (no TRC inverse, no
-matrix); when the profile is LUT-only and has no rXYZ/gXYZ/bXYZ tags, the matrix step is skipped.
-In both cases the scanner's channel differences go uncorrected, so pull back any resulting cast
-with SceneBase's saturation and white balance.
+Only the first genuinely sits in the space the pipeline declares it works in. The other two are
+treated as working-space data without having been converted: `InputTransform` (declared input
+primaries → ACEScg) only runs when `input_primaries` is set, and no control sets it today, so that
+step is skipped in practice.
+
+The gap does **not** affect the density inversion itself: the inversion only computes
+$D = -\log_{10}(T/T_\text{base})$, and $T_\text{base}$ and $D_{\max}$ are measured from the same
+buffer, so density is a self-referential ratio that assumes no colour space at all. What it does
+affect is the **output** side — step 4 interprets the buffer as ACEScg on the way to the output
+space, and for the latter two inputs that premise does not hold.
+
+> The historical justification for the camera path performing no equivalent transform was that the
+> relative sensitivity differences between the camera's three channels are normalised out by
+> $T_\text{base}$ (dividing by the film base), and that a base measured on the actual roll fits the
+> real copying conditions better than a looked-up camera matrix. That holds for **channel gain** —
+> a per-channel division does absorb the diagonal part — but it does not cover the **primaries**,
+> which are off-diagonal and cannot be absorbed by a division. So this remains a known gap rather
+> than a solved problem.
+
+A fully profiled scan is **colour-managed by construction** — the ICC's rXYZ/gXYZ/bXYZ tags describe
+the device primaries and are applied at decode. For the other two rows of the table above the
+primaries go uncorrected, so pull back any resulting cast with SceneBase's saturation and white
+balance.
 
 Scanner TIFF goes down Path B (the white-light path); lens correction and RGB decoupling are not used.
 
