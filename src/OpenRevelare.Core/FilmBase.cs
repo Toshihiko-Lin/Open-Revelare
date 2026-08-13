@@ -62,6 +62,114 @@ public static class FilmBase
     /// <paramref name="image"/> still supplies the luma. Same split as
     /// <see cref="EstimateTBaseFromRoll"/>'s valueImages, and required on Path A.</param>
     /// <returns>The (3,) base, or null when no mode cleared the density floor.</returns>
+    /// <summary>
+    /// Film base from a thin BARE-BASE SLIVER at the frame's edge, on a scan with no light board
+    /// and no blocking card — the case both other estimators miss.
+    ///
+    /// A scan trimmed close to the picture can still include a millimetre of unexposed rebate
+    /// along one or two edges. That sliver is the real film base and it is the brightest thing on
+    /// the negative, but it is far too small for a percentile to find: measured on 图像 001a it is
+    /// 0.74% of the frame, so the 99.99th percentile used by <see cref="EstimateTBaseFromRoll"/>'s
+    /// no-board branch lands inside it only by accident and the 99th lands in picture highlights.
+    /// The returned base then comes back roughly 2.5× too dense (0.43, 0.29, 0.17 against a true
+    /// 0.20, 0.12, 0.06), which propagates into every density downstream.
+    ///
+    /// <see cref="EstimateTBaseByMode"/> cannot help either: it needs a board cut to bound the
+    /// base from above, and refuses without one for the reason given in its own remarks.
+    ///
+    /// What identifies the sliver is that it is a SEPARATE CLUSTER — a second peak above the
+    /// picture's distribution with a genuine valley between them — that also sits at the frame's
+    /// EDGE and is ORANGE. All three tests are required:
+    ///
+    ///  * separate cluster, or a bright picture region qualifies;
+    ///  * at the edge, because bare rebate is at the film's margin while a blown highlight is not;
+    ///  * orange (R &gt; G &gt; B by a clear margin), because that is what a C-41 mask IS, and it is
+    ///    the test a specular white highlight at the frame edge fails.
+    ///
+    /// Returns null unless all three hold, so a frame with no visible base falls through to the
+    /// existing estimators unchanged.
+    /// </summary>
+    /// <param name="image">Frame to measure, in the raw luma domain.</param>
+    /// <param name="valueImage">Optional post-decouple buffer supplying the averaged VALUES while
+    /// <paramref name="image"/> supplies the luma. Same split as the other estimators.</param>
+    /// <returns>The (3,) base, or null when no qualifying sliver was found.</returns>
+    public static double[]? EstimateTBaseFromEdgeSliver(ImageBuffer image,
+                                                        ImageBuffer? valueImage = null)
+    {
+        const int Bins = 256;
+        // The sliver is small by definition; anything larger is a region of the picture.
+        const double MaxShare = 0.08;
+        // …but it must be more than dust, or a hot pixel cluster would qualify.
+        const double MinShare = 0.0005;
+        // Share of the cluster that has to lie in the border band.
+        const double MinEdgeShare = 0.70;
+        // Width of that band, per side.
+        const double EdgeBand = 0.10;
+        // Least R:B ratio for the cluster to be a C-41 mask rather than a neutral highlight.
+        const double MinOrangeRatio = 1.35;
+
+        int w = image.Width, h = image.Height, n = w * h;
+        if (n < 400) return null;
+
+        ImageBuffer values = valueImage ?? image;
+        if (values.PixelCount != n) values = image;
+        float[] s = image.Data, v = values.Data;
+
+        var luma = new double[n];
+        var hist = new int[Bins];
+        for (int p = 0; p < n; p++)
+        {
+            int i = p * 3;
+            double l = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
+            luma[p] = l;
+            hist[Math.Clamp((int)(l * Bins), 0, Bins - 1)]++;
+        }
+
+        // Walk down from the top for the first populated bin, then keep walking while the
+        // histogram is still falling away from that cluster. Where it turns back up, the cluster
+        // has ended and the picture below has begun — that turning point is the cut.
+        int top = Bins - 1;
+        while (top > 0 && hist[top] == 0) top--;
+        if (top <= 1) return null;
+
+        int cut = top;
+        while (cut > 1 && hist[cut - 1] >= hist[cut]) cut--;   // down the cluster's near flank
+        while (cut > 1 && hist[cut - 1] <= hist[cut]) cut--;   // across the valley floor
+        if (cut <= 1) return null;
+
+        double cutLuma = (double)cut / Bins;
+
+        long count = 0, edge = 0;
+        int bx = Math.Max(1, (int)(w * EdgeBand)), by = Math.Max(1, (int)(h * EdgeBand));
+        double a0 = 0, a1 = 0, a2 = 0;
+        for (int y = 0; y < h; y++)
+        {
+            bool edgeRow = y < by || y >= h - by;
+            for (int x = 0; x < w; x++)
+            {
+                int p = y * w + x;
+                if (luma[p] <= cutLuma) continue;
+                count++;
+                if (edgeRow || x < bx || x >= w - bx) edge++;
+                int i = p * 3;
+                a0 += v[i]; a1 += v[i + 1]; a2 += v[i + 2];
+            }
+        }
+        if (count == 0) return null;
+
+        double share = (double)count / n;
+        if (share < MinShare || share > MaxShare) return null;
+        if ((double)edge / count < MinEdgeShare) return null;
+
+        double m0 = a0 / count, m1 = a1 / count, m2 = a2 / count;
+        if (!(m0 > m1 && m1 > m2)) return null;
+        if (m0 / Math.Max(m2, 1e-6) < MinOrangeRatio) return null;
+
+        var tb = new[] { m0, m1, m2 };
+        Quantise(tb);
+        return tb.Any(x => x <= 0) ? null : tb;
+    }
+
     public static double[]? EstimateTBaseByMode(ImageBuffer image,
                                                 double? sprocketThreshold = null,
                                                 ImageBuffer? valueImage = null)
@@ -157,6 +265,31 @@ public static class FilmBase
     }
 
     /// <summary>
+    /// <see cref="EstimateTBaseFromEdgeSliver"/> pooled across the roll, by MEDIAN.
+    ///
+    /// Median for the same reason <see cref="EstimateTBaseByModeFromRoll"/> uses it: the base is
+    /// one physical material, so the frames are repeated measurements of a single quantity and
+    /// the middle one is the best estimate of it. It also carries the roll through frames whose
+    /// sliver is hidden — those simply do not vote, and one frame that still shows rebate is
+    /// enough to base the whole roll correctly.
+    /// </summary>
+    public static double[]? EstimateTBaseFromEdgeSliverFromRoll(
+        IReadOnlyList<ImageBuffer> images, IReadOnlyList<ImageBuffer>? valueImages = null)
+    {
+        var perFrame = new List<double[]>();
+        int frames = valueImages is null ? images.Count : Math.Min(images.Count, valueImages.Count);
+        for (int f = 0; f < frames; f++)
+            if (EstimateTBaseFromEdgeSliver(images[f], valueImages?[f]) is { } pick)
+                perFrame.Add(pick);
+
+        if (perFrame.Count == 0) return null;
+        var tBase = new double[3];
+        for (int c = 0; c < 3; c++) tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
+        Quantise(tBase);
+        return tBase.Any(x => x <= 0) ? null : tBase;
+    }
+
+    /// <summary>
     /// Roll-wide D_max: the per-frame 99.9th density percentile of T / t_base, reduced across
     /// frames by an UPPER percentile rather than by a median or a max.
     ///
@@ -177,17 +310,25 @@ public static class FilmBase
     /// <param name="tBase">The roll's film base.</param>
     /// <param name="rollPercentile">Cross-frame percentile, 0-100.</param>
     /// <returns>The roll D_max, or null when no frame could be measured.</returns>
+    /// <param name="masks">Raw-domain frames the luma cuts key off, index-aligned with
+    /// <paramref name="images"/>. Null → each image masks itself, which is right for a white-light
+    /// roll where the two domains coincide.</param>
+    /// <param name="sprocketThreshold">Board cut, or null to auto-estimate per frame.</param>
     public static double? DetectDMaxFromRoll(IReadOnlyList<ImageBuffer> images, double[] tBase,
-                                             double rollPercentile = 90.0)
+                                             double rollPercentile = 90.0,
+                                             IReadOnlyList<ImageBuffer>? masks = null,
+                                             double? sprocketThreshold = null)
     {
         var perFrame = new List<double>();
-        foreach (ImageBuffer img in images)
+        for (int f = 0; f < images.Count; f++)
         {
+            ImageBuffer img = images[f];
             var norm = new ImageBuffer(img.Width, img.Height);
             for (int p = 0; p < img.PixelCount; p++)
                 for (int c = 0; c < 3; c++)
                     norm.Data[p * 3 + c] = (float)(img.Data[p * 3 + c] / Math.Max(tBase[c], 1e-10));
-            double d = DetectDMax(norm);
+            ImageBuffer maskFrame = masks is not null && f < masks.Count ? masks[f] : img;
+            double d = DetectDMax(norm, maskFrame, sprocketThreshold);
             if (double.IsFinite(d) && d > 0) perFrame.Add(d);
         }
         return perFrame.Count == 0 ? null : Percentile(perFrame.ToArray(), rollPercentile);
@@ -204,15 +345,43 @@ public static class FilmBase
     /// <param name="masks">Raw-domain frames the luma masks key off, where the sprocket
     /// threshold is calibrated. Null = use <paramref name="images"/> for both.</param>
     /// <param name="sprocketThreshold">Bright cut for light board / sprockets; null = no cut.</param>
+    /// <param name="edgeInset">
+    /// Fraction of each border cropped away before measuring, exactly as
+    /// <see cref="AutoWbHighFromRoll"/> does and for the same reason: the film-edge line is a
+    /// hard, opaque boundary whose density sits above anything in the picture, and it is not
+    /// removed by either luma cut — the bright cut is for the board and the dark valley needs a
+    /// cleanly bimodal histogram.
+    ///
+    /// Without it the endpoints are measured off that line rather than off the scene, and because
+    /// they are per-channel divisors the result is a cast. Measured on 图像 001a the uninset
+    /// endpoints put the red channel 18.3% away from the balance wb_high's own solve implies for
+    /// the same highlight; at any inset from 2% upward the two agree to within 0.5%. The default
+    /// matches AutoWbHighFromRoll's so the two ends of the model see the same region.
+    /// </param>
     public static double[]? DetectDMaxPerChannelFromRoll(
         IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
-        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null)
+        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
+        double edgeInset = 0.05)
     {
         var perFrame = new List<double[]>();
         for (int i = 0; i < images.Count; i++)
         {
             ImageBuffer img = images[i];
             ImageBuffer mask = masks is not null && i < masks.Count ? masks[i] : img;
+
+            // Inset both buffers together so the mask still lines up with the pixels it admits.
+            if (edgeInset > 0)
+            {
+                int h0 = img.Height, w0 = img.Width;
+                int yi = RoundHalfEven(h0 * edgeInset), xi = RoundHalfEven(w0 * edgeInset);
+                if (w0 - 2 * xi >= 4 && h0 - 2 * yi >= 4)
+                {
+                    bool shared = ReferenceEquals(mask, img);
+                    img = Crop(img, xi, yi, w0 - 2 * xi, h0 - 2 * yi);
+                    mask = shared ? img : Crop(mask, xi, yi, w0 - 2 * xi, h0 - 2 * yi);
+                }
+            }
+
             bool[] keep = HighDensityKeepMask(mask, sprocketThreshold);
 
             int n = img.PixelCount;
@@ -241,23 +410,74 @@ public static class FilmBase
             }
             if (k == 0) continue;
 
+            // CO-SITED: rank the kept pixels by TOTAL density, then average the top tail's three
+            // channels. All three endpoints therefore come from the SAME physical highlight.
+            //
+            // Three independent per-channel percentiles — what this did before — draw R, G and B
+            // from three DIFFERENT pixels, and the endpoints are per-channel DIVISORS, so any
+            // difference between those pixels becomes a colour cast baked into the inversion.
+            // <see cref="HighlightDensityFromRoll"/> already documents this exact failure at the
+            // same end of the scale ("white clouds look yellow") and solves it the same way; this
+            // routine simply had not been brought into line. Measured on 图像 001a the independent
+            // form put the red endpoint 15% away from what wb_high's own co-sited solve implied
+            // for the same highlight, which is a cast no Stage-2 control can remove because it
+            // happens inside the inversion.
+            //
+            // The tail is averaged rather than a single extremum taken, so grain and dust cannot
+            // define the white point — the same reasoning behind the percentile it replaces.
+            var order = new int[k];
+            var total = new double[k];
+            for (int q = 0; q < k; q++)
+            {
+                order[q] = q;
+                total[q] = (dens[0][q] + dens[1][q] + dens[2][q]) / 3.0;
+            }
+            Array.Sort(total, order);   // ascending by total density; densest at the end
+
+            // 0.1% of the kept pixels, matching the 99.9th percentile this replaces, floored so a
+            // small frame still averages something and clamped so it cannot swallow the frame.
+            int tail = Math.Clamp((int)Math.Ceiling(k * 0.001), 1, Math.Max(1, k / 2));
             var res = new double[3];
+            for (int q = k - tail; q < k; q++)
+            {
+                int src = order[q];
+                for (int c = 0; c < 3; c++) res[c] += dens[c][src];
+            }
             bool ok = true;
             for (int c = 0; c < 3; c++)
             {
-                var used = new double[k];
-                Array.Copy(dens[c], used, k);
-                res[c] = Percentile(used, 99.9);
+                res[c] /= tail;
                 if (!double.IsFinite(res[c]) || res[c] <= 0) { ok = false; break; }
             }
             if (ok) perFrame.Add(res);
         }
         if (perFrame.Count == 0) return null;
 
-        var outv = new double[3];
-        for (int c = 0; c < 3; c++)
-            outv[c] = Percentile(perFrame.Select(v => v[c]).ToArray(), rollPercentile);
-        return outv;
+        // Reduce across frames by picking ONE frame's triplet — the densest — rather than taking
+        // a per-channel percentile over frames.
+        //
+        // A per-channel percentile re-introduces exactly the error the co-siting above removes,
+        // one level up: each channel's 90th percentile can land on a DIFFERENT frame, so the
+        // result is a triplet no single negative ever produced, and the balance between its
+        // channels is an artefact of which frames happened to rank where. Measured on 图像 001a it
+        // also skews the whole triplet high — every frame's red endpoint sat between 0.98 and
+        // 1.09, and the pooled answer came out 1.077 — because a percentile of maxima is not a
+        // maximum. The frames' own endpoints were consistent to within 10%; the pooled one was
+        // further from any of them than they were from each other.
+        //
+        // Taking the densest frame keeps the triplet co-sited all the way through: it is one
+        // physical highlight, on one piece of film, measured under one exposure. That is the same
+        // choice <see cref="AutoWbHighFromRoll"/> makes for the same quantity, and it is what
+        // makes the two agree. <paramref name="rollPercentile"/> is retained for API
+        // compatibility but no longer selects between frames.
+        double[] best = perFrame[0];
+        double bestTotal = best[0] + best[1] + best[2];
+        foreach (double[] cand in perFrame)
+        {
+            double t = cand[0] + cand[1] + cand[2];
+            if (t > bestTotal) { bestTotal = t; best = cand; }
+        }
+        return best;
     }
 
     /// <summary>
@@ -273,8 +493,17 @@ public static class FilmBase
     ///
     /// Same two cuts as <see cref="AutoWbHighFromRoll"/>, on the raw-domain luma where the
     /// sprocket threshold is calibrated.
+    ///
+    /// Public because it is the ONE definition of "which pixels are film" that every automatic
+    /// measurement has to agree on. The bright cut alone is not enough and neither is the dark
+    /// one: a copy stand shows the board ABOVE the film and the blocking card BELOW it, so a
+    /// single-ended rule always leaves one of the two inside the statistics.
     /// </summary>
-    private static bool[] HighDensityKeepMask(ImageBuffer maskFrame, double? sprocketThreshold)
+    /// <param name="maskFrame">Raw-domain frame — the luma domain the cuts are calibrated in.</param>
+    /// <param name="sprocketThreshold">Bright board cut, or null to auto-estimate it from the
+    /// frame. Passing null is what lets a caller with no dialog-supplied threshold still get the
+    /// board excluded; <see cref="Sprocket.NoBoard"/> maps back to "no bright cut".</param>
+    public static bool[] HighDensityKeepMask(ImageBuffer maskFrame, double? sprocketThreshold)
     {
         int w = maskFrame.Width, h = maskFrame.Height, n = w * h;
         var keep = new bool[n];
@@ -285,9 +514,20 @@ public static class FilmBase
         for (int p = 0; p < n; p++)
             luma[p] = ((double)d[p * 3] + d[p * 3 + 1] + d[p * 3 + 2]) / 3.0;
 
+        // No caller-supplied cut: measure one. The board is physically there whether or not a
+        // dialog asked about it, and leaving it in is what puts a blown-white block at the top of
+        // every percentile this mask feeds. NoBoard means the histogram showed no board/base
+        // two-peak structure, which is the genuine "nothing to cut" case.
+        double? bright = sprocketThreshold;
+        if (bright is null)
+        {
+            double est = Sprocket.EstimateSprocketThreshold(maskFrame);
+            if (est < Sprocket.NoBoard) bright = est;
+        }
+
         // Bright end: light board / sprockets, dilated ~5% to swallow the soft transition ring
         // between the transmissive core and the opaque frame edge.
-        if (sprocketThreshold is double thr)
+        if (bright is double thr)
         {
             var board = new bool[n];
             bool any = false;
@@ -334,13 +574,53 @@ public static class FilmBase
     /// which suppresses dust / hot-pixel outliers.
     /// Must be called on the T_norm image (T / T_base), NOT on raw T.
     /// </summary>
-    public static double DetectDMax(ImageBuffer image)
+    public static double DetectDMax(ImageBuffer image) => DetectDMax(image, null, null);
+
+    /// <summary>
+    /// <see cref="DetectDMax(ImageBuffer)"/> restricted to the pixels that are actually film.
+    ///
+    /// D_max is the DENSEST point, so it is precisely the measurement an opaque blocking card
+    /// steals: the card is darker than any exposed area, so it wins the 99.9th density percentile
+    /// outright and the roll's white end is set by a piece of cardboard. The bright board matters
+    /// less here (it is the low-density end) but is excluded for consistency — one definition of
+    /// "film" across every automatic measurement.
+    /// </summary>
+    /// <param name="maskFrame">RAW-domain frame the cuts key off, since the valleys are calibrated
+    /// on raw luma while <paramref name="image"/> is already T_norm. Null → no masking.</param>
+    /// <param name="sprocketThreshold">Board cut, or null to auto-estimate.</param>
+    public static double DetectDMax(ImageBuffer image, ImageBuffer? maskFrame,
+                                    double? sprocketThreshold)
     {
         float[] d = image.Data;
-        var density = new double[d.Length];
-        for (int i = 0; i < d.Length; i++)
-            density[i] = -Math.Log10(Math.Max(d[i], 1e-10));
-        return Percentile(density, 99.9);
+        bool[]? keep = KeepMaskFor(image, maskFrame, sprocketThreshold);
+
+        var density = new double[keep is null ? d.Length : image.PixelCount * 3];
+        int n = 0;
+        for (int p = 0; p < image.PixelCount; p++)
+        {
+            if (keep is not null && !keep[p]) continue;
+            for (int c = 0; c < 3; c++)
+                density[n++] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
+        }
+        if (n == 0) return 0.0;
+        var used = new double[n];
+        Array.Copy(density, used, n);
+        return Percentile(used, 99.9);
+    }
+
+    /// <summary>
+    /// The keep-mask for a measurement, or null when there is nothing to mask.
+    ///
+    /// Guards the size match itself: the mask is built on the raw frame, and a caller that hands
+    /// in a differently-sized buffer would otherwise index past the end. Mismatched sizes mean the
+    /// two are not the same view of the frame, so masking is skipped rather than misapplied.
+    /// </summary>
+    private static bool[]? KeepMaskFor(ImageBuffer image, ImageBuffer? maskFrame,
+                                       double? sprocketThreshold)
+    {
+        if (maskFrame is null) return null;
+        if (maskFrame.Width != image.Width || maskFrame.Height != image.Height) return null;
+        return HighDensityKeepMask(maskFrame, sprocketThreshold);
     }
 
     /// <summary>
@@ -354,15 +634,38 @@ public static class FilmBase
     /// Must be called on the T_norm image (T / T_base), NOT on raw T.
     /// </summary>
     public static double[] DetectDMaxPerChannel(ImageBuffer image)
+        => DetectDMaxPerChannel(image, null, null);
+
+    /// <summary>
+    /// <see cref="DetectDMaxPerChannel(ImageBuffer)"/> restricted to film pixels — see
+    /// <see cref="DetectDMax(ImageBuffer, ImageBuffer?, double?)"/> for why the cut matters.
+    ///
+    /// It matters MORE per channel than for the scalar. A neutral blocking card sets all three
+    /// endpoints to the same value, so the inversion — which divides each channel by its own
+    /// endpoint — reads the roll's highlight balance off the card instead of off the film, and
+    /// the highlight cast the per-channel model exists to capture is flattened away.
+    /// </summary>
+    public static double[] DetectDMaxPerChannel(ImageBuffer image, ImageBuffer? maskFrame,
+                                                double? sprocketThreshold)
     {
         float[] d = image.Data;
         int n = image.PixelCount;
+        bool[]? keep = KeepMaskFor(image, maskFrame, sprocketThreshold);
+
         var res = new double[3];
         var col = new double[n];
         for (int c = 0; c < 3; c++)
         {
-            for (int p = 0; p < n; p++) col[p] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
-            res[c] = Percentile(col, 99.9);
+            int k = 0;
+            for (int p = 0; p < n; p++)
+            {
+                if (keep is not null && !keep[p]) continue;
+                col[k++] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
+            }
+            if (k == 0) return DetectDMaxPerChannel(image);   // all masked out → measure everything
+            var used = new double[k];
+            Array.Copy(col, used, k);
+            res[c] = Percentile(used, 99.9);
         }
         return res;
     }
