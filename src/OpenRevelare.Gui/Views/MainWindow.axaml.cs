@@ -149,7 +149,7 @@ public partial class MainWindow : Window
     // Esc. The tools are mutually exclusive — arming one disarms the others.
     private enum SampleMode
     {
-        None, FilmBase, WbOffset, WbHigh, DMax, ScanEv, GreyPoint, Black, White, Crop,
+        None, FilmBase, WbOffset, WbHigh, DMax, ScanEv, Black, White, Crop,
         StraightenH, StraightenV,
     }
 
@@ -687,7 +687,7 @@ public partial class MainWindow : Window
 
     private ToggleButton[] AllToggles() => new[]
     {
-        FilmBaseBtn, DMaxBtn, ScanEvBtn, WbOffsetBtn, WbHighBtn, GreyPointBtn, BlackBtn, WhiteBtn, CropBtn,
+        FilmBaseBtn, DMaxBtn, ScanEvBtn, WbOffsetBtn, WbHighBtn, BlackBtn, WhiteBtn, CropBtn,
         StraightenHBtn, StraightenVBtn,
     };
 
@@ -808,7 +808,6 @@ public partial class MainWindow : Window
         SampleMode.WbHigh => WbHighBtn,
         SampleMode.DMax => DMaxBtn,
         SampleMode.ScanEv => ScanEvBtn,
-        SampleMode.GreyPoint => GreyPointBtn,
         SampleMode.Black => BlackBtn,
         SampleMode.White => WhiteBtn,
         SampleMode.Crop => CropBtn,
@@ -926,12 +925,12 @@ public partial class MainWindow : Window
 
     private void OnSampleShadowClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.WbOffset,
-            Loc.T("采样暗部 WB（wb_offset）：在正片的暗部拖框，松开即采样。按 Esc 取消。"),
+            Loc.T("采样暗端密度：在正片的【暗部中性区】拖框，松开即采样。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleHighlightWbClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.WbHigh,
-            Loc.T("采样亮部 WB（wb_high）：在正片的【高光中性区】（应为白/灰的最亮处）拖框，松开即采样。按 Esc 取消。"),
+            Loc.T("采样亮端密度：在正片的【高光中性区】（应为白/灰的最亮处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: false);
 
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
@@ -943,11 +942,6 @@ public partial class MainWindow : Window
         ToggleSampling(sender, SampleMode.ScanEv,
             Loc.T("采样偏移：预览已切到负片。框选一块应为纯片基的区域，松开后自动校正零点。按 Esc 取消。"),
             useNegative: true);
-
-    private void OnGreyPointClick(object? sender, RoutedEventArgs e) =>
-        ToggleSampling(sender, SampleMode.GreyPoint,
-            Loc.T("灰点白平衡：在正片中应为【中性灰/白】的区域拖框，松开即把该区域中和为灰。按 Esc 取消。"),
-            useNegative: false);
 
     private void OnSampleBlackClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.Black,
@@ -980,6 +974,8 @@ public partial class MainWindow : Window
 
     private void OnAutoInvertFrameClick(object? sender, RoutedEventArgs e) => Vm?.AutoInvertCurrentFrame();
     private void OnAutoLevelsClick(object? sender, RoutedEventArgs e) => Vm?.AutoLevels();
+
+    private void OnClearLegacySceneWbClick(object? sender, RoutedEventArgs e) => Vm?.ClearLegacySceneWb();
     private void OnAutoDMaxClick(object? sender, RoutedEventArgs e) => Vm?.AutoDetectDMax();
     private void OnAutoWbHighClick(object? sender, RoutedEventArgs e) => Vm?.AutoWbHigh();
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
@@ -1444,7 +1440,6 @@ public partial class MainWindow : Window
                 case SampleMode.WbHigh: Vm.SampleWbHigh(rect.Value); break;
                 case SampleMode.DMax: Vm.SampleDMax(rect.Value); break;
                 case SampleMode.ScanEv: Vm.SampleScanEv(rect.Value); break;
-                case SampleMode.GreyPoint: Vm.SampleGreyPoint(rect.Value); break;
                 case SampleMode.Black: Vm.SampleBlack(rect.Value); break;
                 case SampleMode.White: Vm.SampleWhite(rect.Value); break;
             }

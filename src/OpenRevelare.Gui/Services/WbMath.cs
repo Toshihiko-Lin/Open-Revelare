@@ -50,6 +50,73 @@ public static class WbMath
         return (temp, tint, ev);
     }
 
+    // ── Stage-1 highlight endpoint ↔ (brightness, temp, tint) ───────────────────
+    //
+    // The three highlight densities carry exactly two kinds of information, and the whole point
+    // of this split is that they are SEPARABLE — but only in the geometric (log) domain.
+    //
+    //   geometric mean        → how deep the roll's highlight is  → "brightness"
+    //   geomean-1 remainder   → the cast                          → temp / tint
+    //
+    // Measured: scaling all three endpoints by one factor leaves the between-channel slope ratio
+    // identical to the last digit, while ADDING a constant to all three drifts it (R/B 1.07793 →
+    // 1.07128 for a +0.20 shift). So brightness must be multiplicative, not additive — an
+    // arithmetic "mean" control would quietly recolour the picture, which is exactly the coupling
+    // this decomposition exists to remove.
+    //
+    // The colour half reuses ETemp/ETint above verbatim, so a given temp number means the same
+    // thing here as it does in Frame edit. Only the domain differs: Stage 2's gains multiply
+    // LINEAR light, while these multiply a DENSITY endpoint. Both are per-channel log-domain
+    // moves, which is why one basis serves both.
+    //
+    // NOTE the sign. A LARGER endpoint means that channel's white arrives later, i.e. the channel
+    // renders DARKER — the opposite of a gain. TempTintToGains is therefore applied inverted, so
+    // that raising 色温 warms the picture in Stage 1 exactly as it does in Stage 2 rather than
+    // cooling it.
+
+    /// <summary>Highlight endpoint triple → (brightness, temp, tint). Brightness is the geometric
+    /// mean (a density, same units as the endpoints); temp/tint use the Stage-2 basis.</summary>
+    public static (double Brightness, double Temp, double Tint) EndpointToBrightTempTint(double[] endpoint)
+    {
+        double e0 = Math.Max(endpoint[0], 1e-6), e1 = Math.Max(endpoint[1], 1e-6), e2 = Math.Max(endpoint[2], 1e-6);
+        double geomean = Math.Exp((Math.Log(e0) + Math.Log(e1) + Math.Log(e2)) / 3.0);
+        // Inverted (geomean/e) so the colour half reads as a GAIN, matching Stage 2's convention.
+        var (temp, tint, _) = GainsToTempTint(new[] { geomean / e0, geomean / e1, geomean / e2 });
+        return (geomean, temp, tint);
+    }
+
+    /// <summary>
+    /// (brightness, temp, tint) → the highlight endpoint triple. Exact inverse of
+    /// <see cref="EndpointToBrightTempTint"/>, so sampling a highlight and reading the sliders
+    /// back lands on the same three densities it measured.
+    /// </summary>
+    public static double[] BrightTempTintToEndpoint(double brightness, double temp, double tint)
+    {
+        double[] g = TempTintToGains(temp, tint);
+        double b = Math.Max(brightness, 1e-6);
+        // Inverse of the above: endpoint = geomean / gain.
+        return new[] { b / g[0], b / g[1], b / g[2] };
+    }
+
+    /// <summary>
+    /// The shadow endpoint's scalar level — its ARITHMETIC mean, not the geometric one.
+    ///
+    /// The shadow end sits at or near zero on an untouched roll (t_base put the film base there),
+    /// so a geometric mean would be undefined or explosive exactly where rolls normally live. The
+    /// cast half is deliberately not surfaced: shadow colour is set once by sampling the base and
+    /// then left alone, so it lives in the advanced panel rather than on a pair of sliders.
+    /// </summary>
+    public static double ShadowLevel(double[] shadow) => (shadow[0] + shadow[1] + shadow[2]) / 3.0;
+
+    /// <summary>Move the shadow triple to a new mean level, PRESERVING its per-channel cast —
+    /// an additive shift, which is the operation that leaves the between-channel differences
+    /// (i.e. the shadow cast) untouched.</summary>
+    public static double[] ShadowWithLevel(double[] shadow, double level)
+    {
+        double d = level - ShadowLevel(shadow);
+        return new[] { shadow[0] + d, shadow[1] + d, shadow[2] + d };
+    }
+
     // ── Black / white point (symmetric ±1 sliders, 0 = pass-through) ─────────────
     // _BW_K = 0.5 keeps the old reach: black +1 → black_point -0.5 (raise blacks →
     // matte); −1 → +0.5 (crush blacks); white +1 → white_point 0.5 (brighten →

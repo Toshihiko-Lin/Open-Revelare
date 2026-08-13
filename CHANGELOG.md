@@ -7,13 +7,54 @@
 
 **变更**
 
+- **白平衡改成「亮度 / 色温 / 色调 / 黑场」四个控件**。反相底层是六个绝对密度（两端各三
+  通道），但那不是能拨的旋钮：亮端三个数同时装着「这张有多亮」和「偏什么色」，想调亮就
+  必然连色偏一起动。现在它们被拆成两组**严格正交**的控件——
+
+  | 控件 | 实际在动 | 副作用 |
+  |---|---|---|
+  | **亮度** | 三个亮端密度的几何均值 | 色偏**完全不变**（通道斜率比逐位相同）|
+  | **色温 / 色调** | 通道间比例（几何均值保持）| 明暗基本不变（实测漂移 ~2%）|
+  | **黑场** | 三个暗端密度的均值（加性平移）| 暗部色偏逐位保持 |
+
+  拆法必须是**几何**的：三个端点同乘一个系数色偏严格不变，同加一个常数则会漂（实测 R/B
+  比 1.0779 → 1.0713）。这就是「调亮端顺带改了亮度」的根源——之前没有沿正确的缝切。
+
+  色温/色调复用【帧编辑】那一套 WbMath 基向量，同名同刻度同手感，只是作用在反相白端。
+  六个绝对密度仍可在**【高级：六个端点密度】**里直接改，两边是同一份数据的两个视图。
+
+- **【帧编辑】删除「色偏修正」整组**（色温 / 色调 / 灰点）。色彩平衡是反相白端的属性，只
+  应该有一处；在帧编辑再调一次等于在已定好的端点上叠第二层，两处数值互相掩盖，出了偏色
+  说不清是哪一处。曝光、反差、饱和度、曲线等审美控件不受影响。
+
+  > 旧工程存过的那一层增益**仍然照常生效**，观感不变。**没有**把它折算进端点——线性域增益
+  > 等价于密度域**加常数**，而端点决定的是**斜率**，两者只能在某一个密度上重合：实测折算后
+  > R/B 比在薄部偏 −18%、中间调 +4%、浓部 +53%，旧卷会明显变色。帧编辑顶部会提示它的存在，
+  > 并给一个「清除」按钮把色偏交还给亮端统一管理。
+
+- **白平衡两端都改成显示真实密度**。界面上的「亮端」「暗端」现在是**该通道自己的密度读数**
+  （亮端典型 1.8–2.4），不再是 `1,1,1` / `0,0,0` 这种「相对某个基准的修正系数」。三个通道
+  之间的差**就是**色偏——这三个数本身即白平衡，不需要另一个参数来描述它。
+
+  这不只是换个显示方式。修正系数只有相对于**另一处**对同一端点的陈述才有意义，于是必然
+  存在两处描述互相打架：标定顺序变得有意义，同一个校正会被应用两遍。上一版删掉旧链路时
+  已经堵住了叠加的路径，但代价是 wb_high 变成了没有任何东西读取的死字段——滑块拉动不改变
+  任何像素。改成绝对密度后两处描述合并成一处，问题在结构上消失。
+
+  「框选亮部」与「框选暗部」现在也没有先后之分了：两端各自独立测量，谁先谁后结果相同。
+
+- **「最亮点=白」和「智能白平衡」修复**。这两个按钮此前写入的正是上面那个死字段，因此
+  运行完毕、状态栏报出数值，画面却毫无变化（智能白平衡还会白跑最多 50 轮神经网络推理）。
+  现在它们写入反相真正读取的亮端端点。
+
 - **反相只剩密度端点一种模型**。此前为了让旧工程逐位不变，端点模型与更早的 grade/pivot
   链路并存，高光平衡因此有两处可以写——端点的通道间斜率差，以及 wb_high。整卷自动标定
   两处都写了，同一个校正做了两遍，画面偏红约三分之一，且发生在反相内部，「帧编辑」里
   任何滑块都拉不回来。旧链路已删除。
 
-  > **旧工程需要重跑一次。** 2026-08-12 之前保存的工程没有逐通道端点，会以一组中性端点
-  > 打开，观感与当初不同。跑一次「自动（整卷）」或采样一次 D-max 即可。
+  > **旧工程照常打开，画面不变。** 载入时会把旧的 wb_high 乘数与加性 offset 换算进两端
+  > 端点，渲染结果与旧版逐位一致。但 2026-08-12 之前保存的工程本就没有逐通道端点，仍会
+  > 以一组中性端点打开，观感与当初不同——跑一次「自动（整卷）」或采样一次 D-max 即可。
 
 - **导入后不再弹「齿孔遮罩确认」窗**。阈值自动量出并应用到整卷，导入完直接看到画面。
   要核对或微调，去「整卷校准 → 齿孔遮罩」，勾「显示遮罩」看红色叠加，和以前弹窗里
@@ -67,6 +108,12 @@
 
 - **暗端检测的一处数组越界崩溃**。
 
+- **重采片基后暗端没有跟着换算**。两端都是相对片基的密度，换片基就得同步平移。亮端一直
+  有做，暗端此前是加性偏移量、与片基无关，所以不需要；现在它也是绝对密度了。
+
+- **`FrameParams.Clone()` 漏掉逐通道端点**。撤销快照与之共用这条路径，因此撤销一步会把
+  亮端端点悄悄换成默认值。
+
 ---
 
 The import no longer stops to ask a question, and the roll-calibration panel has two
@@ -76,6 +123,60 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
 
 **Changed**
 
+- **White balance is now brightness / temperature / tint / black level.** Underneath the inversion
+  has six absolute densities (three per end), but those are not knobs anyone wants to turn: the
+  three highlight densities carry both "how bright this is" and "which way it is cast", so reaching
+  for brightness inevitably moved the colour too. They are now split into two **strictly
+  orthogonal** groups —
+
+  | Control | What moves | Side effect |
+  |---|---|---|
+  | **Brightness** | The geometric mean of the three highlight densities | Cast **completely unchanged** (slope ratios identical to the last digit) |
+  | **Temperature / tint** | The ratios between channels (geometric mean held) | Lightness essentially unchanged (~2% measured) |
+  | **Black level** | The mean of the three shadow densities (additive) | Shadow cast preserved exactly |
+
+  The split has to be **geometric**: multiplying all three endpoints by one factor leaves the cast
+  untouched, while adding a constant drifts it (R/B measured 1.0779 → 1.0713). That is the root of
+  "adjusting the highlight end also changed the brightness" — the seam was simply in the wrong place.
+
+  Temperature and tint reuse the same WbMath basis as Frame edit, so the names, scale and feel are
+  identical; only the domain differs. The six absolute densities remain editable under **Advanced:
+  the six endpoint densities** — two views of the same data.
+
+- **The "Colour cast" group is gone from Frame edit** (temperature / tint / grey point). Colour
+  balance is a property of the inversion's white end and should exist in exactly one place;
+  adjusting it again in Frame edit stacked a second layer on settled endpoints, where the two masked
+  each other and a cast could not be traced to either. Exposure, contrast, saturation and the curves
+  are untouched.
+
+  > A layer stored by an old project **still applies**, so those rolls look as they did. It is
+  > deliberately **not** folded into the endpoints: a linear-domain gain is an *additive* shift in
+  > density while an endpoint sets a *slope*, and the two can only agree at one density — folding
+  > measured −18% on the thin end, +4% in the midtones and +53% on the dense end. Frame edit shows a
+  > notice and a "clear" button that hands colour back to the highlight end.
+
+- **Both white-balance ends now show real densities.** The "highlight" and "shadow" fields
+  are each channel's own measured density (highlights typically 1.8–2.4), no longer a
+  `1,1,1` / `0,0,0` correction factor relative to some baseline. The differences between the
+  three channels ARE the cast — these numbers are the white balance itself, and nothing else
+  is needed to describe it.
+
+  This is not only a change of display. A correction factor is meaningful only relative to
+  some *other* statement of the same endpoint, so there were necessarily two descriptions
+  competing: calibration order mattered, and the same correction could be applied twice.
+  Removing the old chain last version closed the double-application path, but at the cost of
+  leaving wb_high a dead field nothing read — moving its sliders changed no pixels. With
+  absolute densities the two descriptions collapse into one and the problem is gone
+  structurally.
+
+  Sampling the two ends no longer has an order either: each is measured independently, so
+  either one may be taken first.
+
+- **"Brightest = white" and "Deep white balance" fixed.** Both wrote to exactly that dead
+  field, so they would run, report numbers in the status bar, and change nothing at all
+  (Deep WB burning up to 50 rounds of network inference to do it). They now write the
+  highlight endpoint the inversion actually reads.
+
 - **One inversion model: density endpoints.** The endpoint model had been living alongside
   the older grade/pivot chain so that existing projects would render bit-identically, which
   left two places able to state the highlight balance — the between-channel difference in
@@ -83,9 +184,11 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
   correction twice: about a third too much red, applied inside the inversion where no Frame
   edit slider can reach it. The old chain is gone.
 
-  > **Existing projects need one pass.** A project saved before 2026-08-12 carries no
-  > per-channel endpoints and opens on a neutral set, so it will not look as it did. Run
-  > "Auto (whole roll)" once, or sample D-max, to bring it back.
+  > **Existing projects open unchanged.** Loading converts the old wb_high multiplier and
+  > additive offset into the two endpoints, reproducing the previous render bit-for-bit. A
+  > project saved before 2026-08-12 still carries no per-channel endpoints and opens on a
+  > neutral set, so it will not look as it did — run "Auto (whole roll)" once, or sample
+  > D-max, to bring it back.
 
 - **No more sprocket-mask dialog after an import.** The threshold is measured and applied to
   the roll, so an import goes straight to a picture. To check or adjust it, go to Roll
@@ -150,6 +253,14 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
   was kept in as picture.
 
 - **An out-of-bounds crash in the dark-end detection.**
+
+- **Re-sampling the film base did not rebase the shadow end.** Both ends are densities measured
+  relative to the base, so a new base shifts them. The highlight end always did this; the
+  shadow end used to be an additive offset, independent of the base, and did not need to —
+  now that it is an absolute density, it does.
+
+- **`FrameParams.Clone()` dropped the per-channel endpoint.** Undo snapshots share that path,
+  so a single undo silently reset the highlight endpoint to its default.
 
 ---
 

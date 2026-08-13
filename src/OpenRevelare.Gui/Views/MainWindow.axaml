@@ -676,7 +676,7 @@
                                         </Button>
                                     </Grid>
                                     <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                               Text="{i18n:T '自动完成：片基 T_base → 亮部 WB → D-max → 黑白场。不改动裁切；裁切见下方【几何 / 裁切】。'}" />
+                                               Text="{i18n:T '自动完成：片基 T_base → 亮端 → D-max → 黑白场。不改动裁切；裁切见下方【几何 / 裁切】。'}" />
                                 </StackPanel>
 
                                 <!-- 镜头校正 -->
@@ -747,31 +747,27 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 白平衡 WB -->
-                                <Expander Header="{i18n:T '白平衡 WB'}" IsExpanded="True">
+                                <!-- 亮端（白点）：亮度 + 色温 + 色调 -->
+                                <Expander Header="{i18n:T '亮端（白点）'}" IsExpanded="True"
+                                          ToolTip.Tip="{i18n:T '反相的白端。底层是三个通道各自的高光密度，这里把它拆成你能直接拨的两件事：亮度（三通道同比例）与色偏（通道间比例）。两者互不干扰。'}">
                                     <StackPanel Spacing="2">
-                                        <Expander Header="{i18n:T '暗部 WB offset（加性）'}">
-                                            <StackPanel Spacing="1">
-                                                <ctl:SliderRow Label="R" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffR}" />
-                                                <ctl:SliderRow Label="G" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffG}" />
-                                                <ctl:SliderRow Label="B" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffB}" />
-                                            </StackPanel>
-                                        </Expander>
-                                        <ToggleButton Name="WbOffsetBtn" Classes="sampling"
-                                                      Click="OnSampleShadowClick" IsEnabled="{Binding HasImage}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
-                                                <TextBlock Text="{i18n:T '框选暗部 WB'}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </ToggleButton>
-                                        <Expander Header="{i18n:T '亮部 WB high（乘性）'}" Margin="0,6,0,0">
-                                            <StackPanel Spacing="1">
-                                                <ctl:SliderRow Label="R" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="1" Value="{Binding WbHighR}" />
-                                                <ctl:SliderRow Label="G" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="1" Value="{Binding WbHighG}" />
-                                                <ctl:SliderRow Label="B" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="1" Value="{Binding WbHighB}" />
-                                            </StackPanel>
-                                        </Expander>
-                                        <Grid ColumnDefinitions="*,*">
+                                        <ctl:SliderRow Label="{i18n:T '亮度'}" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.01" DefaultValue="2"
+                                                       Value="{Binding HighlightBrightness}"
+                                                       ToolTip.Tip="{i18n:T '三通道高光密度的几何均值。调它整体明暗变化，色偏严格不变。'}" />
+                                        <!-- 量程 ±400 而非 ±250：这里是标定量而非审美量，必须能表示扫描件
+                                             实际测到的色偏。实测强偏色卷约 ±120，病态卷可到 ±200；量程若比
+                                             真值窄，滑块会把值钳回去并经 TwoWay 写脏实测密度。-->
+                                        <ctl:SliderRow Label="{i18n:T '色温'}" Minimum="-400" Maximum="400" Decimals="0" Increment="1" DefaultValue="0"
+                                                       Value="{Binding HighlightTemp}"
+                                                       ToolTip.Tip="{i18n:T '暖↔冷。与【帧编辑】同一套刻度，但作用在反相的白端，属于物理标定而非审美调整。'}" />
+                                        <ctl:SliderRow Label="{i18n:T '色调'}" Minimum="-400" Maximum="400" Decimals="0" Increment="1" DefaultValue="0"
+                                                       Value="{Binding HighlightTint}"
+                                                       ToolTip.Tip="{i18n:T '洋红↔绿。调它整体明暗不变。'}" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   IsVisible="{Binding HighlightOutOfRange}"
+                                                   Foreground="{DynamicResource WarnBrush}"
+                                                   Text="{i18n:T '实测色偏超出滑块量程——读数是准的，滑块暂时改不动它。请到下方【高级】直接改三个密度。'}" />
+                                        <Grid ColumnDefinitions="*,*" Margin="0,4,0,0">
                                             <ToggleButton Name="WbHighBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleHighlightWbClick" IsEnabled="{Binding HasImage}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -796,6 +792,38 @@
                                                 <TextBlock Text="{i18n:T '智能白平衡（Beta·请先裁切）'}" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Button>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 暗端（黑点）：只有黑场 -->
+                                <Expander Header="{i18n:T '暗端（黑点）'}" IsExpanded="True"
+                                          ToolTip.Tip="{i18n:T '反相的黑端。片基已被 t_base 归到 0，所以未标定的卷就在 0——那是真实读数，不是「未修正」。暗部色偏由「框选暗部」一次标定，之后基本不动；要微调去高级面板。'}">
+                                    <StackPanel Spacing="2">
+                                        <ctl:SliderRow Label="{i18n:T '黑场'}" Minimum="-1" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0"
+                                                       Value="{Binding ShadowLevel}"
+                                                       ToolTip.Tip="{i18n:T '三通道黑点密度的均值。调它三通道同步平移，暗部色偏保持不变。'}" />
+                                        <ToggleButton Name="WbOffsetBtn" Classes="sampling"
+                                                      Click="OnSampleShadowClick" IsEnabled="{Binding HasImage}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
+                                                <TextBlock Text="{i18n:T '框选暗部 WB'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </ToggleButton>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- 高级：六个端点绝对密度 -->
+                                <Expander Header="{i18n:T '高级：六个端点密度'}"
+                                          ToolTip.Tip="{i18n:T '反相的全部自由度：两端各三个通道的绝对密度。上面的亮度/色温/色调/黑场都是这六个数的视图，改哪边另一边都会跟着变。'}">
+                                    <StackPanel Spacing="1">
+                                        <TextBlock Classes="groupHint" Text="{i18n:T '亮端 · 逐通道白点密度'}" />
+                                        <ctl:SliderRow Label="R" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding WbHighR}" />
+                                        <ctl:SliderRow Label="G" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding WbHighG}" />
+                                        <ctl:SliderRow Label="B" Minimum="0.1" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding WbHighB}" />
+                                        <TextBlock Classes="groupHint" Margin="0,6,0,0" Text="{i18n:T '暗端 · 逐通道黑点密度'}" />
+                                        <ctl:SliderRow Label="R" Minimum="-1" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffR}" />
+                                        <ctl:SliderRow Label="G" Minimum="-1" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffG}" />
+                                        <ctl:SliderRow Label="B" Minimum="-1" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding WbOffB}" />
                                     </StackPanel>
                                 </Expander>
 
@@ -907,19 +935,25 @@
                     <TabItem Header="{i18n:T '帧编辑'}">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
-                                <Expander Header="{i18n:T '色偏修正（白平衡）'}" IsExpanded="True">
-                                    <StackPanel Spacing="2">
-                                        <ToggleButton Name="GreyPointBtn" Classes="sampling"
-                                                      Click="OnGreyPointClick" IsEnabled="{Binding HasImage}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
-                                                <TextBlock Text="{i18n:T '灰点（框选中性区）'}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </ToggleButton>
-                                        <ctl:SliderRow Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" />
-                                        <ctl:SliderRow Label="{i18n:T '色调'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Tint}" />
+                                <!-- 色温/色调不在这里。它们属于反相的白端标定，见【整卷校准 → 亮端】：
+                                     同一件事没有必要在两个阶段各调一次，而且在这里调等于在已经定好的
+                                     端点之上再叠一层，两处数值会互相掩盖。-->
+                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Margin="0,0,0,4"
+                                           Text="{i18n:T '色温 / 色调在【整卷校准 → 亮端】，那里是反相的白端标定。'}" />
+
+                                <!-- 旧工程遗留的那一层增益仍在渲染，但已无控件可改——必须说出来，
+                                     否则就是一个查不到来源的色偏。-->
+                                <Border IsVisible="{Binding HasLegacySceneWb}" Margin="0,0,0,6" Padding="8,6"
+                                        CornerRadius="4" Background="{DynamicResource Panel2Brush}"
+                                        BorderThickness="1" BorderBrush="{DynamicResource BorderSoftBrush}">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource WarnBrush}"
+                                                   Text="{i18n:T '这一卷带着旧版帧编辑白平衡，仍在生效。它是本次改版前留下的第二处色偏来源；清除后色偏将只由【亮端】决定，但画面会变。'}" />
+                                        <Button HorizontalAlignment="Stretch" Click="OnClearLegacySceneWbClick"
+                                                Content="{i18n:T '清除旧版帧编辑白平衡'}" />
                                     </StackPanel>
-                                </Expander>
+                                </Border>
 
                                 <ctl:SliderRow Label="{i18n:T '曝光'}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" />
 

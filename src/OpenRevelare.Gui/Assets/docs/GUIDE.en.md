@@ -68,8 +68,8 @@ single leader frame carries every reference the calibration needs:
 |---|---|
 | Film base T_base | The semi-transparent orange base |
 | D_max | The dark, fully-exposed patch |
-| Shadow WB offset | The base area (same as T_base) |
-| Highlight WB high | The dark area (same as D_max) |
+| Shadow end (black level) | The base area (same as T_base) |
+| Highlight end (brightness/temp/tint) | The dark area (same as D_max) |
 
 **Also**
 
@@ -233,18 +233,33 @@ that should be pure film base and the zero point is corrected automatically. T_b
 base's **colour** but does not guarantee its **absolute level**; a fluctuating panel or edge falloff
 can leave the base grey rather than black. Usually close to 0.
 
-### 4.2 White balance
+### 4.2 The highlight end (white point) and shadow end (black point)
 
-The two ends are independent; the order does not matter.
+The inversion is decided by its two ends: the shadow end is black, the highlight end is white, and
+each channel is normalised on its own. Underneath are **six absolute densities** (three per end),
+but you do not have to face them directly — the UI splits them into the knobs you actually want.
 
-**Shadow WB offset (additive)** — one manual button, "Select shadow WB": select the **base area**
-(the semi-transparent part of the negative).
+#### Highlight end: brightness + temperature + tint
 
-> **Usually you do not need to touch this.** Film-base normalisation already handles the shadow-end
-> cast; this is here for when the **shadows are visibly off-colour**. If nothing looks wrong, leave
-> it alone.
+Those three highlight densities carry two things at once: **how bright the picture is** and **which
+way it is cast**. So they split into two groups of controls, and the split is **strictly
+orthogonal**:
 
-**Highlight WB high (multiplicative)** — three buttons, one manual and two automatic:
+| Control | What actually moves | Side effect |
+|---|---|---|
+| **Brightness** | The geometric mean of the three densities (scaled in proportion) | Cast is **completely unchanged** (channel slope ratios identical to the last digit) |
+| **Temperature / tint** | The ratios between channels (geometric mean held) | Lightness essentially unchanged (~2% measured drift) |
+
+> **Why the *geometric* mean and not the arithmetic one.** Multiplying all three endpoints by one
+> factor leaves the cast exactly alone; *adding* a constant to all three drifts it (the R/B ratio
+> measured 1.0779 → 1.0713). Brightness therefore has to be multiplicative — otherwise "I just want
+> it a bit brighter" would recolour the picture, which is precisely the coupling this split removes.
+
+Temperature and tint use the same scale and feel as Frame edit; the difference is that here they act
+on the inversion's white end, which makes them a **physical calibration** rather than an aesthetic
+adjustment.
+
+All three buttons write this group, and whichever you press last wins:
 
 | Button | Type | Use |
 |---|---|---|
@@ -252,12 +267,35 @@ The two ends are independent; the order does not matter.
 | **Brightest = white** | Automatic | Treats the brightest point as pure white |
 | **Deep white balance (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
 
-For deep white balance, **crop the sprockets and film edge away first** or they will skew it.
+Afterwards the brightness / temperature / tint readouts all refresh to whatever it solved — you see
+what it decided **in units you can read**, and can carry on adjusting from there. For deep white
+balance, **crop the sprockets and film edge away first** or they will skew it.
 
-> The inversion is decided by its two ends: the film base is black, D-max is white, each channel is
-> normalised on its own, and **the slope is what those two ends leave behind** — not an adjustable
-> parameter. To change richness or contrast, go to **saturation** and **contrast** in Frame edit —
-> that is the aesthetic layer.
+> "Select highlight" and "Select D_max" in the previous section measure the same quantity —
+> highlight white balance and the highlight endpoint are one thing. The only difference is that the
+> D_max button also sets the **scalar output range** to the largest of the three channels.
+
+#### Shadow end: black level only
+
+The shadow end gets a single slider. Its per-channel cast is set once by "Select shadow WB" and then
+rarely moves, so there is no reason to keep two sliders that are almost always zero on screen.
+
+**Black level** moves the mean of the three densities, and it moves them **additively** — all three
+together, leaving the shadow cast exactly as it was.
+
+> **Usually you do not need to touch it.** Film-base normalisation has already put the bare base at
+> density 0, so an uncalibrated roll reads `0` — a **real measurement** ("black is where the film
+> base is"), not "not yet corrected".
+
+#### Advanced: the six endpoint densities
+
+To see or edit the measured values directly, expand this group: three absolute densities at each
+end. It and the brightness / temperature / tint / black level above are **two views of the same
+data** — edit either side and the other follows.
+
+> The inversion's slope is what those two ends leave behind, not an adjustable parameter. To change
+> richness or contrast, go to **saturation** and **contrast** in Frame edit — that is the aesthetic
+> layer.
 
 ### 4.3 Lens correction (manual, optional)
 
@@ -290,10 +328,19 @@ Stage 1's physical restoration.
 
 | Panel | What is in it |
 |---|---|
-| Colour cast (white balance) | Temperature / tint; or select a neutral area and solve with "Grey point" |
 | Tone | Black · shadows · highlights · white; with "Auto levels (0.1% / 99.9%)" |
 | — | Exposure, contrast, saturation |
 | Tone curve | M / R / G / B curves, with an optional "Preserve hue on the white curve" |
+
+> **Temperature and tint are not here — they are in Roll calibration → Highlight end.** Colour
+> balance is a property of the inversion's white end, and there should only ever be one place for
+> it. This tab used to carry a second temperature/tint pair, which amounted to stacking another
+> layer on top of endpoints that were already settled: the two sets masked each other, and a cast
+> could not be traced to either one.
+
+> If an old project stored a temperature/tint here, that layer **still applies** and the roll looks
+> as it did. A notice at the top of the tab points it out and offers a "clear" button that hands
+> colour back to the highlight end (the picture will shift when you do).
 
 The **output space** is chosen in the toolbar at the foot of the main window (sRGB / Display P3 /
 Adobe RGB). It is the target of step 4 in the Cineon chain: the inversion is converted into it,

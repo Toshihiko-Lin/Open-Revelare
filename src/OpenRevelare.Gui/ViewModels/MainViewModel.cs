@@ -751,36 +751,172 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnScanEvChanged(double value) => ScheduleRender();
 
-    // 暗部 WB offset（加性，默认 0）
+    // ── 反相的两个端点 ──────────────────────────────────────────────────────────
+    //
+    // 两端都是**该通道的真实密度**，不是「相对某个基准的修正量」。这是本模型的核心：
+    // 端点本身就是白平衡——三个通道端点之间的差**就是**色偏，不需要另一个参数来描述它。
+    //
+    // 旧模型里亮端是乘数 wb_high（中性 = 1,1,1）、暗端是加性 offset（中性 = 0,0,0）。
+    // 一个「修正系数」只有相对于另一处对同一端点的陈述才有意义，于是两处陈述互相打架，
+    // 标定顺序变得有意义，同一个校正还会被应用两次。改成绝对密度后这些问题在结构上消失，
+    // 而且用户看到的是「这个通道的白点在 2.31」而不是「×0.93」——后者根本无从判断对错。
+
+    /// <summary>暗端：逐通道黑点密度。t_base 已把裸片基放在 0，所以未标定的卷是 0,0,0——
+    /// 那是一个真实读数（「黑就在片基处」），不是「未修正」的哨兵值。</summary>
     [ObservableProperty] private double _wbOffR;
     [ObservableProperty] private double _wbOffG;
     [ObservableProperty] private double _wbOffB;
-    partial void OnWbOffRChanged(double value) => ScheduleRender();
-    partial void OnWbOffGChanged(double value) => ScheduleRender();
-    partial void OnWbOffBChanged(double value) => ScheduleRender();
+    partial void OnWbOffRChanged(double value) { SyncShadowFromEndpoint(); ScheduleRender(); }
+    partial void OnWbOffGChanged(double value) { SyncShadowFromEndpoint(); ScheduleRender(); }
+    partial void OnWbOffBChanged(double value) { SyncShadowFromEndpoint(); ScheduleRender(); }
 
-    // 亮部 WB high（乘性，默认 1）
-    [ObservableProperty] private double _wbHighR = 1.0;
-    [ObservableProperty] private double _wbHighG = 1.0;
-    [ObservableProperty] private double _wbHighB = 1.0;
-    partial void OnWbHighRChanged(double value) => ScheduleRender();
-    partial void OnWbHighGChanged(double value) => ScheduleRender();
-    partial void OnWbHighBChanged(double value) => ScheduleRender();
+    /// <summary>亮端：逐通道高光密度（典型 ~1.8–2.4）。<see cref="DMaxPerChannel"/> 的三个分量，
+    /// 供高级面板逐通道绑定。整卷自动、最亮点白、智能白平衡都写这里——因为反相只从这里读白端。</summary>
+    [ObservableProperty] private double _wbHighR = 2.0;
+    [ObservableProperty] private double _wbHighG = 2.0;
+    [ObservableProperty] private double _wbHighB = 2.0;
+    partial void OnWbHighRChanged(double value) { SyncHighlightFromEndpoint(); ScheduleRender(); }
+    partial void OnWbHighGChanged(double value) { SyncHighlightFromEndpoint(); ScheduleRender(); }
+    partial void OnWbHighBChanged(double value) { SyncHighlightFromEndpoint(); ScheduleRender(); }
 
     /// <summary>
-    /// 逐通道高光端点（D-max 采样或整卷自动标定的结果）。始终存在——未测过时是标量 d_max
-    /// 复制到三个通道，即一组中性端点。
-    ///
-    /// 反相由两端决定：t_base 是黑端，这里是白端，斜率是两端相减的结果而不是另一个参数。
-    /// 通道间斜率之差**就是**高光色彩平衡，所以自动求解必须写这里、并把 wb_high 留在 1；
-    /// 两者同时写会把同一个校正做两遍（见 DensityEndpoints.For）。
+    /// 逐通道高光端点，即 <see cref="WbHighR"/>/<see cref="WbHighG"/>/<see cref="WbHighB"/> 的
+    /// 数组视图。**同一份数据的两个入口**，不是两个字段——曾经的 wb_high 与 DMaxPerChannel
+    /// 分立正是同一事实的两种描述，会被叠加应用两遍。
     /// </summary>
-    private double[] _dMaxPerChannel = { 2.0, 2.0, 2.0 };
     public double[] DMaxPerChannel
     {
-        get => _dMaxPerChannel;
-        set { _dMaxPerChannel = value; ScheduleRender(); }
+        get => new[] { WbHighR, WbHighG, WbHighB };
+        set
+        {
+            if (value is not { Length: 3 }) return;
+            WbHighR = value[0]; WbHighG = value[1]; WbHighB = value[2];
+        }
     }
+
+    // ── 两端的用户视图：亮度 / 色温 / 色调 / 黑场 ───────────────────────────────
+    //
+    // 六个绝对密度是底层事实，但它们不是用户想拨的旋钮。亮端三个数同时承载「这张有多亮」
+    // 和「偏什么色」两件事，直接给三个密度滑块，用户想调亮就必然连色偏一起动——这正是
+    // 端点模型最容易被抱怨的地方。
+    //
+    // 拆法必须是**几何**的。实测：三个端点同乘一个系数，通道间斜率比到最后一位都不变；
+    // 同加一个常数则会漂（R/B 1.07793 → 1.07128）。所以「亮度」是几何均值（乘性），
+    // 色偏是 geomean-1 的余量，两者严格正交，见 WbMath.EndpointToBrightTempTint。
+    //
+    // 暗端只给一个【黑场】。它的色偏由「框选暗部」一次标定，之后基本不动——把两个几乎
+    // 永远为 0 的滑块摆在主界面上只会挤占注意力；要微调就展开高级面板改绝对密度。
+    // 而且黑场用的是**算术**均值：未标定的卷暗端就在 0，几何均值在那里没有定义。
+
+    private bool _syncingEndpointView;
+
+    /// <summary>亮端几何均值。动它三通道同比例缩放，色偏严格不变。</summary>
+    [ObservableProperty] private double _highlightBrightness = 2.0;
+    /// <summary>亮端色温（与【帧编辑】同一套 WbMath 基向量，同名同手感）。</summary>
+    [ObservableProperty] private double _highlightTemp;
+    /// <summary>亮端色调。</summary>
+    [ObservableProperty] private double _highlightTint;
+    /// <summary>暗端算术均值——黑场。动它三通道同步平移，暗部色偏不变。</summary>
+    [ObservableProperty] private double _shadowLevel;
+
+    /// <summary>
+    /// 这一卷带着旧版 Stage-2 白平衡增益。仅旧工程会为真——那层增益照常渲染（不折算，理由见
+    /// ApplyParams），但界面上已经没有控件能改它了，所以必须显式告诉用户它的存在，否则就是一
+    /// 个查不到来源的色偏。
+    /// </summary>
+    [ObservableProperty] private bool _hasLegacySceneWb;
+
+    /// <summary>清掉旧版 Stage-2 白平衡增益，把色偏交还给【亮端】那一处统一管理。</summary>
+    public void ClearLegacySceneWb()
+    {
+        Temp = 0; Tint = 0;
+        HasLegacySceneWb = false;
+        StatusText = Loc.T("已清除旧版帧编辑白平衡 · 色偏现在只由【亮端】决定");
+        ScheduleRender();
+    }
+
+    partial void OnHighlightBrightnessChanged(double value) => PushHighlightView();
+    partial void OnHighlightTempChanged(double value) => PushHighlightView();
+    partial void OnHighlightTintChanged(double value) => PushHighlightView();
+    partial void OnShadowLevelChanged(double value) => PushShadowView();
+
+    /// <summary>
+    /// 用户视图 → 三个绝对密度（亮端）。
+    ///
+    /// 只在读数确实超出滑块量程时跳过回写。SliderRow 内部的 Slider 会把值钳到 Maximum 并经
+    /// TwoWay 绑定写回来，若照单全收就会用一个被钳过的值覆盖实测密度——画面无声变色，而且原始
+    /// 测量再也找不回来。宁可让滑块停在端点上不起作用，也不能让它篡改数据。
+    /// </summary>
+    private void PushHighlightView()
+    {
+        if (_syncingEndpointView) return;
+        if (HighlightOutOfRange &&
+            Math.Abs(HighlightTemp) >= HighlightSliderRange &&
+            Math.Abs(HighlightTint) >= HighlightSliderRange) return;
+        _syncingEndpointView = true;
+        try
+        {
+            double[] e = WbMath.BrightTempTintToEndpoint(HighlightBrightness, HighlightTemp, HighlightTint);
+            WbHighR = e[0]; WbHighG = e[1]; WbHighB = e[2];
+            HighlightOutOfRange = false;
+        }
+        finally { _syncingEndpointView = false; }
+        ScheduleRender();
+    }
+
+    /// <summary>色温/色调滑块量程，必须与 MainWindow.axaml 中亮端两个 SliderRow 的 ±值一致。</summary>
+    private const double HighlightSliderRange = 400.0;
+
+    /// <summary>用户视图 → 三个绝对密度（暗端），保持通道间的色偏。</summary>
+    private void PushShadowView()
+    {
+        if (_syncingEndpointView) return;
+        _syncingEndpointView = true;
+        try
+        {
+            double[] s = WbMath.ShadowWithLevel(WbOffArr(), ShadowLevel);
+            WbOffR = s[0]; WbOffG = s[1]; WbOffB = s[2];
+        }
+        finally { _syncingEndpointView = false; }
+        ScheduleRender();
+    }
+
+    /// <summary>
+    /// 三个绝对密度 → 用户视图（亮端）。采样、自动标定、载入工程后都要刷新读数。
+    ///
+    /// 色偏极端的卷（例如某通道端点接近 0）解出的色温/色调会超出 ±250 的滑块量程。这时**不**
+    /// 钳位后回写——那等于用一个偏离真值的读数覆盖掉实际测到的密度，画面会跟着变。滑块停在
+    /// 端点上、显示值超出量程即可；底层六个密度仍是准的，要精修就去高级面板。
+    /// </summary>
+    private void SyncHighlightFromEndpoint()
+    {
+        if (_syncingEndpointView) return;
+        _syncingEndpointView = true;
+        try
+        {
+            var (b, t, ti) = WbMath.EndpointToBrightTempTint(DMaxPerChannel);
+            HighlightBrightness = b;
+            HighlightTemp = t;
+            HighlightTint = ti;
+            HighlightOutOfRange = Math.Abs(t) > HighlightSliderRange || Math.Abs(ti) > HighlightSliderRange;
+        }
+        finally { _syncingEndpointView = false; }
+    }
+
+    /// <summary>亮端色偏超出色温/色调滑块量程——读数仍然准确，但滑块拖不到那里。</summary>
+    [ObservableProperty] private bool _highlightOutOfRange;
+
+    /// <summary>三个绝对密度 → 用户视图（暗端）。</summary>
+    private void SyncShadowFromEndpoint()
+    {
+        if (_syncingEndpointView) return;
+        _syncingEndpointView = true;
+        try { ShadowLevel = WbMath.ShadowLevel(WbOffArr()); }
+        finally { _syncingEndpointView = false; }
+    }
+
+    /// <summary>两端的用户视图一起刷新。载入工程 / 重置 / 整卷标定后调用。</summary>
+    private void SyncEndpointViews() { SyncHighlightFromEndpoint(); SyncShadowFromEndpoint(); }
 
     // ══ Stage 2 — 帧编辑 (SceneBase, positive domain, geomean-1 WB) ═════════════
     [ObservableProperty] private double _temp;                     // 色温（±250，log 空间）
@@ -1193,10 +1329,9 @@ public partial class MainViewModel : ViewModelBase
         // Stage 1 — film base
         TBase = TBaseArr(),
         WbOffset = WbOffArr(),
-        WbHigh = WbHighArr(),
         ScanExposureEv = ScanEv,
         DMax = DMax,
-        DMaxPerChannel = DMaxPerChannel,
+        DMaxPerChannel = WbHighArr(),
         // Stage 2 — 色温/色调 → geomean-1 gains; 黑/白场 → levels
         WbGains = WbMath.TempTintToGains(Temp, Tint),
         ExposureEv = ExposureEv,
@@ -1390,19 +1525,26 @@ public partial class MainViewModel : ViewModelBase
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
         FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
         _filmBaseSampled = true;
-        // The per-channel endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a
-        // new base moves them — by exactly -log10(t_base_new / t_base_old) per channel.
+        // BOTH endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a new base
+        // moves them — by exactly -log10(t_base_new / t_base_old) per channel.
         //
         // That shift is known in closed form, so the endpoints are REBASED rather than discarded.
         // Dropping them used to be the only option because a roll could fall back to the
         // grade/pivot model; with one model there is nothing to fall back to, and clearing them
         // would silently change the picture — which is exactly what made a manual film-base
         // sample look like it "fixed" a roll whose real problem was elsewhere.
+        //
+        // The shadow end is rebased alongside now that it too is an absolute density; as the old
+        // additive nudge it was base-independent and correctly left alone.
+        double[] high = WbHighArr(), low = WbOffArr();
         for (int c = 0; c < 3; c++)
         {
             double shift = -Math.Log10(Math.Max(tb[c], 1e-10) / Math.Max(before[c], 1e-10));
-            _dMaxPerChannel[c] = Math.Max(_dMaxPerChannel[c] + shift, 1e-6);
+            high[c] = Math.Max(high[c] + shift, 1e-6);
+            low[c] += shift;
         }
+        DMaxPerChannel = high;
+        WbOffR = low[0]; WbOffG = low[1]; WbOffB = low[2];
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -1435,22 +1577,27 @@ public partial class MainViewModel : ViewModelBase
             : FilmBaseText;
     });
 
-    /// <summary>Shadow-end density offset (wb_offset) from a dark rect.</summary>
+    /// <summary>暗端：从一块应为中性阴影的区域测出逐通道黑点密度。</summary>
     public void SampleWbOffset((double X, double Y, double W, double H) rect) => TrySample(Loc.T("暗部采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] off = FilmBase.SampleWbOffsetFromRect(src, rect, TBaseArr());
         WbOffR = off[0]; WbOffG = off[1]; WbOffB = off[2];
-        StatusText = Loc.F($"暗部 wb_offset = {off[0]:F3}, {off[1]:F3}, {off[2]:F3}");
+        StatusText = Loc.F($"框选暗部 → 黑场 {ShadowLevel:F3}（逐通道 {off[0]:F3} / {off[1]:F3} / {off[2]:F3}）");
     });
 
-    /// <summary>Highlight-end WB (wb_high) from a neutral highlight rect.</summary>
+    /// <summary>
+    /// 亮端：从一块应为中性高光的区域测出逐通道白点密度。
+    ///
+    /// 与 <see cref="SampleDMax"/> 测的是同一个量——高光白平衡与高光端点本就是一件事。区别只在
+    /// D-max 那个按钮同时把标量输出范围也设成三通道的最大值。
+    /// </summary>
     public void SampleWbHigh((double X, double Y, double W, double H) rect) => TrySample(Loc.T("高光采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
-        double[] hi = FilmBase.SampleWbHighFromRect(src, rect, TBaseArr(), WbOffArr());
+        double[] hi = FilmBase.SampleWbHighFromRect(src, rect, TBaseArr());
         WbHighR = hi[0]; WbHighG = hi[1]; WbHighB = hi[2];
-        StatusText = Loc.F($"高光 wb_high = {hi[0]:F3}, {hi[1]:F3}, {hi[2]:F3}");
+        StatusText = Loc.F($"框选亮部 → 色温 {HighlightTemp:F0} / 色调 {HighlightTint:F0} · 亮度 {HighlightBrightness:F3}");
     });
 
     /// <summary>D-max from the negative's darkest region (= scene highlights = positive white).</summary>
@@ -1718,10 +1865,8 @@ public partial class MainViewModel : ViewModelBase
         {
             // Neutral start: stale levels would clip the positive that AutoLevels measures, and
             // both level sliders are OFFSETS from the untouched endpoints, so neutral is 0 for
-            // each. wb_high goes to 1 and STAYS there — AutoDetectDMax sets both ends, and the
-            // per-channel endpoints already state the highlight balance, so solving wb_high too
-            // would apply it twice (see DensityEndpoints.For).
-            WbHighR = WbHighG = WbHighB = 1.0;
+            // each. The highlight endpoint needs no such reset — AutoDetectDMax overwrites all
+            // three channels of it outright.
             Black = 0.0; White = 0.0;
             AutoDetectDMax();
             AutoLevels();
@@ -1867,7 +2012,7 @@ public partial class MainViewModel : ViewModelBase
             try
             {
                 rollWbHigh = await Task.Run(
-                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, null, cut, valueList), ct);
+                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, cut, valueList), ct);
             }
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
@@ -1891,31 +2036,13 @@ public partial class MainViewModel : ViewModelBase
                 TBaseR = rollBase[0]; TBaseG = rollBase[1]; TBaseB = rollBase[2];
                 if (rollDMax is double dm) DMax = dm;
 
-                // The highlight balance is carried by EXACTLY ONE of these two, never both.
-                //
-                // DensityEndpoints.FromMeasured divides each measured endpoint by that channel's
-                // wb_high — the parameter is a manual NUDGE on top of the endpoints, not a second
-                // description of the same measurement. So writing an auto-solved wb_high next to
-                // auto-solved endpoints applies the highlight correction twice: the endpoints
-                // already differ per channel because they were measured co-sited on the real
-                // highlight, and dividing them by a wb_high derived from that same highlight
-                // skews them again. Measured on 图像 001a that second application multiplied the
-                // red-to-blue balance by 0.647 — a 35% cast, applied inside the inversion where
-                // no Stage-2 control can reach it. It is why the roll went badly off the moment
-                // the roll-wide pass finished while the per-frame thumbnails looked right.
-                //
-                // Endpoints are the richer description (three numbers, co-sited, both ends
-                // pinned), so they win and wb_high goes back to neutral. Without endpoints the
-                // legacy path needs wb_high, and it is used as before.
-                if (rollDMaxPerCh is not null)
-                {
-                    _dMaxPerChannel = rollDMaxPerCh;
-                    WbHighR = WbHighG = WbHighB = 1.0;
-                }
-                else if (rollWbHigh is not null)
-                {
-                    WbHighR = rollWbHigh[0]; WbHighG = rollWbHigh[1]; WbHighB = rollWbHigh[2];
-                }
+                // The highlight endpoint, from whichever measurement is available. Both estimators
+                // return the same quantity — three absolute densities — so there is nothing to
+                // reconcile and no second field left to contradict them. The per-channel D-max
+                // detector is preferred: it pools an upper percentile across the roll, where
+                // AutoWbHighFromRoll takes the single densest frame's highlight.
+                double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
+                if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
                 // Levels are measured last and on the CURRENT frame's rendered positive, because
                 // they are the only step that reads output rather than negative density. With the
                 // three roll-wide values above already in place, that render is the roll's look,
@@ -1959,14 +2086,12 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void ApplyAutoChainToRoll()
     {
-        double[] tb = TBaseArr(), wh = WbHighArr();
+        double[] tb = TBaseArr(), dmc = WbHighArr();
         double dmax = DMax;
-        double[]? dmc = _dMaxPerChannel;
         double black = WbMath.BlackSliderToPoint(Black), white = WbMath.WhiteSliderToPoint(White);
         foreach (RollFrame f in Frames)
         {
             f.Params.TBase = (double[])tb.Clone();
-            f.Params.WbHigh = (double[])wh.Clone();
             f.Params.DMax = dmax;
             // Roll-uniform, exactly like d_max: the endpoints were measured across the roll, so a
             // single flat-lit frame is not normalised on its own.
@@ -1988,7 +2113,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void FinishAutoInvert(int voted = 1)
     {
-        StatusText = Loc.F($"整卷去色罩完成（{voted} 帧参与）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · wb_high {WbHighR:F3}, {WbHighG:F3}, {WbHighB:F3} · D-max {DMax:F3}");
+        StatusText = Loc.F($"整卷去色罩完成（{voted} 帧参与）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {WbHighR:F3}, {WbHighG:F3}, {WbHighB:F3} · D-max {DMax:F3}");
         ScheduleRender();
         // Drop the existing thumbnails before asking for new ones. DecodeThumbnailsAsync skips
         // any frame that already HAS a thumbnail — it exists to fill gaps during import — so
@@ -2100,13 +2225,11 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels would clip
-            // the positive AutoLevels measures, and a stale wb_high would fold into the solve.
-            WbHighR = WbHighG = WbHighB = 1.0;
+            // the positive AutoLevels measures. The highlight endpoint needs no reset —
+            // AutoDetectDMax overwrites all three channels of it.
             Black = 0.0; White = 0.0;
             // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
-            // endpoints — so the highlight balance is already stated once it returns. wb_high is
-            // deliberately NOT solved here and stays at 1: it and the endpoints describe the same
-            // fact, and writing both applies it twice (see DensityEndpoints.For).
+            // highlight endpoint, which IS the highlight balance.
             AutoDetectDMax();
             AutoLevels();
         }
@@ -2197,25 +2320,19 @@ public partial class MainViewModel : ViewModelBase
     private double[]? MeanOfNegative((double X, double Y, double W, double H) rect)
         => Stage1Source(_previewLinear) is { } neg ? RectMean(neg, rect) : null;
 
-    // ══ Stage-2 white balance (grey-world on the rendered positive) ════════════
-    /// <summary>Grey-point WB: neutralise a sampled rect, landing on 色温/色调 sliders.</summary>
-    public void SampleGreyPoint((double X, double Y, double W, double H) rect)
-    {
-        double[]? mean = MeanOfRenderedPositive(rect);
-        if (mean is null) return;
-        // Grey-point is a pure-COLOUR op: discard the brightness part (EV stays put).
-        double[] gains = GreyWorldGains(mean);
-        var (temp, tint, _ev) = WbMath.GainsToTempTint(gains);
-        Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
-        Tint = Math.Clamp(tint, -WbMath.WbRange, WbMath.WbRange);
-        StatusText = Loc.F($"灰点白平衡 → 色温 {Temp:F0} / 色调 {Tint:F0}");
-    }
+    // Stage-2 grey-point WB is gone along with the 色偏修正 group it fed. Colour balance is the
+    // inversion's white end — one place, in 整卷校准 → 亮端 — and a second set of temp/tint on
+    // top of the rendered positive could only mask what the endpoint already said.
 
     /// <summary>
-    /// Auto highlight WB (Stage 1, NegativeConvert way): find the roll's brightest neutral
-    /// scene point and treat it as pure white → per-channel wb_high, landing on the wb_high
-    /// sliders. Ports Python's 自动（寻找最亮点并视为纯白）via <see cref="FilmBase.AutoWbHighFromRoll"/>
+    /// 最亮点白 (Stage 1, NegativeConvert way): find the frame's brightest neutral scene point and
+    /// treat it as pure white → the per-channel HIGHLIGHT ENDPOINT, landing on the 亮端 sliders.
+    /// Ports Python's 自动（寻找最亮点并视为纯白）via <see cref="FilmBase.AutoWbHighFromRoll"/>
     /// on the single current frame.
+    ///
+    /// It writes the endpoint because that is where the inversion reads the white end from. It
+    /// previously wrote a separate wb_high multiplier, which the endpoint model had already
+    /// stopped consuming — so this button rendered nothing at all.
     /// </summary>
     public void AutoWbHigh()
     {
@@ -2231,11 +2348,11 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             double[] wh = FilmBase.AutoWbHighFromRoll(
-                new[] { raw }, TBaseArr(), WbOffArr(),
+                new[] { raw }, TBaseArr(),
                 AutoBoardCut(),
                 valueImages: ReferenceEquals(raw, val) ? null : new[] { val });
             WbHighR = wh[0]; WbHighG = wh[1]; WbHighB = wh[2];
-            StatusText = Loc.F($"自动亮部 WB → wb_high = {wh[0]:F3}, {wh[1]:F3}, {wh[2]:F3}");
+            StatusText = Loc.F($"最亮点=白 → 色温 {HighlightTemp:F0} / 色调 {HighlightTint:F0} · 亮度 {HighlightBrightness:F3}");
         }
         catch (Exception ex)
         {
@@ -2262,26 +2379,27 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Stage-1 render params for the Deep-WB net input: BASIC (colour-restored + sRGB),
     /// current calibration with the trial wb_high + adaptive d_max, Stage-2 reset to defaults so the
     /// net judges an un-graded neutral picture (port of the worker's nn_cal).</summary>
-    private FrameParams BuildDeepWbRenderParams(double[] wbHigh, double iterDMax) => new()
+    private FrameParams BuildDeepWbRenderParams(double[] highlight, double iterDMax) => new()
     {
         OutputIntent = OutputIntent.Basic,
         TBase = TBaseArr(),
-        WbHigh = (double[])wbHigh.Clone(),
         WbOffset = WbOffArr(),
         ScanExposureEv = ScanEv,
-        DMax = iterDMax,   // adaptive d_max (highlight just touches 1)
-        // Must match BuildParams: the net judges a RENDERED positive, so the render it judges
-        // has to be the one the user is looking at.
-        DMaxPerChannel = DMaxPerChannel,
+        DMax = iterDMax,   // adaptive output range (highlight just touches 1)
+        // The trial highlight endpoint for THIS round. It is the quantity being solved, so it must
+        // be what the render uses; everything else here matches BuildParams, because the net judges
+        // a rendered positive and that render has to be the one the user is looking at.
+        DMaxPerChannel = (double[])highlight.Clone(),
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
-        // gains are folded straight into wb_high, which is then applied to a pipeline that DOES
-        // decouple; iterating on an un-decoupled render solves wb_high in the wrong colour basis
-        // and lands magenta. d_highlight is measured on the decoupled negative for the same reason,
-        // and rawDelta divides the net's log-gains BY that d_highlight — so if these two disagree
-        // the mismatch is baked into every iteration. The input characterisation is here for the
-        // same reason: the net judges colour, so it must judge it in the space the export uses.
+        // gains are folded straight into the highlight endpoint, which is then applied to a
+        // pipeline that DOES decouple; iterating on an un-decoupled render solves the endpoint in
+        // the wrong colour basis and lands magenta. d_highlight is measured on the decoupled
+        // negative for the same reason, and rawDelta divides the net's log-gains BY that
+        // d_highlight — so if these two disagree the mismatch is baked into every iteration. The
+        // input characterisation is here for the same reason: the net judges colour, so it must
+        // judge it in the space the export uses.
         DecoupleMatrix = _decoupleMatrix,
         DecoupleMode = DecoupleMode.Linear,
         DecoupleChromaMatrix = _decoupleChromaMatrix,
@@ -2298,10 +2416,19 @@ public partial class MainViewModel : ViewModelBase
     };
 
     /// <summary>
-    /// Smart white balance (Beta) — faithful port of the source worker (gui/main_window.py
-    /// _AutoWBAffineWorker + white_balance.nn_wb_high_step): start from the geometric highlight
-    /// baseline, then iterate the Deep-WB net, adding a chroma-only density-slope delta to wb_high
-    /// each round (adaptive d_max, BASIC-rendered positive), up to 50 rounds or |log_gains| &lt; 0.01.
+    /// Smart white balance (Beta) — port of the source worker (gui/main_window.py
+    /// _AutoWBAffineWorker + white_balance.nn_wb_high_step): start from the measured highlight,
+    /// then iterate the Deep-WB net, folding a chroma-only density delta into the per-channel
+    /// HIGHLIGHT ENDPOINT each round (adaptive output range, BASIC-rendered positive), up to 50
+    /// rounds or |log_gains| &lt; 0.01.
+    ///
+    /// The net's decision lands on the endpoint because the endpoint is the white end the
+    /// inversion actually reads (see <see cref="DensityEndpoints"/>). The worker this ports
+    /// accumulated a wb_high multiplier instead; under the endpoint model nothing consumed that,
+    /// so the button ran its 50 rounds and changed no pixels. The iteration is otherwise the same
+    /// arithmetic — a multiplier on a fixed measured highlight and an endpoint moving away from
+    /// that same highlight are the same one-parameter-per-channel family, related by
+    /// <c>endpoint = d_highlight / wb_high</c>.
     /// </summary>
     public async Task AutoWbAiAsync()
     {
@@ -2345,30 +2472,30 @@ public partial class MainViewModel : ViewModelBase
                     AutoBoardCut(),
                     valueImages: ReferenceEquals(anchorRaw, anchorVal) ? null : new[] { anchorVal });
 
-                // Step 1 — geometric baseline: wb_high so the highlight end inverts to flat white.
-                double target = double.NegativeInfinity;
-                for (int c = 0; c < 3; c++) target = Math.Max(target, dHigh[c] + wbOffset[c]);
-                var wh = new double[3];
-                for (int c = 0; c < 3; c++) wh[c] = (target - wbOffset[c]) / Math.Max(dHigh[c], 1e-10);
+                // Step 1 — geometric baseline. The measured highlight IS the endpoint that inverts
+                // that point to flat white, so the starting endpoint is simply dHigh itself. (The
+                // multiplier form started at (target-off)/dHigh, whose corresponding endpoint
+                // dHigh/wh is the same triple up to the shared scalar the output range absorbs.)
+                var ep = new double[3];
+                for (int c = 0; c < 3; c++) ep[c] = Math.Max(dHigh[c], 1e-6);
                 // Debug, not Console: this is a WinExe with no console attached, so the writes went
                 // nowhere a user could read. Debug.WriteLine reaches the debugger's output window
                 // while developing and compiles out of Release entirely.
                 Debug.WriteLine($"[AIWB] d_highlight={dHigh[0]:F4},{dHigh[1]:F4},{dHigh[2]:F4} " +
-                                $"geo wb_high={wh[0]:F4},{wh[1]:F4},{wh[2]:F4} " +
                                 $"slope={grade:F3}");
 
                 // Step 2 — NN chroma-only iteration.
                 bool conv = false;
                 for (int it = 1; it <= 50; it++)
                 {
-                    double dWbMax = double.NegativeInfinity;
-                    for (int c = 0; c < 3; c++) dWbMax = Math.Max(dWbMax, dHigh[c] * wh[c] + wbOffset[c]);
                     // The output range that puts this iteration's highlight exactly at white.
-                    // Endpoint form: white lands at 0 when density == the span, so the range the
-                    // render needs IS the highlight density itself.
-                    double iterDMax = Math.Max(dWbMax, 1e-6);
+                    // White lands at 0 when density reaches the channel's span, so the range the
+                    // render needs is the widest span across the three channels.
+                    double iterDMax = double.NegativeInfinity;
+                    for (int c = 0; c < 3; c++) iterDMax = Math.Max(iterDMax, ep[c] - wbOffset[c]);
+                    iterDMax = Math.Max(iterDMax, 1e-6);
 
-                    ImageBuffer pos = Pipeline.ProcessFrame(neg, BuildDeepWbRenderParams(wh, iterDMax));
+                    ImageBuffer pos = Pipeline.ProcessFrame(neg, BuildDeepWbRenderParams(ep, iterDMax));
                     var (inp, outp) = corr.CorrectOnce(pos);
                     var (li, lo) = MeanLinearHighlight(inp, outp);
 
@@ -2377,7 +2504,11 @@ public partial class MainViewModel : ViewModelBase
                         logGains[c] = Math.Log10(Math.Max(Math.Max(lo[c], 1e-8) / Math.Max(li[c], 1e-8), 1e-8));
                     double meanLog = (logGains[0] + logGains[1] + logGains[2]) / 3.0;
 
-                    // chroma-only density-slope delta (strip brightness on the delta itself).
+                    // chroma-only density delta (strip brightness on the delta itself). The net
+                    // wants channel c brighter (logGains[c] > mean) ⇒ its white must come on
+                    // EARLIER ⇒ a smaller endpoint, hence the subtraction. Under the multiplier
+                    // form the same correction was an addition, because wb_high sat in the
+                    // denominator of the endpoint — same move, opposite sign.
                     var rawDelta = new double[3];
                     for (int c = 0; c < 3; c++) rawDelta[c] = (logGains[c] - meanLog) / (grade * Math.Max(dHigh[c], 1e-6));
                     double meanRaw = (rawDelta[0] + rawDelta[1] + rawDelta[2]) / 3.0;
@@ -2385,22 +2516,31 @@ public partial class MainViewModel : ViewModelBase
                     double dev = 0;
                     for (int c = 0; c < 3; c++)
                     {
-                        wh[c] = Math.Max(wh[c] + (rawDelta[c] - meanRaw), 0.1);
+                        // Scaled by the channel's own endpoint so the step is the same relative
+                        // move the multiplier form made (it added to wh, and ep = dHigh/wh).
+                        ep[c] = Math.Max(ep[c] * (1.0 - (rawDelta[c] - meanRaw)), 1e-3);
                         dev = Math.Max(dev, Math.Abs(logGains[c] - meanLog));
                     }
 
-                    Debug.WriteLine($"[AIWB] iter {it}: d_max={iterDMax:F4} log_gains=" +
+                    Debug.WriteLine($"[AIWB] iter {it}: range={iterDMax:F4} log_gains=" +
                                     $"{logGains[0]:F4},{logGains[1]:F4},{logGains[2]:F4} dev={dev:F4} " +
-                                    $"wb_high={wh[0]:F4},{wh[1]:F4},{wh[2]:F4}");
+                                    $"endpoint={ep[0]:F4},{ep[1]:F4},{ep[2]:F4}");
                     int round = it;
                     Dispatcher.UIThread.Post(() => StatusText = Loc.F($"智能白平衡 第 {round}/50 轮 · 收敛度 {dev:F4}"));
                     if (dev < 0.01) { conv = true; break; }
                 }
-                return (wh, conv);
+                return (ep, conv);
             });
 
-            WbHighR = wbHigh[0]; WbHighG = wbHigh[1]; WbHighB = wbHigh[2];   // AI only modifies wb_high
-            StatusText = Loc.F($"智能白平衡{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → wb_high {wbHigh[0]:F3}, {wbHigh[1]:F3}, {wbHigh[2]:F3}");
+            // The net's decision, on the field the inversion reads. Writing the three densities
+            // drives SyncHighlightFromEndpoint through the property setters, so 亮度/色温/色调
+            // land on the net's answer too — the user sees WHAT it decided in the same units they
+            // would have dialled by hand, and can carry on adjusting from there.
+            DMaxPerChannel = wbHigh;
+            double solvedRange = double.NegativeInfinity;
+            for (int c = 0; c < 3; c++) solvedRange = Math.Max(solvedRange, wbHigh[c] - WbOffArr()[c]);
+            DMax = Math.Max(solvedRange, 1e-6);
+            StatusText = Loc.F($"智能白平衡{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 色温 {HighlightTemp:F0} / 色调 {HighlightTint:F0} · 亮度 {HighlightBrightness:F3}");
         }
         catch (Exception ex) { StatusText = Loc.T("智能白平衡失败：") + ex.Message; }
         finally { IsBusy = false; }
@@ -2583,21 +2723,9 @@ public partial class MainViewModel : ViewModelBase
                 Scan((long)(n * (1.0 - highPct)), ascending: false));
     }
 
-    /// <summary>Grey-world gains that neutralise a mean colour to grey (relative to G).</summary>
-    private static double[] GreyWorldGains(double[] mean)
-    {
-        double r = Math.Max(mean[0], 1e-6), g = Math.Max(mean[1], 1e-6), b = Math.Max(mean[2], 1e-6);
-        return new[] { g / r, 1.0, g / b };
-    }
-
-    // ForPreview on both: the rect these are handed is normalised against the frame ON SCREEN, so
-    // they have to measure the buffer that is on screen. Cropping again would both shrink the image
-    // and move the sampled region off the spot the user clicked.
-    private double[]? MeanOfRenderedPositive((double X, double Y, double W, double H) rect)
-        => _previewLinear is null
-               ? null
-               : RectMean(Pipeline.ProcessFrame(_previewLinear, ForPreview(BuildParams())), rect);
-
+    // ForPreview: the rect this is handed is normalised against the frame ON SCREEN, so it has to
+    // measure the buffer that is on screen. Cropping again would both shrink the image and move
+    // the sampled region off the spot the user clicked.
     private (double Min, double Max)? MinMaxLumaOfRenderedPositive((double X, double Y, double W, double H) rect)
     {
         if (_previewLinear is null) return null;
@@ -2627,9 +2755,9 @@ public partial class MainViewModel : ViewModelBase
         // Stage 1 — film base
         TBaseR = 0.82; TBaseG = 0.51; TBaseB = 0.29;
         DMax = 2.0; ScanEv = 0;
+        // Both ends back to a neutral (cast-free) pair: black at the film base, white at the
+        // scalar range replicated across the channels. Re-measured by the auto chain or a sample.
         WbOffR = 0; WbOffG = 0; WbOffB = 0;
-        WbHighR = 1.0; WbHighG = 1.0; WbHighB = 1.0;
-        // Back to a neutral endpoint set, then re-measured by the auto chain (or a D-max sample).
         DMaxPerChannel = new[] { DMax, DMax, DMax };
         // Stage 2
         Temp = 0; Tint = 0; ExposureEv = 0;
@@ -3510,14 +3638,23 @@ public partial class MainViewModel : ViewModelBase
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMax = p.DMax; ScanEv = p.ScanExposureEv;
         WbOffR = p.WbOffset[0]; WbOffG = p.WbOffset[1]; WbOffB = p.WbOffset[2];
-        WbHighR = p.WbHigh[0]; WbHighG = p.WbHigh[1]; WbHighB = p.WbHigh[2];
         DMaxPerChannel = p.DMaxPerChannel is { Length: 3 } dmc
             ? (double[])dmc.Clone()
             : new[] { p.DMax, p.DMax, p.DMax };
-        // Stage 2
+        // Stage-2 的色温/色调滑块已随【色偏修正】一组移除，但存下来的 wb_gains 仍然照常载入、
+        // 照常参与渲染——旧工程的观感因此逐位不变。
+        //
+        // 不折进亮端端点。看上去两者都是逐通道的对数域操作，实际不是：Stage-2 增益是线性域的
+        // 【乘法】，等价于给密度【加】一个常数；而端点决定的是【斜率】。加常数与改斜率只能在
+        // 某一个密度值上重合，不可能对所有像素等价。实测把 (色温70/色调-30) 折进端点后，
+        // R/B 比在薄部偏 -18%、中间调 +4%、浓部 +53%——旧卷会明显变色。
+        //
+        // 所以旧卷保留它已有的那一层增益，新卷则一律是 1,1,1（没有控件能再写它），色偏统一
+        // 由亮端端点承担。这是唯一既不改旧观感、又不留下第二处色偏来源的做法。
         var (temp, tint, _) = WbMath.GainsToTempTint(p.WbGains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
         Tint = Math.Clamp(tint, -WbMath.WbRange, WbMath.WbRange);
+        HasLegacySceneWb = Math.Abs(Temp) > 0.5 || Math.Abs(Tint) > 0.5;
         ExposureEv = p.ExposureEv;
         Black = WbMath.BlackPointToSlider(p.BlackPoint);
         White = WbMath.WhitePointToSlider(p.WhitePoint);
@@ -3532,6 +3669,7 @@ public partial class MainViewModel : ViewModelBase
         _cropRect = p.CropRect;
         FilmBaseText = Loc.F($"片基 t_base = {p.TBase[0]:F3}, {p.TBase[1]:F3}, {p.TBase[2]:F3}");
         _filmBaseSampled = true;
+        SyncEndpointViews();            // 亮度/色温/色调/黑场 读数跟上刚载入的六个端点
         _suppressRender = false;
 
         FrameParamsLoaded?.Invoke(p);   // view syncs the curve editor
@@ -3818,7 +3956,16 @@ public partial class MainViewModel : ViewModelBase
                 // The old "relink pivot when d_max moves" rule died with pivot; the slope now
                 // comes from the endpoints above, which are being copied in the same breath.
             }
-            if (Sync.CalWb) { d.WbHigh = (double[])s.WbHigh.Clone(); d.WbOffset = (double[])s.WbOffset.Clone(); }
+            // Both ends. The highlight endpoint is ALSO copied by CalFilmBase above, and that
+            // overlap is real rather than a mistake: the same three densities are simultaneously
+            // the white end of the film-base normalisation and the highlight white balance. Either
+            // switch alone must carry them, or turning that switch on would hand over half a
+            // calibration.
+            if (Sync.CalWb)
+            {
+                d.DMaxPerChannel = (double[])s.DMaxPerChannel.Clone();
+                d.WbOffset = (double[])s.WbOffset.Clone();
+            }
             if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
             if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
             if (Sync.CalSprocket) { d.SprocketEnabled = s.SprocketEnabled; d.SprocketThreshold = s.SprocketThreshold; }
