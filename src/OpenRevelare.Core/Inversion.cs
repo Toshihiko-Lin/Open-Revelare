@@ -85,13 +85,10 @@ public static class Inversion
         double floorV2 = Math.Pow(10.0, -DensityFloor(cal, 2));
         bool biasActive = cal.ScanExposureEv != 0.0;
         double biasV = cal.ScanExposureEv * Log10_2;
-        // wb_high and wb_offset are NOT applied here. Both describe an endpoint, and the
-        // endpoints are where they live (DensityEndpoints.For) — applying them again on the
-        // density would double them. Mirrors BuildDensityLuts.
-        double wbOffMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
+        // The two endpoints are NOT applied here. Steps 1–4 produce the film-base-normalised
+        // density and stop; both ends enter at step 5 through DensityEndpoints. Mirrors
+        // BuildDensityLuts.
         double tb0 = cal.TBase[0], tb1 = cal.TBase[1], tb2 = cal.TBase[2];
-        double wh0 = cal.WbHigh[0], wh1 = cal.WbHigh[1], wh2 = cal.WbHigh[2];
-        double wo0 = cal.WbOffset[0] - wbOffMean, wo1 = cal.WbOffset[1] - wbOffMean, wo2 = cal.WbOffset[2] - wbOffMean;
 
         // Canonical per-channel affine for the non-decomposed path. Hoisted out of the loop:
         // three multiplies and three adds replace the pivot/grade/d_max arithmetic per pixel.
@@ -104,7 +101,7 @@ public static class Inversion
         // plane (see the useMatrix branch).
         double chromaSlope = (es0 + es1 + es2) / 3.0;
 
-        double DirectDensity(double v, double tb, double wh, double woc, double flr)
+        double DirectDensity(double v, double tb, double flr)
         {
             double d = -Math.Log10(Math.Max(v / tb, flr));
             if (biasActive) d += biasV;
@@ -131,9 +128,9 @@ public static class Inversion
                 // 1–4: per-channel density. LUT for input in [0,1] (exact); direct
                 // compute for T > 1 (vignette-boosted / RAW highlights).
                 float v0 = src[i], v1 = src[i + 1], v2 = src[i + 2];
-                double d0 = v0 <= 1.0f ? lut0[ToIndex(v0)] : DirectDensity(v0, tb0, wh0, wo0, floorV0);
-                double d1 = v1 <= 1.0f ? lut1[ToIndex(v1)] : DirectDensity(v1, tb1, wh1, wo1, floorV1);
-                double d2 = v2 <= 1.0f ? lut2[ToIndex(v2)] : DirectDensity(v2, tb2, wh2, wo2, floorV2);
+                double d0 = v0 <= 1.0f ? lut0[ToIndex(v0)] : DirectDensity(v0, tb0, floorV0);
+                double d1 = v1 <= 1.0f ? lut1[ToIndex(v1)] : DirectDensity(v1, tb1, floorV1);
+                double d2 = v2 <= 1.0f ? lut2[ToIndex(v2)] : DirectDensity(v2, tb2, floorV2);
 
                 // 5: density-domain inversion.
                 double a0, a1, a2;
@@ -242,16 +239,18 @@ public static class Inversion
     // observe a half-built table, and nobody ever mutates a published one.
     private sealed class DensityLutEntry
     {
-        public double Tb0, Tb1, Tb2, Wh0, Wh1, Wh2, Wo0, Wo1, Wo2, ScanEv, DMax;
-        // Part of the key: it sets the per-channel density floor, so two rolls differing only
-        // here must not share tables.
+        // Exactly what BuildDensityLuts reads, and nothing more. The endpoints are NOT here:
+        // steps 1–4 stop at the film-base-normalised density, and both ends enter afterwards at
+        // step 5. DMaxPerCh is the one exception — not as an endpoint, but because it sets the
+        // per-channel density FLOOR (see DensityFloor), so two rolls differing only there must
+        // not share tables. Keying on values the tables do not depend on would only cost rebuilds.
+        // DMax stays because DensityFloor falls back to it when DMaxPerCh is not a valid triple.
+        public double Tb0, Tb1, Tb2, ScanEv, DMax;
         public double[]? DMaxPerCh;
         public double[][] Luts = null!;
 
         public bool Matches(FrameParams c) =>
             Tb0 == c.TBase[0] && Tb1 == c.TBase[1] && Tb2 == c.TBase[2] &&
-            Wh0 == c.WbHigh[0] && Wh1 == c.WbHigh[1] && Wh2 == c.WbHigh[2] &&
-            Wo0 == c.WbOffset[0] && Wo1 == c.WbOffset[1] && Wo2 == c.WbOffset[2] &&
             ScanEv == c.ScanExposureEv && DMax == c.DMax &&
             SameEndpoints(DMaxPerCh, c.DMaxPerChannel);
 
@@ -276,8 +275,6 @@ public static class Inversion
         var entry = new DensityLutEntry
         {
             Tb0 = cal.TBase[0], Tb1 = cal.TBase[1], Tb2 = cal.TBase[2],
-            Wh0 = cal.WbHigh[0], Wh1 = cal.WbHigh[1], Wh2 = cal.WbHigh[2],
-            Wo0 = cal.WbOffset[0], Wo1 = cal.WbOffset[1], Wo2 = cal.WbOffset[2],
             ScanEv = cal.ScanExposureEv, DMax = cal.DMax,
             DMaxPerCh = cal.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null,
             Luts = BuildDensityLuts(cal),
@@ -297,16 +294,13 @@ public static class Inversion
         // darkest area short of white and tinted.
         bool biasActive = cal.ScanExposureEv != 0.0;
         double bias = cal.ScanExposureEv * Log10_2;
-        // wb_high / wb_offset are folded into the endpoints (DensityEndpoints.FromMeasured), so
-        // applying them here too would double them.
-        double wbOffsetMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
+        // Neither endpoint is applied here — these tables stop at the film-base-normalised
+        // density, and DensityEndpoints maps both ends at step 5.
 
         var luts = new double[3][];
         for (int c = 0; c < 3; c++)
         {
             double tBase = cal.TBase[c];
-            double wbHigh = cal.WbHigh[c];
-            double wbOff = cal.WbOffset[c] - wbOffsetMean;
             double floor = Math.Pow(10.0, -DensityFloor(cal, c));
             var lut = new double[LutSize];
             for (int idx = 0; idx < LutSize; idx++)

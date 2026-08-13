@@ -18,17 +18,24 @@ namespace OpenRevelare.Core;
 /// WHAT THE SIX DEGREES OF FREEDOM MEAN. Splitting the per-channel scale and offset into their
 /// shared part and their between-channel difference:
 ///
-///   scale  — shared: the density range (what <c>grade</c> sets today)
-///            between-channel: the highlight colour cast (what <c>wb_high</c> corrects today)
+///   scale  — shared: the density range
+///            between-channel: the highlight colour cast
 ///   offset — shared: the black level
-///            between-channel: the shadow colour cast (what <c>wb_offset</c> corrects today)
+///            between-channel: the shadow colour cast
 ///
 /// So white balance keeps all four of its colour degrees of freedom. What changes is that it is
 /// READ OFF the endpoints rather than applied as a separate stage after them.
 ///
+/// Which is why the two ends are stated as ABSOLUTE per-channel densities — the highlight triple
+/// in <see cref="FrameParams.DMaxPerChannel"/>, the shadow triple in
+/// <see cref="FrameParams.WbOffset"/>. A correction factor (the old multiplicative <c>wb_high</c>,
+/// neutral at 1,1,1) describes the cast only RELATIVE to some other statement of the same
+/// endpoint, so it needs that other statement to exist — and then the two compete, which is the
+/// bug the endpoint model was introduced to kill. A measured density needs nothing else, and it
+/// is also what the user should see: "this channel's white sits at 2.31", not "×0.93".
+///
 /// This is now the ONLY inversion model. It replaced a grade/pivot chain that described the same
-/// two ends with a scalar gamma plus a separately-solved wb_high — two descriptions of one fact,
-/// which could be, and were, applied on top of each other. See <see cref="For"/>.
+/// two ends with a scalar gamma plus a separately-solved wb_high. See <see cref="For"/>.
 /// </summary>
 public readonly struct DensityEndpoints
 {
@@ -74,28 +81,29 @@ public readonly struct DensityEndpoints
     ///
     /// <paramref name="outRange"/> is roll-uniform, matching how <see cref="FrameParams.DMax"/>
     /// is established across a roll today, so a flat-lit frame is not stretched on its own.
+    ///
+    /// BOTH ARGUMENTS ARE ABSOLUTE DENSITIES, in the same units, read off the same picture. There
+    /// is no multiplier and no nudge anywhere in here: a channel states where its black is and
+    /// where its white is, and the affine map between them follows. That symmetry is the whole
+    /// point — it is what makes the two ends independent, so solving one cannot disturb the other
+    /// and calibration order stops mattering.
     /// </summary>
-    /// <param name="wbHigh">Per-channel highlight nudge, null = none. Divides that channel's
-    /// endpoint, so wb_high &gt; 1 brings its white on earlier — the same per-channel multiplier
-    /// on the slope that <c>wb_high</c> always was.</param>
-    /// <param name="wbOffset">Per-channel shadow nudge in density, null = none. Moves where that
-    /// channel's black sits.</param>
+    /// <param name="dMaxPerChannel">Per-channel HIGHLIGHT density (the white end). Absolute.</param>
+    /// <param name="wbOffset">Per-channel SHADOW density (the black end), null = all zero, i.e.
+    /// black sits at the film base where <c>t_base</c> put it. Absolute.</param>
     public static DensityEndpoints FromMeasured(double[] dMaxPerChannel, double outRange,
-                                                double[]? wbHigh = null, double[]? wbOffset = null)
+                                                double[]? wbOffset = null)
     {
         var scale = new double[3];
         var offset = new double[3];
         for (int c = 0; c < 3; c++)
         {
-            double wh = wbHigh is { Length: 3 } ? Math.Max(wbHigh[c], 1e-6) : 1.0;
-            // The shadow nudge moves WHICH DENSITY reads black for this channel. t_base put
-            // D_min at 0, so a nudge of wo shifts that endpoint to -wo.
-            double dMin = wbOffset is { Length: 3 } ? -wbOffset[c] : 0.0;
-            double dMax = dMaxPerChannel[c] / wh;
+            double dMin = wbOffset is { Length: 3 } ? wbOffset[c] : 0.0;
+            double dMax = dMaxPerChannel[c];
             // Deriving the slope from the SPAN is what keeps both ends pinned: black lands at
-            // -outRange and white at 0 for every channel, whatever the nudges. Subtracting a
-            // constant instead would drag the white end along with the black one, turning a
-            // colour control into a per-channel gain.
+            // -outRange and white at 0 for every channel, whatever the two endpoints are.
+            // Subtracting a constant instead would drag the white end along with the black one,
+            // turning a colour control into a per-channel gain.
             double span = Math.Max(dMax - dMin, 1e-6);
             scale[c] = outRange / span;
             offset[c] = -outRange - scale[c] * dMin;
@@ -104,18 +112,13 @@ public readonly struct DensityEndpoints
     }
 
     /// <summary>
-    /// The endpoints the post-LUT inversion slot should use. One model, always: the per-channel
-    /// endpoints, which every roll now carries (see <see cref="FrameParams.DMaxPerChannel"/>).
-    ///
-    /// <see cref="FrameParams.WbHigh"/> is deliberately NOT passed. The endpoints already encode
-    /// the highlight balance — that is what the between-channel differences in their slope ARE —
-    /// so handing wb_high in as well applies the same correction twice, and it lands inside the
-    /// inversion where no later control can undo it. wb_high survives only as the shadow-side
-    /// partner's counterpart in the legacy serialisation and as a manual nudge; anything that
-    /// solves the highlight automatically must write the endpoints and leave it at 1.
+    /// The endpoints the post-LUT inversion slot should use: the roll's two measured ends, one
+    /// pair per channel, and nothing else. <see cref="FrameParams.DMaxPerChannel"/> is the white
+    /// end and <see cref="FrameParams.WbOffset"/> is the black end — both absolute densities, so
+    /// each simply IS its endpoint and there is no second parameter left to double it with.
     /// </summary>
     public static DensityEndpoints For(FrameParams cal) =>
-        FromMeasured(cal.DMaxPerChannel, cal.DMax, null, cal.WbOffset);
+        FromMeasured(cal.DMaxPerChannel, cal.DMax, cal.WbOffset);
 
     /// <summary>
     /// The linear value the film base (density 0) maps to — the black floor the inversion

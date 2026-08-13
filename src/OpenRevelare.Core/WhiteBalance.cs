@@ -96,7 +96,7 @@ public static class WhiteBalance
             // scalar d_max, which is what the retired grade/pivot chain reduced to once grade was
             // 1. This routine is reached only by the CLI's parity diagnostics.
             var ep = endpoints ?? DensityEndpoints.FromMeasured(
-                new[] { dMax, dMax, dMax }, dMax);
+                new[] { dMax, dMax, dMax }, dMax, null);
             for (int p = 0; p < n; p++)
             {
                 var r = new double[3];

@@ -198,8 +198,16 @@ public static class Project
             // FilmBase calibration
             ["t_base"] = Arr(p.TBase),
             ["d_max"] = p.DMax,
-            ["wb_high"] = Arr(p.WbHigh),
-            ["wb_offset"] = Arr(p.WbOffset),
+            // Neutral, always. The highlight balance lives in d_max_per_channel and the shadow end
+            // in wb_offset_density; writing the old multiplier as anything but identity would make
+            // a build that still reads it apply the correction twice. Kept so such a build (and the
+            // Python reader) still parses the file. See DesFrame for the read side.
+            ["wb_high"] = new JsonArray(1.0, 1.0, 1.0),
+            // Legacy key: the ADDITIVE shadow nudge, which is what the absolute shadow density
+            // reduces to once t_base has put the base at zero — they differ only in sign
+            // convention, and for the untouched 0,0,0 case not even there.
+            ["wb_offset"] = new JsonArray(-p.WbOffset[0], -p.WbOffset[1], -p.WbOffset[2]),
+            ["wb_offset_density"] = Arr(p.WbOffset),
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
             ["scan_exposure_ev"] = p.ScanExposureEv,
             // Input colour space. Written only when it departs from the sRGB default, so a
@@ -263,14 +271,10 @@ public static class Project
         {
             TBase = Vec3(d, "t_base", 0.82, 0.51, 0.29),
             DMax = Dbl(d, "d_max", 2.0),
-            // Absent — a project written before endpoints existed — falls back to the scalar
-            // replicated across the channels. That is a neutral starting point, not a second
-            // model: the roll re-solves on the next automatic pass or D-max sample.
-            DMaxPerChannel = d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
-                ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
-                : Repeat3(Dbl(d, "d_max", 2.0)),
-            WbHigh = Vec3(d, "wb_high", 1, 1, 1),
-            WbOffset = Vec3(d, "wb_offset", 0, 0, 0),
+            // Both endpoints, migrated from whatever schema the file was written in — see
+            // MigrateHighlightEndpoint / MigrateShadowEndpoint.
+            DMaxPerChannel = MigrateHighlightEndpoint(d),
+            WbOffset = MigrateShadowEndpoint(d),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
             ScanExposureEv = Dbl(d, "scan_exposure_ev", 0.0),
             // Deliberately not read back. A stored 3.05 described a chroma boost compensating for
@@ -350,6 +354,50 @@ public static class Project
 
     /// <summary>A scalar as a neutral three-channel endpoint set.</summary>
     private static double[] Repeat3(double v) => new[] { v, v, v };
+
+    /// <summary>
+    /// The per-channel HIGHLIGHT density, from any schema this project may have been written in.
+    /// Rendered pixels are preserved across all three.
+    ///
+    /// Three cases, newest first:
+    ///
+    ///  1. <c>d_max_per_channel</c> with a neutral <c>wb_high</c> — the current schema. Taken as
+    ///     written.
+    ///  2. <c>d_max_per_channel</c> with a NON-neutral <c>wb_high</c> — written by a build in
+    ///     which wb_high still divided the endpoint. The two are folded back into the one number
+    ///     they always described: <c>endpoint / wb_high</c>, which is precisely what
+    ///     <c>FromMeasured</c> computed at render time before that argument was removed. (In
+    ///     practice only hand-edited projects land here — the auto chain forced wb_high to 1
+    ///     whenever it wrote endpoints — but a file that does hit it must not shift.)
+    ///  3. Neither key — a project older than endpoints. The scalar d_max replicated across the
+    ///     channels is the neutral set the roll started from, then divided by wb_high as above,
+    ///     which reproduces exactly what the old multiplicative model rendered.
+    /// </summary>
+    private static double[] MigrateHighlightEndpoint(JsonObject d)
+    {
+        double[] ep = d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
+            ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
+            : Repeat3(Dbl(d, "d_max", 2.0));
+
+        double[] legacyHigh = Vec3(d, "wb_high", 1, 1, 1);
+        for (int c = 0; c < 3; c++)
+            ep[c] /= Math.Max(legacyHigh[c], 1e-6);
+        return ep;
+    }
+
+    /// <summary>
+    /// The per-channel SHADOW density. <c>wb_offset_density</c> when present (current schema),
+    /// otherwise negated from the legacy additive <c>wb_offset</c> nudge — the same sign flip
+    /// <c>FromMeasured</c> used to perform at render time, so an old project renders unchanged.
+    /// </summary>
+    private static double[] MigrateShadowEndpoint(JsonObject d)
+    {
+        if (d["wb_offset_density"] is JsonArray a && a.Count >= 3)
+            return new[] { a[0]!.GetValue<double>(), a[1]!.GetValue<double>(), a[2]!.GetValue<double>() };
+
+        double[] legacy = Vec3(d, "wb_offset", 0, 0, 0);
+        return new[] { -legacy[0], -legacy[1], -legacy[2] };
+    }
 
     private static double[] Vec3(JsonObject d, string key, double a, double b, double c)
         => d[key] is JsonArray arr && arr.Count >= 3

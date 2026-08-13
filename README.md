@@ -187,7 +187,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 ### 成像
 
-- **密度域反转**——片基 `t_base`（黑端）、逐通道密度端点 `d_max_per_channel`（白端）、白平衡 `wb_high` / `wb_offset`、扫描曝光，每一项都在界面中可调且有明确的物理含义。反转是**双端模型**：斜率由两端相减导出，通道间斜率之差就是高光色彩平衡，不存在独立的 gamma 或色度参数（早期版本的 `grade` / `pivot` / `chroma_grade` 已全部移除）
+- **密度域反转**——片基 `t_base`、逐通道亮端密度 `d_max_per_channel`（白端）、逐通道暗端密度（黑端）、扫描曝光，每一项都在界面中可调且有明确的物理含义。反转是**双端模型**：两端都是该通道的**真实密度读数**，斜率由两端相减导出，通道间之差**就是**白平衡——白平衡不是加在端点之后的一道工序，而是端点本身。不存在独立的 gamma、色度或 `wb_high` 修正系数（早期版本的 `grade` / `pivot` / `chroma_grade` / `wb_high` 已全部移除）
 - **完整色彩管理**——工作空间 ACEScg（宽色域，场景参考）承载反相；输出空间在主窗口选（sRGB / Display P3 / Adobe RGB），帧编辑即在该空间内进行，导出所见即所得；也可导出场景线性 ACEScg 交给外部调色
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡

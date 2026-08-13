@@ -701,14 +701,22 @@ public static class FilmBase
         => RectMeanDensity(image, rect, tBase, blurSigma, "D_max sampling");
 
     /// <summary>
-    /// Highlight WB from a neutral rect in the HIGHLIGHTS. Solves wb_high so every channel of
-    /// (D[c]*wb_high[c] + wb_offset[c]) is equal, anchored to the densest post-offset channel:
-    ///   target = max_c(D[c] + off[c]);  wb_high[c] = (target - off[c]) / D[c].
-    /// With wb_offset = 0 (white-light rolls) this reduces to wb_high[c] = max_d / D[c].
-    /// Pass the ALREADY-SET wb_offset (null = zeros) — see the class remarks on order.
+    /// The per-channel HIGHLIGHT ENDPOINT from a neutral rect in the highlights — three measured
+    /// densities, which is what the inversion's white end is (see <see cref="DensityEndpoints"/>).
+    ///
+    /// It is the same measurement <see cref="SampleDMaxPerChannelFromRect"/> takes, and that is
+    /// the point: highlight white balance and highlight endpoint are ONE quantity. This used to
+    /// solve a multiplier <c>wb_high[c] = (max_d - off[c]) / D[c]</c> instead, which normalised
+    /// away the very levels it was measuring — the three densities went in, a ratio came out, and
+    /// the absolute endpoint had to be re-measured separately. Returning the densities keeps the
+    /// endpoint and its colour cast a single fact and lets the caller write one field.
+    ///
+    /// The neutrality assertion has not gone anywhere; it has moved to where it belongs. Feeding
+    /// these three unequal densities to <c>FromMeasured</c> gives each channel a slope that lands
+    /// its own highlight on white, which is exactly what "this patch is neutral" means.
     /// </summary>
     public static double[] SampleWbHighFromRect(ImageBuffer image, (double X, double Y, double W, double H) rect,
-                                                double[] tBase, double[]? wbOffset = null, double blurSigma = 3.0)
+                                                double[] tBase, double blurSigma = 3.0)
     {
         double[] meanD = RectMeanDensity(image, rect, tBase, blurSigma, "WB sampling");
         if (meanD.Max() <= 0)
@@ -720,32 +728,27 @@ public static class FilmBase
             throw new ArgumentException(CoreText.F(
                 $"采样区比片基还透光（三通道密度全 ≤ 0） · D = {meanD[0]:F3}, {meanD[1]:F3}, {meanD[2]:F3} · t_base = {tBase[0]:F4}, {tBase[1]:F4}, {tBase[2]:F4} · 若框的已是画面内容，多半是 t_base 偏暗，请重采片基"));
 
-        double[] off = wbOffset ?? new double[3];
-        double target = Math.Max(Math.Max(meanD[0] + off[0], meanD[1] + off[1]), meanD[2] + off[2]);
-        var wbHigh = new double[3];
-        for (int c = 0; c < 3; c++) wbHigh[c] = (target - off[c]) / Math.Max(meanD[c], 1e-10);
-        Quantise(wbHigh);
-        return wbHigh;
+        Quantise(meanD);
+        return meanD;
     }
 
     /// <summary>
-    /// Shadow WB (the Negadoctor additive offset) from a rect that should reproduce neutral in
-    /// the positive's SHADOWS. Sample this FIRST (darktable's order: offset before illuminant).
-    /// With wb_high = identity it is purely additive: wb_offset[c] = max_d - D[c] ≥ 0, raising
-    /// every channel to the densest so the region inverts neutral.
+    /// The per-channel SHADOW ENDPOINT from a rect that should reproduce neutral in the positive's
+    /// SHADOWS — three measured densities, the black-end partner of
+    /// <see cref="SampleWbHighFromRect"/>.
+    ///
+    /// Absolute densities, like the highlight end, rather than the additive nudge
+    /// <c>max_d - D[c]</c> this used to return. And ORDER NO LONGER MATTERS: the old form had to
+    /// be sampled before the highlight (darktable's rule) because the two were solved against each
+    /// other; two independently measured endpoints cannot compete, so either may be sampled first
+    /// or re-sampled alone.
     /// </summary>
     public static double[] SampleWbOffsetFromRect(ImageBuffer image, (double X, double Y, double W, double H) rect,
-                                                  double[] tBase, double[]? wbHigh = null, double blurSigma = 3.0)
+                                                  double[] tBase, double blurSigma = 3.0)
     {
         double[] meanD = RectMeanDensity(image, rect, tBase, blurSigma, "WB-offset sampling");
-
-        var sl = new double[3];
-        for (int c = 0; c < 3; c++) sl[c] = meanD[c] * (wbHigh?[c] ?? 1.0);
-        double mx = Math.Max(Math.Max(sl[0], sl[1]), sl[2]);
-        var wbOffset = new double[3];
-        for (int c = 0; c < 3; c++) wbOffset[c] = mx - sl[c];
-        Quantise(wbOffset);
-        return wbOffset;
+        Quantise(meanD);
+        return meanD;
     }
 
     /// <summary>
@@ -931,14 +934,18 @@ public static class FilmBase
     private static long QuantiseLuma(double luma) => (long)(Math.Clamp(luma, 0.0, 1.0) * 65535.0);
 
     /// <summary>
-    /// Auto-estimate highlight WB by finding the roll's brightest highlight — the negative's
-    /// DENSEST (darkest) real picture pixel — and solving wb_high so that point inverts to
-    /// neutral white. Physics: on a negative the densest pixel is the scene's brightest
-    /// highlight (most light → most dye → most opaque); assuming it should reproduce as
-    /// neutral white, we balance the channels there. This is the auto counterpart to
-    /// box-selecting a neutral highlight for <see cref="SampleWbHighFromRect"/> — only the
-    /// region is found automatically, and the final solve is the same flat-channel rule so
-    /// auto and manual agree.
+    /// Auto-estimate the per-channel HIGHLIGHT ENDPOINT by finding the roll's brightest
+    /// highlight — the negative's DENSEST (darkest) real picture pixel — and taking that point's
+    /// three densities as the white end. Physics: on a negative the densest pixel is the scene's
+    /// brightest highlight (most light → most dye → most opaque); assuming it should reproduce as
+    /// neutral white, the inversion maps each channel's own density there onto white, which
+    /// balances the channels at that point. This is the auto counterpart to box-selecting a
+    /// neutral highlight for <see cref="SampleWbHighFromRect"/> — only the region is found
+    /// automatically, and both return the same quantity so auto and manual agree.
+    ///
+    /// Returns absolute densities, not a multiplier: the endpoint and its colour cast are one
+    /// fact (see <see cref="DensityEndpoints"/>), so this writes
+    /// <see cref="FrameParams.DMaxPerChannel"/> directly.
     ///
     /// Per frame the pick is guarded against three contaminants that are denser/brighter
     /// than any real picture tone: the light-board / sprockets (bright end, cut by
@@ -953,15 +960,12 @@ public static class FilmBase
     /// sprocketThreshold and the dark valley are calibrated.</param>
     /// <param name="tBase">The film-base fulcrum (img / t_base → density), the same array the
     /// inversion divides by.</param>
-    /// <param name="wbOffset">Already-set additive shadow WB, folded into the solve so both
-    /// ends stay neutral together (mirrors <see cref="SampleWbHighFromRect"/>).</param>
     /// <param name="valueImages">Optional, index-aligned with <paramref name="images"/>. Given →
     /// masks key off <paramref name="images"/> (raw luma) but the sampled VALUES come from here
     /// (the post-decouple domain on Path A) — the same convention
     /// <see cref="EstimateTBaseFromRoll"/> uses. Null → values come from the frames themselves.</param>
     public static double[] AutoWbHighFromRoll(IReadOnlyList<ImageBuffer> images,
                                               double[] tBase,
-                                              double[]? wbOffset = null,
                                               double? sprocketThreshold = null,
                                               IReadOnlyList<ImageBuffer>? valueImages = null,
                                               double edgeInset = 0.05,
@@ -969,14 +973,8 @@ public static class FilmBase
     {
         double[] bestDensity = HighlightDensityFromRoll(images, tBase, sprocketThreshold,
                                                         valueImages, edgeInset, highlightPct);
-
-        // Same flat-channel rule as SampleWbHighFromRect, so auto and manual agree.
-        double[] off = wbOffset ?? new double[3];
-        double target = Math.Max(Math.Max(bestDensity[0] + off[0], bestDensity[1] + off[1]), bestDensity[2] + off[2]);
-        var wbHigh = new double[3];
-        for (int c = 0; c < 3; c++) wbHigh[c] = (target - off[c]) / Math.Max(bestDensity[c], 1e-10);
-        Quantise(wbHigh);
-        return wbHigh;
+        Quantise(bestDensity);
+        return bestDensity;
     }
 
     /// <summary>

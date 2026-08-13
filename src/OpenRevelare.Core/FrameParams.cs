@@ -19,19 +19,22 @@ public sealed class FrameParams
 
     /// <summary>
     /// Per-channel highlight endpoint — the density each channel reaches in the darkest
-    /// (fully-exposed) area. The inversion's white end; <see cref="TBase"/> is its black end.
+    /// (fully-exposed) area. The inversion's white end; <see cref="WbOffset"/> is its black end.
     ///
-    /// This is the measurement <see cref="FilmBase.SampleDMaxPerChannelFromRect"/> takes and that
-    /// the scalar <see cref="DMax"/> throws two thirds of away. Keeping it whole makes the
-    /// highlight endpoint and its colour cast ONE fact, rather than a scalar plus a
-    /// separately-solved <see cref="WbHigh"/> competing to describe the same thing.
+    /// THE HIGHLIGHT WHITE BALANCE *IS* THESE THREE NUMBERS. They are absolute measured densities
+    /// (typically ~1.8–2.4), not a correction relative to something else, and the differences
+    /// between them are the highlight colour cast. Everything that solves the highlight
+    /// automatically — the roll chain, 最亮点白, Deep-WB — writes here, because this is the only
+    /// place the inversion reads the white end from.
     ///
-    /// ALWAYS present. It used to be nullable, with null selecting a second inversion model built
-    /// on grade/pivot — that model is gone, so an unmeasured roll starts from the scalar
-    /// replicated across the three channels (a neutral endpoint set, the same shape the scalar
-    /// path produced) and the automatic chain or a D-max sample refines it. One model means one
-    /// place for the highlight balance to live, which is what stops the two descriptions from
-    /// being applied on top of each other.
+    /// This replaced a scalar <see cref="DMax"/> plus a separate multiplicative <c>wb_high</c>.
+    /// Two fields describing one physical endpoint is what made calibration order matter and let
+    /// the same correction be applied twice; a measured triple states the endpoint and its cast as
+    /// ONE fact. <see cref="DMax"/> survives only as the output RANGE (how wide a span the roll is
+    /// mapped onto), which is a different quantity.
+    ///
+    /// ALWAYS present. An unmeasured roll starts from the scalar replicated across the three
+    /// channels — a neutral endpoint set — and the automatic chain or a D-max sample refines it.
     ///
     /// Only the per-channel (Path-B / white-light) inversion path consumes this. Rolls carrying a
     /// decouple chroma matrix still take the luminance/chroma decomposition, which is a genuinely
@@ -39,10 +42,17 @@ public sealed class FrameParams
     /// </summary>
     public double[] DMaxPerChannel { get; set; } = { 2.0, 2.0, 2.0 };
 
-    /// <summary>Per-channel MULTIPLICATIVE highlight-end density WB (Negadoctor wb_high).</summary>
-    public double[] WbHigh { get; set; } = { 1.0, 1.0, 1.0 };
-
-    /// <summary>Per-channel ADDITIVE shadow-end density offset (Negadoctor offset/wb_low).</summary>
+    /// <summary>
+    /// Per-channel shadow endpoint — the density each channel reads as black. The inversion's
+    /// black end, the partner of <see cref="DMaxPerChannel"/>.
+    ///
+    /// ABSOLUTE DENSITIES, like the highlight end, not the additive nudge the Negadoctor
+    /// <c>offset</c> was. <see cref="TBase"/> has already put the bare film base at density 0, so
+    /// an untouched roll sits at 0,0,0 and that is a real reading ("black is where the film base
+    /// is"), not a sentinel meaning "no correction". Sampling a neutral shadow writes each
+    /// channel's own measured density here, and the differences between the three are the shadow
+    /// colour cast.
+    /// </summary>
     public double[] WbOffset { get; set; } = { 0.0, 0.0, 0.0 };
 
     /// <summary>Per-channel chroma compression for the RGB-decouple path (× before chroma_grade).</summary>
@@ -238,7 +248,7 @@ public sealed class FrameParams
     {
         TBase = (double[])TBase.Clone(),
         DMax = DMax,
-        WbHigh = (double[])WbHigh.Clone(),
+        DMaxPerChannel = (double[])DMaxPerChannel.Clone(),
         WbOffset = (double[])WbOffset.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
         ScanExposureEv = ScanExposureEv,
@@ -282,14 +292,16 @@ public sealed class FrameParams
     public void Validate()
     {
         Require3(TBase, nameof(TBase));
-        Require3(WbHigh, nameof(WbHigh));
+        Require3(DMaxPerChannel, nameof(DMaxPerChannel));
         Require3(WbOffset, nameof(WbOffset));
         Require3(ChromaChannelScale, nameof(ChromaChannelScale));
 
         foreach (var v in TBase)
             if (v <= 0) throw new ArgumentException($"TBase values must be positive, got [{string.Join(',', TBase)}]");
-        foreach (var v in WbHigh)
-            if (v <= 0) throw new ArgumentException($"WbHigh values must be positive, got [{string.Join(',', WbHigh)}]");
+        // The highlight endpoint is a divisor per channel (see DensityEndpoints.FromMeasured), and
+        // it must also sit above the shadow endpoint or the channel's span inverts.
+        foreach (var v in DMaxPerChannel)
+            if (v <= 0) throw new ArgumentException($"DMaxPerChannel values must be positive, got [{string.Join(',', DMaxPerChannel)}]");
     }
 
     private static void Require3(double[] v, string name)

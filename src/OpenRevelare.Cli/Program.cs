@@ -351,7 +351,7 @@ static int Run(string[] args)
                 if (tBase != null)
                 {
                     Console.WriteLine("auto_wb_high " +
-                        Fmt3(FilmBase.AutoWbHighFromRoll(frames, tBase, null, thr, vals)));
+                        Fmt3(FilmBase.AutoWbHighFromRoll(frames, tBase, thr, vals)));
                     Console.WriteLine("auto_wb_high_nomask " +
                         Fmt3(FilmBase.AutoWbHighFromRoll(frames, tBase)));
                 }
@@ -370,14 +370,13 @@ static int Run(string[] args)
                 if (opts.TryGetValue("fb-wb-rect", out var wr))
                 {
                     var rect = ParseRect(wr);
-                    double[] wbOffset = FilmBase.SampleWbOffsetFromRect(content, rect, tbase);
-                    double[] wbHigh = FilmBase.SampleWbHighFromRect(content, rect, tbase, wbOffset);
-                    Console.WriteLine("wb_offset " + Fmt3(wbOffset));
-                    Console.WriteLine("wb_high " + Fmt3(wbHigh));
-                    // Offset-free solve (white-light rolls). In the paired order above the
-                    // offset has already flattened the channels, so wb_high is exactly
-                    // 1,1,1 and exercises none of the solve — this key does.
-                    Console.WriteLine("wb_high_solo " + Fmt3(FilmBase.SampleWbHighFromRect(content, rect, tbase)));
+                    // Both ends of the rect, each as three absolute densities. The old
+                    // wb_high_solo key is gone with the solve it exercised: wb_high was a
+                    // multiplier solved AGAINST wb_offset, so it needed a second offset-free
+                    // call to cover the unpaired branch. Two independent measurements have no
+                    // such branch — sampling either end alone gives the same numbers.
+                    Console.WriteLine("wb_offset " + Fmt3(FilmBase.SampleWbOffsetFromRect(content, rect, tbase)));
+                    Console.WriteLine("wb_high " + Fmt3(FilmBase.SampleWbHighFromRect(content, rect, tbase)));
                 }
             }
             return 0;
