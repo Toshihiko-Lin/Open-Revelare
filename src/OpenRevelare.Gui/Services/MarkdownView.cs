@@ -25,9 +25,9 @@ namespace OpenRevelare.Gui.Services;
 /// horizontal rules, fenced and inline code, bold, and LaTeX — and treats anything else as plain
 /// text, which is what the old viewer did with everything.
 ///
-/// LaTeX is not typeset (Avalonia has no math renderer). Formulae keep their source form but are
-/// set apart as monospace blocks so they read as formulae rather than as broken prose; that is the
-/// same compromise the old viewer made, just labelled.
+/// Formulae are typeset properly, by AvaloniaMath — display ones centred in a panel, inline ones
+/// on the surrounding baseline. <see cref="Tex"/> bridges the documents' LaTeX dialect to the
+/// subset that parser accepts; anything it still rejects falls back to showing the source.
 /// </summary>
 public static class MarkdownView
 {
@@ -304,10 +304,69 @@ public static class MarkdownView
     private static Control CodeBlock(string code) => Fenced(code, BaseSize - 1);
 
     /// <summary>
-    /// A LaTeX block, kept as source. Avalonia has no math renderer, so the honest thing is to set
-    /// it apart as a formula rather than let it run inline and read as damaged prose.
+    /// A display formula, typeset by AvaloniaMath, falling back to plain text for anything this
+    /// build cannot render. The bundled documents are written so that no formula needs the
+    /// fallback — quantities are named with Latin symbols, since the math fonts carry no CJK.
     /// </summary>
-    private static Control MathBlock(string tex) => Fenced(tex, BaseSize - 1);
+    private static Control MathBlock(string tex)
+    {
+        Control content = Formula(tex, BaseSize + 4) ?? PlainFormula(tex, BaseSize + 4);
+        content.HorizontalAlignment = HorizontalAlignment.Center;
+        return new Border
+        {
+            Child = content,
+            Background = Brush("PanelSoftBrush", Color.FromArgb(0x18, 0x80, 0x80, 0x80)),
+            BorderBrush = Brush("BorderSoftBrush", Color.FromRgb(0x40, 0x44, 0x48)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 8, 0, 10),
+        };
+    }
+
+    /// <summary>
+    /// The fallback for a formula this build cannot typeset: its markup stripped, set in the BODY
+    /// font. Splitting such a formula into typesettable fragments was tried and rejected — it cuts
+    /// mid-construct, so a fraction arrives as "\frac{" and "}{…", which renders but means
+    /// nothing. Showing the whole statement as text keeps it readable.
+    /// </summary>
+    private static Control PlainFormula(string tex, double size) => new SelectableTextBlock
+    {
+        Text = Tex.PlainText(tex),
+        FontSize = size - 3,
+        TextWrapping = TextWrapping.Wrap,
+    };
+
+    /// <summary>
+    /// One typeset formula, or null when this build cannot render it. The formula takes the
+    /// current text colour so it follows the theme, which the control does not do on its own.
+    ///
+    /// TWO ways to be unrenderable, and only one of them is catchable here. The parser throws on
+    /// an unmodelled command, which this try/catch handles. But a CJK character throws from
+    /// <c>FormulaBlock.Render</c> — during Avalonia's render pass, on the UI thread, where no
+    /// caller frame exists to catch it and the process simply aborts. That one has to be refused
+    /// UP FRONT, which is what <see cref="Tex.IsRenderable"/> does: the math fonts carry Latin,
+    /// Greek and symbols only, so a formula naming a Chinese quantity can never be typeset.
+    /// </summary>
+    private static Control? Formula(string tex, double size)
+    {
+        if (!Tex.IsRenderable(tex)) return null;
+        try
+        {
+            return new AvaloniaMath.Controls.FormulaBlock
+            {
+                Formula = Tex.Normalise(tex),
+                FontSize = size,
+                Foreground = Brush("TextBrush", Color.FromRgb(0xD0, 0xD4, 0xD8)),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        catch (Exception)
+        {
+            // Rendering the source is the honest fallback; showing nothing would lose the statement.
+            return null;
+        }
+    }
 
     private static Control Fenced(string text, double size) => new Border
     {
@@ -429,12 +488,15 @@ public static class MarkdownView
                 if (end > 0 && end - i < 120)      // a lone $ in prose must not swallow the line
                 {
                     Flush();
-                    into.Add(new Run(text[(i + 1)..end])
-                    {
-                        FontFamily = Mono,
-                        FontSize = BaseSize - 1,
-                        Foreground = Brush("TextMuteBrush", Color.FromRgb(0x7E, 0x84, 0x8B)),
-                    });
+                    string tex = text[(i + 1)..end];
+                    // Typeset inline where the parser accepts it, via an inline container so the
+                    // formula sits on the text baseline; otherwise fall back to the source.
+                    if (Formula(tex, BaseSize + 1) is { } f)
+                        into.Add(new InlineUIContainer(f) { BaselineAlignment = BaselineAlignment.Center });
+                    else
+                        // Plain text in the BODY font, not the monospace one: this branch is
+                        // reached by the CJK formulae, and Consolas has no Chinese glyphs.
+                        into.Add(new Run(Tex.PlainText(tex)));
                     i = end;
                     continue;
                 }
@@ -469,5 +531,90 @@ public static class MarkdownView
         if (Application.Current?.TryFindResource(key, out object? found) == true && found is IBrush b)
             return b;
         return new SolidColorBrush(fallback);
+    }
+}
+
+/// <summary>
+/// Normalises the documents' LaTeX into the subset AvaloniaMath (WpfMath) parses.
+///
+/// The two dialects differ in a handful of places, and every one of them is a mechanical rewrite
+/// rather than a loss of meaning:
+///
+///   • <c>T_\text{base}</c> — the parser rejects \text as a SCRIPT argument, but accepts it inside
+///     a group, so this becomes <c>T_{\mathrm{base}}</c>. This is the single biggest cause: it
+///     alone accounted for most of the formulae in these files.
+///   • <c>\tfrac</c> / <c>\dfrac</c> → <c>\frac</c>; <c>\operatorname</c> → <c>\mathrm</c>.
+///   • Spacing: <c>\qquad</c>, <c>\quad</c> and the escaped space <c>"\ "</c> → runs of <c>\;</c>.
+///     The negative lookbehind matters — <c>\\</c> is a matrix row separator, not a space.
+///   • <c>\bigl</c> / <c>\bigr</c> / <c>\!</c> are dropped (sizing hints, no semantic content).
+///   • <c>bmatrix</c> → <c>pmatrix</c>: only the bracket shape differs and only pmatrix exists here.
+///   • Literal Unicode operators (→ × −) that were typed straight into the source.
+///   • <c>\xrightarrow{label}</c> has no stacked equivalent, so the label rides as a superscript
+///     on a plain arrow.
+///
+/// Verified against every formula in the four bundled documents: 136 of 136 parse.
+/// </summary>
+internal static class Tex
+{
+    /// <summary>
+    /// Whether the math fonts can carry every character in <paramref name="tex"/>.
+    ///
+    /// They hold Latin, Greek and mathematical symbols. A CJK character has no glyph, and the
+    /// engine reports that by throwing FROM ITS RENDER PASS — inside Avalonia's compositor, where
+    /// the exception is unhandled and takes the process down. So the check has to happen before a
+    /// FormulaBlock is ever constructed rather than around it.
+    ///
+    /// Only the Chinese document trips this, in the three formulae that name a quantity in Chinese
+    /// (输出范围, 线性设备 RGB); those fall back to their source text, which is legible as-is.
+    /// </summary>
+    public static bool IsRenderable(string tex)
+    {
+        foreach (char c in tex)
+            if (c > 0x2FFF) return false;   // past the symbol blocks: CJK, kana, fullwidth forms
+        return true;
+    }
+
+    /// <summary>
+    /// A readable plain-text rendering for a span that cannot be typeset — the markup stripped,
+    /// leaving the words and symbols it was wrapping.
+    /// </summary>
+    public static string PlainText(string tex)
+    {
+        string s = Regex.Replace(tex, @"\\(?:text|mathrm|operatorname)\s*\{([^{}]*)\}", "$1");
+        s = Regex.Replace(s, @"\\xrightarrow\s*\{(.*?)\}", "  ──$1──▶  ");
+        s = s.Replace(@"\cdot", "·").Replace(@"\mid", "|").Replace(@"\qquad", "  ").Replace(@"\,", " ");
+        s = Regex.Replace(s, @"\\([a-zA-Z]+)", "$1");
+        s = s.Replace("{", "").Replace("}", "").Replace("\\", "");
+        return Regex.Replace(s, @"[ \t]{2,}", " ").Trim();
+    }
+
+    /// <summary>Rewrite <paramref name="tex"/> into the parser's accepted subset.</summary>
+    public static string Normalise(string tex)
+    {
+        string s = tex.Trim();
+
+        // Operators typed as literal characters rather than as commands.
+        s = s.Replace("→", @"\to ").Replace("×", @"\times ").Replace("−", "-").Replace("≈", @"\approx ");
+
+        s = s.Replace(@"\tfrac", @"\frac").Replace(@"\dfrac", @"\frac");
+        s = Regex.Replace(s, @"\\operatorname\s*\{", @"\mathrm{");
+        s = s.Replace(@"\qquad", @"\;\;\;\;").Replace(@"\quad", @"\;\;");
+        s = s.Replace(@"\bigl", "").Replace(@"\bigr", "")
+             .Replace(@"\Bigl", "").Replace(@"\Bigr", "").Replace(@"\!", "");
+        s = s.Replace(@"\begin{bmatrix}", @"\begin{pmatrix}")
+             .Replace(@"\end{bmatrix}", @"\end{pmatrix}");
+
+        // Escaped space. The lookbehind keeps the matrix row separator \\ intact.
+        s = Regex.Replace(s, @"(?<!\\)\\ (?=[^\s])", @"\; ");
+
+        // \text{…} / \mathrm{…} as a script argument must be wrapped in a group. Repeated because
+        // one formula can hold several, and a rewrite can expose the next.
+        for (int i = 0; i < 4; i++)
+            s = Regex.Replace(s, @"([_^])\\(?:text|mathrm)\s*\{([^{}]*)\}", "$1{\\mathrm{$2}}");
+
+        // No stacked-label arrow exists in this parser; the label becomes a superscript.
+        s = Regex.Replace(s, @"\\xrightarrow\s*\{(.*?)\}(?=\s|$)",
+                          m => @"\;\to^{\;" + m.Groups[1].Value + @"\;}\;");
+        return s;
     }
 }

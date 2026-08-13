@@ -46,6 +46,9 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- LaTeX typesetting for the formulae in the bundled documents (MIT, plus OFL-1.1 for the
+         bundled math font). The Avalonia port of WpfMath / xaml-math. -->
+    <PackageReference Include="AvaloniaMath" Version="2.1.0" />
   </ItemGroup>
 
   <!--

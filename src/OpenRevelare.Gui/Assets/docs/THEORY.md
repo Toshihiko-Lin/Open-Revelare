@@ -144,7 +144,9 @@ TRC 逆变换处理编码非线性。三通道 gamma 不同使逆变换后各通
 
 该现象源于扫描仪三通道光谱响应与增益的不对称，属设备原色范畴。ICC 规范分别记录两层：TRC 描述编码曲线，rXYZ/gXYZ/bXYZ 描述设备原色至 D50 CIE XYZ 的映射。完整线性化为两步：
 
-$$\text{线性设备 RGB} \xrightarrow{M = M_\text{D50→工作空间} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{工作空间线性 RGB（ACEScg）}$$
+$$\text{device RGB}_\text{linear} \xrightarrow{M = M_\text{D50}\to\text{working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{working RGB}_\text{linear}$$
+
+即：线性设备 RGB 经矩阵 $M$ 送入工作空间（ACEScg）线性 RGB。
 
 矩阵目标端为工作空间。专业扫描仪的设备原色通常宽于 sRGB（某台实测基色三角面积约为 sRGB 的 1.6 倍），目标端色域须足够宽，超出部分的染料方能进入密度运算。矩阵含两级：先以 Bradford 将 D50 的 PCS 适配至工作空间白点（ACEScg 位于 ~D60），再作 XYZ → 工作空间 RGB。目标端跟随 `ColorPipeline.Working` 推导。
 
@@ -248,9 +250,11 @@ $$D_\text{adj} = S_c \cdot D + b_c, \qquad T_\text{pos} = 10^{D_\text{adj}}$$
 
 跨度由该通道的两个端点确定：
 
-$$S_c = \frac{\text{输出范围}}{D_{\max,c}/wh_c - (-wo_c)}, \qquad b_c = -\text{输出范围} - S_c \cdot (-wo_c)$$
+$$S_c = \frac{R_\text{out}}{D_{\max,c}/wh_c - (-wo_c)}, \qquad b_c = -R_\text{out} - S_c \cdot (-wo_c)$$
 
-密度端点下端映射至 $-\text{输出范围}$（黑），上端映射至 0（白）。
+其中 $R_\text{out}$ 为输出范围（4.3 节的标量 $D_\text{max}$）。
+
+密度端点下端映射至 $-R_\text{out}$（黑），上端映射至 0（白）。
 
 斜率为两端之差的导出量，非独立参数。由跨度导出斜率使两端各自定位。三通道保留 4 个颜色自由度：斜率的共有部分为密度范围，通道间差为高光色偏；偏移的共有部分为黑位，通道间差为阴影色偏。该形式与 Cineon / 达芬奇一致——解码、反相、确定黑白两端，观感由输出变换承担。
 
