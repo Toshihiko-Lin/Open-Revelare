@@ -2,6 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 
 namespace OpenRevelare.Gui.Views;
 
@@ -40,7 +41,7 @@ public partial class InfoDialog : Window
         ActionButton.Content = label;
         ActionButton.IsVisible = true;
         // Enter = the primary action, but only on dialogs that have one — a hidden default
-        // button would otherwise swallow Enter on 使用帮助 / 关于.
+        // button would otherwise swallow Enter on 快捷键 / 关于.
         ActionButton.IsDefault = true;
         CloseButton.Content = closeLabel;
         return this;
@@ -70,37 +71,41 @@ public partial class InfoDialog : Window
 
     // ONE translation entry, not thirty: the compiler folds these adjacent literals into a single
     // constant before Loc.T ever sees them, so the table key is the whole page. Wrapping them
-    // line by line would ask a translator to render "· 胶片条 ——" with no idea what follows it,
+    // line by line would ask a translator to render a fragment with no idea what follows it,
     // and would forbid an English version from breaking its lines anywhere else.
-    public static InfoDialog Help() => new(Loc.T("使用帮助"), Loc.T(
-        "OpenRevelare — 彩色负片去色罩工具（复刻 NegativeConvert）。\n\n" +
-        "基本流程：\n" +
-        "1. 文件 → 新建卷…（Ctrl+N）选择一张或多张负片（多选 = 整卷），左侧胶片条切换帧。\n" +
-        "2. 整卷校准（Stage 1）：\n" +
-        "   · 框选片基去掉橙色罩；框选/自动 D_max 定白点端。\n" +
-        "   · 白平衡 wb_offset（暗部加性）/ wb_high（亮部乘性），或用「最亮点=白 / 智能白平衡」。\n" +
-        "   · 反差 = 相纸号数（软/标准/硬/手动 grade+pivot）。\n" +
-        "   · 镜头校正（畸变/暗角/LCC 平场）、齿孔遮罩。\n" +
-        "3. 帧编辑（Stage 2）：色温/色调、曝光、黑白场、阴影/高光、反差、饱和度、色调曲线。\n" +
-        "4. 应用到整卷（面板底部按钮）／复制·应用到勾选帧（编辑 菜单或胶片条右键）；\n" +
-        "   用「选择同步项」控制携带哪些字段。\n" +
-        "5. 文件 → 导出当前帧…（Ctrl+E）／导出整卷…／导出印样…\n" +
-        "   （16-bit TIFF，含 ICC；导出按钮右侧的箭头也能开这三项）\n" +
-        "   印样窗口右侧填「卷信息」（相机/胶卷/ISO/卷号/冲洗店/工艺/日期/地点/备注），\n" +
-        "   会作为一条标识条烧在印样底部，和印样合成一张图。不写入 EXIF。\n\n" +
-        "右键菜单：\n" +
-        "· 预览区 —— 缩放、查看负片、前后对比、裁切、旋转翻转、预览背景色。\n" +
-        "· 胶片条 —— 添加图像、创建虚拟副本、从卷中移除、按文件名排序、复制/应用标定与场景。\n\n" +
-        "帧顺序：导入时按文件名排序（DSC_9 在 DSC_10 之前）。\n" +
-        "在胶片条上拖动缩略图可手动调整顺序；虚拟副本随本帧一起移动。\n" +
-        "右键「按文件名排序」可恢复。顺序随工程保存，也决定印样的排列。\n\n" +
-        "快捷键：\n" +
-        "F 适合窗口 · Ctrl+1 实际像素 · N 查看负片 · K 前后对比 · Esc 取消采样\n" +
-        "Ctrl+Z/Y 撤销·重做 · Ctrl+N 新建卷 · Ctrl+O 添加图像 · Ctrl+E 导出\n" +
-        "Ctrl+Shift+T 切换浅色/深色主题 · Ctrl+, 偏好设置\n\n" +
-        "采样操作：点亮采样按钮（带虚线方框图标）后在预览上拖框；按 Esc 取消。\n" +
-        "滑条：双击标签重置为默认值。\n" +
-        "缩放后左键拖动可平移；滚轮缩放。"));
+    //
+    // Shortcuts ONLY. The workflow walkthrough that used to sit here restated GUIDE.md from
+    // memory, and drifted from it — it still described 反差 = 相纸号数 after the endpoint model
+    // replaced grade. One account of the workflow, in the document that is rendered with its
+    // headings and tables; this dialog answers the one question a document is bad at, which is
+    // "what is the key for this".
+    public static InfoDialog Help() => Monospace(new(Loc.T("快捷键"), Loc.T(
+        "Ctrl+N / Ctrl+O    新建卷 / 添加图像\n" +
+        "Ctrl+E             导出当前帧\n" +
+        "Ctrl+Z / Ctrl+Y    撤销 / 重做\n" +
+        "N                  临时查看负片（对准片基用）\n" +
+        "K                  前后对比（不含 Stage 2）\n" +
+        "F / Ctrl+1         适合窗口 / 实际像素 100%\n" +
+        "G / D              图库 / 修片 切换\n" +
+        "Esc                取消当前采样\n" +
+        "Ctrl+Shift+T       切换浅色 / 深色主题\n" +
+        "Ctrl+,             偏好设置\n\n" +
+        "采样：点亮采样按钮（带虚线方框图标）后在预览上拖框，Esc 取消。\n" +
+        "滑块：双击标签重置为默认值。\n" +
+        "预览：缩放后左键拖动平移，滚轮缩放。\n\n" +
+        "完整操作说明见 帮助 → 操作指引 / 技术原理。")));
+
+    /// <summary>
+    /// Sets the body in a monospace face — the key column is aligned with spaces, which only lines
+    /// up in a fixed-pitch font. Applied here rather than in the XAML because the same BodyText
+    /// carries 关于 and the update notices, which are prose and read better proportional.
+    /// </summary>
+    private static InfoDialog Monospace(InfoDialog dlg)
+    {
+        dlg.BodyText.FontFamily =
+            new FontFamily("Consolas, Cascadia Code, DejaVu Sans Mono, PingFang SC, Microsoft YaHei, monospace");
+        return dlg;
+    }
 
     /// <summary>Reveals the app mark in the header — About only.</summary>
     private InfoDialog WithLogo()

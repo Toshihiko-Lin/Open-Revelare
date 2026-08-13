@@ -117,7 +117,12 @@ public partial class MainWindow : Window
         SyncViewerBgChecks();
     }
 
-    /// <summary>First-ever launch: show the help/onboarding once (persisted by a marker file).</summary>
+    /// <summary>
+    /// First-ever launch: show the onboarding once (persisted by a marker file).
+    ///
+    /// Opens 操作指引 rather than the shortcut list — the walkthrough a first-timer needs lives in
+    /// GUIDE.md, and the shortcuts dialog assumes you already know what the sampling buttons are.
+    /// </summary>
     private async Task MaybeShowOnboarding()
     {
         try
@@ -127,7 +132,7 @@ public partial class MainWindow : Window
             if (System.IO.File.Exists(marker)) return;
             System.IO.Directory.CreateDirectory(dir);
             await System.IO.File.WriteAllTextAsync(marker, "1");
-            await InfoDialog.Help().ShowDialog(this);
+            await new DocDialog().ShowDialog(this);
         }
         catch { /* onboarding is best-effort */ }
     }

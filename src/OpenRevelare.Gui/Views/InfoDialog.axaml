@@ -6,8 +6,8 @@
         WindowStartupLocation="CenterOwner"
         Title="OpenRevelare">
     <DockPanel Margin="16">
-        <!-- Header. The mark only shows on 关于 (see InfoDialog.About) — 使用帮助 and the
-             onboarding text are reading material, not a brand page. -->
+        <!-- Header. The mark only shows on 关于 (see InfoDialog.About) — 快捷键 and the
+             notices are reading material, not a brand page. -->
         <StackPanel Name="Header" DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12"
                     Margin="0,0,0,10">
             <Image Name="Logo" Width="48" Height="48" IsVisible="False"

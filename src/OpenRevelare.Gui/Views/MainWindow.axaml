@@ -183,7 +183,7 @@
 
                     <MenuItem Header="_Help">
                         <MenuItem Header="{i18n:T '操作指引 / 技术原理…'}" Click="OnDocsClick" />
-                        <MenuItem Header="{i18n:T '快捷键与上手…'}" Click="OnHelpClick" />
+                        <MenuItem Header="{i18n:T '快捷键…'}" Click="OnHelpClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
                         <Separator />
