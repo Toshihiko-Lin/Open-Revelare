@@ -34,6 +34,7 @@ static int Run(string[] args)
             case "--grade": opts["grade"] = Next(args, ref i, a); break;
             case "--pivot": opts["pivot"] = Next(args, ref i, a); break;
             case "--d-max-per-channel": opts["d-max-per-channel"] = Next(args, ref i, a); break;
+            case "--d-min-per-channel": opts["d-min-per-channel"] = Next(args, ref i, a); break;
             case "--scan-exposure-ev": opts["scan-exposure-ev"] = Next(args, ref i, a); break;
             case "--wb-gains": opts["wb-gains"] = Next(args, ref i, a); break;
             case "--exposure": opts["exposure"] = Next(args, ref i, a); break;
@@ -101,12 +102,14 @@ static int Run(string[] args)
 
     var cal = new FrameParams();
     if (opts.TryGetValue("t-base", out var tb)) cal.TBase = ParseTriple(tb);
-    if (opts.TryGetValue("d-max", out var dm)) cal.DMax = ParseD(dm);
-    // --grade / --pivot are accepted and ignored: the grade/pivot inversion is gone, and the
-    // slope now comes from the endpoints. Kept as no-ops so existing parity scripts still run.
+    // --grade / --pivot / --d-max / --scan-exposure-ev are accepted and ignored. The inversion
+    // is two endpoints and a constant output range now, so none of them names a parameter that
+    // still exists; kept as no-ops so existing parity scripts still run. --d-max in particular
+    // was the output range, which is FrameParams.OutputRange and no longer per-roll.
     opts.Remove("grade"); opts.Remove("pivot");
+    opts.Remove("d-max"); opts.Remove("scan-exposure-ev");
     if (opts.TryGetValue("d-max-per-channel", out var dmc)) cal.DMaxPerChannel = ParseTriple(dmc);
-    if (opts.TryGetValue("scan-exposure-ev", out var se)) cal.ScanExposureEv = ParseD(se);
+    if (opts.TryGetValue("d-min-per-channel", out var dmn)) cal.DMinPerChannel = ParseTriple(dmn);
     if (opts.TryGetValue("wb-gains", out var wg)) cal.WbGains = ParseTriple(wg);
     if (opts.TryGetValue("exposure", out var exv)) cal.ExposureEv = ParseD(exv);
     if (opts.TryGetValue("black", out var bk)) cal.BlackPoint = ParseD(bk);
@@ -251,7 +254,7 @@ static int Run(string[] args)
             Console.WriteLine("auto_gains " + Fmt3(g.Gains));
             Console.WriteLine("auto_converged " + Fmt1(g.Converged ? 1 : 0));
 
-            var ai = WhiteBalance.AutoWbAffineIterative(srgb, onnx, 1.0, 0.0, cal.DMax);
+            var ai = WhiteBalance.AutoWbAffineIterative(srgb, onnx, 1.0, 0.0, FrameParams.OutputRange);
             Console.WriteLine("affine_iter_high " + Fmt3(ai.WbHigh));
             Console.WriteLine("affine_iter_offset " + Fmt3(ai.WbOffset));
             Console.WriteLine("affine_iter_flags " + Fmt3(new double[] { ai.Converged ? 1 : 0, ReasonCode(ai.Reason) }));
@@ -266,7 +269,7 @@ static int Run(string[] args)
         {
             ImageBuffer inSrgb = LoadLinear(opts["input"]);
             ImageBuffer targetSrgb = LoadLinear(opts["wb-target"]);
-            double grade = 1.0, pivot = 0.0, dMax = cal.DMax;
+            double grade = 1.0, pivot = 0.0, dMax = FrameParams.OutputRange;
             double cgrade = grade;   // the retired chroma split; kept neutral for the harness
             double[] ccs = cal.ChromaChannelScale;
 

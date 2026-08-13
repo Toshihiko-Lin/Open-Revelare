@@ -219,83 +219,60 @@ density that follows is measured against it.
 > Hard to see? Press **N** for a temporary negative view (gamma-encoded, so the base is legible),
 > sample, then press N again.
 
-**Sample D_max** — select the **dark, fully-exposed area**, or the darkest part of the picture.
-There is also "**Auto-detect D_max**".
+### 4.2 The inversion's two ends
 
-> **D_max is also a parameter you can set by eye.** It decides where white lands after inversion, so
-> it drives the overall brightness of the picture: raise it and the picture darkens, lower it and it
-> brightens. It **usually does not affect colour** — the ratio between the three channels' endpoints
-> is unchanged, only the overall mapping range moves. For a brighter or darker result this is a more
-> "physical" control than exposure.
+The inversion is decided entirely by its two ends, and underneath they are **six absolute
+densities** (three per end) — exactly as many numbers as the render actually consumes. This section
+once carried a dozen parameters (grade/pivot, wb_high, wb_offset, d_max, scan_ev) describing those
+same six degrees of freedom, and every surplus one showed up as two sliders doing the same job.
 
-**Offset (scan_ev)** — a slider in the same panel with a sampling button beside it: select an area
-that should be pure film base and the zero point is corrected automatically. T_base removes the
-base's **colour** but does not guarantee its **absolute level**; a fluctuating panel or edge falloff
-can leave the base grey rather than black. Usually close to 0.
+The three things you want to adjust are all different readings of those six numbers, and none of
+them needs a parameter of its own:
 
-### 4.2 The highlight end (white point) and shadow end (black point)
-
-The inversion is decided by its two ends: the shadow end is black, the highlight end is white, and
-each channel is normalised on its own. Underneath are **six absolute densities** (three per end),
-but you do not have to face them directly — the UI splits them into the knobs you actually want.
-
-#### Highlight end: brightness + temperature + tint
-
-Those three highlight densities carry two things at once: **how bright the picture is** and **which
-way it is cast**. So they split into two groups of controls, and the split is **strictly
-orthogonal**:
-
-| Control | What actually moves | Side effect |
+| What you want | How | Measured side effect |
 |---|---|---|
-| **Brightness** | The geometric mean of the three densities (scaled in proportion) | Cast is **completely unchanged** (channel slope ratios identical to the last digit) |
-| **Temperature / tint** | The ratios between channels (geometric mean held) | Lightness essentially unchanged (~2% measured drift) |
+| **Overall lightness** | Drag **Density zero** (both ends together) | contrast 0.15%, cast ~3% |
+| **Contrast** | Drag either D_min or D_max (ends closer / further apart) | cast <1% |
+| **Colour cast** | Expand **Per channel** and adjust the components | contrast ~1% |
 
-> **Why the *geometric* mean and not the arithmetic one.** Multiplying all three endpoints by one
-> factor leaves the cast exactly alone; *adding* a constant to all three drifts it (the R/B ratio
-> measured 1.0779 → 1.0713). Brightness therefore has to be multiplicative — otherwise "I just want
-> it a bit brighter" would recolour the picture, which is precisely the coupling this split removes.
+#### Density zero
 
-Temperature and tint use the same scale and feel as Frame edit; the difference is that here they act
-on the inversion's white end, which makes them a **physical calibration** rather than an aesthetic
-adjustment.
+Moves both ends together. t_base removes the base's **colour** but does not guarantee its
+**absolute level** lands on density 0 — a fluctuating light panel or edge falloff leaves the base
+grey. **Zero on the film base** selects bare base and subtracts its residual density from both ends.
 
-All three buttons write this group, and whichever you press last wins:
+> This used to be a separate parameter called `scan_ev`, applied after the density floor, which
+> made it not quite equivalent to moving the ends (measured 10.7% apart). It is now that move.
+
+#### D_min (black end)
+
+The density each channel reads as black. **Sample the film base** over the semi-transparent orange
+base — that is what defines density 0, so a calibrated roll sits at 0. It is a **real measurement**
+("black is where the film base is"), not "not yet corrected".
+
+Shadow cast is adjusted under **Per channel**, along with the T_base transmittance itself, which
+sampling normally writes for you.
+
+#### D_max (white end)
+
+The density each channel reads as white, typically 1.8–2.4. Its distance from D_min is the
+contrast; the differences between the three are the highlight cast — **these numbers are the white
+balance itself**. They need no reference zero, because they are absolute densities rather than
+correction factors.
 
 | Button | Type | Use |
 |---|---|---|
-| **Select highlight** | Manual | Select the **dark area** of the negative (the positive's highlights) |
-| **Brightest = white** | Automatic | Treats the brightest point as pure white |
+| **Sample the highlight** | Manual | Select the densest part of the negative (the positive's highlights) |
+| **Auto white point** | Automatic | Finds the brightest point and treats it as pure white |
 | **Deep white balance (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
 
-Afterwards the brightness / temperature / tint readouts all refresh to whatever it solved — you see
-what it decided **in units you can read**, and can carry on adjusting from there. For deep white
-balance, **crop the sprockets and film edge away first** or they will skew it.
+All three write the same triple; whichever you press last wins. For deep white balance, **crop the
+sprockets and film edge away first**.
 
-> "Select highlight" and "Select D_max" in the previous section measure the same quantity —
-> highlight white balance and the highlight endpoint are one thing. The only difference is that the
-> D_max button also sets the **scalar output range** to the largest of the three channels.
-
-#### Shadow end: black level only
-
-The shadow end gets a single slider. Its per-channel cast is set once by "Select shadow WB" and then
-rarely moves, so there is no reason to keep two sliders that are almost always zero on screen.
-
-**Black level** moves the mean of the three densities, and it moves them **additively** — all three
-together, leaving the shadow cast exactly as it was.
-
-> **Usually you do not need to touch it.** Film-base normalisation has already put the bare base at
-> density 0, so an uncalibrated roll reads `0` — a **real measurement** ("black is where the film
-> base is"), not "not yet corrected".
-
-#### Advanced: the six endpoint densities
-
-To see or edit the measured values directly, expand this group: three absolute densities at each
-end. It and the brightness / temperature / tint / black level above are **two views of the same
-data** — edit either side and the other follows.
-
-> The inversion's slope is what those two ends leave behind, not an adjustable parameter. To change
-> richness or contrast, go to **saturation** and **contrast** in Frame edit — that is the aesthetic
-> layer.
+> **The output range is a constant with no slider.** It sets where black lands (fixed at 10⁻²).
+> While it was adjustable it competed with the endpoints for the same degree of freedom — both
+> changed lightness and contrast at once, so the panel showed two sliders doing one job. Fixed, the
+> black point holds still and lightness and contrast are expressed by the ends instead.
 
 ### 4.3 Lens correction (manual, optional)
 

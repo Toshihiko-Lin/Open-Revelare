@@ -7,30 +7,41 @@
 
 **变更**
 
-- **白平衡改成「亮度 / 色温 / 色调 / 黑场」四个控件**。反相底层是六个绝对密度（两端各三
-  通道），但那不是能拨的旋钮：亮端三个数同时装着「这张有多亮」和「偏什么色」，想调亮就
-  必然连色偏一起动。现在它们被拆成两组**严格正交**的控件——
+- **反相参数收敛到六个自由度**。渲染只消费 `scale[3]+offset[3]` 六个自由度，但存储一直有
+  十一个参数描述它们——多出来的每一个都必然表现为「两个滑块做同一件事」。实测确认三处重复：
 
-  | 控件 | 实际在动 | 副作用 |
+  | 重复 | 实测 |
+  |---|---|
+  | `d_max` 与亮端端点 | 都主要改 luma（−47% / −13%），且**不可互相替代**（R/B 走向相反）|
+  | `t_base` 与 `wb_offset` | 两条路产生几乎相同的暗部色偏（+6.5% / +6.2%）|
+  | 「黑场」滑块 | **根本不改变黑**——黑端恒为 `10⁻ᵒᵘᵗ` 三通道同值，它改的是斜率 |
+
+  收敛后只剩两组绝对密度：`D_min[3]`（每通道读作黑的密度）与 `D_max[3]`（读作白的密度）。
+  用户想调的三件事都是这六个数的不同读法：
+
+  | 想做的事 | 怎么做 | 实测副作用 |
   |---|---|---|
-  | **亮度** | 三个亮端密度的几何均值 | 色偏**完全不变**（通道斜率比逐位相同）|
-  | **色温 / 色调** | 通道间比例（几何均值保持）| 明暗基本不变（实测漂移 ~2%）|
-  | **黑场** | 三个暗端密度的均值（加性平移）| 暗部色偏逐位保持 |
+  | **整体明暗** | 【密度零点】两端同步升降 | 反差 0.15% |
+  | **反差** | D_min / D_max 拉近拉远 | 色偏 <1% |
+  | **色偏** | 展开【逐通道】改分量 | 反差 ~1% |
 
-  拆法必须是**几何**的：三个端点同乘一个系数色偏严格不变，同加一个常数则会漂（实测 R/B
-  比 1.0779 → 1.0713）。这就是「调亮端顺带改了亮度」的根源——之前没有沿正确的缝切。
+- **输出范围改为常量**（黑位恒为 10⁻²）。它可调时与两端争夺同一自由度，这正是「D_max 和亮度
+  都在控制亮度」的根源。固定之后语义才各归其位。
 
-  色温/色调复用【帧编辑】那一套 WbMath 基向量，同名同刻度同手感，只是作用在反相白端。
-  六个绝对密度仍可在**【高级：六个端点密度】**里直接改，两边是同一份数据的两个视图。
+- **删除 `scan_ev`**，改为【密度零点】。它是密度域加常数，正是「两端同向移动」；且位于密度
+  地板之后，与 t_base 缩放并不严格等价（实测差 10.7%），留着只会是第十二个参数。
 
-- **【帧编辑】删除「色偏修正」整组**（色温 / 色调 / 灰点）。色彩平衡是反相白端的属性，只
-  应该有一处；在帧编辑再调一次等于在已定好的端点上叠第二层，两处数值互相掩盖，出了偏色
-  说不清是哪一处。曝光、反差、饱和度、曲线等审美控件不受影响。
+- **「框选亮部」与「框选 D_max」合并为【高光采样】**。两者测的是同一个量——高光白平衡与高光
+  端点本就是一件事。同理「框选片基」与「框选暗部」合并为【片基采样】：片基定义密度 0，那
+  就是黑端。
 
-  > 旧工程存过的那一层增益**仍然照常生效**，观感不变。**没有**把它折算进端点——线性域增益
-  > 等价于密度域**加常数**，而端点决定的是**斜率**，两者只能在某一个密度上重合：实测折算后
-  > R/B 比在薄部偏 −18%、中间调 +4%、浓部 +53%，旧卷会明显变色。帧编辑顶部会提示它的存在，
-  > 并给一个「清除」按钮把色偏交还给亮端统一管理。
+- **色温 / 色调控件删除**。它们的 0 点是「三通道密度相等」，而真实底片的亮端密度本就不相等
+  （实测四种片种从未接近），所以 0 不对应任何物理状态，读数无从判断对错。色偏改为直接展开
+  三个绝对密度——绝对量有物理意义，不需要参考零点。
+
+  > **旧工程需要重跑一次标定。** 旧的 d_max/scan_ev 与现在固定的输出范围不是同一量纲，
+  > 静默折算实测在薄部偏 −18%、浓部 +53%（比不折算更糟），所以载入后如实提示重跑，而不是
+  > 假装画面没变。面板顶部会显示提示条。
 
 - **白平衡两端都改成显示真实密度**。界面上的「亮端」「暗端」现在是**该通道自己的密度读数**
   （亮端典型 1.8–2.4），不再是 `1,1,1` / `0,0,0` 这种「相对某个基准的修正系数」。三个通道
@@ -123,37 +134,46 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
 
 **Changed**
 
-- **White balance is now brightness / temperature / tint / black level.** Underneath the inversion
-  has six absolute densities (three per end), but those are not knobs anyone wants to turn: the
-  three highlight densities carry both "how bright this is" and "which way it is cast", so reaching
-  for brightness inevitably moved the colour too. They are now split into two **strictly
-  orthogonal** groups —
+- **The inversion is down to six degrees of freedom.** The render only ever consumes
+  `scale[3]+offset[3]`, but eleven parameters were stored to describe them — and every surplus one
+  necessarily showed up as two sliders doing the same job. Three duplications, all measured:
 
-  | Control | What moves | Side effect |
+  | Duplication | Measured |
+  |---|---|
+  | `d_max` vs the highlight endpoint | both mainly change luma (−47% / −13%), and are **not** interchangeable (R/B moves the opposite way) |
+  | `t_base` vs `wb_offset` | both routes produce almost the same shadow cast (+6.5% / +6.2%) |
+  | the "black level" slider | **does not change black at all** — the black end is fixed at `10⁻ᵒᵘᵗ` for all three channels; it changes the slope |
+
+  What remains is two sets of absolute densities: `D_min[3]` (the density each channel reads as
+  black) and `D_max[3]` (as white). The three things you want to adjust are readings of those six:
+
+  | What you want | How | Measured side effect |
   |---|---|---|
-  | **Brightness** | The geometric mean of the three highlight densities | Cast **completely unchanged** (slope ratios identical to the last digit) |
-  | **Temperature / tint** | The ratios between channels (geometric mean held) | Lightness essentially unchanged (~2% measured) |
-  | **Black level** | The mean of the three shadow densities (additive) | Shadow cast preserved exactly |
+  | **Overall lightness** | Density zero — both ends together | contrast 0.15% |
+  | **Contrast** | D_min / D_max closer or further apart | cast <1% |
+  | **Colour cast** | Expand "Per channel" | contrast ~1% |
 
-  The split has to be **geometric**: multiplying all three endpoints by one factor leaves the cast
-  untouched, while adding a constant drifts it (R/B measured 1.0779 → 1.0713). That is the root of
-  "adjusting the highlight end also changed the brightness" — the seam was simply in the wrong place.
+- **The output range is now a constant** (black fixed at 10⁻²). While adjustable it competed with
+  the endpoints for one degree of freedom, which is exactly why "D_max and brightness both control
+  brightness".
 
-  Temperature and tint reuse the same WbMath basis as Frame edit, so the names, scale and feel are
-  identical; only the domain differs. The six absolute densities remain editable under **Advanced:
-  the six endpoint densities** — two views of the same data.
+- **`scan_ev` is gone**, replaced by Density zero. It was an additive shift in density — precisely
+  "move both ends together" — and sat after the density floor, so it was never quite equivalent to
+  scaling t_base (measured 10.7% apart).
 
-- **The "Colour cast" group is gone from Frame edit** (temperature / tint / grey point). Colour
-  balance is a property of the inversion's white end and should exist in exactly one place;
-  adjusting it again in Frame edit stacked a second layer on settled endpoints, where the two masked
-  each other and a cast could not be traced to either. Exposure, contrast, saturation and the curves
-  are untouched.
+- **"Select highlight" and "Select D_max" merged into Sample the highlight.** They measured the
+  same quantity. Likewise "Sample the film base" and "Sample the shadow" merged: the film base
+  defines density 0, which *is* the black end.
 
-  > A layer stored by an old project **still applies**, so those rolls look as they did. It is
-  > deliberately **not** folded into the endpoints: a linear-domain gain is an *additive* shift in
-  > density while an endpoint sets a *slope*, and the two can only agree at one density — folding
-  > measured −18% on the thin end, +4% in the midtones and +53% on the dense end. Frame edit shows a
-  > notice and a "clear" button that hands colour back to the highlight end.
+- **Temperature / tint controls removed.** Their zero meant "all three densities equal", but a real
+  negative's highlight densities are never equal (measured across four stocks), so zero named no
+  physical state and the readout could not be judged right or wrong. Colour cast is now adjusted
+  as the three absolute densities directly — absolute quantities need no reference zero.
+
+  > **Existing projects need one recalibration pass.** The old d_max/scan_ev are not in the same
+  > units as the now-fixed output range; folding them silently measured −18% on the thin end and
+  > +53% on the dense end (worse than not folding), so loading says so plainly instead of
+  > pretending the picture is unchanged. A notice appears at the top of the panel.
 
 - **Both white-balance ends now show real densities.** The "highlight" and "shadow" fields
   are each channel's own measured density (highlights typically 1.8–2.4), no longer a

@@ -10,8 +10,8 @@ namespace OpenRevelare.Gui.Models;
 public sealed partial class SyncOptions : ObservableObject
 {
     // Stage-1 calibration groups
-    [ObservableProperty] private bool _calFilmBase = true;   // T_base / D_max / scan_ev
-    [ObservableProperty] private bool _calWb = true;         // wb_high / wb_offset
+    // 片基与两端端点一起走：端点是相对片基测的密度，分开传就是半套标定。
+    [ObservableProperty] private bool _calFilmBase = true;   // T_base + D_min[3] + D_max[3]
     [ObservableProperty] private bool _calChroma = true;     // chroma channel scale (Path A decouple)
     [ObservableProperty] private bool _calLens = true;       // distortion / vignette / LCC
     [ObservableProperty] private bool _calSprocket = true;   // sprocket enable / threshold

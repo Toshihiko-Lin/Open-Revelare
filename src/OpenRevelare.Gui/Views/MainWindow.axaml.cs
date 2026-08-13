@@ -149,7 +149,7 @@ public partial class MainWindow : Window
     // Esc. The tools are mutually exclusive — arming one disarms the others.
     private enum SampleMode
     {
-        None, FilmBase, WbOffset, WbHigh, DMax, ScanEv, Black, White, Crop,
+        None, FilmBase, DMax, ScanEv, Black, White, Crop,
         StraightenH, StraightenV,
     }
 
@@ -687,7 +687,7 @@ public partial class MainWindow : Window
 
     private ToggleButton[] AllToggles() => new[]
     {
-        FilmBaseBtn, DMaxBtn, ScanEvBtn, WbOffsetBtn, WbHighBtn, BlackBtn, WhiteBtn, CropBtn,
+        FilmBaseBtn, DMaxBtn, ScanEvBtn, BlackBtn, WhiteBtn, CropBtn,
         StraightenHBtn, StraightenVBtn,
     };
 
@@ -804,8 +804,6 @@ public partial class MainWindow : Window
     private ToggleButton? ToggleFor(SampleMode mode) => mode switch
     {
         SampleMode.FilmBase => FilmBaseBtn,
-        SampleMode.WbOffset => WbOffsetBtn,
-        SampleMode.WbHigh => WbHighBtn,
         SampleMode.DMax => DMaxBtn,
         SampleMode.ScanEv => ScanEvBtn,
         SampleMode.Black => BlackBtn,
@@ -920,27 +918,17 @@ public partial class MainWindow : Window
     // ── Sampling button handlers ────────────────────────────────────────────────
     private void OnSampleFilmBaseClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.FilmBase,
-            Loc.T("采样片基：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
+            Loc.T("片基采样：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
-
-    private void OnSampleShadowClick(object? sender, RoutedEventArgs e) =>
-        ToggleSampling(sender, SampleMode.WbOffset,
-            Loc.T("采样暗端密度：在正片的【暗部中性区】拖框，松开即采样。按 Esc 取消。"),
-            useNegative: false);
-
-    private void OnSampleHighlightWbClick(object? sender, RoutedEventArgs e) =>
-        ToggleSampling(sender, SampleMode.WbHigh,
-            Loc.T("采样亮端密度：在正片的【高光中性区】（应为白/灰的最亮处）拖框，松开即采样。按 Esc 取消。"),
-            useNegative: false);
 
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DMax,
-            Loc.T("采样 D_max：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
+            Loc.T("高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleScanEvClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.ScanEv,
-            Loc.T("采样偏移：预览已切到负片。框选一块应为纯片基的区域，松开后自动校正零点。按 Esc 取消。"),
+            Loc.T("片基归零：预览已切到负片。框选一块应为纯片基的区域，松开后把残余密度从两端一起减掉。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleBlackClick(object? sender, RoutedEventArgs e) =>
@@ -975,7 +963,6 @@ public partial class MainWindow : Window
     private void OnAutoInvertFrameClick(object? sender, RoutedEventArgs e) => Vm?.AutoInvertCurrentFrame();
     private void OnAutoLevelsClick(object? sender, RoutedEventArgs e) => Vm?.AutoLevels();
 
-    private void OnClearLegacySceneWbClick(object? sender, RoutedEventArgs e) => Vm?.ClearLegacySceneWb();
     private void OnAutoDMaxClick(object? sender, RoutedEventArgs e) => Vm?.AutoDetectDMax();
     private void OnAutoWbHighClick(object? sender, RoutedEventArgs e) => Vm?.AutoWbHigh();
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
@@ -1436,8 +1423,6 @@ public partial class MainWindow : Window
             switch (mode)
             {
                 case SampleMode.FilmBase: Vm.SampleFilmBase(rect.Value); break;
-                case SampleMode.WbOffset: Vm.SampleWbOffset(rect.Value); break;
-                case SampleMode.WbHigh: Vm.SampleWbHigh(rect.Value); break;
                 case SampleMode.DMax: Vm.SampleDMax(rect.Value); break;
                 case SampleMode.ScanEv: Vm.SampleScanEv(rect.Value); break;
                 case SampleMode.Black: Vm.SampleBlack(rect.Value); break;
