@@ -152,19 +152,26 @@ Splitting completes during import, so the main window is handed a finished frame
 detection does not block the import: it falls back to one frame per file and says so in the status
 bar.
 
-**Sprocket mask confirmation** (pops up after a RAW import)
+**Sprocket mask** (automatic — no dialog)
 
-The software picks the frame with the brightest film base in the roll as a preview and marks the
-sprocket holes and light panel with a **red** overlay.
+The threshold is measured by a bright-end valley detection and applied to the roll on import, so an
+import goes straight to a picture. **It keys off the brightness split between panel and film base,
+not on the shape of any sprocket hole** — so a 120 roll with no sprockets but the panel showing
+around the negative is recognised and the panel excluded just the same. Only when no panel can
+actually be measured (a flatbed scan, or a negative that covers the panel completely) is the roll
+treated as having none, and no mask is forced onto it.
+
+To check or adjust it, go to Roll calibration → **Sprocket mask** and tick "show mask" for the red
+overlay.
 
 - Red **should** cover: sprocket holes, blown-out panel areas
 - Red should **not** cover: the orange film base, or anything with picture in it
 
-The threshold comes from a bright-end valley detection and is usually close enough. A narrow gap
-between panel and base (< 0.08) needs care; reference numbers are shown at the foot of the window.
-
-If this roll has no sprockets and no panel showing (120 with full-frame coverage, say), click
-"**No sprockets on this roll (skip)**". Closing the window or pressing Esc skips it too.
+> This switch only decides **whether the panel is filled white after inversion**. The automatic
+> analysis and the automatic sampling **always** exclude the light panel (bright end) and the
+> blocking card / film-edge line (dark end) from their statistics, regardless of this switch — so
+> even a roll judged to have no sprockets gets its film base, D-max and levels measured without
+> those two contaminating them.
 
 ---
 
@@ -173,8 +180,29 @@ If this roll has no sprockets and no panel showing (120 with full-frame coverage
 The "**Roll calibration**" tab on the right. Every parameter here is an **objective physical
 property** of this roll of film.
 
-> **Note: every control acts on the CURRENT frame only.** Once it is right, push it out with
-> "**Apply calibration to the whole roll**" — there is no "select on a grid of the whole roll".
+> **Note: the controls in the groups below act on the CURRENT frame only.** Once it is right, push
+> it out with "**Apply calibration to the whole roll**" — there is no "select on a grid of the whole
+> roll". ("Auto (whole roll)" at the top of the panel is the exception: it writes the roll itself.)
+
+### 4.0 One-press mask removal
+
+The two buttons at the top of the panel are the shortcut through all of Stage 1. They run, in order:
+**film base T_base → highlight WB → D-max → black/white points**, with no region to select
+anywhere.
+
+> **Neither button touches the crop.** They do inversion, not geometry — crop by hand under
+> Geometry and cropping.
+
+| Button | Reach | When to use it |
+|---|---|---|
+| **Auto (whole roll)** | Walks the roll, pools one parameter set, writes it to every frame | The default path. Import already ran it once; this is the way back to it |
+| **Auto (this frame)** | Solves the current frame only, leaving **the rest of the roll and the crop** alone | When the roll-wide parameters do not suit one picture (a tungsten interior in an otherwise daylight roll) |
+
+> **"Auto (whole roll)" overwrites the highlight WB and the levels you already have.** On a roll you
+> have graded by hand, use "Auto (this frame)" instead, or the individual step buttons below.
+
+Every step remains redoable on its own afterwards — the buttons in the groups below are unchanged.
+The automatic pass only strings them together and runs them once.
 
 ### 4.1 Film base and mask removal (T_base / D_max)
 
@@ -222,26 +250,18 @@ The two ends are independent; the order does not matter.
 
 For deep white balance, **crop the sprockets and film edge away first** or they will skew it.
 
-### 4.3 Density endpoints (read-only)
+> The inversion is decided by its two ends: the film base is black, D-max is white, each channel is
+> normalised on its own, and **the slope is what those two ends leave behind** — not an adjustable
+> parameter. To change richness or contrast, go to **saturation** and **contrast** in Frame edit —
+> that is the aesthetic layer.
 
-**There is nothing to operate here.** The inversion is decided by its two ends: the film base is
-black, D-max is white, each channel is normalised on its own, and **the slope is what those two ends
-leave behind** — not an adjustable parameter.
-
-The panel shows `D-max per channel = a, b, c`. The spread between those three is how large this
-roll's highlight cast actually is, and is worth a glance. If it says no endpoints have been
-measured, sample D-max once or re-run the roll analysis.
-
-> To change richness or contrast, go to **saturation** and **contrast** in Frame edit — that is the
-> aesthetic layer.
-
-### 4.4 Lens correction (manual, optional)
+### 4.3 Lens correction (manual, optional)
 
 Distortion, vignetting, **LCC flat field**. Besides fixing the optical faults themselves, the flat
 field improves the accuracy of the auto analysis — vignetting distorts the base and D_max statistics
 at the edges. The flat-field shot is an even light source photographed with no film in the way.
 
-### 4.5 Sprocket mask (optional)
+### 4.4 Sprocket mask (optional)
 
 Marks over-bright areas (absolute luminance > threshold) as masked and fills them white after
 inversion. "Show mask" lets you check the coverage (a red overlay).
@@ -249,6 +269,7 @@ inversion. "Show mask" lets you check the coverage (a red overlay).
 ---
 
 ## 5. Geometry and cropping
+
 
 - **Crop**: pick a format preset (135 full frame, half frame, XPan, 645, 6×6, 6×7, 6×9, 6×12 …) or
   drag freely. Non-destructive, clearable at any time.

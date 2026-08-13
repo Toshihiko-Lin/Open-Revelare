@@ -973,6 +973,12 @@ public partial class MainWindow : Window
             Loc.T("取垂直：沿画面中【应当垂直】的边（门框、旗杆、墙角）拖一条线，松开即转正。按 Esc 取消。"),
             useNegative: false);
 
+    private async void OnAutoInvertRollClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm != null) await Vm.AutoInvertRollCommandAsync();
+    }
+
+    private void OnAutoInvertFrameClick(object? sender, RoutedEventArgs e) => Vm?.AutoInvertCurrentFrame();
     private void OnAutoLevelsClick(object? sender, RoutedEventArgs e) => Vm?.AutoLevels();
     private void OnAutoDMaxClick(object? sender, RoutedEventArgs e) => Vm?.AutoDetectDMax();
     private void OnAutoWbHighClick(object? sender, RoutedEventArgs e) => Vm?.AutoWbHigh();
@@ -990,13 +996,17 @@ public partial class MainWindow : Window
         await new SyncDialog(Vm.Sync).ShowDialog(this);
     }
 
-    private async void OnRollImported()
-    {
-        if (Vm?.PreviewForDialog is not { } preview) return;
-        var dlg = new SprocketDialog(preview);
-        bool accepted = await dlg.ShowDialog<bool>(this);
-        if (accepted) Vm.ApplySprocketFromDialog(dlg.ResultEnabled, dlg.ResultThreshold);
-    }
+    /// <summary>
+    /// Import finished. The sprocket threshold used to be confirmed here in a modal dialog before
+    /// anything else could happen; it is now measured from the frame and applied silently, so an
+    /// import goes straight to a picture.
+    ///
+    /// Nothing is lost by not asking. The dialog's own default was
+    /// <see cref="Sprocket.EstimateSprocketThreshold"/>'s answer, which is what runs now, and the
+    /// threshold remains fully adjustable in 整卷校准 → 齿孔遮罩 with a live mask overlay — the
+    /// same control the dialog offered, in the place the rest of the calibration lives.
+    /// </summary>
+    private void OnRollImported() => Vm?.ApplySprocketAuto();
 
     private void OnViewNegToggle(object? sender, RoutedEventArgs e)
     {

@@ -650,6 +650,35 @@
                     <TabItem Header="{i18n:T '整卷校准'}">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
+                                <!-- ── 一键去色罩 ────────────────────────────────────
+                                     The whole chain, at the top, before the parameters it
+                                     solves. The individual buttons below stay exactly as they
+                                     were: these two are the fast path, not a replacement. -->
+                                <StackPanel Spacing="4" Margin="0,0,0,8">
+                                    <Grid ColumnDefinitions="*,*">
+                                        <Button Grid.Column="0" Classes="primary" Margin="0,0,3,0"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnAutoInvertRollClick" IsEnabled="{Binding HasImage}"
+                                                ToolTip.Tip="{i18n:T '遍历整卷解出片基 / 白平衡 / D-max / 黑白场，一套参数应用到所有帧。会覆盖已有的白平衡与色阶，不改动裁切。'}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoWand}" />
+                                                <TextBlock Text="{i18n:T '自动（整卷）'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Grid.Column="1" Margin="3,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnAutoInvertFrameClick" IsEnabled="{Binding HasImage}"
+                                                ToolTip.Tip="{i18n:T '只对当前帧做同样的自动流程，不动其他帧、也不改动裁切——用于整卷参数对这一张不合适时。'}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoWand}" />
+                                                <TextBlock Text="{i18n:T '自动（单张）'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+                                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                               Text="{i18n:T '自动完成：片基 T_base → 亮部 WB → D-max → 黑白场。不改动裁切；裁切见下方【几何 / 裁切】。'}" />
+                                </StackPanel>
+
                                 <!-- 镜头校正 -->
                                 <Expander Header="{i18n:T '镜头校正（手动）'}">
                                     <StackPanel Spacing="2">
@@ -767,15 +796,6 @@
                                                 <TextBlock Text="{i18n:T '智能白平衡（Beta·请先裁切）'}" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Button>
-                                    </StackPanel>
-                                </Expander>
-
-                                <!-- 密度端点 -->
-                                <Expander Header="{i18n:T '密度端点'}" IsExpanded="True">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Classes="groupHint"
-                                                   Text="{i18n:T '反相由两端决定：片基是黑端，D-max 是白端，逐通道各自归一化。斜率是这两端的结果，不是另设的参数——这是 Cineon / 达芬奇的做法，观感留给输出变换。'}" />
-                                        <TextBlock Classes="groupHint" Text="{Binding EndpointText}" />
                                     </StackPanel>
                                 </Expander>
 

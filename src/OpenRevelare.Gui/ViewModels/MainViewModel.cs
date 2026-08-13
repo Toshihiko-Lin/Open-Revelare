@@ -498,9 +498,6 @@ public partial class MainViewModel : ViewModelBase
     public event Action? RollImported;
     private bool _pendingSprocketPrompt;
 
-    /// <summary>The current frame's downsampled linear negative — fed to the sprocket dialog.</summary>
-    public ImageBuffer? PreviewForDialog => _previewLinear;
-
     partial void OnCurrentFrameChanged(RollFrame? value)
     {
         // A reorder pulls the selected frame out of Frames and puts it back, which the strip's
@@ -771,23 +768,19 @@ public partial class MainViewModel : ViewModelBase
     partial void OnWbHighBChanged(double value) => ScheduleRender();
 
     /// <summary>
-    /// 逐通道高光端点（D-max 采样或整卷自动标定的结果）；null 表示还没测过。
+    /// 逐通道高光端点（D-max 采样或整卷自动标定的结果）。始终存在——未测过时是标量 d_max
+    /// 复制到三个通道，即一组中性端点。
     ///
     /// 反相由两端决定：t_base 是黑端，这里是白端，斜率是两端相减的结果而不是另一个参数。
-    /// 通道间斜率之差就是高光色彩平衡——wb_high 作为微调写进端点，不再是独立阶段，因此也
-    /// 不存在"先标暗端还是先标亮端"的顺序问题。
+    /// 通道间斜率之差**就是**高光色彩平衡，所以自动求解必须写这里、并把 wb_high 留在 1；
+    /// 两者同时写会把同一个校正做两遍（见 DensityEndpoints.For）。
     /// </summary>
-    private double[]? _dMaxPerChannel;
-    public double[]? DMaxPerChannel
+    private double[] _dMaxPerChannel = { 2.0, 2.0, 2.0 };
+    public double[] DMaxPerChannel
     {
         get => _dMaxPerChannel;
-        set { _dMaxPerChannel = value; OnPropertyChanged(nameof(EndpointText)); ScheduleRender(); }
+        set { _dMaxPerChannel = value; ScheduleRender(); }
     }
-
-    /// <summary>端点读数，显示在密度端点面板里。</summary>
-    public string EndpointText => _dMaxPerChannel is { Length: 3 } d
-        ? Loc.F($"D-max 逐通道 = {d[0]:F3}, {d[1]:F3}, {d[2]:F3}")
-        : Loc.T("尚未测得端点——请采样 D-max，或运行整卷自动标定");
 
     // ══ Stage 2 — 帧编辑 (SceneBase, positive domain, geomean-1 WB) ═════════════
     [ObservableProperty] private double _temp;                     // 色温（±250，log 空间）
@@ -1392,20 +1385,23 @@ public partial class MainViewModel : ViewModelBase
     public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample(Loc.T("片基采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
+        double[] before = TBaseArr();           // needed to rebase the endpoints below
         double[] tb = FilmBase.SampleTBase(src, rect);
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
         FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
         _filmBaseSampled = true;
         // The per-channel endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a
-        // new base invalidates them — they would sit off by exactly -log10(t_base_new/t_base_old).
-        // The legacy scalar d_max has the same dependency, but nothing downstream divides by it
-        // per channel, so the staleness never showed; the endpoint path normalises by these
-        // directly, where it would appear as a colour cast. Drop them rather than silently
-        // rendering from a stale measurement.
-        if (_dMaxPerChannel is not null)
+        // new base moves them — by exactly -log10(t_base_new / t_base_old) per channel.
+        //
+        // That shift is known in closed form, so the endpoints are REBASED rather than discarded.
+        // Dropping them used to be the only option because a roll could fall back to the
+        // grade/pivot model; with one model there is nothing to fall back to, and clearing them
+        // would silently change the picture — which is exactly what made a manual film-base
+        // sample look like it "fixed" a roll whose real problem was elsewhere.
+        for (int c = 0; c < 3; c++)
         {
-            _dMaxPerChannel = null;
-            FilmBaseText += Loc.T("（端点已失效，请重采 D-max）");
+            double shift = -Math.Log10(Math.Max(tb[c], 1e-10) / Math.Max(before[c], 1e-10));
+            _dMaxPerChannel[c] = Math.Max(_dMaxPerChannel[c] + shift, 1e-6);
         }
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
@@ -1472,17 +1468,39 @@ public partial class MainViewModel : ViewModelBase
     });
 
     /// <summary>
-    /// Apply the import-time sprocket dialog result to the whole roll, then run the auto chain.
+    /// Measure the sprocket/light-board threshold from the imported frame, apply it to the whole
+    /// roll, then run the auto chain. The import-time entry point.
     ///
-    /// The sprocket threshold has to be settled before the chain runs, not after: it is the
-    /// light-board cut that keeps the board out of both the film-base estimate and the highlight
-    /// pick, and re-running the chain later would be the only way to fold in a threshold that
-    /// arrived afterwards. That ordering is why this method — rather than the end of
-    /// LoadRollAsync — is where import-time auto-inversion belongs.
+    /// The threshold has to be settled BEFORE the chain runs, not after: it is the light-board cut
+    /// that keeps the board out of both the film-base estimate and the highlight pick, and
+    /// re-running the chain later would be the only way to fold in a threshold that arrived
+    /// afterwards. That ordering is why this method — rather than the end of LoadRollAsync — is
+    /// where import-time auto-inversion belongs.
+    ///
+    /// This used to be a modal dialog the user had to clear before the roll would open. It is now
+    /// measured and applied silently: the dialog's own default was
+    /// <see cref="Sprocket.EstimateSprocketThreshold"/>'s answer, which is what runs here, and the
+    /// threshold stays adjustable in 整卷校准 → 齿孔遮罩 with the same live mask overlay.
+    ///
+    /// <see cref="Sprocket.NoBoard"/> is a real answer rather than a failure — a flatbed scan has
+    /// no light board, and forcing a cut onto one would mask off the film's own highlights. It maps
+    /// to SprocketEnabled = false, exactly what the dialog's 跳过 did.
+    ///
+    /// Note this decides only the MASK-FILL toggle (齿孔遮罩, which paints the board white in the
+    /// output). The automatic measurements exclude the board either way — they re-derive the cut
+    /// themselves through <see cref="FilmBase.HighDensityKeepMask"/> — so a roll that lands here
+    /// with no board still gets its statistics taken over film pixels only.
     /// </summary>
-    public void ApplySprocketFromDialog(bool enabled, double? threshold)
+    public void ApplySprocketAuto()
     {
-        if (enabled && threshold is double thr)
+        double? threshold = null;
+        if (_previewLinear is { } preview)
+        {
+            double est = Sprocket.EstimateSprocketThreshold(preview);
+            if (est < Sprocket.NoBoard) threshold = est;
+        }
+
+        if (threshold is double thr)
         {
             SprocketEnabled = true; SprocketThreshold = thr;
             foreach (RollFrame f in Frames) { f.Params.SprocketEnabled = true; f.Params.SprocketThreshold = thr; }
@@ -1516,7 +1534,7 @@ public partial class MainViewModel : ViewModelBase
     /// This import's auto-inversion choice, taken from the import dialog's checkbox.
     ///
     /// Held as a field because the decision is made in <see cref="LoadRollWithConfigAsync"/> but
-    /// acted on later, in <see cref="ApplySprocketFromDialog"/> — the chain has to wait for the
+    /// acted on later, in <see cref="ApplySprocketAuto"/> — the chain has to wait for the
     /// sprocket threshold. Defaults true so a roll opened by any other route (a saved project, the
     /// catalog) still behaves as before.
     /// </summary>
@@ -1545,16 +1563,37 @@ public partial class MainViewModel : ViewModelBase
             double[]? tb = useMode
                 ? FilmBase.EstimateTBaseByMode(_previewLinear, sprocketThreshold, values)
                 : null;
+            // Then the edge sliver: a scan with no board still often keeps a thin strip of bare
+            // rebate, which is the real base but far too small for any percentile to find. Tried
+            // before the tail estimator because when it answers at all it has identified an
+            // actual piece of film base, whereas the tail is a fallback that measures whatever
+            // happens to be brightest.
+            tb ??= FilmBase.EstimateTBaseFromEdgeSliver(_previewLinear, values);
             tb ??= values is null
                 ? FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold)
                 : FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold,
                                                  valueImages: new[] { values });
             TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
             foreach (RollFrame f in Frames) f.Params.TBase = (double[])tb.Clone();
-            FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）");
             _filmBaseSampled = true;
-            StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
             ok = true;
+
+            // Sanity-check the result against what a C-41 base physically IS: an orange dye layer,
+            // so R > G > B, and by a clear margin. A neutral answer means the estimator found no
+            // bare base and fell back to the picture's own highlights — which happens on a scan
+            // already cropped to the image area, where no base is in frame at all. The number it
+            // returns is then not a film base and everything downstream inherits that, so it has
+            // to be said out loud rather than shown as a normal measurement.
+            if (IsPlausibleFilmBase(tb))
+            {
+                FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）");
+                StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
+            }
+            else
+            {
+                FilmBaseText = Loc.F($"⚠ 未测到片基（t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3} 偏中性）——画面中没有裸露片基，请手动【框选片基】");
+                StatusText = Loc.T("⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【框选片基】手动标定");
+            }
         }
         catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
         // t_base just changed for every frame, so every existing thumbnail is stale. They have to
@@ -1563,6 +1602,25 @@ public partial class MainViewModel : ViewModelBase
         RestartThumbnails();
         return ok;
     }
+
+    /// <summary>
+    /// Whether a measured t_base looks like a real C-41 film base rather than a fallback.
+    ///
+    /// The mask is an orange dye layer, so its transmittance is ordered R > G > B and the R-to-B
+    /// ratio is large — the hand-sampled references in this project sit around 0.20 / 0.175 /
+    /// 0.06, a ratio above 3. A base measured off picture highlights instead comes back nearly
+    /// neutral (0.716 / 0.729 / 0.725 on the 归档 samples, ratio 0.99, and with G above R, which
+    /// no C-41 base can be). A modest ratio floor separates the two cleanly without rejecting a
+    /// thin or faded base.
+    /// </summary>
+    private static bool IsPlausibleFilmBase(double[] tb)
+        => tb.Length == 3 && tb[0] > tb[1] && tb[1] > tb[2]
+           && tb[0] / Math.Max(tb[2], 1e-6) >= FilmBaseMinRatio;
+
+
+    /// <summary>Least R:B ratio for <see cref="IsPlausibleFilmBase"/>. Set well below a real
+    /// base's ≈3 and well above the ≈1 a neutral fallback returns.</summary>
+    private const double FilmBaseMinRatio = 1.35;
 
     /// <summary>
     /// The light-board cut the auto chain should use, measured from the frame rather than taken
@@ -1575,8 +1633,9 @@ public partial class MainViewModel : ViewModelBase
     /// sample that failure returned (0.568, 0.987, 0.591) — G highest of the three, which no
     /// C-41 base can be — against a hand-sampled (0.200, 0.175, 0.060).
     ///
-    /// A user-set threshold still wins: 确认 means the cut was looked at on the real frame, and
-    /// the estimator is a heuristic. Only when there is no user value does this measure one, and
+    /// A user-set threshold still wins: an enabled 齿孔遮罩 means the cut was looked at on the real
+    /// frame, and the estimator is a heuristic. Only when there is no user value does this measure
+    /// one — which since the import dialog was removed is also the import-time path, and
     /// <see cref="Sprocket.EstimateSprocketThreshold"/> reports <see cref="Sprocket.NoBoard"/>
     /// on a frame that genuinely has no board, which maps back to null (pure-brightness mode).
     /// </summary>
@@ -1608,10 +1667,13 @@ public partial class MainViewModel : ViewModelBase
     /// highlight) and <see cref="FilmBase.DetectDMaxFromRoll"/> (upper percentile: only
     /// well-exposed frames reach the film's ceiling).
     ///
-    /// Runs once per import, from <see cref="AutoInvertOnImportRun"/>, and is not exposed as a
-    /// button. Every step it performs is already its own button in the 整卷校准 panel, so a chain
-    /// button would be a second way to do the same thing — and re-running it over a half-graded
-    /// roll would silently discard the user's wb_high and levels.
+    /// Runs on import, from <see cref="AutoInvertOnImportRun"/>, and on demand from the 自动（整卷）
+    /// button via <see cref="AutoInvertRollCommandAsync"/>. Every step it performs is also its own
+    /// button in the 整卷校准 panel, so the chain button IS a second way to do the same thing —
+    /// that redundancy is the point: the individual buttons document the physics, while the chain
+    /// is the path for someone who just wants the roll inverted. Note that re-running it over a
+    /// half-graded roll discards the user's wb_high and levels, which is why it is only ever
+    /// reached by an explicit press.
     ///
     /// The ORDER is the part that is not obvious, and it is wrong in both other directions:
     ///
@@ -1704,6 +1766,9 @@ public partial class MainViewModel : ViewModelBase
 
             var masks = new List<ImageBuffer>();
             var values = new List<ImageBuffer>();
+            // Uncropped counterparts of `values`, for the film-base estimators only — see the
+            // note where they are filled.
+            var baseSources = new List<ImageBuffer>();
             var gate = new object();
             int done = 0;
             ReportBackground(Loc.F($"整卷分析 0/{order.Count} …"));
@@ -1748,13 +1813,29 @@ public partial class MainViewModel : ViewModelBase
                 // correcting an already-cropped buffer would centre the falloff on the wrong point.
                 ImageBuffer? dec = Stage1Source(raw);
                 ImageBuffer val = ReferenceEquals(dec, raw) || dec is null ? raw : dec;
+
+                // The UNCROPPED buffer is kept alongside the cropped one, because t_base is the
+                // one measurement that must NOT see the crop.
+                //
+                // Every other statistic here wants the kept picture: D-max and the highlight pick
+                // are about the scene, so the border must go. The film base is the opposite — it
+                // is bare rebate at the frame's edge, which is exactly what a crop removes. Stage
+                // 1 measures the whole frame and finds it; stage 2 was cropping first, so the
+                // sliver estimator had nothing left to find and fell through to the bright-tail
+                // fallback, which reports picture highlights instead. That is why a roll opened
+                // with a correct base drifted the moment the roll-wide pass finished, and why
+                // re-running it on one frame could not recover: measured on 图像 001a, a 2% crop
+                // cut the sliver's vote count from 7/8 frames to 3/8 and a 5% crop to 0/8, at
+                // which point t_base jumped from (0.397, 0.272, 0.155) to the tail's answer.
+                ImageBuffer baseSrc = val;
+
                 if (crop is { } cc)
                 {
                     bool shared = ReferenceEquals(val, raw);
                     raw = Geometry.ApplyCrop(raw, cc);
                     val = shared ? raw : Geometry.ApplyCrop(val, cc);
                 }
-                lock (gate) { masks.Add(raw); values.Add(val); }
+                lock (gate) { masks.Add(raw); values.Add(val); baseSources.Add(baseSrc); }
                 ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
             });
             ReportBackground("");
@@ -1765,10 +1846,21 @@ public partial class MainViewModel : ViewModelBase
                               && !masks.Where((m, i) => !ReferenceEquals(m, values[i])).Any();
             IReadOnlyList<ImageBuffer>? valueList = sameDomain ? null : values;
 
+            // t_base is measured on the UNCROPPED frames — the base lives in the margin a crop
+            // removes, so cropping first is what made this diverge from stage 1. Everything after
+            // it (wb_high, D-max, the endpoints) still uses the cropped buffers, because those
+            // are measurements of the SCENE and the border would corrupt them.
+            IReadOnlyList<ImageBuffer> baseList =
+                baseSources.Count == masks.Count ? baseSources : masks;
+
             double[]? rollBase = await Task.Run(
-                () => FilmBase.EstimateTBaseByModeFromRoll(masks, cut, valueList), ct);
+                () => FilmBase.EstimateTBaseByModeFromRoll(baseList, cut), ct);
+            // Same order as the single-frame chain: an identified sliver of real base beats a
+            // bright-tail percentile, which only measures whatever happens to be brightest.
             rollBase ??= await Task.Run(
-                () => FilmBase.EstimateTBaseFromRoll(masks, cut, valueList), ct);
+                () => FilmBase.EstimateTBaseFromEdgeSliverFromRoll(baseList), ct);
+            rollBase ??= await Task.Run(
+                () => FilmBase.EstimateTBaseFromRoll(baseList, cut), ct);
 
             double[]? rollWbHigh = null;
             double? rollDMax = null;
@@ -1780,7 +1872,8 @@ public partial class MainViewModel : ViewModelBase
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
 
-            rollDMax = await Task.Run(() => FilmBase.DetectDMaxFromRoll(values, rollBase), ct);
+            rollDMax = await Task.Run(
+                () => FilmBase.DetectDMaxFromRoll(values, rollBase, 90.0, masks, cut), ct);
             // Roll-wide highlight endpoints, measured alongside the scalar. Endpoint inversion is
             // the default path, so the auto chain has to produce these — without them a roll that
             // was never hand-sampled would silently fall back to the legacy grade chain.
@@ -1796,12 +1889,33 @@ public partial class MainViewModel : ViewModelBase
             try
             {
                 TBaseR = rollBase[0]; TBaseG = rollBase[1]; TBaseB = rollBase[2];
-                if (rollWbHigh is not null)
+                if (rollDMax is double dm) DMax = dm;
+
+                // The highlight balance is carried by EXACTLY ONE of these two, never both.
+                //
+                // DensityEndpoints.FromMeasured divides each measured endpoint by that channel's
+                // wb_high — the parameter is a manual NUDGE on top of the endpoints, not a second
+                // description of the same measurement. So writing an auto-solved wb_high next to
+                // auto-solved endpoints applies the highlight correction twice: the endpoints
+                // already differ per channel because they were measured co-sited on the real
+                // highlight, and dividing them by a wb_high derived from that same highlight
+                // skews them again. Measured on 图像 001a that second application multiplied the
+                // red-to-blue balance by 0.647 — a 35% cast, applied inside the inversion where
+                // no Stage-2 control can reach it. It is why the roll went badly off the moment
+                // the roll-wide pass finished while the per-frame thumbnails looked right.
+                //
+                // Endpoints are the richer description (three numbers, co-sited, both ends
+                // pinned), so they win and wb_high goes back to neutral. Without endpoints the
+                // legacy path needs wb_high, and it is used as before.
+                if (rollDMaxPerCh is not null)
+                {
+                    _dMaxPerChannel = rollDMaxPerCh;
+                    WbHighR = WbHighG = WbHighB = 1.0;
+                }
+                else if (rollWbHigh is not null)
                 {
                     WbHighR = rollWbHigh[0]; WbHighG = rollWbHigh[1]; WbHighB = rollWbHigh[2];
                 }
-                if (rollDMax is double dm) DMax = dm;
-                if (rollDMaxPerCh is not null) _dMaxPerChannel = rollDMaxPerCh;
                 // Levels are measured last and on the CURRENT frame's rendered positive, because
                 // they are the only step that reads output rather than negative density. With the
                 // three roll-wide values above already in place, that render is the roll's look,
@@ -1811,7 +1925,12 @@ public partial class MainViewModel : ViewModelBase
             }
             finally { _suppressRender = false; }
 
-            FilmBaseText = Loc.F($"片基 t_base = {rollBase[0]:F3}, {rollBase[1]:F3}, {rollBase[2]:F3}（整卷）");
+            // Same plausibility check the single-frame path applies — the roll-pooled base is no
+            // more guaranteed to be a real film base than a single frame's, and reporting it as a
+            // plain measurement here would silently overwrite the warning stage 1 just raised.
+            FilmBaseText = IsPlausibleFilmBase(rollBase)
+                ? Loc.F($"片基 t_base = {rollBase[0]:F3}, {rollBase[1]:F3}, {rollBase[2]:F3}（整卷）")
+                : Loc.F($"⚠ 未测到片基（t_base = {rollBase[0]:F3}, {rollBase[1]:F3}, {rollBase[2]:F3} 偏中性）——画面中没有裸露片基，请手动【框选片基】");
             ApplyAutoChainToRoll();
             FinishAutoInvert(masks.Count);
         }
@@ -1851,13 +1970,20 @@ public partial class MainViewModel : ViewModelBase
             f.Params.DMax = dmax;
             // Roll-uniform, exactly like d_max: the endpoints were measured across the roll, so a
             // single flat-lit frame is not normalised on its own.
-            f.Params.DMaxPerChannel = dmc is null ? null : (double[])dmc.Clone();
+            f.Params.DMaxPerChannel = (double[])dmc.Clone();
             f.Params.BlackPoint = black;
             f.Params.WhitePoint = white;
         }
         // The current frame's params are rebuilt from the sliders on switch anyway, but the loop
         // above has just overwritten them with the same values, so nothing is lost either way.
         if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+
+        // The loop above mutated every OTHER frame's params directly, and nothing else notices
+        // that: autosave is driven by the slider bindings, which only fire for the frame on
+        // screen. Without this the broadcast lives in memory and dies with the session — the
+        // saved .ncproj keeps whatever the other frames had before, so reopening the roll shows
+        // it un-broadcast and the button looks like it did nothing.
+        MarkRollDirty();
     }
 
     private void FinishAutoInvert(int voted = 1)
@@ -1914,9 +2040,86 @@ public partial class MainViewModel : ViewModelBase
             norm[b + 1] = (float)(src.Data[b + 1] / tb[1]);
             norm[b + 2] = (float)(src.Data[b + 2] / tb[2]);
         }
-        DMax = FilmBase.DetectDMax(new ImageBuffer(src.Width, src.Height, norm));
+        // Masked on the RAW region, not on the normalised one: both valleys are calibrated on raw
+        // luma. Without this the light board and — far more damaging — the opaque blocking card
+        // sit inside the percentile, and the card, being denser than any exposed area, simply
+        // becomes D-max.
+        DMax = FilmBase.DetectDMax(new ImageBuffer(src.Width, src.Height, norm),
+                                   AutoRegion(), AutoBoardCut());
         StatusText = Loc.F($"自动 D-max = {DMax:F3}");
     }
+
+    /// <summary>
+    /// The 自动（单张）button: geometry + the full inversion chain, for the CURRENT frame only.
+    ///
+    /// Same four photometric steps as <see cref="AutoInvertRollAsync"/>'s stage 1, in the same
+    /// order and for the same reasons (see that method's remarks — t_base must precede
+    /// everything, levels must come last).
+    ///
+    /// Deliberately does NOT touch the other frames. That is the whole distinction from the
+    /// roll button: this one is the escape hatch for the frame the roll-wide solve got wrong —
+    /// a lone tungsten interior, a frame shot on a different light source — so writing its
+    /// result outward would defeat its purpose.
+    /// </summary>
+    public void AutoInvertCurrentFrame()
+    {
+        if (_previewLinear is null) return;
+
+        // Snapshot every OTHER frame's t_base before measuring.
+        //
+        // AutoFilmBaseFromRoll is the roll-wide estimator and writes its result to every frame —
+        // correct when the whole chain is roll-wide, wrong here. Restoring only the current
+        // frame's params afterwards does NOT undo that: the others keep the broadcast base, so
+        // pressing 单张 silently re-based the entire roll. The snapshot is what makes this button
+        // mean what its name says.
+        var restore = new List<(RollFrame Frame, double[] TBase)>();
+        foreach (RollFrame f in Frames)
+            if (!ReferenceEquals(f, CurrentFrame))
+                restore.Add((f, (double[])f.Params.TBase.Clone()));
+
+        double? cut = AutoBoardCut();
+        if (!AutoFilmBaseFromRoll(cut, useMode: true)) return;
+
+        _suppressRender = true;
+        try
+        {
+            // Neutral start, for the reasons given in AutoInvertRollAsync: a stale wb_high folds
+            // into this frame's solve and stale levels clip the positive AutoLevels measures.
+            WbHighR = WbHighG = WbHighB = 1.0;
+            Black = 0.0; White = 0.0;
+            AutoWbHigh();
+            AutoDetectDMax();
+            AutoLevels();
+        }
+        finally { _suppressRender = false; }
+
+        // Undo AutoFilmBaseFromRoll's broadcast, then persist: the restore is itself a direct
+        // mutation of other frames' params, so without marking the roll dirty the saved project
+        // could keep the broadcast this method just reverted.
+        foreach (var (f, tb) in restore) f.Params.TBase = tb;
+        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        MarkRollDirty();
+
+        ScheduleRender();
+        // Only this frame's thumbnail changed; the rest were restored, so re-rendering the whole
+        // strip would be wasted work (and would flicker the roll for no reason).
+        if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
+        StatusText = Loc.F($"单张去色罩完成 · 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · D-max {DMax:F3}");
+    }
+
+    /// <summary>
+    /// The 自动（整卷）button: re-run the roll-wide auto-inversion on demand.
+    ///
+    /// Exposed as a button now, against the original note on <see cref="AutoInvertRollAsync"/>
+    /// that a chain button would duplicate the individual step buttons. That reasoning held while
+    /// the chain was import-only, but it left the automation invisible: the one control that does
+    /// the whole job lived in a checkbox in the import dialog, and a user who unticked it, or who
+    /// opened an existing roll, had no way back to it short of re-importing.
+    ///
+    /// It does overwrite wb_high and the levels across the roll, which is why it is a distinct,
+    /// explicitly-pressed button rather than something that re-runs on its own.
+    /// </summary>
+    public Task AutoInvertRollCommandAsync() => AutoInvertRollAsync();
 
     /// <summary>Sample the scan-exposure bias so a film-base rect falls to pure black.</summary>
     /// <remarks>
@@ -2288,7 +2491,14 @@ public partial class MainViewModel : ViewModelBase
         FrameParams p = BuildParams();
         p.BlackPoint = 0.0; p.WhitePoint = 1.0;   // measure the positive WITHOUT the current levels
         ImageBuffer pos = Pipeline.ProcessFrame(_previewLinear, ForPreview(p));
-        var (black, white) = LevelsPercentiles(pos.Data, 0.001, 0.999);
+        // The mask is built on the RAW frame (where the valleys are calibrated) but indexes the
+        // RENDERED positive, so the two must be the same size. ForPreview crops the render to the
+        // frame rect on a split frame, which is exactly what AutoRegion returns — see KeepMaskFor,
+        // which drops the mask rather than misapply it if they ever disagree.
+        bool[]? keep = AutoRegion() is { } raw && raw.PixelCount == pos.PixelCount
+            ? FilmBase.HighDensityKeepMask(raw, AutoBoardCut())
+            : null;
+        var (black, white) = LevelsPercentiles(pos.Data, 0.001, 0.999, keep);
         if (white - black < 1e-6) white = black + 1e-6;
         Black = WbMath.BlackPointToSlider(Math.Clamp(black, 0.0, 0.5));
         White = WbMath.WhitePointToSlider(Math.Clamp(white, 0.5, 1.0));
@@ -2311,16 +2521,29 @@ public partial class MainViewModel : ViewModelBase
     /// the 20% release threshold is measured against. The single forward pass this replaced
     /// could only have guarded the low end.
     /// </summary>
-    private static (double Black, double White) LevelsPercentiles(float[] data, double lowPct, double highPct)
+    /// <param name="keep">Per-PIXEL admission mask (not per sample), or null for every pixel. The
+    /// board and the blocking card both survive the inversion as huge flat blocks — the board
+    /// inverts to crushed black, the card to blown white — so on a frame that shows either, the
+    /// two ends of this histogram are set by things that are not the photograph.</param>
+    private static (double Black, double White) LevelsPercentiles(float[] data, double lowPct,
+                                                                  double highPct, bool[]? keep = null)
     {
         const int bins = 4096;
         var hist = new int[bins];
-        foreach (float v in data)
+        long n = 0;
+        for (int p = 0; p * 3 + 2 < data.Length; p++)
         {
-            int b = (int)(v * bins);
-            hist[b < 0 ? 0 : b >= bins ? bins - 1 : b]++;
+            if (keep is not null && p < keep.Length && !keep[p]) continue;
+            for (int c = 0; c < 3; c++)
+            {
+                int b = (int)(data[p * 3 + c] * bins);
+                hist[b < 0 ? 0 : b >= bins ? bins - 1 : b]++;
+                n++;
+            }
         }
-        long n = data.Length;
+        // Everything masked out (or an empty buffer): fall back to measuring the whole frame
+        // rather than returning a degenerate 0..1 range that would flatten the picture.
+        if (n == 0 && keep is not null) return LevelsPercentiles(data, lowPct, highPct, null);
         double spike = n * 0.10, guard = n * 0.20;
 
         // Walk one end of the histogram inward, skipping spike bins, and stop at `target`.
@@ -2387,8 +2610,8 @@ public partial class MainViewModel : ViewModelBase
         DMax = 2.0; ScanEv = 0;
         WbOffR = 0; WbOffG = 0; WbOffB = 0;
         WbHighR = 1.0; WbHighG = 1.0; WbHighB = 1.0;
-        // Cleared, then re-measured by the auto chain (or a D-max sample).
-        DMaxPerChannel = null;
+        // Back to a neutral endpoint set, then re-measured by the auto chain (or a D-max sample).
+        DMaxPerChannel = new[] { DMax, DMax, DMax };
         // Stage 2
         Temp = 0; Tint = 0; ExposureEv = 0;
         Black = 0; White = 0; Contrast = 0; Highlights = 0; Shadows = 0; Saturation = 0;
@@ -2978,10 +3201,10 @@ public partial class MainViewModel : ViewModelBase
         _calRgbPaths = calRgb;
         _lccSourcePath = (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath)) ? cfg.LccPath : null;
 
-        // Set roll-level ops BEFORE loading so the sprocket dialog + auto film-base (which run
+        // Set roll-level ops BEFORE loading so the sprocket estimate + auto film-base (which run
         // during LoadRollAsync) sample t_base in the DECOUPLED domain and the first render decouples.
-        // The auto-inversion choice rides along for the same reason: ApplySprocketFromDialog acts
-        // on it partway through the load.
+        // The auto-inversion choice rides along for the same reason: ApplySprocketAuto acts on it
+        // partway through the load.
         _cfgAutoInvert = cfg.AutoInvert;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
         if (lccField is not null) { _lccFlatField = lccField; LccAvailable = true; LccStatus = Loc.T("已载入平场：") + lccName; }
@@ -3269,10 +3492,9 @@ public partial class MainViewModel : ViewModelBase
         DMax = p.DMax; ScanEv = p.ScanExposureEv;
         WbOffR = p.WbOffset[0]; WbOffG = p.WbOffset[1]; WbOffB = p.WbOffset[2];
         WbHighR = p.WbHigh[0]; WbHighG = p.WbHigh[1]; WbHighB = p.WbHigh[2];
-        // A project saved before endpoints existed carries no measurement. It renders through the
-        // legacy fallback in DensityEndpoints.For until the auto chain or a D-max sample supplies
-        // one, which is what moves such a roll onto the endpoint path.
-        DMaxPerChannel = p.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null;
+        DMaxPerChannel = p.DMaxPerChannel is { Length: 3 } dmc
+            ? (double[])dmc.Clone()
+            : new[] { p.DMax, p.DMax, p.DMax };
         // Stage 2
         var (temp, tint, _) = WbMath.GainsToTempTint(p.WbGains);
         Temp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
@@ -3573,12 +3795,12 @@ public partial class MainViewModel : ViewModelBase
                 // The endpoints travel with the film base: they are densities measured RELATIVE to
                 // it, so handing over a new t_base without them would leave the target normalising
                 // by a measurement taken against a different base.
-                d.DMaxPerChannel = s.DMaxPerChannel is { Length: 3 } e ? (double[])e.Clone() : null;
+                d.DMaxPerChannel = (double[])s.DMaxPerChannel.Clone();
                 // The old "relink pivot when d_max moves" rule died with pivot; the slope now
                 // comes from the endpoints above, which are being copied in the same breath.
             }
             if (Sync.CalWb) { d.WbHigh = (double[])s.WbHigh.Clone(); d.WbOffset = (double[])s.WbOffset.Clone(); }
-            if (Sync.CalGrade) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
+            if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
             if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
             if (Sync.CalSprocket) { d.SprocketEnabled = s.SprocketEnabled; d.SprocketThreshold = s.SprocketThreshold; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform
