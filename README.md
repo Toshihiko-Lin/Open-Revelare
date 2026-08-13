@@ -101,7 +101,7 @@ OpenRevelare 的想法很简单：把去色罩从「调出来的」变成「算�
 
 ## 界面
 
-一个窗口走完一整卷。第一页「整卷校准」：片基透射率 `t_base`、`d_max`、暗部与亮部两段白平衡、反差号数、齿孔遮罩、几何裁切。先标定当前帧，再应用到整卷，其余帧共用同一套物理参数。
+一个窗口走完一整卷。第一页「整卷校准」：片基透射率 `t_base`、`d_max`、暗部与亮部两段白平衡、齿孔遮罩、几何裁切。先标定当前帧，再应用到整卷，其余帧共用同一套物理参数。
 
 <p align="center">
   <img src="docs/assets/editor-scenebase.jpg" width="100%" alt="主窗口：帧编辑">
@@ -187,7 +187,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 ### 成像
 
-- **密度域反转**——片基 `t_base`、白平衡 `wb_high` / `wb_offset`、扫描曝光、`d_max`、gamma（反差号数），每一项都在界面中可调且有明确的物理含义。反转本身是 Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有独立的色度参数（早期版本有一个 `chroma_grade`，补齐色彩管理后已移除）
+- **密度域反转**——片基 `t_base`（黑端）、逐通道密度端点 `d_max_per_channel`（白端）、白平衡 `wb_high` / `wb_offset`、扫描曝光，每一项都在界面中可调且有明确的物理含义。反转是**双端模型**：斜率由两端相减导出，通道间斜率之差就是高光色彩平衡，不存在独立的 gamma 或色度参数（早期版本的 `grade` / `pivot` / `chroma_grade` 已全部移除）
 - **完整色彩管理**——工作空间 ACEScg（宽色域，场景参考）承载反相；输出空间在主窗口选（sRGB / Display P3 / Adobe RGB），帧编辑即在该空间内进行，导出所见即所得；也可导出场景线性 ACEScg 交给外部调色
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
@@ -244,9 +244,9 @@ $$D = -\log_{10}\!\bigl(\max(T_\text{norm},\ 10^{-D_\text{max}})\bigr)$$
 
 $$D_\text{corr}[c] = D[c] \times w_\text{high}[c] + w_\text{offset}[c]$$
 
-**反转**——Cineon 的做法：一个 gamma 作用于三个通道，色度按比例自动跟随，没有第二个系数：
+**反转**——双端模型：片基把每个通道的黑端归零，白端是该通道实测的最大密度 $D_{\max}[c]$，斜率是两端相减的结果而不是另设的参数：
 
-$$D_\text{adj} = \text{pivot} + (D - \text{pivot}) \times \text{grade} - D_\text{max}$$
+$$D_\text{adj}[c] = \frac{R_\text{out}}{D_{\max}[c]} \times D[c] - R_\text{out}$$
 
 $$T_\text{pos} = 10^{D_\text{adj}}$$
 
@@ -291,7 +291,7 @@ dotnet run --project src/OpenRevelare.Gui
 命令行前端（无 GUI，同一个 Core）：
 
 ```bash
-dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --grade 1.65 --d-max 2.0
+dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --d-max 2.0
 dotnet run --project src/OpenRevelare.Cli -- --help
 ```
 

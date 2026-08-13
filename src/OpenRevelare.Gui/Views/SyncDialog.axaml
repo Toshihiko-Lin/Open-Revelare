@@ -19,7 +19,7 @@
                 <TextBlock Text="{i18n:T '标定（Stage 1）'}" FontWeight="Bold" Margin="0,4" />
                 <CheckBox Content="{i18n:T '片基 T_base / D_max / 偏移'}" IsChecked="{Binding CalFilmBase}" />
                 <CheckBox Content="{i18n:T '白平衡 wb_high / wb_offset'}" IsChecked="{Binding CalWb}" />
-                <CheckBox Content="{i18n:T '色度通道缩放'}" IsChecked="{Binding CalGrade}" />
+                <CheckBox Content="{i18n:T '色度通道缩放'}" IsChecked="{Binding CalChroma}" />
                 <CheckBox Content="{i18n:T '镜头 畸变 / 暗角 / LCC'}" IsChecked="{Binding CalLens}" />
                 <CheckBox Content="{i18n:T '齿孔 启用 / 阈值'}" IsChecked="{Binding CalSprocket}" />
                 <TextBlock Text="{i18n:T '场景（Stage 2）'}" FontWeight="Bold" Margin="0,8,0,4" />

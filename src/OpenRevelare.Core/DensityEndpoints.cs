@@ -26,14 +26,14 @@ namespace OpenRevelare.Core;
 /// So white balance keeps all four of its colour degrees of freedom. What changes is that it is
 /// READ OFF the endpoints rather than applied as a separate stage after them.
 ///
-/// PHASE 1 SCOPE. This type only converts; it changes no behaviour. <see cref="FromLegacy"/>
-/// reproduces the current chain exactly (verified to 4.4e-16, i.e. double-precision equality),
-/// which is what makes the migration in later phases lossless — an existing project can be
-/// restated in canonical form and must render bit-identically.
+/// This is now the ONLY inversion model. It replaced a grade/pivot chain that described the same
+/// two ends with a scalar gamma plus a separately-solved wb_high — two descriptions of one fact,
+/// which could be, and were, applied on top of each other. See <see cref="For"/>.
 /// </summary>
 public readonly struct DensityEndpoints
 {
-    /// <summary>Per-channel slope applied to density. Legacy equivalent: <c>grade × wb_high_c</c>.</summary>
+    /// <summary>Per-channel slope applied to density. Its between-channel differences ARE the
+    /// highlight colour balance.</summary>
     public double[] Scale { get; }
 
     /// <summary>Per-channel offset added after scaling.</summary>
@@ -52,59 +52,6 @@ public readonly struct DensityEndpoints
     /// film-base-normalised density <c>-log10(T / t_base)</c>.
     /// </summary>
     public double Apply(int channel, double density) => Scale[channel] * density + Offset[channel];
-
-    /// <summary>
-    /// Exact restatement of the WHOLE chain (steps 3–5) as one affine map per channel, acting on
-    /// the film-base-normalised density.
-    ///
-    /// USE THIS ONLY where the input has NOT already been through steps 3–4. <see cref="Inversion"/>
-    /// folds those into its LUT, so that slot wants <see cref="LegacyStep5"/> instead; passing this
-    /// there applies wb_high and wb_offset twice. This full-chain form is what to reason with when
-    /// mapping density to output end to end — e.g. <see cref="WhiteBalance"/>, which starts from a
-    /// rendered sRGB positive rather than from LUT output.
-    ///
-    /// Derivation — expanding the chain in <see cref="Inversion"/> (steps 3–5), with
-    /// <c>D</c> the film-base-normalised density and <c>w̄</c> = mean(wb_offset):
-    ///
-    /// <code>
-    ///   D₁ = D + ev·log10(2)
-    ///   D₂ = D₁·wh_c + (wo_c - w̄)
-    ///   D_adj = pivot + (D₂ - pivot)·grade - d_max
-    ///
-    ///   ⇒ Scale_c  = grade · wh_c
-    ///     Offset_c = grade·(ev·log10(2)·wh_c + (wo_c - w̄) - pivot) + pivot - d_max
-    /// </code>
-    ///
-    /// Note <c>wb_offset</c> enters mean-subtracted, matching step 4 — it carries only the
-    /// between-channel difference, never a shared shift. Dropping that term would silently
-    /// change the black level.
-    /// </summary>
-    public static DensityEndpoints FromLegacy(FrameParams cal)
-    {
-        double grade = cal.Grade, pivot = cal.Pivot, dMax = cal.DMax;
-
-        // The legacy chain GATES each term rather than always applying it (see
-        // Inversion.BuildDensityLuts): a wb_high of 1.0000001 makes the multiply be SKIPPED,
-        // which is not the same as multiplying by the stored value. Reproducing the algebra but
-        // not the gating would differ in the last ulp for rolls sitting near these tolerances,
-        // and bit-exactness is the whole acceptance test for this migration. So the endpoints are
-        // derived from the EFFECTIVE values the LUT actually uses.
-        double evShift = cal.ScanExposureEv != 0.0 ? cal.ScanExposureEv * Log10_2 : 0.0;
-        bool wbHighActive = !ApproxAll(cal.WbHigh, 1.0);
-        bool wbOffsetActive = cal.WbOffset.Any(x => Math.Abs(x) > Tol);
-        double woMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
-
-        var scale = new double[3];
-        var offset = new double[3];
-        for (int c = 0; c < 3; c++)
-        {
-            double wh = wbHighActive ? cal.WbHigh[c] : 1.0;
-            double wo = wbOffsetActive ? cal.WbOffset[c] - woMean : 0.0;
-            scale[c] = grade * wh;
-            offset[c] = grade * (evShift * wh + wo - pivot) + pivot - dMax;
-        }
-        return new DensityEndpoints(scale, offset);
-    }
 
     /// <summary>
     /// The endpoint form proper: each channel's measured highlight density mapped onto the
@@ -157,47 +104,18 @@ public readonly struct DensityEndpoints
     }
 
     /// <summary>
-    /// Step 5 ALONE, for callers whose input density has already been through steps 3–4.
+    /// The endpoints the post-LUT inversion slot should use. One model, always: the per-channel
+    /// endpoints, which every roll now carries (see <see cref="FrameParams.DMaxPerChannel"/>).
     ///
-    /// <see cref="Inversion"/> folds the film-base divide, the scan-exposure shift, wb_high and
-    /// wb_offset into its per-channel LUT, so the density reaching step 5 is already corrected.
-    /// Using <see cref="FromLegacy"/> there would apply wb_high and wb_offset a SECOND time.
-    /// Step 5 on its own is:
-    ///
-    /// <code>
-    ///   a = pivot + (d - pivot)·grade - d_max
-    ///     = grade·d + (pivot·(1 - grade) - d_max)
-    /// </code>
-    ///
-    /// Same slope for all three channels, because in the legacy model the per-channel part
-    /// lives entirely in the LUT.
-    /// </summary>
-    public static DensityEndpoints LegacyStep5(FrameParams cal)
-        => LegacyStep5Of(cal.Grade, cal.Pivot, cal.DMax);
-
-    /// <summary>
-    /// <see cref="LegacyStep5"/> from loose parameters, for callers that carry grade/pivot/d_max
-    /// around without a <see cref="FrameParams"/> — notably the white-balance solve.
-    /// </summary>
-    public static DensityEndpoints LegacyStep5Of(double grade, double pivot, double dMax)
-    {
-        double off = pivot * (1.0 - grade) - dMax;
-        return new DensityEndpoints(
-            new[] { grade, grade, grade },
-            new[] { off, off, off });
-    }
-
-    /// <summary>
-    /// The endpoints the post-LUT inversion slot should use: measured per-channel when the roll
-    /// has them, otherwise <see cref="LegacyStep5"/>.
-    ///
-    /// The measured branch is self-contained — its slope already encodes the highlight balance,
-    /// so a roll on that branch must NOT also carry wb_high (see <see cref="FrameParams.DMaxPerChannel"/>).
+    /// <see cref="FrameParams.WbHigh"/> is deliberately NOT passed. The endpoints already encode
+    /// the highlight balance — that is what the between-channel differences in their slope ARE —
+    /// so handing wb_high in as well applies the same correction twice, and it lands inside the
+    /// inversion where no later control can undo it. wb_high survives only as the shadow-side
+    /// partner's counterpart in the legacy serialisation and as a manual nudge; anything that
+    /// solves the highlight automatically must write the endpoints and leave it at 1.
     /// </summary>
     public static DensityEndpoints For(FrameParams cal) =>
-        cal.DMaxPerChannel is { Length: 3 } dm
-            ? FromMeasured(dm, cal.DMax, cal.WbHigh, cal.WbOffset)
-            : LegacyStep5(cal);
+        FromMeasured(cal.DMaxPerChannel, cal.DMax, null, cal.WbOffset);
 
     /// <summary>
     /// The linear value the film base (density 0) maps to — the black floor the inversion

@@ -19,21 +19,25 @@ public sealed class FrameParams
 
     /// <summary>
     /// Per-channel highlight endpoint — the density each channel reaches in the darkest
-    /// (fully-exposed) area. Null = derive it from the legacy scalar chain, which is what
-    /// existing rolls do.
+    /// (fully-exposed) area. The inversion's white end; <see cref="TBase"/> is its black end.
     ///
-    /// This is the measurement <see cref="FilmBase.SampleDMaxPerChannelFromRect"/> already
-    /// takes and that the scalar <see cref="DMax"/> throws two thirds of away. Keeping it whole
-    /// makes the highlight endpoint and its colour cast ONE fact, instead of a scalar plus a
-    /// separately-solved <see cref="WbHigh"/> that competes with it — see
-    /// <see cref="DensityEndpoints"/> for why that competition is what makes calibration order
-    /// matter today.
+    /// This is the measurement <see cref="FilmBase.SampleDMaxPerChannelFromRect"/> takes and that
+    /// the scalar <see cref="DMax"/> throws two thirds of away. Keeping it whole makes the
+    /// highlight endpoint and its colour cast ONE fact, rather than a scalar plus a
+    /// separately-solved <see cref="WbHigh"/> competing to describe the same thing.
+    ///
+    /// ALWAYS present. It used to be nullable, with null selecting a second inversion model built
+    /// on grade/pivot — that model is gone, so an unmeasured roll starts from the scalar
+    /// replicated across the three channels (a neutral endpoint set, the same shape the scalar
+    /// path produced) and the automatic chain or a D-max sample refines it. One model means one
+    /// place for the highlight balance to live, which is what stops the two descriptions from
+    /// being applied on top of each other.
     ///
     /// Only the per-channel (Path-B / white-light) inversion path consumes this. Rolls carrying a
     /// decouple chroma matrix still take the luminance/chroma decomposition, which is a genuinely
     /// cross-channel operation that endpoints do not subsume.
     /// </summary>
-    public double[]? DMaxPerChannel { get; set; }
+    public double[] DMaxPerChannel { get; set; } = { 2.0, 2.0, 2.0 };
 
     /// <summary>Per-channel MULTIPLICATIVE highlight-end density WB (Negadoctor wb_high).</summary>
     public double[] WbHigh { get; set; } = { 1.0, 1.0, 1.0 };
@@ -46,26 +50,6 @@ public sealed class FrameParams
 
     /// <summary>Density-domain zero-point correction: D_corr = D + ev * log10(2).</summary>
     public double ScanExposureEv { get; set; } = 0.0;
-
-    /// <summary>
-    /// LEGACY. The density-domain contrast that used to be sold as a digital "paper grade".
-    /// Read ONLY by <see cref="DensityEndpoints.LegacyStep5"/>, i.e. for rolls with no measured
-    /// <see cref="DMaxPerChannel"/> — projects saved before endpoints existed. No control writes
-    /// it any more and the inversion does not consult it otherwise.
-    ///
-    /// It is retained rather than deleted because dropping it would silently re-render every such
-    /// project; it is not retained as a knob. The paper-grade story it carried was wrong on its
-    /// own terms — Cineon is a storage encoding and models no paper, negadoctor models none
-    /// either, and recovering scene luminance from density is a division by the film's own gamma
-    /// whether or not any paper exists downstream. See THEORY.md and
-    /// docs/calibration/grade_is_overloaded.py: one gamma was driving two independent quantities
-    /// (luminance 1.010 vs chroma 1.347), and the three dye layers do not share a gamma at all
-    /// (channel spread 0.141), so no single scalar could have been right.
-    /// </summary>
-    public double Grade { get; set; } = 1.65;
-
-    /// <summary>LEGACY mid-tone anchor that <see cref="Grade"/> rotated about. Same status.</summary>
-    public double Pivot { get; set; } = 0.9;
 
     /// <summary>"none" (linear) | "basic" (sRGB gamma).</summary>
     public OutputIntent OutputIntent { get; set; } = OutputIntent.Basic;
@@ -258,8 +242,6 @@ public sealed class FrameParams
         WbOffset = (double[])WbOffset.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
         ScanExposureEv = ScanExposureEv,
-        Grade = Grade,
-        Pivot = Pivot,
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,

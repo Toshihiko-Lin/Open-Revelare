@@ -91,11 +91,12 @@ public static class WhiteBalance
         var res = new double[n][];
         if (chromaGrade is null || chromaGrade == grade)
         {
-            // Per-channel affine inverse. Written as the general (scale, offset) form rather
-            // than in terms of grade/pivot/d_max so the endpoint model can supply its own
-            // coefficients — see the DensityEndpoints overload below. For the legacy parameters
-            // these are exactly LegacyStep5's, so this stays bit-identical.
-            var ep = endpoints ?? DensityEndpoints.LegacyStep5Of(grade, pivot, dMax);
+            // Per-channel affine inverse, in the general (scale, offset) form. The caller supplies
+            // the endpoints; with none given this falls back to a neutral set built from the
+            // scalar d_max, which is what the retired grade/pivot chain reduced to once grade was
+            // 1. This routine is reached only by the CLI's parity diagnostics.
+            var ep = endpoints ?? DensityEndpoints.FromMeasured(
+                new[] { dMax, dMax, dMax }, dMax);
             for (int p = 0; p < n; p++)
             {
                 var r = new double[3];

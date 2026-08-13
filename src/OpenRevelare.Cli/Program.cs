@@ -102,10 +102,9 @@ static int Run(string[] args)
     var cal = new FrameParams();
     if (opts.TryGetValue("t-base", out var tb)) cal.TBase = ParseTriple(tb);
     if (opts.TryGetValue("d-max", out var dm)) cal.DMax = ParseD(dm);
-    // --grade / --pivot drive the LEGACY path only; supplying per-channel endpoints selects the
-    // endpoint model, in which the slope comes from the endpoints and neither is consulted.
-    if (opts.TryGetValue("grade", out var gr)) cal.Grade = ParseD(gr);
-    if (opts.TryGetValue("pivot", out var pv)) cal.Pivot = ParseD(pv);
+    // --grade / --pivot are accepted and ignored: the grade/pivot inversion is gone, and the
+    // slope now comes from the endpoints. Kept as no-ops so existing parity scripts still run.
+    opts.Remove("grade"); opts.Remove("pivot");
     if (opts.TryGetValue("d-max-per-channel", out var dmc)) cal.DMaxPerChannel = ParseTriple(dmc);
     if (opts.TryGetValue("scan-exposure-ev", out var se)) cal.ScanExposureEv = ParseD(se);
     if (opts.TryGetValue("wb-gains", out var wg)) cal.WbGains = ParseTriple(wg);
@@ -252,7 +251,7 @@ static int Run(string[] args)
             Console.WriteLine("auto_gains " + Fmt3(g.Gains));
             Console.WriteLine("auto_converged " + Fmt1(g.Converged ? 1 : 0));
 
-            var ai = WhiteBalance.AutoWbAffineIterative(srgb, onnx, cal.Grade, cal.Pivot, cal.DMax);
+            var ai = WhiteBalance.AutoWbAffineIterative(srgb, onnx, 1.0, 0.0, cal.DMax);
             Console.WriteLine("affine_iter_high " + Fmt3(ai.WbHigh));
             Console.WriteLine("affine_iter_offset " + Fmt3(ai.WbOffset));
             Console.WriteLine("affine_iter_flags " + Fmt3(new double[] { ai.Converged ? 1 : 0, ReasonCode(ai.Reason) }));
@@ -267,8 +266,8 @@ static int Run(string[] args)
         {
             ImageBuffer inSrgb = LoadLinear(opts["input"]);
             ImageBuffer targetSrgb = LoadLinear(opts["wb-target"]);
-            double grade = cal.Grade, pivot = cal.Pivot, dMax = cal.DMax;
-            double cgrade = cal.Grade;   // chroma follows grade (Cineon single gamma)
+            double grade = 1.0, pivot = 0.0, dMax = cal.DMax;
+            double cgrade = grade;   // the retired chroma split; kept neutral for the harness
             double[] ccs = cal.ChromaChannelScale;
 
             double[][] dSimple = WhiteBalance.SrgbToPreStep4Density(inSrgb, grade, pivot, dMax);

@@ -202,10 +202,6 @@ public static class Project
             ["wb_offset"] = Arr(p.WbOffset),
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
             ["scan_exposure_ev"] = p.ScanExposureEv,
-            // chroma_grade is retired — the concept is gone, not merely defaulted away. It is
-            // still WRITTEN, equal to grade, so a file stays readable by older builds and by the
-            // Python original, both of which expect the key.
-            ["chroma_grade"] = p.Grade,
             // Input colour space. Written only when it departs from the sRGB default, so a
             // project that never touched it stays byte-identical to one from an older build.
             ["input_primaries"] = p.InputPrimaries is { } ip
@@ -214,8 +210,6 @@ public static class Project
             ["input_white_point"] = p.InputWhitePoint is { Length: 2 } iw
                 ? new JsonArray(iw[0], iw[1])
                 : null,
-            ["grade"] = p.Grade,
-            ["pivot"] = p.Pivot,
             ["output_intent"] = p.OutputIntent == OutputIntent.Basic ? "basic" : "none",
             // Absent = false: a project written before the Stage-2 rework keeps the old chain.
             ["display_referred_stage2"] = p.DisplayReferredStage2,
@@ -255,12 +249,11 @@ public static class Project
             ["source_path"] = e.SourcePath,
         };
 
-        // Per-channel highlight endpoints. Not part of the Python schema, so written only when
-        // present rather than as a null — a roll that never used endpoint inversion stays
-        // byte-identical to what an older build produces, and the Python reader never meets a
-        // key it does not model. Absent on load = the legacy grade path.
-        if (p.DMaxPerChannel is { Length: 3 } dmc)
-            o["d_max_per_channel"] = new JsonArray(dmc[0], dmc[1], dmc[2]);
+        // Per-channel highlight endpoints — the inversion's white end, and now always present.
+        // Not part of the Python schema, so it is an extra key; the Python reader ignores it and
+        // reconstructs nothing, which is correct, because that reader models the retired chain.
+        var dmc = p.DMaxPerChannel;
+        o["d_max_per_channel"] = new JsonArray(dmc[0], dmc[1], dmc[2]);
         return o;
     }
 
@@ -270,10 +263,12 @@ public static class Project
         {
             TBase = Vec3(d, "t_base", 0.82, 0.51, 0.29),
             DMax = Dbl(d, "d_max", 2.0),
-            // Absent = null = the legacy grade path, so older projects render unchanged.
+            // Absent — a project written before endpoints existed — falls back to the scalar
+            // replicated across the channels. That is a neutral starting point, not a second
+            // model: the roll re-solves on the next automatic pass or D-max sample.
             DMaxPerChannel = d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
                 ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
-                : null,
+                : Repeat3(Dbl(d, "d_max", 2.0)),
             WbHigh = Vec3(d, "wb_high", 1, 1, 1),
             WbOffset = Vec3(d, "wb_offset", 0, 0, 0),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
@@ -285,8 +280,6 @@ public static class Project
             InputWhitePoint = d["input_white_point"] is JsonArray wa && wa.Count == 2
                 ? new[] { wa[0]!.GetValue<double>(), wa[1]!.GetValue<double>() }
                 : null,
-            Grade = d["grade"] is { } g ? g.GetValue<double>() : Dbl(d, "gamma", 1.65),
-            Pivot = Dbl(d, "pivot", 0.9),
             OutputIntent = Str(d, "output_intent", "basic") == "none" ? OutputIntent.None : OutputIntent.Basic,
             DisplayReferredStage2 = Bool(d, "display_referred_stage2", false),
             // Projects saved before the colour-managed rework carry no output space. They were
@@ -354,6 +347,9 @@ public static class Project
                 m[i, j] = a[i * 2 + j]!.GetValue<double>();
         return m;
     }
+
+    /// <summary>A scalar as a neutral three-channel endpoint set.</summary>
+    private static double[] Repeat3(double v) => new[] { v, v, v };
 
     private static double[] Vec3(JsonObject d, string key, double a, double b, double c)
         => d[key] is JsonArray arr && arr.Count >= 3

@@ -85,10 +85,9 @@ public static class Inversion
         double floorV2 = Math.Pow(10.0, -DensityFloor(cal, 2));
         bool biasActive = cal.ScanExposureEv != 0.0;
         double biasV = cal.ScanExposureEv * Log10_2;
-        // Mirrors BuildDensityLuts: under the endpoint model these live in the endpoints.
-        bool endpointModel = cal.DMaxPerChannel is { Length: 3 };
-        bool wbHighActive = !endpointModel && !ApproxAll(cal.WbHigh, 1.0);
-        bool wbOffsetActive = !endpointModel && cal.WbOffset.Any(x => Math.Abs(x) > Tol);
+        // wb_high and wb_offset are NOT applied here. Both describe an endpoint, and the
+        // endpoints are where they live (DensityEndpoints.For) — applying them again on the
+        // density would double them. Mirrors BuildDensityLuts.
         double wbOffMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
         double tb0 = cal.TBase[0], tb1 = cal.TBase[1], tb2 = cal.TBase[2];
         double wh0 = cal.WbHigh[0], wh1 = cal.WbHigh[1], wh2 = cal.WbHigh[2];
@@ -109,8 +108,6 @@ public static class Inversion
         {
             double d = -Math.Log10(Math.Max(v / tb, flr));
             if (biasActive) d += biasV;
-            if (wbHighActive) d *= wh;
-            if (wbOffsetActive) d += woc;
             return d;
         }
 
@@ -300,11 +297,8 @@ public static class Inversion
         // darkest area short of white and tinted.
         bool biasActive = cal.ScanExposureEv != 0.0;
         double bias = cal.ScanExposureEv * Log10_2;
-        // Under the endpoint model wb_high / wb_offset are folded into the endpoints
-        // (DensityEndpoints.FromMeasured), so applying them here too would double them.
-        bool endpointModel = cal.DMaxPerChannel is { Length: 3 };
-        bool wbHighActive = !endpointModel && !ApproxAll(cal.WbHigh, 1.0);
-        bool wbOffsetActive = !endpointModel && cal.WbOffset.Any(x => Math.Abs(x) > Tol);
+        // wb_high / wb_offset are folded into the endpoints (DensityEndpoints.FromMeasured), so
+        // applying them here too would double them.
         double wbOffsetMean = (cal.WbOffset[0] + cal.WbOffset[1] + cal.WbOffset[2]) / 3.0;
 
         var luts = new double[3][];
@@ -320,8 +314,6 @@ public static class Inversion
                 double t = idx / 65535.0;
                 double d = -Math.Log10(Math.Max(t / tBase, floor));
                 if (biasActive) d += bias;
-                if (wbHighActive) d *= wbHigh;
-                if (wbOffsetActive) d += wbOff;
                 lut[idx] = d;
             }
             luts[c] = lut;
