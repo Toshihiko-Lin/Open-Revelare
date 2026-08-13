@@ -1,5 +1,158 @@
 # OpenRevelare — 更新日志
 
+## 待发布
+
+导入后不再弹窗，整卷校准面板顶上多了两个自动按钮。自动标定在几类以前测不准的底片上
+测准了：没有灯板的卷、片基只剩边缘一条窄带的卷、画面里有挡光板的卷。
+
+**变更**
+
+- **反相只剩密度端点一种模型**。此前为了让旧工程逐位不变，端点模型与更早的 grade/pivot
+  链路并存，高光平衡因此有两处可以写——端点的通道间斜率差，以及 wb_high。整卷自动标定
+  两处都写了，同一个校正做了两遍，画面偏红约三分之一，且发生在反相内部，「帧编辑」里
+  任何滑块都拉不回来。旧链路已删除。
+
+  > **旧工程需要重跑一次。** 2026-08-12 之前保存的工程没有逐通道端点，会以一组中性端点
+  > 打开，观感与当初不同。跑一次「自动（整卷）」或采样一次 D-max 即可。
+
+- **导入后不再弹「齿孔遮罩确认」窗**。阈值自动量出并应用到整卷，导入完直接看到画面。
+  要核对或微调，去「整卷校准 → 齿孔遮罩」，勾「显示遮罩」看红色叠加，和以前弹窗里
+  是同一个控件。
+
+- **移除「密度端点」面板**。它没有可操作的东西，只显示一行读数。相关说明保留为片基
+  分组下的一行注解。
+
+**新增**
+
+- **「自动（整卷）」「自动（单张）」两个按钮**，在整卷校准面板最上方。自动去色罩的
+  能力一直都在，但只藏在导入对话框的一个复选框里，导入完就没有入口，也无法重跑。
+
+  「整卷」遍历全卷汇总成一套参数写给所有帧；「单张」只算当前帧，用于卷里混了一张
+  光源不同的片子。两者都不改动裁切。
+
+**改进**
+
+- **灯板识别改按物理特征判断**。以前只要求「亮端有峰、峰下有谷」，而任何直方图都满足。
+  现在要求灯板同时是独立亮簇、占据一定画面、与胶片有真实间隙、连到画幅边缘，且亮度
+  达到裸光源的水平——片基透过色罩只有灯板的三分之一亮，不会再被当成灯板。
+
+  受影响的三类卷：120 这类灯板面积大的、画面本身明暗分明的、以及画面里只有一条裸片基
+  窄带的。
+
+- **没有灯板时也能量出片基**。扫描件常常只在边缘留一条裸片基，占画面不到 1%，按分位数
+  取值会落在画面高光上，量出的片基偏高两倍多。现在会专门找这条窄带——独立亮簇、贴着
+  边缘、且是橙色，三条都满足才采信。
+
+- **测不到片基时会说出来**。C-41 片基必然是橙色（R > G > B 且相差明显）。测出接近中性
+  说明画面里没有裸露片基（例如已经裁到画面区域的扫描件），此时自动结果只是画面最亮处，
+  界面会提示改用「框选片基」手动标定。
+
+**修复**
+
+- **「自动（单张）」会把片基广播给整卷**。它调用的是整卷估计器，会写给每一帧；名字说
+  只管当前帧，实际改了整卷。
+
+- **「应用标定到整卷」重开工程后失效**。参数写进了内存但没有触发保存——自动保存只跟随
+  当前帧的滑块，其余帧是直接改的，程序不知道它们变了。
+
+- **整卷分析测片基前先裁切，把片基裁掉了**。片基就在裁切要去掉的那圈边缘上，2% 的裁切
+  就足以让它测不到而退回分位估计。这是「导入时第一张正常、整卷分析完就偏色」的直接
+  原因。现在片基单独用未裁切的画面测，其余统计仍用裁切后的。
+
+- **D-max 被挡光板和片边带偏**。挡光板比任何曝光区都密，直接成了 D-max；不透光的片边
+  又把三个通道不等地抬高。现在两端都排除在统计之外，画面里的暗部主体不受影响。
+
+- **暗端检测在纯黑处失效**。扫描件黑边三个通道相差 0.001，肉眼纯黑，按相对色偏算却是
+  15%，于是被当作画面保留了下来。
+
+- **暗端检测的一处数组越界崩溃**。
+
+---
+
+The import no longer stops to ask a question, and the roll-calibration panel has two
+automatic buttons at the top. Automatic calibration now measures correctly on several
+kinds of negative it used to get wrong: rolls with no light panel, rolls where the film
+base survives only as a sliver at the edge, and rolls with a light blocker in shot.
+
+**Changed**
+
+- **One inversion model: density endpoints.** The endpoint model had been living alongside
+  the older grade/pivot chain so that existing projects would render bit-identically, which
+  left two places able to state the highlight balance — the between-channel difference in
+  the endpoints' slope, and wb_high. The roll-wide calibration wrote both, applying the same
+  correction twice: about a third too much red, applied inside the inversion where no Frame
+  edit slider can reach it. The old chain is gone.
+
+  > **Existing projects need one pass.** A project saved before 2026-08-12 carries no
+  > per-channel endpoints and opens on a neutral set, so it will not look as it did. Run
+  > "Auto (whole roll)" once, or sample D-max, to bring it back.
+
+- **No more sprocket-mask dialog after an import.** The threshold is measured and applied to
+  the roll, so an import goes straight to a picture. To check or adjust it, go to Roll
+  calibration → Sprocket mask and tick "show mask" — the same control the dialog offered.
+
+- **The "Density endpoints" panel is gone.** It had nothing to operate, only a readout. The
+  explanation stays as a note under the film-base group.
+
+**Added**
+
+- **"Auto (whole roll)" and "Auto (this frame)"**, at the top of the roll-calibration panel.
+  The automatic mask removal always existed, but only as a checkbox in the import dialog:
+  once the import was done there was no way back to it.
+
+  "Whole roll" pools the roll into one parameter set and writes it to every frame; "this
+  frame" solves the current frame alone, for a picture shot under a different light. Neither
+  touches the crop.
+
+**Improved**
+
+- **The light panel is now identified by what it physically is.** The old test only asked for
+  a peak at the bright end with a dip below it, which every histogram satisfies. A panel must
+  now also be a separate cluster, occupy a real share of the frame, stand clear of the film,
+  reach the frame's edge, and be as bright as a bare light source — film base seen through the
+  orange mask is a third as bright and is no longer mistaken for one.
+
+  Three kinds of roll were affected: 120, where the panel can fill a third of the frame;
+  pictures that are themselves strongly bimodal; and frames whose only bright region is a
+  sliver of bare base.
+
+- **The film base can be measured with no light panel present.** A scan often keeps a strip of
+  bare rebate under 1% of the frame — far too small for a percentile, which lands on the
+  picture's highlights and reports a base more than twice too dense. That sliver is now looked
+  for directly, and believed only when it is a separate cluster, at the edge, and orange.
+
+- **When no film base can be measured, it says so.** A C-41 base is orange by construction
+  (R > G > B, by a clear margin). A near-neutral result means there is no bare base in frame —
+  a scan already cropped to the picture, for instance — and the panel now says as much and
+  points at the manual film-base sample.
+
+**Fixed**
+
+- **"Auto (this frame)" broadcast the film base to the whole roll.** It calls the roll-wide
+  estimator, which writes to every frame — the opposite of what the button's name promises.
+
+- **"Apply calibration to the whole roll" did not survive reopening the project.** The values
+  reached memory but nothing triggered a save: autosave follows the current frame's sliders,
+  and the other frames were written directly.
+
+- **The roll-wide pass cropped each frame before measuring the film base, cropping the base
+  away.** The base sits in exactly the margin a crop removes, and a 2% crop is enough to lose
+  it and fall back to a percentile. This is why a roll looked right on the first frame during
+  import and drifted the moment the roll-wide pass finished. The base is now measured on the
+  uncropped frame; everything else still measures the kept picture.
+
+- **D-max was set by the light blocker or the film edge.** A blocker is denser than any exposed
+  area and simply became D-max, while an opaque film edge lifted the three channels unequally.
+  Both ends are now excluded, and a dark subject inside the picture is left alone.
+
+- **The dark-end detection failed on true black.** A scanner's black border separates its
+  channels by 0.001 — visually pure black — which a relative test reports as a 15% cast, so it
+  was kept in as picture.
+
+- **An out-of-bounds crash in the dark-end detection.**
+
+---
+
 ## v1.3.0（2026-08-13）
 
 反相改用逐通道密度端点：黑白两端量出来，中间是算出来的。胶片条的帧顺序现在是可控的。
