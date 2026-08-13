@@ -95,6 +95,16 @@ public static class Settings
         /// </summary>
         public bool AutoInvertOnImport { get; set; } = true;
 
+        /// <summary>
+        /// Whether the import dialog's strip-split box opens ticked.
+        ///
+        /// Off by default, unlike the auto-inversion above, because the two have opposite costs
+        /// when guessed wrong. A needless inversion pass is a click to redo; a needless split
+        /// pre-pass decodes every file in the roll and puts a dialog in the way before anything
+        /// can be seen. Whoever scans whole strips turns it on once and it stays on.
+        /// </summary>
+        public bool SplitStripsOnImport { get; set; }
+
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
         public Models.ExportOptions Export { get; set; } = new();

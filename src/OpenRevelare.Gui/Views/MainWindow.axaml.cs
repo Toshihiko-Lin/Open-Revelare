@@ -1567,7 +1567,10 @@ public partial class MainWindow : Window
     private async Task<bool> RunSplitPrePassAsync(Models.ImportConfig cfg)
     {
         if (Vm is null) return true;
-        var scans = cfg.Paths.Where(ImportDialog.IsScan).ToList();
+        // Opt-in (import dialog → 底片分割). Unticked means every file is one frame, which is
+        // right for a scan already cut in the scanner software and saves decoding the whole roll
+        // just to find that out.
+        var scans = cfg.SplitStrips ? cfg.Paths.Where(ImportDialog.IsScan).ToList() : new List<string>();
         if (scans.Count == 0) { Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>()); return true; }
 
         Vm.StatusText = Loc.T("正在识别底片分割 …");

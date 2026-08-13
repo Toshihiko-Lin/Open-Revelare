@@ -30,4 +30,15 @@ public sealed class ImportConfig
     /// that is worth it depends on the roll in front of you.
     /// </summary>
     public bool AutoInvert { get; set; } = true;
+
+    /// <summary>
+    /// Run the strip-split pre-pass on scanner TIFFs: detect how many negatives each file holds
+    /// and open the confirmation dialog. Camera RAW ignores this — one file is one frame there.
+    ///
+    /// Opt-in because it is only right for one kind of scan. A file that already holds a single
+    /// frame — cut in the scanner software, or scanned one negative at a time — has nothing to
+    /// split, and running detection on it costs a decode of every file and a dialog to dismiss
+    /// before the roll will open. Defaults to the saved preference, like <see cref="AutoInvert"/>.
+    /// </summary>
+    public bool SplitStrips { get; set; }
 }

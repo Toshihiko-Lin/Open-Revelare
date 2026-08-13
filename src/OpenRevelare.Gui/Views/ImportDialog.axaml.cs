@@ -46,9 +46,9 @@ public partial class ImportDialog : Window
     {
         InitializeComponent();
         FileList.ItemsSource = Files;
-        FormatCombo.ItemsSource = FormatPresets;
-        // Opens on whatever the last import chose (OnOk writes it back).
+        // Opens on whatever the last import chose (OnAcceptClick writes them back).
         AutoInvertChk.IsChecked = Settings.Current.AutoInvertOnImport;
+        SplitChk.IsChecked = Settings.Current.SplitStripsOnImport;
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
@@ -140,22 +140,17 @@ public partial class ImportDialog : Window
             LccEnabled = LccChk.IsChecked == true,
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
             AutoInvert = AutoInvertChk.IsChecked == true,
+            SplitStrips = SplitChk.IsChecked == true,
         };
-        // The dialog's choice becomes the new default, so the next import opens on it.
-        if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert)
+        // The dialog's choices become the new defaults, so the next import opens on them.
+        if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert
+            || Settings.Current.SplitStripsOnImport != cfg.SplitStrips)
         {
             Settings.Current.AutoInvertOnImport = cfg.AutoInvert;
+            Settings.Current.SplitStripsOnImport = cfg.SplitStrips;
             Settings.Save();
         }
         cfg.Paths.AddRange(Files);
-        cfg.Notes.CameraBody = CameraEdit.Text ?? "";
-        cfg.Notes.FilmStock = FilmEdit.Text ?? "";
-        cfg.Notes.RollNumber = RollNoEdit.Text ?? "";
-        cfg.Notes.DevLab = LabEdit.Text ?? "";
-        cfg.Notes.DevDate = DateEdit.Text ?? "";
-        cfg.Notes.Location = LocationEdit.Text ?? "";
-        cfg.Notes.RollNote = NoteEdit.Text ?? "";
-        cfg.Notes.Format = FormatCombo.Text ?? "";
         Result = cfg;
         Close(true);
     }

@@ -131,10 +131,10 @@ white balance, D_max and the per-channel density endpoints.
 Unticking it means **nothing is measured** — not even the film base. The roll opens on pipeline
 defaults and every value is yours to set.
 
-**Strip splitting** (scans only; appears when one file holds several frames)
+**Strip splitting** (scans only; off by default)
 
-Scanners routinely put a whole strip of negative into one image. The software detects how many
-frames each scan holds and opens a "Strip splitting" window to confirm:
+Scanners routinely put a whole strip of negative into one image. **Ticked**, the import detects how
+many frames each scan holds and opens a "Strip splitting" window to confirm:
 
 - **Drag the dividers** to adjust the boundaries. What you edit are **dividers**, not four-cornered
   boxes: frames on a strip share their edges and are evenly pitched, so one number per boundary
@@ -151,6 +151,10 @@ frames each scan holds and opens a "Strip splitting" window to confirm:
 Splitting completes during import, so the main window is handed a finished frame list. A failed
 detection does not block the import: it falls back to one frame per file and says so in the status
 bar.
+
+> **Unticked, one file is one frame.** That is what you want for scans already cut in the scanner
+> software, or made one negative at a time — detection has to decode the whole roll, and there is no
+> reason to pay for it. Camera RAW is unaffected: always one frame per file.
 
 **Sprocket mask** (automatic — no dialog)
 

@@ -198,8 +198,6 @@
   "清空": "Clear",
   "0 张": "0 files",
   "支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。": "RAW (ARW/NEF/CR2/DNG …) and scanner TIFF. Select several = one roll.",
-  "卷信息（可选）": "Roll info (optional)",
-  "印在印样上，不写入 EXIF；也是图库的筛选依据（胶卷 / 相机 / ISO / 冲洗店 / 工艺 / 地点 / 年份）。导入后仍可在图库「卷信息」里修改。": "Printed on the contact sheet, never written to EXIF; it is also what the library filters on (film / camera / ISO / lab / process / location / year). All of it stays editable under “Roll info” in the library.",
   "翻拍光源（仅相机 RAW）": "Copy light source (camera RAW only)",
   "宽谱光源（白光）— Path B": "Broadband source (white light) — Path B",
   "窄谱光源（RGB 合成）— Path A，需校正图": "Narrowband source (RGB mix) — Path A, needs calibration shots",
@@ -536,5 +534,9 @@
   "⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【框选片基】手动标定": "⚠ No orange film base found: this roll may already be cropped past the base, so the automatic result is only a starting point — calibrate it by hand with Film-base sample",
   "自动完成：片基 T_base → 亮部 WB → D-max → 黑白场。不改动裁切；裁切见下方【几何 / 裁切】。": "Runs in order: film base T_base → highlight WB → D-max → black/white points. The crop is left alone — see Geometry and cropping below.",
   "遍历整卷解出片基 / 白平衡 / D-max / 黑白场，一套参数应用到所有帧。会覆盖已有的白平衡与色阶，不改动裁切。": "Walks the whole roll to solve the film base, white balance, D-max and the black/white points, and applies one parameter set to every frame. Overwrites any white balance and levels already set; leaves the crop alone.",
-  "只对当前帧做同样的自动流程，不动其他帧、也不改动裁切——用于整卷参数对这一张不合适时。": "Runs the same automatic pass on this frame alone, leaving the rest of the roll and the crop untouched — for when the roll-wide parameters do not suit this one picture."
+  "只对当前帧做同样的自动流程，不动其他帧、也不改动裁切——用于整卷参数对这一张不合适时。": "Runs the same automatic pass on this frame alone, leaving the rest of the roll and the crop untouched — for when the roll-wide parameters do not suit this one picture.",
+  "底片分割（仅扫描件）": "Strip splitting (scans only)",
+  "导入时识别一张里的多格底片并分割": "Detect and split several negatives held in one file",
+  "扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。": "Scanners routinely put a whole strip into one image. Ticked, the import detects how many frames each file holds and opens a window to confirm the dividers.",
+  "不勾选则一个文件按一帧导入——已经在扫描软件里切好、或本来就是一格一张时用这个。相机 RAW 不受影响，始终一张一帧。": "Unticked, one file is one frame — for scans already cut in the scanner software, or made one negative at a time. Camera RAW is unaffected: it is always one frame per file."
 }
