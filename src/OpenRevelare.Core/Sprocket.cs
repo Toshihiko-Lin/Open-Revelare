@@ -18,6 +18,73 @@ public static class Sprocket
     /// <summary>Sentinel from <see cref="EstimateDarkValley"/>: no light-blocking mask — use everything.</summary>
     public const double NoMaskDark = 0.0;
 
+    /// <summary>
+    /// Share of the global histogram peak a bin must clear to count as a cluster rather than
+    /// scatter, in <see cref="TopCluster"/>. Low enough for a thin sliver of board, high enough
+    /// that film grain and dust specks in the highlight tail are not "the topmost cluster".
+    /// </summary>
+    private const double ClusterFloor = 0.01;
+
+    /// <summary>
+    /// How shallow the valley below the board must be, as a share of the board peak, before the
+    /// two are accepted as separate populations. This is what distinguishes a genuine gap (bare
+    /// light source against film) from the smooth roll-off of a normally-exposed negative into
+    /// its own highlights.
+    /// </summary>
+    private const double MaxValleyDepth = 0.20;
+
+    /// <summary>
+    /// Least ABSOLUTE channel spread (max−min of the per-channel means, in linear units) before a
+    /// dark cluster's relative cast is believed to be a real colour cast rather than noise.
+    ///
+    /// Set above the channel scatter of a black scanner border — measured ≈0.001 on the samples
+    /// here — and far below a genuine C-41 highlight seen through the orange base, whose channels
+    /// separate by an order of magnitude more.
+    /// </summary>
+    private const double MinCastSpread = 0.01;
+
+    /// <summary>
+    /// Least share of the frame a light board must occupy to be believed.
+    ///
+    /// A board is a physical object in shot — on the copy-stand samples it runs from a thin ring
+    /// to a third of the frame. Below this the "board" is the bright tail of the picture, and
+    /// cutting there removes highlights rather than hardware. 0.2% is low enough for a sliver of
+    /// panel showing past one edge of a 135 frame.
+    /// </summary>
+    private const double MinBoardShare = 0.002;
+
+    /// <summary>
+    /// Least luma gap between the board's peak and the valley below it.
+    ///
+    /// Expresses "the board stands clear of the film" — the board↔base boundary is a step, not a
+    /// dip inside one continuous distribution. Without it a scan whose histogram merely thins out
+    /// toward the highlights yields a cut in the middle of the picture.
+    /// </summary>
+    private const double MinBoardSeparation = 0.10;
+
+    /// <summary>
+    /// Share of a cluster's pixels that must be connected to the frame's edge before it is
+    /// accepted as hardware (light board, blocking card, unlit surround) rather than picture.
+    ///
+    /// Hardware reaches the edge by construction, so its true share is ≈1; picture content is
+    /// ≈0. The margin below 1 absorbs the ordinary case where a little genuine picture happens
+    /// to fall on the same side of the cut as the hardware — dark shadow touching a black
+    /// border, a blown highlight meeting the panel — without letting that decide the answer.
+    /// </summary>
+    private const double MinEdgeConnected = 0.70;
+
+    /// <summary>
+    /// Least peak luma for a bright cluster to be a light board rather than bare film base.
+    ///
+    /// A board is unattenuated light source and is exposed at or near clipping; base is that same
+    /// light seen THROUGH the orange mask, which costs it most of a stop and then some. Measured
+    /// bases here peak around 0.27-0.28 and boards around 0.93-0.95, so the two populations are
+    /// separated by a factor of three and the exact bar is not load-bearing. Set low enough to
+    /// still admit a deliberately dim board (the estimator's remarks cite one at 0.9) and a copy
+    /// stand exposed conservatively.
+    /// </summary>
+    private const double MinBoardLuma = 0.55;
+
     /// <summary>Detect mask: per-pixel mean luma &gt; threshold (matches image.mean(axis=2)).</summary>
     public static bool[] MakeMask(float[] data, int pixelCount, float threshold)
     {
@@ -65,27 +132,176 @@ public static class Sprocket
         if (luma.Length < 100) return NoBoard;
         double[] smooth = Smooth7(Histogram256(luma));
 
-        // 1. Board peak: tallest bin in the bright region (luma > 0.55).
-        int hiLo = SearchSortedLeftCentres(0.55);
-        if (hiLo >= smooth.Length) return NoBoard;
-        int boardPk = ArgMax(smooth, hiLo, smooth.Length);
+        // 1. The board cluster, identified by ITS OWN properties rather than by pairing it with a
+        //    film-base peak. See the class remarks: a normally-exposed negative HAS no base peak,
+        //    so requiring one is what made this fire on pictures.
+        int boardPk = TopCluster(smooth, out int boardFoot);
+        if (boardPk < 0) return NoBoard;
 
-        // 2. Base peak: tallest bin to the LEFT of the board peak.
-        if (boardPk <= 0) return NoBoard;
-        int basePk = ArgMax(smooth, 0, boardPk);
-        if (basePk >= boardPk) return NoBoard;
-
-        // 3. Valley: deepest point between the two peaks.
-        int valleyIdx = ArgMin(smooth, basePk, boardPk);
+        // 2. The gap between the FILM's bright edge and the board's foot.
+        //
+        // Searched from the film upward, not from bin 0. Below the film the histogram is empty,
+        // and an empty bin is the global minimum — so a search starting at 0 puts the cut under
+        // everything in frame, the "board" becomes the whole picture and the tests below then
+        // reject the frame outright. The film's own top edge is where the gap actually begins.
+        int filmTop = FilmTop(smooth, boardFoot);
+        if (filmTop < 0) return NoBoard;
+        int valleyIdx = ArgMin(smooth, filmTop, boardFoot + 1);
         double valleyLuma = Centre(valleyIdx);
 
-        // The valley must be a genuine gap — notably shallower than both flanking peaks.
-        // Otherwise the "two peaks" are one cluster (no board in frame) and we fall back.
-        double boardVal = smooth[boardPk], baseVal = smooth[basePk], valleyVal = smooth[valleyIdx];
-        if (boardVal <= 0 || baseVal <= 0) return NoBoard;
-        if (valleyVal > 0.5 * Math.Min(boardVal, baseVal)) return NoBoard;
+        // 3. Rejection tests. Steps 1-2 find SOMETHING on any histogram — every distribution has a
+        //    top and a dip — so what follows is what stops this firing on a photograph.
+        double total = 0;
+        foreach (double c in smooth) total += c;
+        if (total <= 0) return NoBoard;
+        double boardShare = 0;
+        for (int i = boardFoot + 1; i < smooth.Length; i++) boardShare += smooth[i];
+        // (a) The board occupies a real share of the frame — it is a physical object in shot.
+        if (boardShare < MinBoardShare * total) return NoBoard;
+
+        // (b) The board stands CLEAR of the film. Both halves are needed: the brightness gap says
+        //     the cluster is somewhere else on the scale, and the valley DEPTH says the two are
+        //     genuinely separate populations rather than one distribution with a dip in it. A
+        //     normally-exposed negative rolls off smoothly into its highlights, so it fails the
+        //     depth test even where a wide shoulder passes the separation one.
+        if (Centre(boardPk) - valleyLuma < MinBoardSeparation) return NoBoard;
+        if (smooth[valleyIdx] > MaxValleyDepth * smooth[boardPk]) return NoBoard;
+
+        // (c) The board lies at the EDGE of the frame — the one test a bright picture cannot pass,
+        //     because the board is the thing the film is lying ON and can only show around the
+        //     film's edges. On FS-76221534.tif a dark subject at luma 0.21 against bright sky at
+        //     0.59 satisfies every photometric rule above; what gives it away is that 643k of
+        //     those pixels sit in the frame's interior against 63k in the border band.
+        if (!BorderDominant(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
+
+        // (d) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
+        //     brightest thing present.
+        //
+        // Without this, the bare film-base rebate at the edge of a scan is mistaken for a board:
+        // it is a separate cluster, it is at the edge, and it is the brightest thing in frame, so
+        // it passes (a) through (c). On 图像 003c the base sliver at luma 0.28 was read as a board
+        // and the cut placed at 0.178, which then removed the base itself from every statistic —
+        // and, because the roll pass applies one cut to all frames, took the whole roll's t_base
+        // with it (0.163, 0.094, 0.048 against a correct 0.397, 0.273, 0.155).
+        //
+        // The two are far apart on an absolute scale and cannot be confused once it is consulted:
+        // a copy-stand board is exposed to clip or near it (0.93-0.95 on the synthetic cases here,
+        // and the estimator's own remarks cite a dim board at 0.9), while base seen through the
+        // orange mask cannot exceed roughly a third of that. Anything dimmer than this bar is
+        // film, whatever else it looks like.
+        if (Centre(boardPk) < MinBoardLuma) return NoBoard;
 
         return Math.Clamp(valleyLuma, 0.1, 0.99);
+    }
+
+    /// <summary>
+    /// The brightest bin still holding film: the last populated bin below
+    /// <paramref name="boardFoot"/>. The gap the board cut goes in starts here.
+    /// </summary>
+    /// <returns>Bin index, or -1 when nothing lies below the board at all.</returns>
+    private static int FilmTop(double[] smooth, int boardFoot)
+    {
+        double mx = 0;
+        foreach (double v in smooth) if (v > mx) mx = v;
+        if (mx <= 0) return -1;
+        // "Populated" relative to the frame, so grain scatter in an empty region does not count
+        // as film. The same floor the cluster search uses, for the same reason.
+        double floor = ClusterFloor * mx;
+        for (int i = Math.Min(boardFoot, smooth.Length - 1); i >= 0; i--)
+            if (smooth[i] > floor) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// The topmost significant cluster of <paramref name="smooth"/>: its peak bin, and via
+    /// <paramref name="foot"/> the bin where the cluster's lower flank bottoms out.
+    ///
+    /// Scans from the BRIGHT end for the first local maximum clearing a floor, rather than taking
+    /// the tallest bin above a fixed luma. The fixed-luma form ("tallest bin above 0.55") failed
+    /// in both directions: on a 120 frame with a large board, the board's own shoulder outranked
+    /// the film base one bin below its summit; on a boardless scan it simply returned the
+    /// picture's highlight mode and the caller cut the picture in half. Which cluster is topmost
+    /// is a property of the histogram, not of a constant.
+    /// </summary>
+    /// <returns>Peak bin index, or -1 when no cluster clears the floor.</returns>
+    private static int TopCluster(double[] smooth, out int foot)
+    {
+        foot = 0;
+        double mx = 0;
+        foreach (double v in smooth) if (v > mx) mx = v;
+        if (mx <= 0) return -1;
+        double floor = ClusterFloor * mx;
+
+        int n = smooth.Length;
+        int pk = -1;
+        for (int i = n - 2; i >= 1; i--)
+        {
+            if (smooth[i] > floor && smooth[i] >= smooth[i - 1] && smooth[i] >= smooth[i + 1])
+            {
+                pk = i;
+                break;
+            }
+        }
+        if (pk < 0) return -1;
+
+        // Down the cluster's lower flank to its foot: the bin where the histogram stops falling
+        // and starts rising again into whatever lies below the board.
+        int f = pk;
+        while (f > 0 && smooth[f - 1] <= smooth[f]) f--;
+        foot = f;
+        return pk;
+    }
+
+    /// <summary>
+    /// True when the pixels above <paramref name="cut"/> are concentrated in the frame's border
+    /// band rather than spread through its interior — the signature of a light board as opposed
+    /// to a bright subject.
+    ///
+    /// Measured as a DENSITY ratio, not a raw count: the border band is a small fraction of the
+    /// frame, so a plain count comparison would be biased toward the interior simply because the
+    /// interior is bigger. Comparing "share of the band that is lit" against "share of the
+    /// interior that is lit" is scale-free and holds for a thin sliver of panel and a wide one
+    /// alike.
+    /// </summary>
+    /// <param name="below">False → pixels ABOVE <paramref name="cut"/> (a light board).
+    /// True → pixels at or BELOW it (a blocking card / unlit surround).</param>
+    private static bool BorderDominant(float[] luma, int w, int h, double cut, bool below = false)
+    {
+        // Flood from the frame's border inward through matching pixels. Connectivity, not a
+        // fixed band: hardware touches the edge of the scan but its shape is not known in
+        // advance — a full-width strip along one side, a ring on all four, a corner wedge. A
+        // band test only recognises the ring, and reports a one-sided strip as picture because
+        // half the band is film. What every real case shares is that the region REACHES the
+        // frame's edge, while a subject in the photograph does not.
+        int n = w * h;
+        var seen = new bool[n];
+        var stack = new Stack<int>();
+
+        void Seed(int p) { if (!seen[p] && Match(luma[p])) { seen[p] = true; stack.Push(p); } }
+        bool Match(float v) => below ? v <= cut : v > cut;
+
+        for (int x = 0; x < w; x++) { Seed(x); Seed((h - 1) * w + x); }
+        for (int y = 0; y < h; y++) { Seed(y * w); Seed(y * w + w - 1); }
+
+        long connected = 0;
+        while (stack.Count > 0)
+        {
+            int p = stack.Pop();
+            connected++;
+            int px = p % w, py = p / w;
+            if (px > 0) Seed(p - 1);
+            if (px < w - 1) Seed(p + 1);
+            if (py > 0) Seed(p - w);
+            if (py < h - 1) Seed(p + w);
+        }
+        if (connected == 0) return false;
+
+        // How much of the matching population is edge-connected. Hardware is essentially all of
+        // it; a bright sky or a dark subject sitting in the picture is essentially none, and the
+        // few pixels of it that happen to touch a corner cannot carry the rest.
+        long matching = 0;
+        for (int p = 0; p < n; p++) if (Match(luma[p])) matching++;
+        return matching > 0 && (double)connected / matching >= MinEdgeConnected;
     }
 
     /// <summary>
@@ -127,8 +343,14 @@ public static class Sprocket
 
         // 2. Picture peak: tallest bin to the RIGHT of the mask peak (the darkest real
         //    picture tones — the highlight cluster we want to keep).
+        //
+        // ArgMax already returns an ABSOLUTE index into `smooth`, so its result is used as-is.
+        // Re-adding the `maskPk + 1` offset (as this line once did) pushed picPk past the end of
+        // the array whenever the picture peak sat in the upper half, and ArgMin(maskPk, picPk)
+        // then indexed out of bounds — an outright crash, reached by any frame whose brightest
+        // cluster is bright enough, e.g. a 120 negative with the light panel showing.
         if (maskPk >= smooth.Length - 1) return NoMaskDark;
-        int picPk = maskPk + 1 + ArgMax(smooth, maskPk + 1, smooth.Length);
+        int picPk = ArgMax(smooth, maskPk + 1, smooth.Length);
         if (picPk <= maskPk) return NoMaskDark;
 
         // 3. Valley: deepest point between the two peaks.
@@ -142,7 +364,17 @@ public static class Sprocket
         // Neutrality gate: an opaque mask blocks all light equally, so it is NEUTRAL
         // (R≈G≈B); a real negative highlight is seen THROUGH the orange base and carries a
         // strong cast. A coloured dark cluster is therefore a highlight, not a mask — and
-        // clipping it would throw away the very pixel auto-WB needs. >8% cast → not a mask.
+        // clipping it would throw away the very pixel auto-WB needs.
+        //
+        // Judged on the RELATIVE cast AND an ABSOLUTE channel spread, because the relative
+        // measure alone divides by a near-zero mean and stops meaning anything exactly where the
+        // surround is blackest. A scanner's unlit border measured (0.0066, 0.0070, 0.0076) on
+        // FS-76221528.tif — visually pure black, and 0.001 apart — which the ratio reports as a
+        // 15% "cast", rejecting it as picture. The surround then stayed in every statistic: it
+        // set D-max to 4.6 and dragged t_base to a neutral 0.72 instead of an orange base.
+        // Requiring the spread to be absolutely large as well keeps the test meaningful at both
+        // ends of the scale, since a genuine C-41 highlight separates its channels by far more
+        // than sensor noise does.
         double s0 = 0, s1 = 0, s2 = 0;
         long n = 0;
         float[] d = image.Data;
@@ -155,9 +387,22 @@ public static class Sprocket
         }
         if (n == 0) return NoMaskDark;
         double m0 = s0 / n, m1 = s1 / n, m2 = s2 / n;
-        double cast = (Math.Max(Math.Max(m0, m1), m2) - Math.Min(Math.Min(m0, m1), m2))
-                      / Math.Max((m0 + m1 + m2) / 3.0, 1e-6);
-        if (cast > 0.08) return NoMaskDark;
+        double spread = Math.Max(Math.Max(m0, m1), m2) - Math.Min(Math.Min(m0, m1), m2);
+        double cast = spread / Math.Max((m0 + m1 + m2) / 3.0, 1e-6);
+        if (cast > 0.08 && spread > MinCastSpread) return NoMaskDark;
+
+        // Spatial gate, the mirror of the one on the bright end: a blocking card / unlit surround
+        // is at the frame's EDGE, whereas a dark SUBJECT is not.
+        //
+        // The neutrality test above is necessary but not sufficient. It rejects a dark cluster
+        // that carries the orange base's cast, but a genuinely neutral dark subject — a shadow
+        // under an overhang, a black object, a night sky — passes it, and clipping there throws
+        // away the densest real pixels. Since those pixels are precisely the scene's brightest
+        // highlights, losing them is what sends D-max to an extreme: the endpoint is then read
+        // off whatever survives instead of off the true highlight. Requiring the dark cluster to
+        // live at the border keeps the card and the surround while leaving picture shadows alone.
+        if (!BorderDominant(luma, image.Width, image.Height, valleyLuma, below: true))
+            return NoMaskDark;
 
         return Math.Clamp(valleyLuma, 0.0, 0.9);
     }
