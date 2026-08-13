@@ -1,45 +1,76 @@
 # OpenRevelare — 更新日志
 
-## 待发布
+## v1.3.0（2026-08-13）
 
-反相不再有「反差」这个旋钮——黑白两端定出来，中间是算出来的。胶片条的帧顺序现在是可控的。
+反相改用逐通道密度端点：黑白两端量出来，中间是算出来的。胶片条的帧顺序现在是可控的。
+程序内的文档按 Markdown 渲染，公式真正排版。
 
 **变更**
 
-- **「反差（相纸号数）」面板已移除，反相改由密度端点决定**。片基是黑端，D-max 是白端，
-  三个通道各自归一化，斜率是这两端相减的结果，不再是一个要你去选的参数。整卷自动标定
-  会同时量出逐通道端点，正常流程下无需额外操作。
+- **反相由密度端点决定**。片基是黑端，D-max 是白端，三个通道各自归一化，斜率由两端算出。
+  面板上「反差（相纸号数）」换成只读的「密度端点」；整卷自动标定会一并量出端点，正常
+  流程下无需额外操作。白平衡 wb_high / wb_offset 照旧可调，两端各自独立确定，标定没有
+  先暗后亮的顺序要求。原理见程序内「技术原理」。
 
-  原来那套说法是「负片为相纸设计得低反差，数字化要补回来」。这个论证不成立：Cineon 是
-  负片密度的存储编码，本身不含相纸环节，darktable negadoctor 同样不含；而从密度还原场景
-  亮度是除以胶片自身的 gamma，跟下游有没有相纸无关。实测也不支持用一个标量：亮度和色度
-  需要的增益不同（1.010 vs 1.347），三层染料的 gamma 本就不同（跨通道差 0.141），单一
-  标量无法同时线性化三个通道。详见程序内「技术原理」与 `docs/calibration/`。
+  已有工程渲染结果不变；重跑整卷自动标定或采样一次 D-max 即可切换到新模型。
 
-  **三通道调整的自由度一个没少**：wb_high / wb_offset 保留，改为作用在端点上。附带的好处是
-  标定顺序问题消失了——原先必须先暗后亮（顺序反了残差 0.7，对了 0.04），因为两端在抢同一
-  批自由度；现在两端各自独立确定。
-
-  已有工程若没有存过端点，仍按旧方式渲染，结果逐位不变；重跑整卷自动标定或采样一次 D-max
-  即可切换到新路径。
-
-**修复**
-
-- **片基采样误报「采样区偏暗」**。判据原本逐通道比较，但片基是橙色、蓝通道天然低，而参照的
-  齿孔/灯板不带色罩，等于要求色罩吸收最强的通道去和无滤镜通道比高低；阈值 0.4 也偏严——
-  色罩密度本就让片基透光远低于裸灯板的一半。改为按总透光量比较、阈值 0.08。
+- **「快捷键与上手…」改为「快捷键…」**，只留快捷键表和采样 / 滑块 / 预览三条操作提示，
+  流程说明统一在「操作指引」里。首次启动的引导打开「操作指引」。
 
 **新增**
 
 - **拖动缩略图调整帧顺序**。高亮横线指示落点，拖到顶端或底端会自动滚动。虚拟副本
   跟着母帧一起移动。顺序随工程保存，也决定印样的排列，右键「按文件名排序」可恢复。
 
+- **文档查看器渲染 Markdown，公式按 LaTeX 排版**。标题、列表、表格、引用块、代码与公式
+  各按其形态显示；公式有横线分数、斜体变量、真正降位的下标和带括号的矩阵。左侧目录由
+  文档里实际存在的标题生成。
+
+**改进**
+
+- **「操作指引」按现行界面重写**。章节对应当前的面板划分（整卷校准 / 帧编辑），顺序照实际
+  操作走：输入路径 → 翻拍要求 → 导入 → 整卷校准 → 几何 → 帧编辑 → 整卷操作 → 导出 →
+  Path A → 快捷键。
+
+- **「技术原理」按现行实现重写**。结构改为「三条并行输入前端 → Cineon 核心」：Path A /
+  Path B / TIFF 各自如何得到线性光，汇合后进入统一的密度域反相。另补「已知限制：输入
+  原色未声明」一节。
+
 **修复**
 
-- **导入后缩略图不按文件名排序**。手选多个文件、或分多次添加攒起来的卷会乱序
-  （文件夹导入本来就是排好的）。现在统一按文件名排，向已有的卷添加图像时只把新增的这批排好追加在末尾，不重排整卷。
+- **导入后缩略图不按文件名排序**。手选多个文件、或分多次添加攒起来的卷会乱序。现在统一
+  按文件名排，数字段按数值比较；向已有的卷添加图像时只把新增的这批排好追加在末尾，不动
+  已有的顺序。
+
+- **片基采样误报「采样区偏暗」**。橙色片基的蓝通道天然低于不带色罩的齿孔/灯板，正常的
+  片基框选也会触发提示。现在按总透光量判断，误采到画面或深阴影仍会提示。
+
+- **自动 D-max 检测被片边干扰**，不透光的片边会把三个通道不等地抬高，结果偏色。现在与
+  整条自动标定链一致，齿孔与片边不再计入。
 
 ---
+
+The inversion model changed: one gamma shared across three channels gives way to
+per-channel density endpoints. The "contrast" knob goes with it — the two ends are
+measured and the middle follows. The frame order in the film strip is now yours to set.
+The in-app documents are no longer one block of source, and their formulas are typeset.
+
+**Changed**
+
+- **The inversion is decided by density endpoints.** The film base is the black end,
+  D-max is the white end, each channel is normalised on its own, and the slope follows
+  from the two ends. On screen, "Contrast (paper grade)" gives way to a read-only "Density
+  endpoints"; the roll-wide auto calibration measures the endpoints along the way, so the
+  ordinary route needs no extra step. White balance (wb_high / wb_offset) adjusts as
+  before, and with each end pinned independently, calibration no longer has to go dark
+  before light. See "How it works" in the app for the reasoning.
+
+  Existing projects render as they did. Re-run the roll-wide auto calibration, or sample
+  D-max once, to move them onto the new model.
+
+- **"Keys and getting started…" is now "Keyboard shortcuts…"** — the key table plus three
+  notes on sampling, sliders and the preview, with the workflow documented in the user
+  guide alone. The first-run prompt opens the user guide.
 
 **Added**
 
@@ -48,12 +79,39 @@
   The order is saved with the project and sets the contact sheet's layout; right-click →
   "Sort by file name" puts it back.
 
+- **The document viewer renders Markdown, and formulas are typeset as LaTeX.** Headings,
+  lists, tables, quotes, code and formulas each look like what they are, and a formula
+  gets a real fraction bar, italic variables, subscripts that sit below the line and
+  bracketed matrices. The table of contents on the left is built from the headings in the
+  document.
+
+**Improved**
+
+- **The user guide was rewritten around the current interface.** Its sections match the
+  panels as they now stand (roll calibration / frame edit) and follow the order you work
+  in: input paths → copy-stand requirements → import → roll calibration → geometry →
+  frame edit → roll-wide operations → export → Path A → keys.
+
+- **"How it works" was rewritten against the current implementation**, restructured as
+  three parallel input front ends feeding one Cineon core: how Path A, Path B and TIFF
+  each arrive at linear light before meeting in the shared density-domain inversion. A
+  "Known limitation: input primaries are not declared" section is new.
+
 **Fixed**
 
 - **Thumbnails were not sorted by file name after an import.** Hand-picking several files,
-  or building a roll up over several adds, left it scrambled (a folder import was already
-  sorted). Everything is now sorted by file name with digit runs compared as numbers. Adding to an existing roll sorts only the new batch and
-  appends it, leaving the rest of the order alone.
+  or building a roll up over several adds, left it scrambled. Everything is now sorted by
+  file name with digit runs compared as numbers; adding to an existing roll sorts only the
+  new batch and appends it, leaving the existing order alone.
+
+- **Film-base sampling wrongly reported "the sampled region looks dark".** The orange
+  base has a naturally low blue channel next to unmasked sprockets and light panel, so a
+  perfectly good base selection could set the warning off. It now judges by total
+  transmission, and still warns if you land on the picture or a deep shadow.
+
+- **Automatic D-max detection was thrown off by the film edge**, where opaque border
+  lifted the three channels unequally and left a cast. It now matches the rest of the
+  automatic calibration chain, with sprockets and film edge left out.
 
 ## v1.2.2（2026-08-11）
 
