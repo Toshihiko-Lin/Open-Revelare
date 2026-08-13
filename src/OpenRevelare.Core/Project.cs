@@ -47,6 +47,12 @@ public static class Project
     {
         public RollMeta Meta = new();
         public List<Frame> Frames = new();
+
+        /// <summary>
+        /// 这一卷存的是旧标定模型（没有 d_min_per_channel），载入后画面与保存时不同。
+        /// 界面据此提示用户重跑标定；见 <see cref="NeedsRecalibration"/> 说明为何不静默折算。
+        /// </summary>
+        public bool NeedsRecalibration;
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────
@@ -97,7 +103,12 @@ public static class Project
         var d = new Data { Meta = DesRollMeta(root["roll_meta"]?.AsObject()) };
         if (root["frames"] is JsonArray frames)
             foreach (JsonNode? f in frames)
-                if (f is JsonObject fo) d.Frames.Add(DesFrame(fo));
+                if (f is JsonObject fo)
+                {
+                    d.Frames.Add(DesFrame(fo));
+                    // 任何一帧是旧模型就标记整卷：标定是卷级的，逐帧提示没有意义。
+                    if (NeedsRecalibration(fo)) d.NeedsRecalibration = true;
+                }
         return d;
     }
 
@@ -197,19 +208,17 @@ public static class Project
             ["filename"] = System.IO.Path.GetFileName(e.SourcePath),
             // FilmBase calibration
             ["t_base"] = Arr(p.TBase),
-            ["d_max"] = p.DMax,
-            // Neutral, always. The highlight balance lives in d_max_per_channel and the shadow end
-            // in wb_offset_density; writing the old multiplier as anything but identity would make
-            // a build that still reads it apply the correction twice. Kept so such a build (and the
-            // Python reader) still parses the file. See DesFrame for the read side.
+            // ── 反相的六个自由度，就这两行 ──────────────────────────────────────
+            ["d_min_per_channel"] = Arr(p.DMinPerChannel),
+            ["d_max_per_channel"] = Arr(p.DMaxPerChannel),
+            // ── 以下为兼容键，全部写成中性值 ────────────────────────────────────
+            // 旧版本（及 Python 读端）仍会解析它们。写中性值而非真实值，是因为那些版本会把
+            // 它们叠加到端点之上——写非中性就等于让旧版把同一个校正应用两遍。
+            ["d_max"] = FrameParams.OutputRange,
             ["wb_high"] = new JsonArray(1.0, 1.0, 1.0),
-            // Legacy key: the ADDITIVE shadow nudge, which is what the absolute shadow density
-            // reduces to once t_base has put the base at zero — they differ only in sign
-            // convention, and for the untouched 0,0,0 case not even there.
-            ["wb_offset"] = new JsonArray(-p.WbOffset[0], -p.WbOffset[1], -p.WbOffset[2]),
-            ["wb_offset_density"] = Arr(p.WbOffset),
+            ["wb_offset"] = new JsonArray(0.0, 0.0, 0.0),
             ["chroma_channel_scale"] = Arr(p.ChromaChannelScale),
-            ["scan_exposure_ev"] = p.ScanExposureEv,
+            ["scan_exposure_ev"] = 0.0,
             // Input colour space. Written only when it departs from the sRGB default, so a
             // project that never touched it stays byte-identical to one from an older build.
             ["input_primaries"] = p.InputPrimaries is { } ip
@@ -257,11 +266,6 @@ public static class Project
             ["source_path"] = e.SourcePath,
         };
 
-        // Per-channel highlight endpoints — the inversion's white end, and now always present.
-        // Not part of the Python schema, so it is an extra key; the Python reader ignores it and
-        // reconstructs nothing, which is correct, because that reader models the retired chain.
-        var dmc = p.DMaxPerChannel;
-        o["d_max_per_channel"] = new JsonArray(dmc[0], dmc[1], dmc[2]);
         return o;
     }
 
@@ -270,13 +274,11 @@ public static class Project
         var p = new FrameParams
         {
             TBase = Vec3(d, "t_base", 0.82, 0.51, 0.29),
-            DMax = Dbl(d, "d_max", 2.0),
             // Both endpoints, migrated from whatever schema the file was written in — see
             // MigrateHighlightEndpoint / MigrateShadowEndpoint.
             DMaxPerChannel = MigrateHighlightEndpoint(d),
-            WbOffset = MigrateShadowEndpoint(d),
+            DMinPerChannel = MigrateShadowEndpoint(d),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
-            ScanExposureEv = Dbl(d, "scan_exposure_ev", 0.0),
             // Deliberately not read back. A stored 3.05 described a chroma boost compensating for
             // a colour-space conversion the pipeline was missing; that conversion now exists
             // (InputTransform / OutputRender), so honouring the old number would double up.
@@ -356,42 +358,35 @@ public static class Project
     private static double[] Repeat3(double v) => new[] { v, v, v };
 
     /// <summary>
-    /// The per-channel HIGHLIGHT density, from any schema this project may have been written in.
-    /// Rendered pixels are preserved across all three.
+    /// 这一帧的标定是否来自旧模型、需要重跑。
     ///
-    /// Three cases, newest first:
-    ///
-    ///  1. <c>d_max_per_channel</c> with a neutral <c>wb_high</c> — the current schema. Taken as
-    ///     written.
-    ///  2. <c>d_max_per_channel</c> with a NON-neutral <c>wb_high</c> — written by a build in
-    ///     which wb_high still divided the endpoint. The two are folded back into the one number
-    ///     they always described: <c>endpoint / wb_high</c>, which is precisely what
-    ///     <c>FromMeasured</c> computed at render time before that argument was removed. (In
-    ///     practice only hand-edited projects land here — the auto chain forced wb_high to 1
-    ///     whenever it wrote endpoints — but a file that does hit it must not shift.)
-    ///  3. Neither key — a project older than endpoints. The scalar d_max replicated across the
-    ///     channels is the neutral set the roll started from, then divided by wb_high as above,
-    ///     which reproduces exactly what the old multiplicative model rendered.
+    /// 判据是 <c>d_min_per_channel</c> 缺失——那是新模型独有的键。旧工程的 d_max/scan_ev 与
+    /// 现在固定的输出范围不是同一个量纲，**渲染结果一定会变**，所以不做静默折算（试过：把
+    /// 增益折进端点在薄部偏 -18%、浓部 +53%，比不折算更糟），而是如实告诉用户重跑标定。
     /// </summary>
-    private static double[] MigrateHighlightEndpoint(JsonObject d)
-    {
-        double[] ep = d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
-            ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
-            : Repeat3(Dbl(d, "d_max", 2.0));
-
-        double[] legacyHigh = Vec3(d, "wb_high", 1, 1, 1);
-        for (int c = 0; c < 3; c++)
-            ep[c] /= Math.Max(legacyHigh[c], 1e-6);
-        return ep;
-    }
+    public static bool NeedsRecalibration(JsonObject frame) => frame["d_min_per_channel"] is not JsonArray;
 
     /// <summary>
-    /// The per-channel SHADOW density. <c>wb_offset_density</c> when present (current schema),
-    /// otherwise negated from the legacy additive <c>wb_offset</c> nudge — the same sign flip
-    /// <c>FromMeasured</c> used to perform at render time, so an old project renders unchanged.
+    /// 亮端三个密度。<c>d_max_per_channel</c> 在任何写过端点的版本里都存在，直接读取；
+    /// 更早的工程只有标量 d_max，复制成三个通道作为一组中性起点。
+    ///
+    /// 旧版的 <c>wb_high</c> 乘数**不再折算**：它与固定输出范围下的端点不是同一量纲，折算
+    /// 反而引入跨色调的大幅偏差。带旧参数的工程由 <see cref="NeedsRecalibration"/> 标记，
+    /// 界面提示重跑标定。
+    /// </summary>
+    private static double[] MigrateHighlightEndpoint(JsonObject d)
+        => d["d_max_per_channel"] is JsonArray dpc && dpc.Count == 3
+            ? new[] { dpc[0]!.GetValue<double>(), dpc[1]!.GetValue<double>(), dpc[2]!.GetValue<double>() }
+            : Repeat3(Dbl(d, "d_max", FrameParams.OutputRange));
+
+    /// <summary>
+    /// 暗端三个密度。新键 <c>d_min_per_channel</c> 优先；其次是上一版的
+    /// <c>wb_offset_density</c>（同为绝对密度，语义一致）；再早的加性 <c>wb_offset</c> 翻号。
     /// </summary>
     private static double[] MigrateShadowEndpoint(JsonObject d)
     {
+        if (d["d_min_per_channel"] is JsonArray n && n.Count >= 3)
+            return new[] { n[0]!.GetValue<double>(), n[1]!.GetValue<double>(), n[2]!.GetValue<double>() };
         if (d["wb_offset_density"] is JsonArray a && a.Count >= 3)
             return new[] { a[0]!.GetValue<double>(), a[1]!.GetValue<double>(), a[2]!.GetValue<double>() };
 

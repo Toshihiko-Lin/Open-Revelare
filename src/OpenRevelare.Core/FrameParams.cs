@@ -11,55 +11,58 @@ namespace OpenRevelare.Core;
 /// </summary>
 public sealed class FrameParams
 {
-    /// <summary>Per-channel film-base transmittance (removes D_min + shadow WB). Must be &gt; 0.</summary>
+    // ══ 反相的全部自由度：两端各三个绝对密度 ═══════════════════════════════════
+    //
+    // 渲染只消费 DensityEndpoints 的 scale[3] + offset[3] = 六个自由度。所以这里也只存六个数，
+    // 一一对应，不多不少。历史上这里曾有 grade/pivot、wb_high、wb_offset、d_max、scan_ev 等
+    // 十余个参数描述这同样的六个自由度——多出来的每一个都必然表现为「两个滑块做同一件事」，
+    // 而且必然有一天会被同时写入、把同一个校正应用两遍。参数数量等于自由度数量是唯一的解。
+    //
+    // 两端都是**绝对密度**，量纲相同、可直接相减：
+    //
+    //   D_min[c]  该通道读作黑的密度      D_max[c]  该通道读作白的密度
+    //
+    // 由此导出的三件事，正好就是用户想调的三件事：
+    //
+    //   两端中点   -> 整体明暗（密度零点）  两端同向移动，反差与色偏都不变
+    //   两端距离   -> 反差                  两端反向移动
+    //   通道间差   -> 色偏                  展开三个分量各自调整
+    //
+    // 注意这三者**不需要额外参数**，它们就是这六个数的不同读法。任何试图为「亮度」「反差」
+    // 「色温」单独立一个字段的做法，都是在重新制造上面那个十余参数的局面。
+
+    /// <summary>Per-channel film-base transmittance — the divisor that puts the bare base at
+    /// density 0. <see cref="DMinPerChannel"/> is stated relative to it. Must be &gt; 0.</summary>
     public double[] TBase { get; set; } = { 0.82, 0.51, 0.29 };
 
-    /// <summary>Scalar physical max density of the film.</summary>
-    public double DMax { get; set; } = 2.0;
+    /// <summary>
+    /// 输出范围：黑端落在 10^-OutputRange。
+    ///
+    /// **常量，不是参数。** 它曾经是可调的 d_max，于是与亮端端点争夺同一个自由度——两者都
+    /// 同时改亮度和反差，用户看到两个滑块做同一件事。固定之后黑位恒定，明暗与反差改由两端
+    /// 端点表达（见上），语义才各归其位。
+    /// </summary>
+    public const double OutputRange = 2.0;
 
     /// <summary>
-    /// Per-channel highlight endpoint — the density each channel reaches in the darkest
-    /// (fully-exposed) area. The inversion's white end; <see cref="WbOffset"/> is its black end.
+    /// 亮端：每个通道读作白的密度（典型 1.8–2.4）。
     ///
-    /// THE HIGHLIGHT WHITE BALANCE *IS* THESE THREE NUMBERS. They are absolute measured densities
-    /// (typically ~1.8–2.4), not a correction relative to something else, and the differences
-    /// between them are the highlight colour cast. Everything that solves the highlight
-    /// automatically — the roll chain, 最亮点白, Deep-WB — writes here, because this is the only
-    /// place the inversion reads the white end from.
-    ///
-    /// This replaced a scalar <see cref="DMax"/> plus a separate multiplicative <c>wb_high</c>.
-    /// Two fields describing one physical endpoint is what made calibration order matter and let
-    /// the same correction be applied twice; a measured triple states the endpoint and its cast as
-    /// ONE fact. <see cref="DMax"/> survives only as the output RANGE (how wide a span the roll is
-    /// mapped onto), which is a different quantity.
-    ///
-    /// ALWAYS present. An unmeasured roll starts from the scalar replicated across the three
-    /// channels — a neutral endpoint set — and the automatic chain or a D-max sample refines it.
-    ///
-    /// Only the per-channel (Path-B / white-light) inversion path consumes this. Rolls carrying a
-    /// decouple chroma matrix still take the luminance/chroma decomposition, which is a genuinely
-    /// cross-channel operation that endpoints do not subsume.
+    /// **高光白平衡就是这三个数。** 它们是绝对密度，不是相对某个基准的修正量，所以不需要
+    /// 参考零点——三个通道之间的差即色偏。凡是自动解白平衡的（整卷标定、高光对齐、Deep-WB）
+    /// 都写这里，因为反相只从这里读白端。
     /// </summary>
     public double[] DMaxPerChannel { get; set; } = { 2.0, 2.0, 2.0 };
 
     /// <summary>
-    /// Per-channel shadow endpoint — the density each channel reads as black. The inversion's
-    /// black end, the partner of <see cref="DMaxPerChannel"/>.
+    /// 暗端：每个通道读作黑的密度，<see cref="DMaxPerChannel"/> 的对称伙伴。
     ///
-    /// ABSOLUTE DENSITIES, like the highlight end, not the additive nudge the Negadoctor
-    /// <c>offset</c> was. <see cref="TBase"/> has already put the bare film base at density 0, so
-    /// an untouched roll sits at 0,0,0 and that is a real reading ("black is where the film base
-    /// is"), not a sentinel meaning "no correction". Sampling a neutral shadow writes each
-    /// channel's own measured density here, and the differences between the three are the shadow
-    /// colour cast.
+    /// 同样是绝对密度。<see cref="TBase"/> 已把裸片基放在 0，所以未标定的卷是 0,0,0——那是
+    /// 一个真实读数（「黑就在片基处」），不是「未修正」的哨兵值。三通道之差即暗部色偏。
     /// </summary>
-    public double[] WbOffset { get; set; } = { 0.0, 0.0, 0.0 };
+    public double[] DMinPerChannel { get; set; } = { 0.0, 0.0, 0.0 };
 
     /// <summary>Per-channel chroma compression for the RGB-decouple path (× before chroma_grade).</summary>
     public double[] ChromaChannelScale { get; set; } = { 1.0, 1.0, 1.0 };
-
-    /// <summary>Density-domain zero-point correction: D_corr = D + ev * log10(2).</summary>
-    public double ScanExposureEv { get; set; } = 0.0;
 
     /// <summary>"none" (linear) | "basic" (sRGB gamma).</summary>
     public OutputIntent OutputIntent { get; set; } = OutputIntent.Basic;
@@ -247,11 +250,9 @@ public sealed class FrameParams
     public FrameParams Clone() => new()
     {
         TBase = (double[])TBase.Clone(),
-        DMax = DMax,
         DMaxPerChannel = (double[])DMaxPerChannel.Clone(),
-        WbOffset = (double[])WbOffset.Clone(),
+        DMinPerChannel = (double[])DMinPerChannel.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
-        ScanExposureEv = ScanExposureEv,
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,
@@ -293,15 +294,19 @@ public sealed class FrameParams
     {
         Require3(TBase, nameof(TBase));
         Require3(DMaxPerChannel, nameof(DMaxPerChannel));
-        Require3(WbOffset, nameof(WbOffset));
+        Require3(DMinPerChannel, nameof(DMinPerChannel));
         Require3(ChromaChannelScale, nameof(ChromaChannelScale));
 
         foreach (var v in TBase)
             if (v <= 0) throw new ArgumentException($"TBase values must be positive, got [{string.Join(',', TBase)}]");
-        // The highlight endpoint is a divisor per channel (see DensityEndpoints.FromMeasured), and
-        // it must also sit above the shadow endpoint or the channel's span inverts.
-        foreach (var v in DMaxPerChannel)
-            if (v <= 0) throw new ArgumentException($"DMaxPerChannel values must be positive, got [{string.Join(',', DMaxPerChannel)}]");
+        // 白端必须严格高于黑端，否则该通道的跨度反号，斜率变负，画面正负颠倒。这是两端模型
+        // 唯一的硬约束——两端各自的绝对值都可以是任意实数（暗端为负也合法：比裸片基还透光的
+        // 区域确实存在），只有它们的**顺序**不能颠倒。
+        for (int c = 0; c < 3; c++)
+            if (DMaxPerChannel[c] <= DMinPerChannel[c])
+                throw new ArgumentException(
+                    $"DMax must exceed DMin per channel, got DMax=[{string.Join(',', DMaxPerChannel)}] " +
+                    $"DMin=[{string.Join(',', DMinPerChannel)}]");
     }
 
     private static void Require3(double[] v, string name)

@@ -83,11 +83,14 @@ public static class Inversion
         double floorV0 = Math.Pow(10.0, -DensityFloor(cal, 0));
         double floorV1 = Math.Pow(10.0, -DensityFloor(cal, 1));
         double floorV2 = Math.Pow(10.0, -DensityFloor(cal, 2));
-        bool biasActive = cal.ScanExposureEv != 0.0;
-        double biasV = cal.ScanExposureEv * Log10_2;
         // The two endpoints are NOT applied here. Steps 1–4 produce the film-base-normalised
         // density and stop; both ends enter at step 5 through DensityEndpoints. Mirrors
         // BuildDensityLuts.
+        //
+        // The scan-exposure bias is gone with it: shifting the density zero point is what MOVING
+        // BOTH ENDPOINTS TOGETHER does, so it was a twelfth parameter for a job the six already
+        // do. It also sat AFTER the density floor, which is why it was never exactly equivalent
+        // to a t_base change and could not simply be folded away.
         double tb0 = cal.TBase[0], tb1 = cal.TBase[1], tb2 = cal.TBase[2];
 
         // Canonical per-channel affine for the non-decomposed path. Hoisted out of the loop:
@@ -101,12 +104,8 @@ public static class Inversion
         // plane (see the useMatrix branch).
         double chromaSlope = (es0 + es1 + es2) / 3.0;
 
-        double DirectDensity(double v, double tb, double flr)
-        {
-            double d = -Math.Log10(Math.Max(v / tb, flr));
-            if (biasActive) d += biasV;
-            return d;
-        }
+        static double DirectDensity(double v, double tb, double flr)
+            => -Math.Log10(Math.Max(v / tb, flr));
 
         // Black floor, if folded in. Mirrors Pipeline's standalone loop exactly, including the
         // 0 < floor < 1 admissibility test and the "no upper clip" rule.
@@ -244,14 +243,12 @@ public static class Inversion
         // step 5. DMaxPerCh is the one exception — not as an endpoint, but because it sets the
         // per-channel density FLOOR (see DensityFloor), so two rolls differing only there must
         // not share tables. Keying on values the tables do not depend on would only cost rebuilds.
-        // DMax stays because DensityFloor falls back to it when DMaxPerCh is not a valid triple.
-        public double Tb0, Tb1, Tb2, ScanEv, DMax;
+        public double Tb0, Tb1, Tb2;
         public double[]? DMaxPerCh;
         public double[][] Luts = null!;
 
         public bool Matches(FrameParams c) =>
             Tb0 == c.TBase[0] && Tb1 == c.TBase[1] && Tb2 == c.TBase[2] &&
-            ScanEv == c.ScanExposureEv && DMax == c.DMax &&
             SameEndpoints(DMaxPerCh, c.DMaxPerChannel);
 
         private static bool SameEndpoints(double[]? a, double[]? b)
@@ -275,7 +272,6 @@ public static class Inversion
         var entry = new DensityLutEntry
         {
             Tb0 = cal.TBase[0], Tb1 = cal.TBase[1], Tb2 = cal.TBase[2],
-            ScanEv = cal.ScanExposureEv, DMax = cal.DMax,
             DMaxPerCh = cal.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null,
             Luts = BuildDensityLuts(cal),
         };
@@ -286,17 +282,8 @@ public static class Inversion
     /// <summary>Precompute the per-channel T→density mapping (steps 1–4) for every 16-bit level.</summary>
     private static double[][] BuildDensityLuts(FrameParams cal)
     {
-        // The density floor is where the log is allowed to bottom out. In the legacy model that
-        // is d_max, because d_max IS the deepest density the roll reaches. With measured
-        // per-channel endpoints those are two different numbers — d_max becomes the OUTPUT range
-        // (where white lands) while the deepest density is dMaxPerChannel[c] — and clamping at
-        // the output range would truncate the highlight end before step 5 sees it, landing the
-        // darkest area short of white and tinted.
-        bool biasActive = cal.ScanExposureEv != 0.0;
-        double bias = cal.ScanExposureEv * Log10_2;
         // Neither endpoint is applied here — these tables stop at the film-base-normalised
         // density, and DensityEndpoints maps both ends at step 5.
-
         var luts = new double[3][];
         for (int c = 0; c < 3; c++)
         {
@@ -306,9 +293,7 @@ public static class Inversion
             for (int idx = 0; idx < LutSize; idx++)
             {
                 double t = idx / 65535.0;
-                double d = -Math.Log10(Math.Max(t / tBase, floor));
-                if (biasActive) d += bias;
-                lut[idx] = d;
+                lut[idx] = -Math.Log10(Math.Max(t / tBase, floor));
             }
             luts[c] = lut;
         }
@@ -316,14 +301,15 @@ public static class Inversion
     }
 
     /// <summary>
-    /// How deep density is allowed to go for channel <paramref name="c"/> — the measured
-    /// endpoint when the roll has one, otherwise d_max (which in the legacy model is the same
-    /// thing). Kept in one place because the LUT and the direct &gt;1 path must agree, and
-    /// because it is the exact spot where "deepest density" and "output range" stop being the
-    /// same number.
+    /// How deep density is allowed to go for channel <paramref name="c"/> — the channel's measured
+    /// highlight endpoint. Kept in one place because the LUT and the direct &gt;1 path must agree.
+    ///
+    /// This is the DEEPEST DENSITY, which is a different quantity from the OUTPUT RANGE
+    /// (<see cref="FrameParams.OutputRange"/>): clamping at the range would truncate the highlight
+    /// end before step 5 sees it, landing the darkest area short of white and tinted.
     /// </summary>
     private static double DensityFloor(FrameParams cal, int c) =>
-        cal.DMaxPerChannel is { Length: 3 } dm ? Math.Max(dm[c], 1e-6) : cal.DMax;
+        cal.DMaxPerChannel is { Length: 3 } dm ? Math.Max(dm[c], 1e-6) : FrameParams.OutputRange;
 
     private static bool ApproxAll(double[] v, double target)
     {

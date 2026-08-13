@@ -89,16 +89,16 @@ public readonly struct DensityEndpoints
     /// and calibration order stops mattering.
     /// </summary>
     /// <param name="dMaxPerChannel">Per-channel HIGHLIGHT density (the white end). Absolute.</param>
-    /// <param name="wbOffset">Per-channel SHADOW density (the black end), null = all zero, i.e.
-    /// black sits at the film base where <c>t_base</c> put it. Absolute.</param>
+    /// <param name="dMinPerChannel">Per-channel SHADOW density (the black end), null = all zero,
+    /// i.e. black sits at the film base where <c>t_base</c> put it. Absolute.</param>
     public static DensityEndpoints FromMeasured(double[] dMaxPerChannel, double outRange,
-                                                double[]? wbOffset = null)
+                                                double[]? dMinPerChannel = null)
     {
         var scale = new double[3];
         var offset = new double[3];
         for (int c = 0; c < 3; c++)
         {
-            double dMin = wbOffset is { Length: 3 } ? wbOffset[c] : 0.0;
+            double dMin = dMinPerChannel is { Length: 3 } ? dMinPerChannel[c] : 0.0;
             double dMax = dMaxPerChannel[c];
             // Deriving the slope from the SPAN is what keeps both ends pinned: black lands at
             // -outRange and white at 0 for every channel, whatever the two endpoints are.
@@ -114,11 +114,12 @@ public readonly struct DensityEndpoints
     /// <summary>
     /// The endpoints the post-LUT inversion slot should use: the roll's two measured ends, one
     /// pair per channel, and nothing else. <see cref="FrameParams.DMaxPerChannel"/> is the white
-    /// end and <see cref="FrameParams.WbOffset"/> is the black end — both absolute densities, so
-    /// each simply IS its endpoint and there is no second parameter left to double it with.
+    /// end and <see cref="FrameParams.DMinPerChannel"/> is the black end — both absolute
+    /// densities, so each simply IS its endpoint and there is no second parameter left to double
+    /// it with. The range is a constant, so it cannot compete with them either.
     /// </summary>
     public static DensityEndpoints For(FrameParams cal) =>
-        FromMeasured(cal.DMaxPerChannel, cal.DMax, cal.WbOffset);
+        FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel);
 
     /// <summary>
     /// The linear value the film base (density 0) maps to — the black floor the inversion
