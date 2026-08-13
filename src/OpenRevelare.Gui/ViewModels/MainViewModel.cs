@@ -1716,13 +1716,13 @@ public partial class MainViewModel : ViewModelBase
         _suppressRender = true;
         try
         {
-            // Neutral start: a stale wb_high would be folded into this frame's solve
-            // (SampleWbHighFromRect anchors on the post-offset densest channel), and stale levels
-            // would clip the positive that AutoLevels measures. Both level sliders are OFFSETS
-            // from the untouched endpoints, so neutral is 0 for each.
+            // Neutral start: stale levels would clip the positive that AutoLevels measures, and
+            // both level sliders are OFFSETS from the untouched endpoints, so neutral is 0 for
+            // each. wb_high goes to 1 and STAYS there — AutoDetectDMax sets both ends, and the
+            // per-channel endpoints already state the highlight balance, so solving wb_high too
+            // would apply it twice (see DensityEndpoints.For).
             WbHighR = WbHighG = WbHighB = 1.0;
             Black = 0.0; White = 0.0;
-            AutoWbHigh();
             AutoDetectDMax();
             AutoLevels();
         }
@@ -2044,8 +2044,24 @@ public partial class MainViewModel : ViewModelBase
         // luma. Without this the light board and — far more damaging — the opaque blocking card
         // sit inside the percentile, and the card, being denser than any exposed area, simply
         // becomes D-max.
-        DMax = FilmBase.DetectDMax(new ImageBuffer(src.Width, src.Height, norm),
-                                   AutoRegion(), AutoBoardCut());
+        var normImg = new ImageBuffer(src.Width, src.Height, norm);
+        ImageBuffer? mask = AutoRegion();
+        double? cut = AutoBoardCut();
+        DMax = FilmBase.DetectDMax(normImg, mask, cut);
+
+        // BOTH ends, not just the scalar.
+        //
+        // The scalar is the output RANGE — where white lands. The white END is the per-channel
+        // endpoint set, and the inversion divides by it. Setting only the scalar therefore
+        // calibrates the black end (t_base) and leaves the white end wherever it happened to be:
+        // on a fresh roll that is the neutral default, so the roll inverts through endpoints that
+        // were never measured. Measured on 图像 001a that put the midtone red/blue ratio at 0.529
+        // against 1.174 once the endpoints were measured — the picture was visibly wrong, and no
+        // amount of re-running 单张 could fix it because 单张 was the thing not measuring them.
+        if (mask is not null && FilmBase.DetectDMaxPerChannelFromRoll(
+                new[] { normImg }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut) is { } perCh)
+            DMaxPerChannel = perCh;
+
         StatusText = Loc.F($"自动 D-max = {DMax:F3}");
     }
 
@@ -2083,11 +2099,14 @@ public partial class MainViewModel : ViewModelBase
         _suppressRender = true;
         try
         {
-            // Neutral start, for the reasons given in AutoInvertRollAsync: a stale wb_high folds
-            // into this frame's solve and stale levels clip the positive AutoLevels measures.
+            // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels would clip
+            // the positive AutoLevels measures, and a stale wb_high would fold into the solve.
             WbHighR = WbHighG = WbHighB = 1.0;
             Black = 0.0; White = 0.0;
-            AutoWbHigh();
+            // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
+            // endpoints — so the highlight balance is already stated once it returns. wb_high is
+            // deliberately NOT solved here and stays at 1: it and the endpoints describe the same
+            // fact, and writing both applies it twice (see DensityEndpoints.For).
             AutoDetectDMax();
             AutoLevels();
         }
