@@ -693,7 +693,7 @@
                      Stage-1 标定, 帧编辑 → Stage-2 场景. -->
                 <TabControl Name="PanelTabs" Grid.Row="1" Padding="0">
                     <!-- ══ 整卷校准（FilmBase · Stage 1） ═══════════════════════ -->
-                    <TabItem Header="{i18n:T '整卷校准'}">
+                    <TabItem Header="Cineon">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
                                 <!-- 旧模型存的 d_max / scan_ev 与现在固定的输出范围不是同一
@@ -952,7 +952,7 @@
                     </TabItem>
 
                     <!-- ══ 帧编辑（SceneBase · Stage 2） ═══════════════════════ -->
-                    <TabItem Header="{i18n:T '帧编辑'}">
+                    <TabItem Header="Display">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
                                 <!-- 色温/色调不在这里。色彩平衡是反相白端的属性，只应该有一处；
