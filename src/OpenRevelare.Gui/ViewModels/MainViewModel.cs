@@ -1950,26 +1950,27 @@ public partial class MainViewModel : ViewModelBase
             rollBase ??= await Task.Run(
                 () => FilmBase.EstimateTBaseFromRoll(baseList, cut), ct);
 
+            // 估计器一律传中性参考，让它们直接产出**对 T=1 的绝对密度**——与 D_min 同一基准。
+            //
+            // 传 rollBase 会得到「相对片基」的密度，而黑端现在是绝对密度，两端基准不一致：
+            // 跨度 = D_max − D_min 会各通道少算一个 D_min，而三通道少得不一样多
+            // （实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。
+            double[] neutralRef = { 1.0, 1.0, 1.0 };
+
             double[]? rollWbHigh = null;
-            double? rollDMax = null;
             try
             {
                 rollWbHigh = await Task.Run(
-                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, cut, valueList), ct);
+                    () => FilmBase.AutoWbHighFromRoll(masks, neutralRef, cut, valueList), ct);
             }
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
 
-            rollDMax = await Task.Run(
-                () => FilmBase.DetectDMaxFromRoll(values, rollBase, 90.0, masks, cut), ct);
-            // Roll-wide highlight endpoints, measured alongside the scalar. Endpoint inversion is
-            // the default path, so the auto chain has to produce these — without them a roll that
-            // was never hand-sampled would silently fall back to the legacy grade chain.
-            // Masked with the same two cuts the t_base / wb_high estimators use: the endpoints
-            // are DIVISORS per channel, so an opaque film-edge line would inflate them unequally
-            // and show up as a colour cast.
+            // Roll-wide highlight endpoints. Masked with the same two cuts the t_base estimator
+            // uses: an opaque film-edge line would inflate the channels unequally and show up as
+            // a colour cast.
             double[]? rollDMaxPerCh = await Task.Run(
-                () => FilmBase.DetectDMaxPerChannelFromRoll(values, rollBase, 90.0, masks, cut), ct);
+                () => FilmBase.DetectDMaxPerChannelFromRoll(values, neutralRef, 90.0, masks, cut), ct);
 
             ct.ThrowIfCancellationRequested();
 
@@ -2098,21 +2099,12 @@ public partial class MainViewModel : ViewModelBase
     {
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
-        // DetectDMax expects the T_norm image (T / t_base), not raw T — normalise first.
-        double[] tb = TBaseArr();
-        var norm = new float[src.Data.Length];
-        for (int p = 0; p < src.PixelCount; p++)
-        {
-            int b = p * 3;
-            norm[b] = (float)(src.Data[b] / tb[0]);
-            norm[b + 1] = (float)(src.Data[b + 1] / tb[1]);
-            norm[b + 2] = (float)(src.Data[b + 2] / tb[2]);
-        }
-        // Masked on the RAW region, not on the normalised one: both valleys are calibrated on raw
-        // luma. Without this the light board and — far more damaging — the opaque blocking card
-        // sit inside the percentile, and the card, being denser than any exposed area, simply
-        // becomes D-max.
-        var normImg = new ImageBuffer(src.Width, src.Height, norm);
+        // 不再预先除以 t_base：参考透射率恒为 1,1,1，估计器直接产出对 T=1 的绝对密度，
+        // 与 D_min 同基准。（这里曾经按片基归一化，那是旧模型的做法。）
+        //
+        // Masked on the RAW region: both valleys are calibrated on raw luma. Without this the
+        // light board and — far more damaging — the opaque blocking card sit inside the
+        // percentile, and the card, being denser than any exposed area, simply becomes D-max.
         ImageBuffer? mask = AutoRegion();
         double? cut = AutoBoardCut();
 
@@ -2126,7 +2118,7 @@ public partial class MainViewModel : ViewModelBase
         // against 1.174 once the endpoints were measured — the picture was visibly wrong, and no
         // amount of re-running 单张 could fix it because 单张 was the thing not measuring them.
         if (mask is not null && FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { normImg }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut) is { } perCh)
+                new[] { src }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut) is { } perCh)
             DMaxPerChannel = perCh;
 
         StatusText = Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
@@ -2218,14 +2210,16 @@ public partial class MainViewModel : ViewModelBase
     {
         double[]? t = MeanOfNegative(rect);
         if (t is null) return;
-        double[] tb = TBaseArr();
-        double dResid = 0.0;
-        for (int c = 0; c < 3; c++)
-            dResid += -Math.Log10(Math.Max(t[c], 1e-6) / tb[c]);
-        dResid /= 3.0;
-        DMinR -= dResid; DMinG -= dResid; DMinB -= dResid;
-        DMaxR -= dResid; DMaxG -= dResid; DMaxB -= dResid;
-        StatusText = Loc.F($"片基归零 → 两端各减 {dResid:F3}");
+        // 框中区域的绝对密度（对 T=1），与两端同基准。
+        double[] patch = TBaseToDensity(t);
+        // 它应当正好落在黑端上——两者之差就是要平移的量。取三通道均值，因为这是一个整体
+        // 升降控件；通道间的差属于色偏，由展开的分量负责，不该被这里改动。
+        double shift = 0.0;
+        for (int c = 0; c < 3; c++) shift += patch[c] - DMinPerChannel[c];
+        shift /= 3.0;
+        DMinR += shift; DMinG += shift; DMinB += shift;
+        DMaxR += shift; DMaxG += shift; DMaxB += shift;
+        StatusText = Loc.F($"片基归零 → 两端各移 {shift:+0.000;-0.000}");
     }
 
     /// <summary>
