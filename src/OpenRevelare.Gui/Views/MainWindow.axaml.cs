@@ -761,6 +761,11 @@ public partial class MainWindow : Window
         Banner.IsHitTestVisible = crop;
     }
 
+    /// <summary>Dismiss the "整卷分析进行中" notice. The analysis itself keeps running — this only
+    /// takes the card off the picture, and it comes back for the NEXT analysis.</summary>
+    private void OnDismissRollAnalysisNoticeClick(object? sender, RoutedEventArgs e)
+        => Vm?.DismissRollAnalysisNotice();
+
     private void OnBannerCloseClick(object? sender, RoutedEventArgs e)
     {
         _bannerHintDismissed = true;

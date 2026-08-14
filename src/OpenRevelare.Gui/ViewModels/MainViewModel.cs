@@ -469,6 +469,41 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
     [ObservableProperty] private string _backgroundStatus = "";
+    /// <summary>
+    /// True while the roll-wide auto-inversion is still pooling frames — i.e. while what is on
+    /// screen comes from stage 1's SINGLE-frame measurement broadcast to the whole roll.
+    ///
+    /// Drives a dismissible notice over the preview. The provisional state is not a defect worth
+    /// hiding, but it is indistinguishable from the finished result by eye: the opening frame's
+    /// solve stands in for the roll, and on a roll whose first frame is unrepresentative (roll 21
+    /// opens on P8060012, whose kept area holds no highlight) every thumbnail is visibly off until
+    /// stage 2 lands and the strip jumps. Saying so is what stops that reading as "this tool is
+    /// broken" during the seconds before the real answer arrives.
+    ///
+    /// Set alongside stage 1's broadcast and cleared by <see cref="FinishAutoInvert"/>, so it
+    /// tracks the analysis rather than a timer.
+    /// </summary>
+    [ObservableProperty] private bool _rollAnalysisPending;
+
+    /// <summary>
+    /// Set when the user dismisses the <see cref="RollAnalysisPending"/> notice, so it stays down
+    /// for the rest of THIS analysis. Cleared when a new one starts — a dismissal is about the
+    /// notice in front of them, not a permanent preference.
+    /// </summary>
+    [ObservableProperty] private bool _rollAnalysisNoticeDismissed;
+
+    /// <summary>Whether the notice is actually on screen: pending AND not dismissed.</summary>
+    public bool ShowRollAnalysisNotice => RollAnalysisPending && !RollAnalysisNoticeDismissed;
+
+    partial void OnRollAnalysisPendingChanged(bool value)
+        => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+
+    partial void OnRollAnalysisNoticeDismissedChanged(bool value)
+        => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+
+    /// <summary>Dismiss the roll-analysis notice. The analysis itself keeps running.</summary>
+    public void DismissRollAnalysisNotice() => RollAnalysisNoticeDismissed = true;
+
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _hasImage;
     [ObservableProperty] private string _fileName = "";
@@ -1772,6 +1807,13 @@ public partial class MainViewModel : ViewModelBase
         // wb_high at 1,1,1 and the levels untouched, so the preview is a mask-removed but
         // ungraded picture — which reads as "去色罩没做完", because it is not done. The remaining
         // three steps are cheap here: they measure the already-decoded current frame.
+        //
+        // Stage 1's answer is broadcast to the whole roll and is provisional by construction: it
+        // is ONE frame's measurement standing in for the roll until stage 2 pools every frame. On
+        // a roll whose opening frame is unrepresentative — roll 21 starts on P8060012, a boundary
+        // frame with no highlight in its kept area — the whole strip is visibly off until stage 2
+        // lands. That is why <see cref="RollAnalysisPending"/> exists: the provisional state is
+        // announced rather than left to look like the finished result.
         double? cut = AutoBoardCut();
         if (!AutoFilmBaseFromRoll(cut, useMode: true))
             return;   // AutoFilmBaseFromRoll already reported why; a base-less chain is meaningless
@@ -1801,6 +1843,13 @@ public partial class MainViewModel : ViewModelBase
         // ── Stage 2: pool the whole roll ───────────────────────────────────────────────────
         List<RollFrame> frames = Frames.ToList();
         if (frames.Count <= 1) { FinishAutoInvert(); return; }
+
+        // Everything on screen is now one frame's answer standing in for the roll. Say so, and
+        // let the notice be dismissed — a user who already knows should not have to keep reading
+        // it. Raised here rather than at the top of the method because a single-frame roll (the
+        // early return above) never has a provisional stage to warn about.
+        RollAnalysisNoticeDismissed = false;
+        RollAnalysisPending = true;
 
         var cts = new CancellationTokenSource();
         _autoInvertCts?.Cancel();
@@ -1979,10 +2028,19 @@ public partial class MainViewModel : ViewModelBase
             NeedsRecalibration = false;   // 重跑过了，提示可以撤下
             FinishAutoInvert(masks.Count);
         }
-        catch (OperationCanceledException) { ReportBackground(""); }
+        // Both failure paths clear the notice as well as the progress line. A cancelled or failed
+        // analysis is exactly the case where "正在分析" must stop being displayed: the roll is
+        // staying on stage 1's provisional numbers, and a notice promising a result that is no
+        // longer coming would sit there for the rest of the session.
+        catch (OperationCanceledException)
+        {
+            ReportBackground("");
+            RollAnalysisPending = false;
+        }
         catch (Exception ex)
         {
             ReportBackground("");
+            RollAnalysisPending = false;
             StatusText = Loc.T("整卷分析去色罩失败：") + ex.Message;
         }
     }
@@ -2030,6 +2088,8 @@ public partial class MainViewModel : ViewModelBase
 
     private void FinishAutoInvert(int voted = 1)
     {
+        // The roll-wide numbers are in: what is on screen is no longer provisional.
+        RollAnalysisPending = false;
         StatusText = Loc.F($"整卷去色罩完成（{voted} 帧参与）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
         ScheduleRender();
         // Drop the existing thumbnails before asking for new ones. DecodeThumbnailsAsync skips
@@ -2067,6 +2127,17 @@ public partial class MainViewModel : ViewModelBase
         return AutoCrop is { } c ? Geometry.ApplyCrop(s, c) : s;
     }
 
+    /// <summary>
+    /// Whether the last <see cref="AutoDetectDMax"/> actually solved the highlight end.
+    ///
+    /// A field rather than a return value because <see cref="AutoDetectDMax"/> is also a command
+    /// bound straight to a button, and because the caller that needs the answer —
+    /// <see cref="AutoInvertCurrentFrame"/> — reads it several steps later, after AutoLevels has
+    /// rewritten StatusText. Inspecting the status text instead would tie control flow to a
+    /// translated string.
+    /// </summary>
+    private bool _lastHighlightMeasured;
+
     /// <summary>Auto-detect D-max = 99.9th density percentile of the T_norm (T / t_base) frame.</summary>
     public void AutoDetectDMax()
     {
@@ -2090,11 +2161,43 @@ public partial class MainViewModel : ViewModelBase
         // were never measured. Measured on 图像 001a that put the midtone red/blue ratio at 0.529
         // against 1.174 once the endpoints were measured — the picture was visibly wrong, and no
         // amount of re-running 单张 could fix it because 单张 was the thing not measuring them.
-        if (mask is not null && FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { src }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut) is { } perCh)
-            DMaxPerChannel = perCh;
+        // Same TWO estimators, in the same order, as the roll pass's `rollDMaxPerCh ?? rollWbHigh`.
+        //
+        // The per-channel detector is preferred but it can decline — it returns null when no frame
+        // yielded a usable triplet, e.g. every kept pixel hit the density ceiling or the keep mask
+        // left nothing. The roll pass has a second estimator behind it for exactly that case; this
+        // path had none, so a decline left the highlight endpoint at whatever it happened to hold
+        // — the neutral default on a fresh roll — while the status line below still printed those
+        // stale numbers as though they had just been measured. That is the "单张没把高光段测上"
+        // gap: not a wrong measurement but a missing one, reported as success.
+        double[]? highlight = null;
+        if (mask is not null)
+        {
+            highlight = FilmBase.DetectDMaxPerChannelFromRoll(
+                new[] { src }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut);
 
-        StatusText = Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
+            // Fallback: the densest-highlight solve. It answers from the same masked pixels but
+            // reduces them differently, so it still produces a triplet where the percentile
+            // detector abstained. Throws when there is genuinely no usable highlight, which is
+            // the one case where leaving the endpoint alone is right.
+            if (highlight is null)
+            {
+                try
+                {
+                    highlight = FilmBase.AutoWbHighFromRoll(
+                        new[] { mask }, new[] { 1.0, 1.0, 1.0 }, cut,
+                        valueImages: ReferenceEquals(mask, src) ? null : new[] { src });
+                }
+                catch { /* no usable highlight in this frame — say so below */ }
+            }
+        }
+
+        if (highlight is not null) DMaxPerChannel = highlight;
+        _lastHighlightMeasured = highlight is not null;
+
+        StatusText = highlight is not null
+            ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
+            : Loc.T("⚠ 这一帧测不到高光——亮端保持原值，请用【高光采样】手动标定或改用【自动（整卷）】");
     }
 
     /// <summary>
@@ -2128,6 +2231,7 @@ public partial class MainViewModel : ViewModelBase
         double? cut = AutoBoardCut();
         if (!AutoFilmBaseFromRoll(cut, useMode: true)) return;
 
+        bool highlightMeasured;
         _suppressRender = true;
         try
         {
@@ -2138,6 +2242,11 @@ public partial class MainViewModel : ViewModelBase
             // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
             // highlight endpoint, which IS the highlight balance.
             AutoDetectDMax();
+            // Whether the highlight end was actually measured — see the field's remarks. The
+            // completion line at the end of this method would otherwise overwrite AutoDetectDMax's
+            // warning with "完成" plus the untouched endpoint, so the failure would reach the user
+            // as a success carrying stale numbers.
+            highlightMeasured = _lastHighlightMeasured;
             AutoLevels();
         }
         finally { _suppressRender = false; }
@@ -2153,7 +2262,9 @@ public partial class MainViewModel : ViewModelBase
         // Only this frame's thumbnail changed; the rest were restored, so re-rendering the whole
         // strip would be wasted work (and would flicker the roll for no reason).
         if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
-        StatusText = Loc.F($"单张去色罩完成 · 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxLevel:F3}");
+        StatusText = highlightMeasured
+            ? Loc.F($"单张去色罩完成 · 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxLevel:F3}")
+            : Loc.F($"单张去色罩完成（⚠ 这一帧测不到高光，亮端 {DMaxLevel:F3} 为原值）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3}");
     }
 
     /// <summary>
