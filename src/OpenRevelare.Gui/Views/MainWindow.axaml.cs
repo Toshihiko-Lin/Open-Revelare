@@ -964,6 +964,7 @@ public partial class MainWindow : Window
     private void OnAutoLevelsClick(object? sender, RoutedEventArgs e) => Vm?.AutoLevels();
 
     private void OnAutoDMaxClick(object? sender, RoutedEventArgs e) => Vm?.AutoDetectDMax();
+    private void OnAutoFilmBaseClick(object? sender, RoutedEventArgs e) => Vm?.AutoFilmBase();
     private void OnAutoWbHighClick(object? sender, RoutedEventArgs e) => Vm?.AutoWbHigh();
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
     private void OnApplyCalToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToRoll();

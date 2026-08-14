@@ -246,12 +246,22 @@ grey. **Zero on the film base** selects bare base and subtracts its residual den
 
 #### D_min (black end)
 
-The density each channel reads as black. **Sample the film base** over the semi-transparent orange
-base — that is what defines density 0, so a calibrated roll sits at 0. It is a **real measurement**
-("black is where the film base is"), not "not yet corrected".
+The density each channel reads as black. Two buttons:
 
-Shadow cast is adjusted under **Per channel**, along with the T_base transmittance itself, which
-sampling normally writes for you.
+| Button | Type | Use |
+|---|---|---|
+| **Sample the film base** | Manual | Select the semi-transparent orange base (between sprockets, or the margin) |
+| **Auto black point** | Automatic | Finds bare base: the peak below the light panel → an edge sliver → a bright-end percentile |
+
+The film base defines density 0, so a calibrated roll sits at 0 — a **real measurement** ("black is
+where the film base is"), not "not yet corrected". Shadow cast is adjusted under **Per channel**.
+
+> If no bare base is found (a scan already cropped past it, say) an orange warning appears: the
+> automatic result is then just the brightest part of the picture, so sample by hand.
+
+> T_base no longer has sliders. It describes the same thing D_min does — where black sits and which
+> way the shadows are cast — and is written by sampling. D_min is the one in the same units as
+> D_max, so the two can be subtracted directly.
 
 #### D_max (white end)
 

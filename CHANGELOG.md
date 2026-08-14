@@ -31,6 +31,21 @@
 - **删除 `scan_ev`**，改为【密度零点】。它是密度域加常数，正是「两端同向移动」；且位于密度
   地板之后，与 t_base 缩放并不严格等价（实测差 10.7%），留着只会是第十二个参数。
 
+- **黑端只保留一组 RGB，并与亮端同构**。原先黑端里有两组 RGB 滑块（D_min 与片基透射率
+  T_base），而它们描述的是同一件事——黑端在哪、暗部偏什么色（实测改任一个都在动同一个量）。
+  T_base 不再给滑块，由【片基采样】写入；D_min 才是与 D_max 同量纲、可直接相减的那个。
+
+  同时补上黑端缺的自动按钮：估计器一直存在（自动链的第一步就是它），只是没有入口，于是
+  亮端有「手动 + 两个自动」而黑端只有手动。现在两端形状一致：
+
+  | | 标量 | 按钮 | 展开 |
+  |---|---|---|---|
+  | **D_min** | 黑端位置 | 片基采样 · 自动黑点 | R G B |
+  | **D_max** | 白端位置 | 高光采样 · 自动白点 · 智能白平衡 | R G B |
+
+  片基读数也随之改为**只在测不到裸露片基时告警**——成功时不再回显 t_base 数值，那个数已经
+  没有滑块了。
+
 - **「框选亮部」与「框选 D_max」合并为【高光采样】**。两者测的是同一个量——高光白平衡与高光
   端点本就是一件事。同理「框选片基」与「框选暗部」合并为【片基采样】：片基定义密度 0，那
   就是黑端。
@@ -160,6 +175,22 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
 - **`scan_ev` is gone**, replaced by Density zero. It was an additive shift in density — precisely
   "move both ends together" — and sat after the density floor, so it was never quite equivalent to
   scaling t_base (measured 10.7% apart).
+
+- **The black end keeps one RGB group and now mirrors the white end.** It used to carry two RGB
+  triples (D_min and the T_base transmittance) describing the same thing — where black sits and
+  which way the shadows are cast. T_base loses its sliders and is written by sampling; D_min is the
+  one in the same units as D_max.
+
+  The black end also gains the automatic button it was missing — the estimator already existed as
+  the first step of the auto chain, it simply had no entry point. Both ends now have the same shape:
+
+  | | Scalar | Buttons | Expanded |
+  |---|---|---|---|
+  | **D_min** | black position | Sample the film base · Auto black point | R G B |
+  | **D_max** | white position | Sample the highlight · Auto white point · Deep WB | R G B |
+
+  The film-base readout is now **a warning only**, shown when no bare base was found; on success it
+  no longer echoes the t_base numbers, which have no slider any more.
 
 - **"Select highlight" and "Select D_max" merged into Sample the highlight.** They measured the
   same quantity. Likewise "Sample the film base" and "Sample the shadow" merged: the film base

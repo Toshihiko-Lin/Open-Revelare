@@ -1237,12 +1237,14 @@ public partial class MainViewModel : ViewModelBase
     /// rather than something to pixel-peep. The preview stands in, softer but truthful.
     /// </summary>
     private bool _showingBeforeEdits;
-    [ObservableProperty] private string _filmBaseText = Loc.T("片基：默认（未采样）");
+    /// <summary>
+    /// 片基告警。**只在测不到裸露片基时非空**——成功时不回显 t_base 数值，那个数已经没有
+    /// 滑块，它的意义由 D_min 承担。空字符串时整行在界面上隐藏，这样黑端分组的形状与亮端
+    /// 一致（标量 → 采样按钮 → 逐通道）。
+    /// </summary>
+    [ObservableProperty] private string _filmBaseText = "";
 
-    /// <summary>Whether <see cref="FilmBaseText"/> is reporting a measured t_base rather than
-    /// standing at its default. Only the default is re-translated on a language switch — a
-    /// measured one is three numbers with a translated prefix, and the prefix is not worth
-    /// keeping the sample around for. See <see cref="RetranslateText"/>.</summary>
+    /// <summary>片基是否已经采过样。语言切换时用来决定是否重译告警文案。</summary>
     private bool _filmBaseSampled;
 
     // ── Tone curves (gamma-2.2 domain; set by the CurveEditor via SetCurves) ─────
@@ -1479,7 +1481,7 @@ public partial class MainViewModel : ViewModelBase
         double[] before = TBaseArr();           // needed to rebase the endpoints below
         double[] tb = FilmBase.SampleTBase(src, rect);
         TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
-        FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}");
+        FilmBaseText = "";
         _filmBaseSampled = true;
         // BOTH endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a new base
         // moves them — by exactly -log10(t_base_new / t_base_old) per channel.
@@ -1669,13 +1671,13 @@ public partial class MainViewModel : ViewModelBase
             // to be said out loud rather than shown as a normal measurement.
             if (IsPlausibleFilmBase(tb))
             {
-                FilmBaseText = Loc.F($"片基 t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3}（自动）");
+                FilmBaseText = "";
                 StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
             }
             else
             {
-                FilmBaseText = Loc.F($"⚠ 未测到片基（t_base = {tb[0]:F3}, {tb[1]:F3}, {tb[2]:F3} 偏中性）——画面中没有裸露片基，请手动【框选片基】");
-                StatusText = Loc.T("⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【框选片基】手动标定");
+                FilmBaseText = Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
+                StatusText = Loc.T("⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定");
             }
         }
         catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
@@ -1993,8 +1995,8 @@ public partial class MainViewModel : ViewModelBase
             // more guaranteed to be a real film base than a single frame's, and reporting it as a
             // plain measurement here would silently overwrite the warning stage 1 just raised.
             FilmBaseText = IsPlausibleFilmBase(rollBase)
-                ? Loc.F($"片基 t_base = {rollBase[0]:F3}, {rollBase[1]:F3}, {rollBase[2]:F3}（整卷）")
-                : Loc.F($"⚠ 未测到片基（t_base = {rollBase[0]:F3}, {rollBase[1]:F3}, {rollBase[2]:F3} 偏中性）——画面中没有裸露片基，请手动【框选片基】");
+                ? ""
+                : Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
             ApplyAutoChainToRoll();
             NeedsRecalibration = false;   // 重跑过了，提示可以撤下
             FinishAutoInvert(masks.Count);
@@ -2262,6 +2264,22 @@ public partial class MainViewModel : ViewModelBase
     // Stage-2 grey-point WB is gone along with the 色偏修正 group it fed. Colour balance is the
     // inversion's white end — one place, in 整卷校准 → 亮端 — and a second set of temp/tint on
     // top of the rendered positive could only mask what the endpoint already said.
+
+    /// <summary>
+    /// 自动黑点：自动找出裸露片基并写入暗端——【自动白点】在黑端的对称件。
+    ///
+    /// 估计器一直存在（自动链的第一步就是它），只是没有按钮，于是两端不对称：亮端有手动+两个
+    /// 自动，黑端只有手动。三级回退与自动链完全相同：灯板下的片基峰 → 边缘裸片基窄带 → 亮端
+    /// 分位（此时结果不是真片基，会告警）。
+    /// </summary>
+    public void AutoFilmBase()
+    {
+        if (_previewLinear is null) return;
+        if (!AutoFilmBaseFromRoll(AutoBoardCut(), useMode: true)) return;
+        // 片基定义密度 0，所以暗端按定义归零——与【片基采样】一致。
+        DMinR = DMinG = DMinB = 0.0;
+        ScheduleRender();
+    }
 
     /// <summary>
     /// 最亮点白 (Stage 1, NegativeConvert way): find the frame's brightest neutral scene point and
@@ -2698,7 +2716,7 @@ public partial class MainViewModel : ViewModelBase
         _curveM = new(); _curveR = new(); _curveG = new(); _curveB = new(); _curvePreserveHue = true;
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
-        FilmBaseText = Loc.T("片基：默认（未采样）");
+        FilmBaseText = "";
         _filmBaseSampled = false;
         ScheduleRender();
     }
@@ -2750,7 +2768,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
-        if (!_filmBaseSampled) FilmBaseText = Loc.T("片基：默认（未采样）");
+        if (!_filmBaseSampled) FilmBaseText = "";
         foreach (RollFrame f in Frames) f.RefreshText();
     }
 
@@ -3598,7 +3616,7 @@ public partial class MainViewModel : ViewModelBase
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
-        FilmBaseText = Loc.F($"片基 t_base = {p.TBase[0]:F3}, {p.TBase[1]:F3}, {p.TBase[2]:F3}");
+        FilmBaseText = "";
         _filmBaseSampled = true;
         SyncEndpointViews();            // 亮度/色温/色调/黑场 读数跟上刚载入的六个端点
         _suppressRender = false;

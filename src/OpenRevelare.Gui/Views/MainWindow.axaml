@@ -741,25 +741,37 @@
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_min" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" />
-                                        <ToggleButton Name="FilmBaseBtn" Classes="sampling"
-                                                      Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
-                                                <TextBlock Text="{i18n:T '片基采样'}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </ToggleButton>
+                                        <Grid ColumnDefinitions="*,*">
+                                            <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                                          Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <ctl:Icon Data="{StaticResource IcoMarquee}" />
+                                                    <TextBlock Text="{i18n:T '片基采样'}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </ToggleButton>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                                    Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}"
+                                                    ToolTip.Tip="{i18n:T '自动找出画面里裸露的片基并写入黑端。依次尝试：灯板下的片基峰 → 边缘裸片基窄带 → 亮端分位。'}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <ctl:Icon Data="{StaticResource IcoWand}" />
+                                                    <TextBlock Text="{i18n:T '自动黑点'}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <!-- 只在测不到裸露片基时出现。成功时不回显 t_base 数值——
+                                             那个数已经没有滑块，它的意义由 D_min 承担。-->
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseText}"
+                                                   IsVisible="{Binding FilmBaseText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                                    TextWrapping="Wrap" Foreground="{DynamicResource WarnBrush}" />
+                                        <!-- 只有这一组 RGB。片基透射率 T_base 不再给滑块：它与
+                                             D_min 描述的是同一件事——黑端在哪、暗部偏什么色（实测
+                                             改任一个都在动同一个量）。T_base 由【片基采样】写入，
+                                             D_min 才是与 D_max 同量纲、可直接相减的那个。-->
                                         <Expander Header="{i18n:T '逐通道'}" Margin="0,2,0,0">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" />
                                                 <ctl:SliderRow Label="G" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" />
                                                 <ctl:SliderRow Label="B" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinB}" />
-                                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Margin="0,3,0,0"
-                                                           Text="{i18n:T '片基透射率 T_base'}" />
-                                                <ctl:SliderRow Label="R" Minimum="0.001" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0.82" Value="{Binding TBaseR}" />
-                                                <ctl:SliderRow Label="G" Minimum="0.001" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0.51" Value="{Binding TBaseG}" />
-                                                <ctl:SliderRow Label="B" Minimum="0.001" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0.29" Value="{Binding TBaseB}" />
                                             </StackPanel>
                                         </Expander>
                                     </StackPanel>
