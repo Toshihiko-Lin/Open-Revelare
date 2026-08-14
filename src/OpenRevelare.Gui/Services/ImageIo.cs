@@ -9,12 +9,13 @@ namespace OpenRevelare.Gui.Services;
 /// </summary>
 public static class ImageIo
 {
-    /// <summary>File dialog filter patterns for supported inputs.</summary>
+    /// <summary>File dialog filter patterns for supported inputs — TIFF plus every RAW the
+    /// decoder accepts, derived from <see cref="RawDecode.RawExtensions"/> so a format added
+    /// there becomes selectable here without a second edit.</summary>
     public static readonly string[] OpenPatterns =
-    {
-        "*.tif", "*.tiff",
-        "*.arw", "*.nef", "*.cr2", "*.cr3", "*.dng", "*.raf", "*.rw2", "*.orf", "*.pef",
-    };
+        new[] { "*.tif", "*.tiff" }
+            .Concat(RawDecode.RawExtensions.OrderBy(e => e, StringComparer.Ordinal).Select(e => "*" + e))
+            .ToArray();
 
     // ── Decode admission control ────────────────────────────────────────────────
     //

@@ -16,16 +16,42 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class RawDecode
 {
-    // Common camera RAW extensions (superset of the formats LibRaw handles).
+    // Camera RAW extensions, as a ROUTING HINT ONLY — this decides whether a file is handed to
+    // LibRaw or to TiffIO, nothing more. LibRaw itself dispatches on file CONTENT, not on the
+    // name: a file with a RAW extension that is not actually RAW is rejected by the decoder
+    // (verified: LibRawFileUnsupportedError), so a too-generous entry here cannot make LibRaw
+    // misparse anything. A too-narrow list is the damaging direction — an unlisted RAW goes to
+    // TiffIO, and since most RAW formats ARE TIFF containers it may not fail cleanly but decode
+    // to a wrong image. Hence: err towards listing.
     private static readonly HashSet<string> RawExts = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".arw", ".nef", ".cr2", ".cr3", ".dng", ".raf", ".rw2", ".orf", ".pef",
-        ".srw", ".dcr", ".kdc", ".mrw", ".3fr", ".mos", ".iiq", ".nrw", ".srf",
-        ".x3f", ".erf", ".mef", ".rwl",
+        ".arw", ".srf", ".sr2",                                  // Sony
+        ".nef", ".nrw",                                          // Nikon
+        ".cr2", ".cr3", ".crw",                                  // Canon
+        ".raf",                                                  // Fujifilm
+        ".rw2",                                                  // Panasonic
+        ".orf",                                                  // Olympus
+        ".pef", ".dng",                                          // Pentax / Adobe + DJI, Leica, Sigma
+        ".srw",                                                  // Samsung
+        ".dcr", ".kdc",                                          // Kodak
+        ".mrw",                                                  // Minolta
+        ".3fr", ".fff",                                          // Hasselblad / Imacon
+        ".iiq", ".cap", ".eip",                                  // Phase One
+        ".mos",                                                  // Leaf
+        ".x3f",                                                  // Sigma Foveon
+        ".erf",                                                  // Epson
+        ".mef",                                                  // Mamiya
+        ".rwl", ".raw",                                          // Leica
+        ".bay",                                                  // Casio
     };
 
     /// <summary>True when the path's extension is a known camera RAW format.</summary>
     public static bool IsRawExtension(string path) => RawExts.Contains(Path.GetExtension(path));
+
+    /// <summary>The RAW extensions above, for callers that build file-dialog filters or scan a
+    /// folder. Exposed so the GUI's lists derive from this one rather than restating it — three
+    /// hand-copied lists is how <c>.3fr</c> ended up decodable but unselectable.</summary>
+    public static IReadOnlyCollection<string> RawExtensions => RawExts;
 
     /// <summary>FBDD Bayer-domain chroma noise reduction (pre-demosaic). Port of raw_decode.py's
     /// FBDD_OFF/LIGHT/FULL. Values match LibRaw's fbdd_noiserd (0/1/2).</summary>

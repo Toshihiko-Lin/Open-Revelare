@@ -21,8 +21,11 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public partial class ImportDialog : Window
 {
-    private static readonly HashSet<string> RawTiffExt = new(StringComparer.OrdinalIgnoreCase)
-    { ".arw", ".nef", ".cr2", ".cr3", ".dng", ".raf", ".rw2", ".orf", ".pef", ".srw", ".tif", ".tiff" };
+    /// <summary>What "add folder" picks up: every RAW the decoder accepts, plus TIFF. Derived
+    /// from <see cref="RawDecode.RawExtensions"/> rather than restated — a RAW the decoder can
+    /// read but this set omits would be silently skipped on import.</summary>
+    private static readonly HashSet<string> RawTiffExt =
+        new(RawDecode.RawExtensions.Concat(new[] { ".tif", ".tiff" }), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Scanner output — the inputs that may hold several negatives in one file and so
     /// go through the split pre-pass. Camera RAW is one frame per file and skips it.</summary>
