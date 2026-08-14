@@ -80,17 +80,24 @@ jobs:
       - name: 内存探测所依赖的 sysctl 键
         run: |
           set -e
+          # 必须存在的键：缺任何一个，SystemMemory.TryMacOS 就会整体返回 false。
           for k in hw.pagesize vm.page_free_count vm.page_speculative_count \
-                   vm.page_purgeable_count vm.page_external_count; do
+                   vm.page_purgeable_count; do
             v=$(sysctl -n "$k") || { echo "缺 sysctl 键 $k —— SystemMemory 会退回总内存估算"; exit 1; }
             echo "$k = $v"
             case "$v" in ''|*[!0-9]*) echo "$k 不是无符号整数：$v"; exit 1;; esac
           done
-          # free 单独为 0 是正常的（统一缓冲区缓存会吃满空闲），但四项全 0 说明读法有问题。
+          # vm.page_external_count 在代码里是软读取（缺失时直接跳过，不影响返回值），
+          # 部分 macOS 版本（包括 GitHub runner 用的镜像）没有这个键，属正常情况。
+          if v=$(sysctl -n vm.page_external_count 2>/dev/null); then
+            echo "vm.page_external_count = $v"
+          else
+            echo "vm.page_external_count 不存在（软读取，正常）"
+          fi
+          # free 单独为 0 是正常的（统一缓冲区缓存会吃满空闲），但必须键全 0 说明读法有问题。
           total=0
-          for k in vm.page_free_count vm.page_speculative_count \
-                   vm.page_purgeable_count vm.page_external_count; do
+          for k in vm.page_free_count vm.page_speculative_count vm.page_purgeable_count; do
             total=$((total + $(sysctl -n "$k")))
           done
-          [ "$total" -gt 0 ] || { echo "四项页计数全为 0 —— 读法有问题"; exit 1; }
+          [ "$total" -gt 0 ] || { echo "三项页计数全为 0 —— 读法有问题"; exit 1; }
           echo "可回收+空闲合计 $((total * $(sysctl -n hw.pagesize) / 1024 / 1024)) MB"
