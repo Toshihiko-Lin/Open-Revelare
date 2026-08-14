@@ -229,6 +229,37 @@ public partial class MainViewModel : ViewModelBase
     private bool _paramsLoaded;
 
     /// <summary>
+    /// Fold the live control values back into <paramref name="frame"/> — the ONE way a frame's
+    /// stored params are updated from the UI.
+    ///
+    /// Refuses while <see cref="_paramsLoaded"/> is false, which is the whole point of it existing.
+    /// Between <c>CurrentFrame = …</c> and the <see cref="LoadParams"/> at the end of
+    /// <see cref="SwitchFrameAsync"/> the controls still hold the OUTGOING frame's state (or, on a
+    /// fresh roll, the previous roll's), so writing them onto the incoming frame does not save an
+    /// edit — it invents one. <see cref="BuildParams"/> reads <see cref="_cropRect"/> for
+    /// <see cref="FrameParams.CropRect"/>, so on an import that window ends with the frame's crop
+    /// REPLACED BY NULL.
+    ///
+    /// That window is wide open on import and the film strip writes into it: the strip binds
+    /// SelectedItem two-way to <see cref="CurrentFrame"/>, so rebuilding Frames pushes the
+    /// selection back through the binding and re-enters <see cref="OnCurrentFrameChanged"/>, whose
+    /// outgoing-frame fold is this call. The decode it is racing is the roll's FIRST, so the victim
+    /// is always frame 1 — and on a split import frame 1's params are its share of the strip, which
+    /// is why a multi-strip import (several files' decodes queued at the gate ahead of it, so the
+    /// window stays open far longer) showed the first strip's first negative uncropped: the whole
+    /// scan, with its pre-crop erased before it was ever applied. The <see cref="HasImage"/> guard
+    /// at the call site does not cover this — HasImage stays true from the previous roll.
+    ///
+    /// Nothing is lost by refusing: a frame whose params have not been loaded yet has no live edit
+    /// to capture, and the frame already holds the params the load put there.
+    /// </summary>
+    private void CommitLiveParams(RollFrame? frame)
+    {
+        if (frame is null || !_paramsLoaded) return;
+        frame.Params = BuildParams();
+    }
+
+    /// <summary>
     /// The frame's own rect within its source file, or null when the frame owns the whole file.
     /// Split frames only — on an ordinary frame the file IS the frame.
     ///
@@ -543,10 +574,13 @@ public partial class MainViewModel : ViewModelBase
 
         // Persist the outgoing frame's live edits before swapping in the new one.
         // Skipped during a restore switch — the frames already hold the restored params.
-        if (_prevFrame is not null && HasImage && !_restoring)
+        // _paramsLoaded (inside CommitLiveParams) is the load-in-flight half of this guard, and it
+        // is the half that matters on import: HasImage stays true from the PREVIOUS roll, so on its
+        // own it lets the incoming roll's first frame be overwritten with the old roll's controls.
+        if (_prevFrame is not null && HasImage && !_restoring && _paramsLoaded)
         {
             CommitUndo();   // flush any pending edit on the outgoing frame
-            _prevFrame.Params = BuildParams();
+            CommitLiveParams(_prevFrame);
             RefreshThumbnail(_prevFrame);
         }
         _prevFrame = value;
@@ -571,7 +605,7 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Snapshot every frame's params (folding current UI into the current frame) + index.</summary>
     private RollSnapshot CaptureSnapshot()
     {
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        CommitLiveParams(CurrentFrame);
         var arr = new FrameParams[Frames.Count];
         for (int i = 0; i < Frames.Count; i++) arr[i] = Frames[i].Params.Clone();
         return new RollSnapshot(arr, CurrentFrame is null ? 0 : Frames.IndexOf(CurrentFrame));
@@ -2075,8 +2109,10 @@ public partial class MainViewModel : ViewModelBase
             f.Params.WhitePoint = white;
         }
         // The current frame's params are rebuilt from the sliders on switch anyway, but the loop
-        // above has just overwritten them with the same values, so nothing is lost either way.
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        // above has just overwritten them with the same values, so nothing is lost either way —
+        // including when CommitLiveParams declines because a frame switch is still in flight, in
+        // which case the loop's direct write is already the whole answer for that frame.
+        CommitLiveParams(CurrentFrame);
 
         // The loop above mutated every OTHER frame's params directly, and nothing else notices
         // that: autosave is driven by the slider bindings, which only fire for the frame on
@@ -2255,7 +2291,7 @@ public partial class MainViewModel : ViewModelBase
         // mutation of other frames' params, so without marking the roll dirty the saved project
         // could keep the broadcast this method just reverted.
         foreach (var (f, tb) in restore) f.Params.TBase = tb;
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        CommitLiveParams(CurrentFrame);
         MarkRollDirty();
 
         ScheduleRender();
@@ -2924,7 +2960,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private Project.Data BuildProjectData()
     {
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        CommitLiveParams(CurrentFrame);
         var data = new Project.Data
         {
             Meta = new Project.RollMeta
@@ -3491,6 +3527,13 @@ public partial class MainViewModel : ViewModelBase
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
         _prevFrame = null;
+        // The controls still show the OUTGOING roll, and they stay that way until the incoming
+        // first frame finishes decoding and LoadParams runs. Say so before Frames is touched:
+        // rebuilding the collection pushes the strip's two-way SelectedItem binding back into
+        // CurrentFrame, and every write-back that lands in that window is gated on this flag (see
+        // CommitLiveParams). Without it the first frame of the new roll is stamped with the old
+        // roll's controls — on a split import that means its pre-crop is replaced by null.
+        _paramsLoaded = false;
         _pendingSprocketPrompt = true;
         if (!_configLoad)   // config path pre-sets roll-level ops before this call; don't wipe them
         {
@@ -3587,7 +3630,13 @@ public partial class MainViewModel : ViewModelBase
         IsBusy = true;
         StatusText = Loc.F($"正在解码 {frame.FileName} …");
         int tok = ++_switchToken;
-        _paramsLoaded = false;   // _cropRect still belongs to the frame being left
+        // _cropRect still belongs to the frame being left, so until LoadParams runs below the
+        // controls describe no frame in particular. SplitCropOf reads this to know which rect to
+        // trust, and CommitLiveParams refuses to write the controls back onto a frame while it is
+        // false — the decode below is awaited, and everything that fires meanwhile (the strip's
+        // SelectedItem binding, autosave, the auto-invert chain) would otherwise stamp the
+        // incoming frame with the outgoing frame's state.
+        _paramsLoaded = false;
         try
         {
             // Cache hit → no decode at all; otherwise join whoever is already decoding this file.
@@ -4150,7 +4199,7 @@ public partial class MainViewModel : ViewModelBase
         if (toAdd.Count == 0) { StatusText = Loc.T("所选文件已在当前卷中"); return; }
 
         // Fold the current frame's live edits in, then use its calibration as the template.
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        CommitLiveParams(CurrentFrame);
         FrameParams template = (CurrentFrame?.Params ?? new FrameParams()).Clone();
         RollFrame.ResetScene(template);
         template.CropRect = null; template.Rotation = 0;   // geometry is per-scan; don't inherit crop/straighten
@@ -4174,7 +4223,7 @@ public partial class MainViewModel : ViewModelBase
         if (parent.IsVirtual) { StatusText = Loc.T("只能对真实帧创建副本（当前已是副本）"); return; }
 
         CommitUndo();
-        parent.Params = BuildParams();   // capture live edits into the parent first
+        CommitLiveParams(parent);   // capture live edits into the parent first
         RollFrame copy = RollFrame.MakeVirtualCopy(parent);
         int pos = Frames.IndexOf(parent) + 1;
         Frames.Insert(pos, copy);
@@ -4382,7 +4431,7 @@ public partial class MainViewModel : ViewModelBase
     public async Task ExportRollAsync(string folder, ExportOptions opt)
     {
         if (Frames.Count == 0) return;
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();   // capture live edits
+        CommitLiveParams(CurrentFrame);   // capture live edits
         IsBusy = true;
         try
         {
@@ -4431,7 +4480,7 @@ public partial class MainViewModel : ViewModelBase
     public async Task<IReadOnlyList<ImageBuffer>?> BuildContactThumbsAsync()
     {
         if (Frames.Count == 0) return null;
-        if (CurrentFrame is not null) CurrentFrame.Params = BuildParams();
+        CommitLiveParams(CurrentFrame);
         IsBusy = true;
         StatusText = Loc.T("正在生成印样 …");
         try
