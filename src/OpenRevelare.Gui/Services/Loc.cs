@@ -88,7 +88,37 @@ public static class Loc
     }
 
     /// <summary>Translate a plain literal. Unknown strings come back unchanged (i.e. Chinese).</summary>
-    public static string T(string zh) => Lookup(zh) ?? zh;
+    public static string T(string zh) => Keys(Lookup(zh) ?? zh);
+
+    /// <summary>
+    /// Spell shortcuts with the modifier the running platform actually uses: ⌘ on macOS, Ctrl
+    /// elsewhere.
+    ///
+    /// Applied after the table lookup, on the way out, so the translation keys stay written
+    /// "Ctrl+…" — they are the Chinese source strings and must not vary by platform, or a mac
+    /// would miss every entry in en.json.
+    ///
+    /// Only the modifier's NAME is rewritten. The gestures themselves are bound from
+    /// <c>MainWindow.Accel</c> / <see cref="Markup.AccelExtension"/>; this keeps the prose that
+    /// describes them honest, which is the half a user reads before pressing anything.
+    ///
+    /// "Cmd" is one character shorter than "Ctrl", which matters because the 快捷键 help is a
+    /// monospace table whose second column is aligned by spaces: a plain replace pulls every
+    /// shortcut line one column left of the plain-key lines (N / K / F / Esc) and the table
+    /// visibly breaks. Each substitution therefore gives back the character it took, when there
+    /// is a run of spaces after it to give it back to.
+    /// </summary>
+    private static string Keys(string s)
+    {
+        if (!OperatingSystem.IsMacOS() || !s.Contains("Ctrl", StringComparison.Ordinal)) return s;
+        // "Ctrl+Z  " → "Cmd+Z   ": swap the name, then restore the column by re-padding the
+        // following gap. A shortcut with no trailing gap (mid-sentence, "（Ctrl+1）") just gets
+        // one character shorter, which is what prose should do.
+        return System.Text.RegularExpressions.Regex.Replace(
+            s, @"Ctrl(\+\S+)?( +)?",
+            m => "Cmd" + m.Groups[1].Value
+                 + (m.Groups[2].Success ? m.Groups[2].Value + " " : ""));
+    }
 
     /// <summary>
     /// Translate a literal that means different things in different places. 「关闭」 is "Off" in
@@ -98,7 +128,8 @@ public static class Loc
     /// The table key is <c>context|zh</c>; a table with no such entry falls back to the plain
     /// key and then to the Chinese, so adding a context never breaks an existing string.
     /// </summary>
-    public static string T(string zh, string context) => Lookup(context + "|" + zh) ?? T(zh);
+    public static string T(string zh, string context)
+        => Lookup(context + "|" + zh) is { } v ? Keys(v) : T(zh);
 
     /// <summary>Raw table lookup — null when there is no entry. This is what Core's
     /// <see cref="OpenRevelare.Core.CoreText"/> is pointed at, so the exception texts the GUI
@@ -117,9 +148,9 @@ public static class Loc
     {
         if (Lookup(fs.Format) is { } v)
         {
-            try { return string.Format(CultureInfo.CurrentCulture, v, fs.GetArguments()); }
+            try { return Keys(string.Format(CultureInfo.CurrentCulture, v, fs.GetArguments())); }
             catch (FormatException) { /* a bad hole in the table → fall through to Chinese */ }
         }
-        return fs.ToString(CultureInfo.CurrentCulture);
+        return Keys(fs.ToString(CultureInfo.CurrentCulture));
     }
 }

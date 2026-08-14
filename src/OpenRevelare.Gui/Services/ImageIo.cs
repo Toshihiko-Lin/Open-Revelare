@@ -9,12 +9,23 @@ namespace OpenRevelare.Gui.Services;
 /// </summary>
 public static class ImageIo
 {
-    /// <summary>File dialog filter patterns for supported inputs — TIFF plus every RAW the
-    /// decoder accepts, derived from <see cref="RawDecode.RawExtensions"/> so a format added
-    /// there becomes selectable here without a second edit.</summary>
+    /// <summary>
+    /// File dialog filter patterns for supported inputs — TIFF plus every RAW the decoder
+    /// accepts, derived from <see cref="RawDecode.RawExtensions"/> so a format added there
+    /// becomes selectable here without a second edit.
+    ///
+    /// Each extension is listed in BOTH cases, because the dialog's matching is not
+    /// case-insensitive everywhere: Win32 and GTK fold case for us, but macOS hands these to
+    /// NSOpenPanel, which does NOT. Cameras write the upper-case form constantly (Canon .CR2,
+    /// Nikon .NEF, Hasselblad .3FR), so the lower-case-only list left mac users looking at
+    /// their own negatives greyed out — while <see cref="RawDecode.IsRawExtension"/>, which
+    /// compares OrdinalIgnoreCase, would have decoded them happily. A file the decoder accepts
+    /// must never be a file the picker refuses to show.
+    /// </summary>
     public static readonly string[] OpenPatterns =
-        new[] { "*.tif", "*.tiff" }
-            .Concat(RawDecode.RawExtensions.OrderBy(e => e, StringComparer.Ordinal).Select(e => "*" + e))
+        new[] { ".tif", ".tiff" }
+            .Concat(RawDecode.RawExtensions.OrderBy(e => e, StringComparer.Ordinal))
+            .SelectMany(e => new[] { "*" + e, "*" + e.ToUpperInvariant() })
             .ToArray();
 
     // ── Decode admission control ────────────────────────────────────────────────

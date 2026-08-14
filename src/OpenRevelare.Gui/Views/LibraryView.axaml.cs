@@ -145,6 +145,23 @@ public partial class LibraryView : UserControl
         await vm.RefreshCoverAsync(card);
     }
 
+    /// <summary>
+    /// Show the roll's project file in the system file manager.
+    ///
+    /// Arguments go through <see cref="ProcessStartInfo.ArgumentList"/> rather than the single
+    /// <c>Arguments</c> string on the two Unix platforms, so the path is handed over as one argv
+    /// entry and is never re-parsed.
+    ///
+    /// Quoting it into a string works for ordinary paths — .NET's splitter does strip the outer
+    /// quotes, spaces and CJK included — but it is the Windows command-line grammar, and two
+    /// characters that are perfectly legal in a macOS or Linux filename do not survive it
+    /// (measured, not assumed): a <c>"</c> in the path is eaten outright, and a trailing
+    /// <c>\</c> escapes the closing quote and turns into one. Either way the file manager is
+    /// asked to reveal a path that does not exist, and the failure is silent.
+    ///
+    /// Windows is the exception and keeps the raw string: explorer.exe does not take a normal
+    /// argv, it wants the literal <c>/select,"C:\path"</c> with the comma and quotes intact.
+    /// </summary>
     private void OnRevealClick(object? sender, RoutedEventArgs e)
     {
         if (CardOf(sender) is not { } card || card.Roll is not { } roll) return;
@@ -154,11 +171,18 @@ public partial class LibraryView : UserControl
             if (OperatingSystem.IsWindows())
                 Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{roll.ProjectPath}\""));
             else if (OperatingSystem.IsMacOS())
-                Process.Start("open", $"-R \"{roll.ProjectPath}\"");
-            else
-                Process.Start("xdg-open", $"\"{System.IO.Path.GetDirectoryName(roll.ProjectPath)}\"");
+                Process.Start(new ProcessStartInfo("open")
+                { ArgumentList = { "-R", roll.ProjectPath } });
+            else if (System.IO.Path.GetDirectoryName(roll.ProjectPath) is { } dir)
+                Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir } });
         }
-        catch { /* no file manager is not worth an error dialog */ }
+        // Still no dialog — a machine without a file manager is not an error worth interrupting
+        // anyone for. But swallowing it without a trace is how this stayed "clicking does
+        // nothing" for whoever had to report it, so leave something a log can show.
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[reveal] {roll.ProjectPath}: {ex.Message}");
+        }
     }
 
     private async void OnForgetClick(object? sender, RoutedEventArgs e)

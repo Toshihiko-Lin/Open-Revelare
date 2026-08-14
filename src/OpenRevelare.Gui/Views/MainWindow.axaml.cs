@@ -58,6 +58,10 @@ public partial class MainWindow : Window
                     ResetZoom();   // a new frame → back to fit
                 };
                 vm.RollImported += OnRollImported;
+                // macOS 顶端菜单栏（P4）。挂在这里而不是构造函数里：菜单项的 IsEnabled 直接
+                // 绑到 vm 上（NativeMenuItem 没有 DataContext 可继承，见 Bind 的注释），
+                // 而 DataContext 是构造之后才赋的，那时 Vm 还是 null。
+                SetUpNativeMenu();
             }
         };
         // Onboarding first, then the delayed update check — the notice must not open on top of
@@ -853,12 +857,32 @@ public partial class MainWindow : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         Vm?.FlushRollNow();
+        // Loc.Changed 是静态事件，订阅方却是这个窗口：不摘掉就会把窗口钉在进程生命周期上。
+        // 实际只有一个主窗口，但配对的 -= 是这个项目里其余订阅一贯的写法。
+        TearDownNativeMenu();
         base.OnClosing(e);
     }
 
+    /// <summary>
+    /// The platform's shortcut modifier: ⌘ on macOS, Ctrl everywhere else.
+    ///
+    /// Avalonia reports ⌘ as <see cref="KeyModifiers.Meta"/> and keeps
+    /// <see cref="KeyModifiers.Control"/> for the physical Ctrl key, so testing Control alone
+    /// meant every accelerator below was dead on macOS unless the user reached for a key mac
+    /// software never uses for these. ⌘Z among them — on an editor, an undo that silently does
+    /// nothing reads as lost work.
+    ///
+    /// The two places that SHOW a shortcut follow the same rule from their own side:
+    /// <see cref="Markup.AccelExtension"/> builds the menu gestures, and <c>Loc.Keys</c>
+    /// rewrites the modifier in prose. Change one, change all three, or a menu goes back to
+    /// advertising a chord that is not the one wired here.
+    /// </summary>
+    private static KeyModifiers Accel =>
+        OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        bool ctrl = e.KeyModifiers.HasFlag(Accel);
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool bare = e.KeyModifiers == KeyModifiers.None;
         bool img = Vm?.HasImage == true;
@@ -1035,8 +1059,9 @@ public partial class MainWindow : Window
         SyncViewerBgChecks();
     }
 
-    /// <summary>Tick the swatch that matches the saved backdrop, in both copies of the menu
-    /// (视图 菜单 and the preview right-click share the item list but not the instances).</summary>
+    /// <summary>Tick the swatch that matches the saved backdrop, in every copy of the menu
+    /// (视图 菜单, the preview right-click, and — on macOS — the native menu bar share the item
+    /// list but not the instances).</summary>
     private void SyncViewerBgChecks()
     {
         string cur = Services.Settings.Current.ViewerBackground;
@@ -1044,6 +1069,10 @@ public partial class MainWindow : Window
             foreach (object? child in parent.Items)
                 if (child is MenuItem { Tag: string hex } mi)
                     mi.IsChecked = string.Equals(hex, cur, StringComparison.OrdinalIgnoreCase);
+
+        // 第三份：mac 顶端菜单栏那组。空 dictionary 时（非 mac）这一圈什么也不做。
+        foreach ((string hex, NativeMenuItem item) in _bgNativeItems)
+            item.IsChecked = string.Equals(hex, cur, StringComparison.OrdinalIgnoreCase);
     }
 
     // ── Film strip: right-click selection + drag-to-reorder ─────────────────────
@@ -1739,6 +1768,9 @@ public partial class MainWindow : Window
             FileTypeFilter = new[]
             {
                 new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                // Always leave a way through: a filter that fails to match is otherwise a dead
+                // end with no in-app remedy (see ImageIo.OpenPatterns on why it can happen).
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
         var paths = files.Select(f => f.TryGetLocalPath()).Where(p => p != null).Cast<string>().ToList();
@@ -1784,6 +1816,7 @@ public partial class MainWindow : Window
             FileTypeFilter = new[]
             {
                 new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
         string? path = files.FirstOrDefault()?.TryGetLocalPath();
