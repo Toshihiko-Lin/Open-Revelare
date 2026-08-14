@@ -512,7 +512,6 @@
   "片基归零": "Zero on the film base",
   "两端一起升降。实测反差变化仅 ±0.1%、色偏不变，所以这是纯粹的整体明暗。": "Moves both ends together. Contrast measured to change by only ±0.1% and the cast not at all, so this is purely overall lightness.",
   "框一块应为纯片基的区域，把它的残余密度从两端一起减掉。t_base 消掉的是片基的颜色，不保证它恰好落在密度 0。": "Select an area that should be bare film base; its residual density is subtracted from both ends. t_base removes the base's colour but does not guarantee it lands exactly on density 0.",
-  "每个通道读作黑的密度。片基采样定义了密度 0，所以标定后就落在 0——那是真实读数，不是「未修正」。展开三个分量即可调暗部色偏。": "The density each channel reads as black. Sampling the film base defines density 0, so a calibrated roll sits at 0 — a real reading, not \"uncorrected\". Expand the three components to adjust the shadow cast.",
   "每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离就是反差；三通道之差就是高光色偏——这三个数本身即白平衡。": "The density each channel reads as white, typically 1.8–2.4. Its distance from D_min is the contrast; the differences between the three are the highlight cast — these numbers are the white balance itself.",
   "自动找到画面最亮点，把它当作纯白来解出亮端三个密度": "Finds the brightest point automatically and treats it as pure white to solve the three highlight densities",
   "色偏在【整卷校准 → D_max / D_min】展开的三个通道里调，那里是反相的两端。": "Colour cast is adjusted in the per-channel components under Roll calibration → D_max / D_min, which are the inversion's two ends.",
@@ -531,5 +530,7 @@
   "自动黑点": "Auto black point",
   "自动找出画面里裸露的片基并写入黑端。依次尝试：灯板下的片基峰 → 边缘裸片基窄带 → 亮端分位。": "Finds the bare film base automatically and writes the black end. Tries in order: the base peak below the light panel → a sliver of bare base at the edge → a bright-end percentile.",
   "⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】": "⚠ No bare film base found — the automatic result is just the brightest part of the picture. Use \"Sample the film base\" by hand.",
-  "⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定": "⚠ No orange film base found: this roll may already be cropped past the base, so the automatic result is only a starting point — calibrate it by hand with Film-base sample"
+  "⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定": "⚠ No orange film base found: this roll may already be cropped past the base, so the automatic result is only a starting point — calibrate it by hand with Film-base sample",
+  "片基采样 → 黑端 {0:F3} / {1:F3} / {2:F3}": "Film base sampled → D_min {0:F3} / {1:F3} / {2:F3}",
+  "每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。": "The density each channel reads as black, measured against clear (T=1). A C-41 orange base is always R<G<B, typically 0.09 / 0.29 / 0.54 — verifiable physical numbers, not an offset from some baseline. Expand the three components to adjust the shadow cast."
 }

@@ -1474,37 +1474,23 @@ public partial class MainViewModel : ViewModelBase
         catch (Exception ex) { StatusText = Loc.F($"{what}失败：{ex.Message}"); }
     }
 
-    /// <summary>Film-base t_base from a rect over clear film (removes the orange mask).</summary>
+    /// <summary>
+    /// 片基采样：量出裸片基的**绝对密度**，写进黑端。
+    ///
+    /// 密度对 T=1 而言（TBase 恒为 1,1,1），所以量到的就是 −log10(片基透射率)。C-41 的橙色
+    /// 片基必然 R&lt;G&lt;B，典型 ~0.09/0.29/0.54——这三个数是可验证的物理量。
+    ///
+    /// 曾经这里写的是 t_base（除数），黑端则恒为 0,0,0。那样片基信息藏在一个没有滑块的字段
+    /// 里，界面上看不到黑端的任何客观数值，用户无从判断自动标定对不对。两种写法渲染逐位相同
+    /// （把片基从除数移到减数是同一个仿射变换），所以改成显示绝对值没有代价。
+    /// </summary>
     public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample(Loc.T("片基采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
-        double[] before = TBaseArr();           // needed to rebase the endpoints below
         double[] tb = FilmBase.SampleTBase(src, rect);
-        TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
-        FilmBaseText = "";
         _filmBaseSampled = true;
-        // BOTH endpoints are DENSITIES relative to t_base (-log10(patch/t_base)), so a new base
-        // moves them — by exactly -log10(t_base_new / t_base_old) per channel.
-        //
-        // That shift is known in closed form, so the endpoints are REBASED rather than discarded.
-        // Dropping them used to be the only option because a roll could fall back to the
-        // grade/pivot model; with one model there is nothing to fall back to, and clearing them
-        // would silently change the picture — which is exactly what made a manual film-base
-        // sample look like it "fixed" a roll whose real problem was elsewhere.
-        //
-        // 暗端直接归零，而不是像亮端那样平移。
-        //
-        // 片基采样定义的就是「密度 0 在哪」，所以采完之后暗端按定义落在 0——把刚测到的片基
-        // 密度再存一遍是同一事实的第二份拷贝，正是这次重构要消除的东西。用户若要暗部偏色，
-        // 展开三个分量手调即可。
-        double[] high = DMaxPerChannel;
-        for (int c = 0; c < 3; c++)
-        {
-            double shift = -Math.Log10(Math.Max(tb[c], 1e-10) / Math.Max(before[c], 1e-10));
-            high[c] += shift;
-        }
-        DMaxPerChannel = high;
-        DMinR = DMinG = DMinB = 0.0;
+        // 亮端不动：它已经是对 T=1 的绝对密度，与这次采样无关。只有黑端被重新定义。
+        DMinPerChannel = TBaseToDensity(tb);
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -1532,10 +1518,27 @@ public partial class MainViewModel : ViewModelBase
         double[] br = ImageIo.BrightReference(src);
         double tbSum = tb[0] + tb[1] + tb[2];
         double brSum = br[0] + br[1] + br[2];
-        StatusText = tbSum < brSum * 0.08
-            ? Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采")
-            : FilmBaseText;
+        if (tbSum < brSum * 0.08)
+        {
+            FilmBaseText = Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采");
+            StatusText = FilmBaseText;
+        }
+        else
+        {
+            FilmBaseText = "";
+            StatusText = Loc.F($"片基采样 → 黑端 {DMinR:F3} / {DMinG:F3} / {DMinB:F3}");
+        }
     });
+
+    /// <summary>
+    /// 透射率 → 对 T=1 的绝对密度。片基采样与自动片基共用，保证两条路写出同一个量。
+    /// </summary>
+    private static double[] TBaseToDensity(double[] t)
+    {
+        var d = new double[3];
+        for (int c = 0; c < 3; c++) d[c] = -Math.Log10(Math.Max(t[c], 1e-10));
+        return d;
+    }
 
     /// <summary>
     /// 高光采样：框负片上最浓的区域（= 正片高光），测出亮端三个密度。
@@ -1658,8 +1661,10 @@ public partial class MainViewModel : ViewModelBase
                 ? FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold)
                 : FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold,
                                                  valueImages: new[] { values });
-            TBaseR = tb[0]; TBaseG = tb[1]; TBaseB = tb[2];
-            foreach (RollFrame f in Frames) f.Params.TBase = (double[])tb.Clone();
+            // 片基的绝对密度进黑端；TBase 保持中性 1,1,1（参考点是完全透光）。
+            DMinPerChannel = TBaseToDensity(tb);
+            double[] dmin = DMinPerChannel;
+            foreach (RollFrame f in Frames) f.Params.DMinPerChannel = (double[])dmin.Clone();
             _filmBaseSampled = true;
             ok = true;
 
@@ -1971,9 +1976,8 @@ public partial class MainViewModel : ViewModelBase
             _suppressRender = true;
             try
             {
-                TBaseR = rollBase[0]; TBaseG = rollBase[1]; TBaseB = rollBase[2];
-                // 片基定义密度 0，所以暗端按定义归零。
-                DMinR = DMinG = DMinB = 0.0;
+                // 片基的绝对密度就是黑端本身。
+                DMinPerChannel = TBaseToDensity(rollBase);
 
                 // The highlight endpoint, from whichever measurement is available. Both estimators
                 // return the same quantity — three absolute densities — so there is nothing to
@@ -2276,8 +2280,6 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_previewLinear is null) return;
         if (!AutoFilmBaseFromRoll(AutoBoardCut(), useMode: true)) return;
-        // 片基定义密度 0，所以暗端按定义归零——与【片基采样】一致。
-        DMinR = DMinG = DMinB = 0.0;
         ScheduleRender();
     }
 
@@ -2705,7 +2707,7 @@ public partial class MainViewModel : ViewModelBase
         DistortionK1 = 0; VignetteAmount = 0; VignetteFalloff = 2.5;
         SprocketEnabled = false; SprocketThreshold = 0.9;
         // Stage 1 — film base
-        TBaseR = 0.82; TBaseG = 0.51; TBaseB = 0.29;
+        TBaseR = TBaseG = TBaseB = 1.0;   // 参考透射率恒为中性；片基由黑端承载
         // 两端回到一组中性（无色偏）的默认值：黑在片基处，白在输出范围处。
         // 由自动标定或采样重新测量。
         DMinR = 0; DMinG = 0; DMinB = 0;

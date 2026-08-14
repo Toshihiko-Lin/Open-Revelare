@@ -31,6 +31,21 @@
 - **删除 `scan_ev`**，改为【密度零点】。它是密度域加常数，正是「两端同向移动」；且位于密度
   地板之后，与 t_base 缩放并不严格等价（实测差 10.7%），留着只会是第十二个参数。
 
+- **黑端显示真实密度，不再恒为 0,0,0**。此前片基信息存在 `t_base`（密度的除数）里，而
+  D_min 恒为 `0,0,0`——两端说是同量纲，实际一个是绝对值一个恒为零；更糟的是 t_base 已经
+  没有滑块，于是**界面上看不到黑端的任何客观数值**，片基又是自动测的，用户无从判断对错。
+
+  现在 `t_base` 固定为 1,1,1（参考点＝完全透光），两端都是对 T=1 的绝对密度：
+
+  ```
+  D_min  0.086  0.292  0.538   ← 橙色片基，必然 R<G<B，一眼可验
+  D_max  2.229  2.274  2.848
+  跨度   2.143  1.982  2.310   ← 相减得到，即原先的 D_max
+  ```
+
+  把片基从除数移到减数是同一个仿射变换，**渲染逐位不变**（实测 luma 0.025377145 前后完全
+  相同），旧工程载入时自动折算，也逐位不变。
+
 - **黑端只保留一组 RGB，并与亮端同构**。原先黑端里有两组 RGB 滑块（D_min 与片基透射率
   T_base），而它们描述的是同一件事——黑端在哪、暗部偏什么色（实测改任一个都在动同一个量）。
   T_base 不再给滑块，由【片基采样】写入；D_min 才是与 D_max 同量纲、可直接相减的那个。
@@ -175,6 +190,25 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
 - **`scan_ev` is gone**, replaced by Density zero. It was an additive shift in density — precisely
   "move both ends together" — and sat after the density floor, so it was never quite equivalent to
   scaling t_base (measured 10.7% apart).
+
+- **The black end shows real densities instead of a constant 0,0,0.** The film base used to live in
+  `t_base` (the divisor for density) while D_min always read `0,0,0` — nominally the same units as
+  D_max, actually one absolute and one permanently zero. Worse, t_base had lost its sliders, so **no objective
+  number for the black end appeared anywhere in the UI**, and the base is measured automatically,
+  leaving nothing to check it against.
+
+  `t_base` is now fixed at 1,1,1 (the reference is clear film), and both ends are absolute densities
+  against T=1:
+
+  ```
+  D_min  0.086  0.292  0.538   ← the orange base, always R<G<B, verifiable at a glance
+  D_max  2.229  2.274  2.848
+  span   2.143  1.982  2.310   ← their difference, i.e. the old D_max
+  ```
+
+  Moving the base from divisor to subtrahend is the same affine map, so **the render is
+  bit-identical** (luma measured 0.025377145 before and after), and old projects are converted on
+  load with no shift either.
 
 - **The black end keeps one RGB group and now mirrors the white end.** It used to carry two RGB
   triples (D_min and the T_base transmittance) describing the same thing — where black sits and

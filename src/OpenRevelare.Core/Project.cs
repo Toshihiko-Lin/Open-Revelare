@@ -273,9 +273,11 @@ public static class Project
     {
         var p = new FrameParams
         {
-            TBase = Vec3(d, "t_base", 0.82, 0.51, 0.29),
-            // Both endpoints, migrated from whatever schema the file was written in — see
-            // MigrateHighlightEndpoint / MigrateShadowEndpoint.
+            // TBase 恒为中性：片基改由黑端以绝对密度承载。旧工程存在 t_base 里的片基由
+            // RebaseToNeutral 折进两端——把片基从除数移到减数是同一个仿射变换，所以这一步
+            // 渲染逐位不变（与 NeedsRecalibration 提示的那种真正会变的迁移不同）。
+            TBase = new[] { 1.0, 1.0, 1.0 },
+            // 两端，按文件写入时的 schema 迁移——见 MigrateHighlightEndpoint / MigrateShadowEndpoint。
             DMaxPerChannel = MigrateHighlightEndpoint(d),
             DMinPerChannel = MigrateShadowEndpoint(d),
             ChromaChannelScale = Vec3(d, "chroma_channel_scale", 1, 1, 1),
@@ -318,6 +320,7 @@ public static class Project
             FlipH = Bool(d, "flip_h", false),
             FlipV = Bool(d, "flip_v", false),
         };
+        RebaseToNeutral(d, p);
         // lcc_enabled is stored, but the flat-field object is roll-level and re-baked by the loader.
         string src = d["source_path"]?.GetValue<string>() ?? Str(d, "filename", "");
         return new Frame { SourcePath = src, IsVirtual = Bool(d, "is_virtual", false), Params = p };
@@ -356,6 +359,29 @@ public static class Project
 
     /// <summary>A scalar as a neutral three-channel endpoint set.</summary>
     private static double[] Repeat3(double v) => new[] { v, v, v };
+
+    /// <summary>
+    /// 把存在 <c>t_base</c> 里的片基折进两端，使 TBase 归于中性 1,1,1。
+    ///
+    /// 密度定义是 <c>D = -log10(T / t_base)</c>；把除数换成 1 相当于给每个通道的密度加上
+    /// <c>-log10(t_base[c])</c>。两端同时加同一个量，端点之差（即反差与色偏）完全不变，
+    /// 渲染逐位相同——这只是同一个仿射变换的另一种写法，不是重新标定。
+    ///
+    /// 这样做是为了让黑端显示**可验证的绝对密度**（橙色片基必然 R&lt;G&lt;B，典型
+    /// 0.09/0.29/0.54），而不是恒为 0,0,0 的哨兵值——后者把真实信息藏在一个界面上看不到的
+    /// 字段里，用户无从判断自动标定是否正确。
+    /// </summary>
+    private static void RebaseToNeutral(JsonObject d, FrameParams p)
+    {
+        double[] stored = Vec3(d, "t_base", 1, 1, 1);
+        for (int c = 0; c < 3; c++)
+        {
+            double shift = -Math.Log10(Math.Max(stored[c], 1e-10));
+            if (Math.Abs(shift) < 1e-12) continue;
+            p.DMinPerChannel[c] += shift;
+            p.DMaxPerChannel[c] += shift;
+        }
+    }
 
     /// <summary>
     /// 这一帧的标定是否来自旧模型、需要重跑。

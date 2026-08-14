@@ -31,9 +31,20 @@ public sealed class FrameParams
     // 注意这三者**不需要额外参数**，它们就是这六个数的不同读法。任何试图为「亮度」「反差」
     // 「色温」单独立一个字段的做法，都是在重新制造上面那个十余参数的局面。
 
-    /// <summary>Per-channel film-base transmittance — the divisor that puts the bare base at
-    /// density 0. <see cref="DMinPerChannel"/> is stated relative to it. Must be &gt; 0.</summary>
-    public double[] TBase { get; set; } = { 0.82, 0.51, 0.29 };
+    /// <summary>
+    /// 密度的参考透射率：<c>D = -log10(T / TBase)</c>。
+    ///
+    /// **恒为 1,1,1，不再承载片基。** 它曾经是片基透射率，于是片基信息藏在这里、而
+    /// <see cref="DMinPerChannel"/> 恒为 0,0,0——两端说是同量纲，实际一个是绝对值一个恒为零，
+    /// 而且界面上看不到黑端的任何客观数值（片基是自动测的，用户无从判断对错）。
+    ///
+    /// 固定成 1 之后参考点是「完全透光」，两端都成为对 T=1 的绝对密度：橙色片基读出
+    /// ~0.09/0.29/0.54（R&lt;G&lt;B，一眼可验），高光读出 ~2.2/2.3/2.8，反差就是两者之差。
+    /// 渲染逐位不变——把片基从除数移到减数是同一个仿射变换的两种写法。
+    ///
+    /// 保留字段而非删除：Path A 的解耦标定仍可能需要一个非中性的参考，且旧工程要能读回。
+    /// </summary>
+    public double[] TBase { get; set; } = { 1.0, 1.0, 1.0 };
 
     /// <summary>
     /// 输出范围：黑端落在 10^-OutputRange。
@@ -56,8 +67,9 @@ public sealed class FrameParams
     /// <summary>
     /// 暗端：每个通道读作黑的密度，<see cref="DMaxPerChannel"/> 的对称伙伴。
     ///
-    /// 同样是绝对密度。<see cref="TBase"/> 已把裸片基放在 0，所以未标定的卷是 0,0,0——那是
-    /// 一个真实读数（「黑就在片基处」），不是「未修正」的哨兵值。三通道之差即暗部色偏。
+    /// **裸片基的实测密度**，对 T=1 而言。C-41 的橙色片基必然 R&lt;G&lt;B（红光透过最多），
+    /// 典型 ~0.09 / 0.29 / 0.54——这三个数本身就能让人判断标定对不对，这正是它要显示绝对值
+    /// 而不是恒为 0 的原因。三通道之差即暗部色偏。
     /// </summary>
     public double[] DMinPerChannel { get; set; } = { 0.0, 0.0, 0.0 };
 

@@ -737,9 +737,9 @@
 
                                 <!-- D_min：暗端 -->
                                 <Expander Header="{i18n:T 'D_min（黑端）'}" IsExpanded="True"
-                                          ToolTip.Tip="{i18n:T '每个通道读作黑的密度。片基采样定义了密度 0，所以标定后就落在 0——那是真实读数，不是「未修正」。展开三个分量即可调暗部色偏。'}">
+                                          ToolTip.Tip="{i18n:T '每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。'}">
                                     <StackPanel Spacing="2">
-                                        <ctl:SliderRow Label="D_min" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.005" DefaultValue="0"
+                                        <ctl:SliderRow Label="D_min" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" />
                                         <Grid ColumnDefinitions="*,*">
                                             <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
@@ -769,9 +769,9 @@
                                              D_min 才是与 D_max 同量纲、可直接相减的那个。-->
                                         <Expander Header="{i18n:T '逐通道'}" Margin="0,2,0,0">
                                             <StackPanel Spacing="1">
-                                                <ctl:SliderRow Label="R" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" />
-                                                <ctl:SliderRow Label="G" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" />
-                                                <ctl:SliderRow Label="B" Minimum="-1" Maximum="1.5" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinB}" />
+                                                <ctl:SliderRow Label="R" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" />
+                                                <ctl:SliderRow Label="G" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" />
+                                                <ctl:SliderRow Label="B" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinB}" />
                                             </StackPanel>
                                         </Expander>
                                     </StackPanel>

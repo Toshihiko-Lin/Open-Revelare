@@ -253,15 +253,19 @@ The density each channel reads as black. Two buttons:
 | **Sample the film base** | Manual | Select the semi-transparent orange base (between sprockets, or the margin) |
 | **Auto black point** | Automatic | Finds bare base: the peak below the light panel → an edge sliver → a bright-end percentile |
 
-The film base defines density 0, so a calibrated roll sits at 0 — a **real measurement** ("black is
-where the film base is"), not "not yet corrected". Shadow cast is adjusted under **Per channel**.
+What it measures is the **bare base's absolute density**, against clear (T=1). A C-41 orange base is
+always **R<G<B** — red passes most — typically reading `0.086 / 0.292 / 0.538`. Those are verifiable
+physical numbers: one look tells you whether the automatic calibration found the right place. Shadow
+cast is adjusted under **Per channel**.
 
 > If no bare base is found (a scan already cropped past it, say) an orange warning appears: the
 > automatic result is then just the brightest part of the picture, so sample by hand.
 
-> T_base no longer has sliders. It describes the same thing D_min does — where black sits and which
-> way the shadows are cast — and is written by sampling. D_min is the one in the same units as
-> D_max, so the two can be subtracted directly.
+> T_base is retired entirely (fixed at 1,1,1). It used to be the divisor for density, which hid the
+> film base in a field with no slider while D_min always read `0,0,0` — leaving no objective number
+> for the black end anywhere in the UI. Moving the base from divisor to subtrahend is the same
+> affine map, so **the render is bit-identical**, but the readout becomes a verifiable quantity
+> instead of a sentinel.
 
 #### D_max (white end)
 
