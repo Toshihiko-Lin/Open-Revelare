@@ -856,9 +856,26 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
+    /// <summary>
+    /// The platform's shortcut modifier: ⌘ on macOS, Ctrl everywhere else.
+    ///
+    /// Avalonia reports ⌘ as <see cref="KeyModifiers.Meta"/> and keeps
+    /// <see cref="KeyModifiers.Control"/> for the physical Ctrl key, so testing Control alone
+    /// meant every accelerator below was dead on macOS unless the user reached for a key mac
+    /// software never uses for these. ⌘Z among them — on an editor, an undo that silently does
+    /// nothing reads as lost work.
+    ///
+    /// The two places that SHOW a shortcut follow the same rule from their own side:
+    /// <see cref="Markup.AccelExtension"/> builds the menu gestures, and <c>Loc.Keys</c>
+    /// rewrites the modifier in prose. Change one, change all three, or a menu goes back to
+    /// advertising a chord that is not the one wired here.
+    /// </summary>
+    private static KeyModifiers Accel =>
+        OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        bool ctrl = e.KeyModifiers.HasFlag(Accel);
         bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool bare = e.KeyModifiers == KeyModifiers.None;
         bool img = Vm?.HasImage == true;
@@ -1739,6 +1756,9 @@ public partial class MainWindow : Window
             FileTypeFilter = new[]
             {
                 new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                // Always leave a way through: a filter that fails to match is otherwise a dead
+                // end with no in-app remedy (see ImageIo.OpenPatterns on why it can happen).
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
         var paths = files.Select(f => f.TryGetLocalPath()).Where(p => p != null).Cast<string>().ToList();
@@ -1784,6 +1804,7 @@ public partial class MainWindow : Window
             FileTypeFilter = new[]
             {
                 new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
         string? path = files.FirstOrDefault()?.TryGetLocalPath();

@@ -34,8 +34,8 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <Menu Grid.Column="0" VerticalAlignment="Center">
                     <MenuItem Header="_File" SubmenuOpened="OnFileMenuOpened">
-                        <MenuItem Header="{i18n:T '新建卷…'}" InputGesture="Ctrl+N" Click="OnOpenClick" />
-                        <MenuItem Header="{i18n:T '添加图像到当前卷…'}" InputGesture="Ctrl+O"
+                        <MenuItem Header="{i18n:T '新建卷…'}" InputGesture="{i18n:Accel 'N'}" Click="OnOpenClick" />
+                        <MenuItem Header="{i18n:T '添加图像到当前卷…'}" InputGesture="{i18n:Accel 'O'}"
                                   Click="OnAddImagesClick" IsEnabled="{Binding HasImage}" />
                         <Separator />
                         <!-- Filled in when the 文件 menu opens (OnFileMenuOpened) — the catalog
@@ -47,7 +47,7 @@
                         <MenuItem Header="{i18n:T '另存工程副本…'}" Click="OnSaveProjectClick" IsEnabled="{Binding HasImage}"
                                   ToolTip.Tip="{i18n:T '当前卷会自动保存；这里是导出一份副本'}" />
                         <Separator />
-                        <MenuItem Header="{i18n:T '导出当前帧…'}" InputGesture="Ctrl+E"
+                        <MenuItem Header="{i18n:T '导出当前帧…'}" InputGesture="{i18n:Accel 'E'}"
                                   Click="OnExportClick" IsEnabled="{Binding HasImage}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoExport}" />
@@ -64,12 +64,12 @@
                     </MenuItem>
 
                     <MenuItem Header="_Edit">
-                        <MenuItem Header="{i18n:T '撤销'}" InputGesture="Ctrl+Z" Click="OnUndoClick" IsEnabled="{Binding CanUndo}">
+                        <MenuItem Header="{i18n:T '撤销'}" InputGesture="{i18n:Accel 'Z'}" Click="OnUndoClick" IsEnabled="{Binding CanUndo}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoUndo}" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="{i18n:T '重做'}" InputGesture="Ctrl+Y" Click="OnRedoClick" IsEnabled="{Binding CanRedo}">
+                        <MenuItem Header="{i18n:T '重做'}" InputGesture="{i18n:Accel 'Y'}" Click="OnRedoClick" IsEnabled="{Binding CanRedo}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoRedo}" />
                             </MenuItem.Icon>
@@ -77,14 +77,14 @@
                         <Separator />
                         <MenuItem Header="{i18n:T '重置本帧调整'}" Click="OnResetClick" IsEnabled="{Binding HasImage}" />
                         <Separator />
-                        <MenuItem Header="{i18n:T '复制（按当前面板）'}" InputGesture="Ctrl+C"
+                        <MenuItem Header="{i18n:T '复制（按当前面板）'}" InputGesture="{i18n:Accel 'C'}"
                                   Click="OnCopyActiveClick" IsEnabled="{Binding HasImage}"
                                   ToolTip.Tip="{i18n:T '整卷校准面板 → 复制标定；帧编辑面板 → 复制场景'}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoCopy}" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="{i18n:T '粘贴到本帧（按当前面板）'}" InputGesture="Ctrl+V"
+                        <MenuItem Header="{i18n:T '粘贴到本帧（按当前面板）'}" InputGesture="{i18n:Accel 'V'}"
                                   Click="OnPasteActiveClick" IsEnabled="{Binding HasImage}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoCheck}" />
@@ -174,7 +174,7 @@
                             <MenuItem Header="{i18n:T '深灰'}" Tag="#323232" ToggleType="Radio" GroupName="viewerbg" Click="OnViewerBgClick" />
                             <MenuItem Header="{i18n:T '黑'}" Tag="#0E0F11" ToggleType="Radio" GroupName="viewerbg" Click="OnViewerBgClick" />
                         </MenuItem>
-                        <MenuItem Header="{i18n:T '切换浅色/深色主题'}" InputGesture="Ctrl+Shift+T" Click="OnToggleThemeClick" />
+                        <MenuItem Header="{i18n:T '切换浅色/深色主题'}" InputGesture="{i18n:Accel 'Shift+T'}" Click="OnToggleThemeClick" />
                     </MenuItem>
 
                     <MenuItem Header="_Settings">

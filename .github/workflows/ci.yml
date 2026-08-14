@@ -4,6 +4,8 @@ name: ci
 #
 # 真正只有 CI 能验的是「Linux 产物齐不齐」—— Core 的 LibRaw runtime 包是按 RID 条件挑的，
 # 挑错了本机 Windows 构建看不出来。发版时 release.yml 的 linux job 也会做同样的事。
+#
+# macos job 见文件末尾：那一格补的是另一个盲区 —— macOS 的行为差异过去只能等用户报障。
 
 on:
   workflow_dispatch:
@@ -33,4 +35,42 @@ jobs:
           test -f /tmp/pub/OpenRevelare          || { echo "缺主程序"; exit 1; }
           test -f /tmp/pub/libraw_r.so.23    || { echo "缺 LibRaw 原生库"; exit 1; }
           test -f /tmp/pub/models/net_awb.onnx || { echo "缺 Deep-WB 模型"; exit 1; }
+          ls /tmp/pub/*.dll > /dev/null
+
+  # macOS 的构建能力守门。
+  #
+  # 为什么单开一格：这个项目的 macOS 问题一直只有一条发现渠道 —— 用户报障。ci 只跑
+  # ubuntu，release.yml 的 macos job 只在打 tag 时跑，于是任何 mac 专属的破绽都要等到
+  # 发版之后才现形。ad-hoc 签名、bash 3.2 的多字节坑、RID 条件没传给类库导致 dylib
+  # 不进产物 —— 这些都是已经栽过的跟头（见 build-app.sh 与 Gui.csproj 里的注释）。
+  #
+  # **不编 LibRaw**：bundle-libraw.sh 要 brew 装依赖再从源码编 0.21.4，几分钟起步，
+  # 而它守的是「原生库编得对不对」，那是 release 的事。这一格守的是**托管代码在 osx RID
+  # 下编不编得过、publish 的产物齐不齐**，用一个假 dylib 就能验，秒级完成。
+  #
+  # 假 dylib 不能省：Gui.csproj 的 WarnMissingMacLibRaw 在文件缺失时发 Warning，
+  # 而下面带 -warnaserror，缺了它这一格会以一条与本次改动无关的错误常红。
+  macos:
+    runs-on: macos-latest      # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build -c Release -warnaserror
+      # 占位 dylib：只为让按 RID 条件的 Content 项有东西可复制，内容无所谓 —— 这一步
+      # 不运行程序，只看装配结果。真库由 release.yml 的 macos job 编。
+      - name: 放一个占位 libraw.23.dylib
+        run: |
+          mkdir -p native/osx-arm64
+          echo "placeholder — real dylib is built by packaging/macos/bundle-libraw.sh" \
+            > native/osx-arm64/libraw.23.dylib
+      - run: dotnet publish src/OpenRevelare.Gui -c Release -r osx-arm64 --self-contained true -warnaserror -o /tmp/pub
+      - name: 产物自检
+        # 这三条正是 v1.0.0 那几次 CI 栽过的地方：dylib 因为 RID 条件写在 Core 里而静默
+        # 不复制，包照打，直到 mac 上导入 RAW 才 DllNotFoundException。
+        run: |
+          test -f /tmp/pub/OpenRevelare         || { echo "缺主程序"; exit 1; }
+          test -f /tmp/pub/libraw.23.dylib      || { echo "dylib 没进产物 —— 检查 Gui.csproj 里按 RID 条件的 Content 项"; exit 1; }
+          test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
           ls /tmp/pub/*.dll > /dev/null

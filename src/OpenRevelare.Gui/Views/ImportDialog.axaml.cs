@@ -114,7 +114,11 @@ public partial class ImportDialog : Window
         {
             Title = Loc.T("选择 LCC 平场参考图"),
             AllowMultiple = false,
-            FileTypeFilter = new[] { new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns } },
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType(Loc.T("平场图 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
+            },
         });
         if (picked.FirstOrDefault()?.TryGetLocalPath() is { } p) LccEdit.Text = p;
     }
