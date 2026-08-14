@@ -2,375 +2,99 @@
 
 ## 待发布
 
-导入后不再弹窗，整卷校准面板顶上多了两个自动按钮。自动标定在几类以前测不准的底片上
-测准了：没有灯板的卷、片基只剩边缘一条窄带的卷、画面里有挡光板的卷。
+整卷校准面板重构：反相只由密度端点驱动，两端各三通道，面板上冗余控件全部移除。导入
+流程简化，自动标定算法更可靠。macOS 快捷键、菜单栏和内存管理补齐平台适配。
+
+
 
 **变更**
 
-- **反相参数收敛到六个自由度**。渲染只消费 `scale[3]+offset[3]` 六个自由度，但存储一直有
-  十一个参数描述它们——多出来的每一个都必然表现为「两个滑块做同一件事」。实测确认三处重复：
+- **反相参数精简为六个自由度**。删除旧链路、
+  部分控件移除，色偏改为直接展开三个通道的绝对密度。
 
-  | 重复 | 实测 |
-  |---|---|
-  | `d_max` 与亮端端点 | 都主要改 luma（−47% / −13%），且**不可互相替代**（R/B 走向相反）|
-  | `t_base` 与 `wb_offset` | 两条路产生几乎相同的暗部色偏（+6.5% / +6.2%）|
-  | 「黑场」滑块 | **根本不改变黑**——黑端恒为 `10⁻ᵒᵘᵗ` 三通道同值，它改的是斜率 |
+- **两端统一为绝对密度显示**，两端各带手动 + 自动按钮。
 
-  收敛后只剩两组绝对密度：`D_min[3]`（每通道读作黑的密度）与 `D_max[3]`（读作白的密度）。
-  用户想调的三件事都是这六个数的不同读法：
+- **「框选亮部」与「框选 D_max」合并为【高光采样】**，「框选片基」与「框选暗部」
+  合并为【片基采样】。两端标定不再有先后顺序要求。
 
-  | 想做的事 | 怎么做 | 实测副作用 |
-  |---|---|---|
-  | **整体明暗** | 【密度零点】两端同步升降 | 反差 0.15% |
-  | **反差** | D_min / D_max 拉近拉远 | 色偏 <1% |
-  | **色偏** | 展开【逐通道】改分量 | 反差 ~1% |
+- **导入后不再弹「齿孔遮罩确认」窗**，阈值自动测出并应用。
 
-- **删除【密度零点】**。它的设想是「两端同步升降 = 纯亮度」，但实测有 ±3.5% 的色偏：
-  `offset[c] = −输出范围 − scale[c]·D_min[c]`，两端同加一个常数虽然保住了 scale（跨度不变），
-  却让各通道的 offset 变得**不一样多**——`scale` 三通道分别是 0.952/1.026/0.877，乘上同一个
-  位移就得到三个不同的 offset 变化。
 
-  这不是实现瑕疵而是数学结论：要 offset 不变且 scale 不变，D_min 就必须不变，即什么都没动。
-  **密度域内不存在「改亮度且零色偏」的两端操作。** 零色偏的亮度只能是线性域乘常数——那就是
-  曝光，Stage 2 已经有了。
-
-  【片基归零】按钮一并移除：它与【片基采样】瞄准同一处、写同一个字段。
-
-- **输出范围改为常量**（黑位恒为 10⁻²）。它可调时与两端争夺同一自由度，这正是「D_max 和亮度
-  都在控制亮度」的根源。固定之后语义才各归其位。
-
-- **删除 `scan_ev`**，改为【密度零点】。它是密度域加常数，正是「两端同向移动」；且位于密度
-  地板之后，与 t_base 缩放并不严格等价（实测差 10.7%），留着只会是第十二个参数。
-
-- **黑端显示真实密度，不再恒为 0,0,0**。此前片基信息存在 `t_base`（密度的除数）里，而
-  D_min 恒为 `0,0,0`——两端说是同量纲，实际一个是绝对值一个恒为零；更糟的是 t_base 已经
-  没有滑块，于是**界面上看不到黑端的任何客观数值**，片基又是自动测的，用户无从判断对错。
-
-  现在 `t_base` 固定为 1,1,1（参考点＝完全透光），两端都是对 T=1 的绝对密度：
-
-  ```
-  D_min  0.086  0.292  0.538   ← 橙色片基，必然 R<G<B，一眼可验
-  D_max  2.229  2.274  2.848
-  跨度   2.143  1.982  2.310   ← 相减得到，即原先的 D_max
-  ```
-
-  把片基从除数移到减数是同一个仿射变换，**渲染逐位不变**（实测 luma 0.025377145 前后完全
-  相同），旧工程载入时自动折算，也逐位不变。
-
-- **黑端只保留一组 RGB，并与亮端同构**。原先黑端里有两组 RGB 滑块（D_min 与片基透射率
-  T_base），而它们描述的是同一件事——黑端在哪、暗部偏什么色（实测改任一个都在动同一个量）。
-  T_base 不再给滑块，由【片基采样】写入；D_min 才是与 D_max 同量纲、可直接相减的那个。
-
-  同时补上黑端缺的自动按钮：估计器一直存在（自动链的第一步就是它），只是没有入口，于是
-  亮端有「手动 + 两个自动」而黑端只有手动。现在两端形状一致：
-
-  | | 标量 | 按钮 | 展开 |
-  |---|---|---|---|
-  | **D_min** | 黑端位置 | 片基采样 · 自动黑点 | R G B |
-  | **D_max** | 白端位置 | 高光采样 · 自动白点 · 智能白平衡 | R G B |
-
-  片基读数也随之改为**只在测不到裸露片基时告警**——成功时不再回显 t_base 数值，那个数已经
-  没有滑块了。
-
-- **「框选亮部」与「框选 D_max」合并为【高光采样】**。两者测的是同一个量——高光白平衡与高光
-  端点本就是一件事。同理「框选片基」与「框选暗部」合并为【片基采样】：片基定义密度 0，那
-  就是黑端。
-
-- **色温 / 色调控件删除**。它们的 0 点是「三通道密度相等」，而真实底片的亮端密度本就不相等
-  （实测四种片种从未接近），所以 0 不对应任何物理状态，读数无从判断对错。色偏改为直接展开
-  三个绝对密度——绝对量有物理意义，不需要参考零点。
-
-  > **旧工程需要重跑一次标定。** 旧的 d_max/scan_ev 与现在固定的输出范围不是同一量纲，
-  > 静默折算实测在薄部偏 −18%、浓部 +53%（比不折算更糟），所以载入后如实提示重跑，而不是
-  > 假装画面没变。面板顶部会显示提示条。
-
-- **白平衡两端都改成显示真实密度**。界面上的「亮端」「暗端」现在是**该通道自己的密度读数**
-  （亮端典型 1.8–2.4），不再是 `1,1,1` / `0,0,0` 这种「相对某个基准的修正系数」。三个通道
-  之间的差**就是**色偏——这三个数本身即白平衡，不需要另一个参数来描述它。
-
-  这不只是换个显示方式。修正系数只有相对于**另一处**对同一端点的陈述才有意义，于是必然
-  存在两处描述互相打架：标定顺序变得有意义，同一个校正会被应用两遍。上一版删掉旧链路时
-  已经堵住了叠加的路径，但代价是 wb_high 变成了没有任何东西读取的死字段——滑块拉动不改变
-  任何像素。改成绝对密度后两处描述合并成一处，问题在结构上消失。
-
-  「框选亮部」与「框选暗部」现在也没有先后之分了：两端各自独立测量，谁先谁后结果相同。
-
-- **「最亮点=白」和「智能白平衡」修复**。这两个按钮此前写入的正是上面那个死字段，因此
-  运行完毕、状态栏报出数值，画面却毫无变化（智能白平衡还会白跑最多 50 轮神经网络推理）。
-  现在它们写入反相真正读取的亮端端点。
-
-- **反相只剩密度端点一种模型**。此前为了让旧工程逐位不变，端点模型与更早的 grade/pivot
-  链路并存，高光平衡因此有两处可以写——端点的通道间斜率差，以及 wb_high。整卷自动标定
-  两处都写了，同一个校正做了两遍，画面偏红约三分之一，且发生在反相内部，「帧编辑」里
-  任何滑块都拉不回来。旧链路已删除。
-
-  > **旧工程照常打开，画面不变。** 载入时会把旧的 wb_high 乘数与加性 offset 换算进两端
-  > 端点，渲染结果与旧版逐位一致。但 2026-08-12 之前保存的工程本就没有逐通道端点，仍会
-  > 以一组中性端点打开，观感与当初不同——跑一次「自动（整卷）」或采样一次 D-max 即可。
-
-- **导入后不再弹「齿孔遮罩确认」窗**。阈值自动量出并应用到整卷，导入完直接看到画面。
-  要核对或微调，去「整卷校准 → 齿孔遮罩」，勾「显示遮罩」看红色叠加，和以前弹窗里
-  是同一个控件。
-
-- **移除「密度端点」面板**。它没有可操作的东西，只显示一行读数。相关说明保留为片基
-  分组下的一行注解。
 
 **新增**
 
-- **「自动（整卷）」「自动（单张）」两个按钮**，在整卷校准面板最上方。自动去色罩的
-  能力一直都在，但只藏在导入对话框的一个复选框里，导入完就没有入口，也无法重跑。
+- **「自动（整卷）」「自动（单张）」两个按钮**。「整卷」
+  汇总全卷参数；「单张」只算当前帧。
 
-  「整卷」遍历全卷汇总成一套参数写给所有帧；「单张」只算当前帧，用于卷里混了一张
-  光源不同的片子。两者都不改动裁切。
+- **macOS 顶端原生菜单栏**。File / Edit / View / Help 以及应用菜单（关于 / 偏好设置），
+  ⌘Q、⌘W 由系统自动提供。窗口内菜单在 macOS 上隐藏，其余平台不变。
 
 **改进**
 
-- **灯板识别改按物理特征判断**。以前只要求「亮端有峰、峰下有谷」，而任何直方图都满足。
-  现在要求灯板同时是独立亮簇、占据一定画面、与胶片有真实间隙、连到画幅边缘，且亮度
-  达到裸光源的水平——片基透过色罩只有灯板的三分之一亮，不会再被当成灯板。
+- **非胶片区域的识别与排除**
+  
 
-  受影响的三类卷：120 这类灯板面积大的、画面本身明暗分明的、以及画面里只有一条裸片基
-  窄带的。
-
-- **没有灯板时也能量出片基**。扫描件常常只在边缘留一条裸片基，占画面不到 1%，按分位数
-  取值会落在画面高光上，量出的片基偏高两倍多。现在会专门找这条窄带——独立亮簇、贴着
-  边缘、且是橙色，三条都满足才采信。
-
-- **测不到片基时会说出来**。C-41 片基必然是橙色（R > G > B 且相差明显）。测出接近中性
-  说明画面里没有裸露片基（例如已经裁到画面区域的扫描件），此时自动结果只是画面最亮处，
-  界面会提示改用「框选片基」手动标定。
+- **片基的自动识别与采样**，测不到时提示手动标定。
 
 **修复**
 
-- **「自动（单张）」会把片基广播给整卷**。它调用的是整卷估计器，会写给每一帧；名字说
-  只管当前帧，实际改了整卷。
 
-- **「应用标定到整卷」重开工程后失效**。参数写进了内存但没有触发保存——自动保存只跟随
-  当前帧的滑块，其余帧是直接改的，程序不知道它们变了。
-
-- **整卷分析测片基前先裁切，把片基裁掉了**。片基就在裁切要去掉的那圈边缘上，2% 的裁切
-  就足以让它测不到而退回分位估计。这是「导入时第一张正常、整卷分析完就偏色」的直接
-  原因。现在片基单独用未裁切的画面测，其余统计仍用裁切后的。
-
-- **D-max 被挡光板和片边带偏**。挡光板比任何曝光区都密，直接成了 D-max；不透光的片边
-  又把三个通道不等地抬高。现在两端都排除在统计之外，画面里的暗部主体不受影响。
-
-- **暗端检测在纯黑处失效**。扫描件黑边三个通道相差 0.001，肉眼纯黑，按相对色偏算却是
-  15%，于是被当作画面保留了下来。
-
-- **暗端检测的一处数组越界崩溃**。
-
-- **重采片基后暗端没有跟着换算**。两端都是相对片基的密度，换片基就得同步平移。亮端一直
-  有做，暗端此前是加性偏移量、与片基无关，所以不需要；现在它也是绝对密度了。
-
-- **`FrameParams.Clone()` 漏掉逐通道端点**。撤销快照与之共用这条路径，因此撤销一步会把
-  亮端端点悄悄换成默认值。
+- **D-max 被挡光板和片边带偏**。
+- **多条同时分割时，第一张的预裁切被抹掉**。
+- **部分相机 RAW 无法顺利导入**
+- **macOS 上 ⌘ 快捷键全部失效**，统一为一处定义，macOS 显示 ⌘、其余平台显示 Ctrl。
+- **macOS 文件选择框选不进大写扩展名的 RAW**（.CR2、.NEF、.3FR 等）。
+- **macOS 上导入大 RAW 容易卡死**，补上可用内存探测的 macOS 实现。
 
 ---
 
-The import no longer stops to ask a question, and the roll-calibration panel has two
-automatic buttons at the top. Automatic calibration now measures correctly on several
-kinds of negative it used to get wrong: rolls with no light panel, rolls where the film
-base survives only as a sliver at the edge, and rolls with a light blocker in shot.
+The roll-calibration panel is rebuilt: the inversion is driven by density endpoints alone —
+three channels at each end — and redundant controls are gone. The import flow is simpler,
+automatic calibration is more reliable, and macOS gets keyboard shortcuts, a native menu
+bar and proper memory management.
+
+
 
 **Changed**
 
-- **The inversion is down to six degrees of freedom.** The render only ever consumes
-  `scale[3]+offset[3]`, but eleven parameters were stored to describe them — and every surplus one
-  necessarily showed up as two sliders doing the same job. Three duplications, all measured:
+- **Inversion parameters reduced to six degrees of freedom.** Legacy chain removed,
+  redundant controls removed; colour cast is now adjusted by expanding three channels
+  of absolute density directly.
 
-  | Duplication | Measured |
-  |---|---|
-  | `d_max` vs the highlight endpoint | both mainly change luma (−47% / −13%), and are **not** interchangeable (R/B moves the opposite way) |
-  | `t_base` vs `wb_offset` | both routes produce almost the same shadow cast (+6.5% / +6.2%) |
-  | the "black level" slider | **does not change black at all** — the black end is fixed at `10⁻ᵒᵘᵗ` for all three channels; it changes the slope |
+- **Both ends display absolute densities**, each with manual + automatic buttons.
 
-  What remains is two sets of absolute densities: `D_min[3]` (the density each channel reads as
-  black) and `D_max[3]` (as white). The three things you want to adjust are readings of those six:
+- **"Select highlight" and "Select D_max" merged into "Sample the highlight"**;
+  "Sample the film base" and "Sample the shadow" merged. Calibration order no longer matters.
 
-  | What you want | How | Measured side effect |
-  |---|---|---|
-  | **Overall lightness** | Density zero — both ends together | contrast 0.15% |
-  | **Contrast** | D_min / D_max closer or further apart | cast <1% |
-  | **Colour cast** | Expand "Per channel" | contrast ~1% |
+- **No more sprocket-mask dialog after an import** — the threshold is measured and applied
+  automatically.
 
-- **Density zero removed.** The idea was "move both ends together = pure lightness", but it
-  measured a ±3.5% cast: `offset[c] = −range − scale[c]·D_min[c]`, so adding a constant to both
-  ends preserves the slopes yet shifts each channel's offset by a *different* amount — the three
-  slopes are 0.952/1.026/0.877, and one shared displacement times three different slopes gives
-  three different offsets.
 
-  This is a conclusion, not a defect: for offset and scale both to hold still, D_min must not move
-  — i.e. nothing moved. **No pair-of-endpoints operation in the density domain can change lightness
-  with zero cast.** A cast-free brightness has to be a multiply in linear light, which is exposure,
-  and Stage 2 already has one.
-
-  The "Zero on the film base" button goes with it: it aimed at the same place and wrote the same
-  field as "Sample the film base".
-
-- **The output range is now a constant** (black fixed at 10⁻²). While adjustable it competed with
-  the endpoints for one degree of freedom, which is exactly why "D_max and brightness both control
-  brightness".
-
-- **`scan_ev` is gone**, replaced by Density zero. It was an additive shift in density — precisely
-  "move both ends together" — and sat after the density floor, so it was never quite equivalent to
-  scaling t_base (measured 10.7% apart).
-
-- **The black end shows real densities instead of a constant 0,0,0.** The film base used to live in
-  `t_base` (the divisor for density) while D_min always read `0,0,0` — nominally the same units as
-  D_max, actually one absolute and one permanently zero. Worse, t_base had lost its sliders, so **no objective
-  number for the black end appeared anywhere in the UI**, and the base is measured automatically,
-  leaving nothing to check it against.
-
-  `t_base` is now fixed at 1,1,1 (the reference is clear film), and both ends are absolute densities
-  against T=1:
-
-  ```
-  D_min  0.086  0.292  0.538   ← the orange base, always R<G<B, verifiable at a glance
-  D_max  2.229  2.274  2.848
-  span   2.143  1.982  2.310   ← their difference, i.e. the old D_max
-  ```
-
-  Moving the base from divisor to subtrahend is the same affine map, so **the render is
-  bit-identical** (luma measured 0.025377145 before and after), and old projects are converted on
-  load with no shift either.
-
-- **The black end keeps one RGB group and now mirrors the white end.** It used to carry two RGB
-  triples (D_min and the T_base transmittance) describing the same thing — where black sits and
-  which way the shadows are cast. T_base loses its sliders and is written by sampling; D_min is the
-  one in the same units as D_max.
-
-  The black end also gains the automatic button it was missing — the estimator already existed as
-  the first step of the auto chain, it simply had no entry point. Both ends now have the same shape:
-
-  | | Scalar | Buttons | Expanded |
-  |---|---|---|---|
-  | **D_min** | black position | Sample the film base · Auto black point | R G B |
-  | **D_max** | white position | Sample the highlight · Auto white point · Deep WB | R G B |
-
-  The film-base readout is now **a warning only**, shown when no bare base was found; on success it
-  no longer echoes the t_base numbers, which have no slider any more.
-
-- **"Select highlight" and "Select D_max" merged into Sample the highlight.** They measured the
-  same quantity. Likewise "Sample the film base" and "Sample the shadow" merged: the film base
-  defines density 0, which *is* the black end.
-
-- **Temperature / tint controls removed.** Their zero meant "all three densities equal", but a real
-  negative's highlight densities are never equal (measured across four stocks), so zero named no
-  physical state and the readout could not be judged right or wrong. Colour cast is now adjusted
-  as the three absolute densities directly — absolute quantities need no reference zero.
-
-  > **Existing projects need one recalibration pass.** The old d_max/scan_ev are not in the same
-  > units as the now-fixed output range; folding them silently measured −18% on the thin end and
-  > +53% on the dense end (worse than not folding), so loading says so plainly instead of
-  > pretending the picture is unchanged. A notice appears at the top of the panel.
-
-- **Both white-balance ends now show real densities.** The "highlight" and "shadow" fields
-  are each channel's own measured density (highlights typically 1.8–2.4), no longer a
-  `1,1,1` / `0,0,0` correction factor relative to some baseline. The differences between the
-  three channels ARE the cast — these numbers are the white balance itself, and nothing else
-  is needed to describe it.
-
-  This is not only a change of display. A correction factor is meaningful only relative to
-  some *other* statement of the same endpoint, so there were necessarily two descriptions
-  competing: calibration order mattered, and the same correction could be applied twice.
-  Removing the old chain last version closed the double-application path, but at the cost of
-  leaving wb_high a dead field nothing read — moving its sliders changed no pixels. With
-  absolute densities the two descriptions collapse into one and the problem is gone
-  structurally.
-
-  Sampling the two ends no longer has an order either: each is measured independently, so
-  either one may be taken first.
-
-- **"Brightest = white" and "Deep white balance" fixed.** Both wrote to exactly that dead
-  field, so they would run, report numbers in the status bar, and change nothing at all
-  (Deep WB burning up to 50 rounds of network inference to do it). They now write the
-  highlight endpoint the inversion actually reads.
-
-- **One inversion model: density endpoints.** The endpoint model had been living alongside
-  the older grade/pivot chain so that existing projects would render bit-identically, which
-  left two places able to state the highlight balance — the between-channel difference in
-  the endpoints' slope, and wb_high. The roll-wide calibration wrote both, applying the same
-  correction twice: about a third too much red, applied inside the inversion where no Frame
-  edit slider can reach it. The old chain is gone.
-
-  > **Existing projects open unchanged.** Loading converts the old wb_high multiplier and
-  > additive offset into the two endpoints, reproducing the previous render bit-for-bit. A
-  > project saved before 2026-08-12 still carries no per-channel endpoints and opens on a
-  > neutral set, so it will not look as it did — run "Auto (whole roll)" once, or sample
-  > D-max, to bring it back.
-
-- **No more sprocket-mask dialog after an import.** The threshold is measured and applied to
-  the roll, so an import goes straight to a picture. To check or adjust it, go to Roll
-  calibration → Sprocket mask and tick "show mask" — the same control the dialog offered.
-
-- **The "Density endpoints" panel is gone.** It had nothing to operate, only a readout. The
-  explanation stays as a note under the film-base group.
 
 **Added**
 
-- **"Auto (whole roll)" and "Auto (this frame)"**, at the top of the roll-calibration panel.
-  The automatic mask removal always existed, but only as a checkbox in the import dialog:
-  once the import was done there was no way back to it.
+- **"Auto (whole roll)" and "Auto (this frame)" buttons.** "Whole roll" pools the
+  roll-wide parameters; "this frame" solves the current frame alone.
 
-  "Whole roll" pools the roll into one parameter set and writes it to every frame; "this
-  frame" solves the current frame alone, for a picture shot under a different light. Neither
-  touches the crop.
+- **macOS native menu bar.** File / Edit / View / Help plus the application menu (About /
+  Preferences). ⌘Q and ⌘W are provided by the system. The in-window menu is hidden on macOS;
+  other platforms are unchanged.
 
 **Improved**
 
-- **The light panel is now identified by what it physically is.** The old test only asked for
-  a peak at the bright end with a dip below it, which every histogram satisfies. A panel must
-  now also be a separate cluster, occupy a real share of the frame, stand clear of the film,
-  reach the frame's edge, and be as bright as a bare light source — film base seen through the
-  orange mask is a third as bright and is no longer mistaken for one.
+- **Non-film-area detection and exclusion.**
 
-  Three kinds of roll were affected: 120, where the panel can fill a third of the frame;
-  pictures that are themselves strongly bimodal; and frames whose only bright region is a
-  sliver of bare base.
-
-- **The film base can be measured with no light panel present.** A scan often keeps a strip of
-  bare rebate under 1% of the frame — far too small for a percentile, which lands on the
-  picture's highlights and reports a base more than twice too dense. That sliver is now looked
-  for directly, and believed only when it is a separate cluster, at the edge, and orange.
-
-- **When no film base can be measured, it says so.** A C-41 base is orange by construction
-  (R > G > B, by a clear margin). A near-neutral result means there is no bare base in frame —
-  a scan already cropped to the picture, for instance — and the panel now says as much and
-  points at the manual film-base sample.
+- **Automatic film-base detection and sampling**; prompts manual calibration when not found.
 
 **Fixed**
 
-- **"Auto (this frame)" broadcast the film base to the whole roll.** It calls the roll-wide
-  estimator, which writes to every frame — the opposite of what the button's name promises.
-
-- **"Apply calibration to the whole roll" did not survive reopening the project.** The values
-  reached memory but nothing triggered a save: autosave follows the current frame's sliders,
-  and the other frames were written directly.
-
-- **The roll-wide pass cropped each frame before measuring the film base, cropping the base
-  away.** The base sits in exactly the margin a crop removes, and a 2% crop is enough to lose
-  it and fall back to a percentile. This is why a roll looked right on the first frame during
-  import and drifted the moment the roll-wide pass finished. The base is now measured on the
-  uncropped frame; everything else still measures the kept picture.
-
-- **D-max was set by the light blocker or the film edge.** A blocker is denser than any exposed
-  area and simply became D-max, while an opaque film edge lifted the three channels unequally.
-  Both ends are now excluded, and a dark subject inside the picture is left alone.
-
-- **The dark-end detection failed on true black.** A scanner's black border separates its
-  channels by 0.001 — visually pure black — which a relative test reports as a 15% cast, so it
-  was kept in as picture.
-
-- **An out-of-bounds crash in the dark-end detection.**
-
-- **Re-sampling the film base did not rebase the shadow end.** Both ends are densities measured
-  relative to the base, so a new base shifts them. The highlight end always did this; the
-  shadow end used to be an additive offset, independent of the base, and did not need to —
-  now that it is an absolute density, it does.
-
-- **`FrameParams.Clone()` dropped the per-channel endpoint.** Undo snapshots share that path,
-  so a single undo silently reset the highlight endpoint to its default.
+- **D-max was biased by the light blocker or film edge.**
+- **Splitting multiple strips at once erased the first frame's pre-crop.**
+- **Some camera RAW formats could not be imported.**
+- **macOS: ⌘ shortcuts did not work** — unified to one definition, showing ⌘ on macOS and
+  Ctrl elsewhere.
+- **macOS: the file picker rejected uppercase RAW extensions** (.CR2, .NEF, .3FR, etc.).
+- **macOS: importing large RAWs could freeze the app** — macOS memory detection added.
 
 ---
 
