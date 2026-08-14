@@ -17,7 +17,7 @@ macOS 只在 release 时构建一次（`release.yml:139`），且只验"能否�
 
 下面按"确定性 × 影响面"排序。
 
-> **状态**：P1、P2、P3、P4 已修（见文末「已修内容」）。P5 待定。
+> **状态**：P1–P5 全部已修（见文末「已修内容」）。
 
 ---
 
@@ -154,7 +154,7 @@ Windows 分支**保持原样**：explorer.exe 不收正常 argv，
 
 ---
 
-## P5 ── 内存探测在 macOS 上退化为总量估算（已知取舍，值得记一笔）
+## P5 ── 内存探测在 macOS 上退化为总量估算 ✅ 已修
 
 `Services/SystemMemory.cs:44` 只实现 Windows / Linux，macOS 返回 false，
 `ImageIo.AutoLimit()`（`ImageIo.cs:82`）回落到按**总内存**估并发。
@@ -164,7 +164,34 @@ Windows 分支**保持原样**：explorer.exe 不收正常 argv，
 16 GB M1 会算出 2 槽 × 1.2 GB，而实际可用常远低于此。
 mac 用户报"导入大 RAW 卡死 / 被系统杀掉"时先看这里。
 
-真要修，`sysctlbyname("vm.page_free_count")` + `hw.pagesize` 比 mach API 便宜得多。
+### 上一版建议的 `vm.page_free_count` 单用是错的
+
+我先前写"`sysctlbyname("vm.page_free_count")` + `hw.pagesize` 就够"——**这条建议有问题**，
+按它实现会做出一个比现状更差的东西。
+
+`page_free_count` 正是 macOS 版的 Linux `MemFree`，而 `TryLinux` 的注释**明确拒绝**了
+`MemFree` 而改用 `MemAvailable`，理由是它不含可回收的页缓存。macOS 是这个问题的最坏情况：
+统一缓冲区缓存会把空闲内存吃满，开机一小时后 free 页数就贴近 0。
+
+按真实 `vm_stat` 量级模拟（脚本在 scratchpad，未进仓库）：
+
+| 场景 | 真实可用 | 只看 free | 只看 free 会选 | 现方案 | 旧的总量估 |
+|------|---------|----------|--------------|--------|-----------|
+| 32 GB M1 Pro 日常 | 12.5 G | **0.6 G** | **1 槽** | 4 槽 | 3 槽 |
+| 64 GB M3 Max 日常 | 27.6 G | 2.7 G | **1 槽** | 8 槽 | 3 槽 |
+| 16 GB M1 高压 | 0.5 G | 0.0 G | 1 槽 | **1 槽** | 2 槽 ❌ |
+
+也就是说只看 free 会把所有 mac **永久钉在 1 槽**，比它要取代的回退还糟。
+
+### 实际改法
+
+可用量 = free + speculative +（purgeable + external）× 0.5。
+后两项是可回收但**不是白拿**的（清掉干净的文件页要付重读代价），所以打五折——
+不打折的话，刚开机的 16 GB M1 会算出 11.8 G、开 8 槽 ≈ 9.6 G，正好是这道闸想避免的换页风暴。
+脏的匿名页（inactive 里非 external 的部分）**不计入**：回收它们要写 swap，
+而那正是我们在规避的停顿。
+
+修好后 16 GB M1 高压场景从 2 槽降到 **1 槽**——这就是"导入大 RAW 卡死"的那一格。
 
 ---
 
@@ -191,11 +218,11 @@ mac 用户报"导入大 RAW 卡死 / 被系统杀掉"时先看这里。
 2. ~~**P3**~~ ✅ 已修。
 3. ~~**CI 加一格 macOS**~~ ✅ 已加（见下）。
 4. ~~**P4**~~ ✅ 已修。
-5. P5 按产品优先级排期。
+5. ~~**P5**~~ ✅ 已修。
 
 ---
 
-## 已修内容（P1 + P2 + P3 + P4）
+## 已修内容（P1 + P2 + P3 + P4 + P5）
 
 `dotnet build -c Release` 通过，0 警告 0 错误。**未提交**，改动都在工作区。
 
@@ -264,9 +291,27 @@ Windows 分支保持原样（explorer.exe 要的就是那个字面格式）。
 没开卷时「导出当前帧…」照样可点，且只在 mac 上出现。改成显式 `Source = Vm` 才对。
 这条是靠下面那个 headless 探针跑出来的，不是看出来的。
 
+### P5 内存探测
+
+| 文件 | 改动 |
+|------|------|
+| `Services/SystemMemory.cs` | 新增 `TryMacOS()`：`sysctlbyname` 读 4 个页计数 + `hw.pagesize`；新增 `ReclaimableShare = 0.5` |
+| `.github/workflows/ci.yml` | macos job 加一步，在**真 Apple Silicon** 上验这 5 个 sysctl 键存在且读得出数 |
+
+只有 `vm.page_free_count` 是必需的，其余三项缺了就少算一项而不是整个失败——
+一个键名写错就让整个平台静默退回总量估算，正是 P5 本身的毛病。
+
+`Sysctl()` 用 `out ulong` 接 4 字节或 8 字节的键（这些 `vm.*` 键在不同版本宽度不同）。
+**这一条本机实测过**：写了个 C 桩库验证 P/Invoke 的 `out` 参数在调用前确实清零，
+所以 4 字节写入落在低半部、高半部不会留下上次调用的残留——同一个栈槽先被写成
+`0xAAAA…` 再走 4 字节写入，读回来仍是干净的 `0xDEADBEEF`。
+
+CI 那一步的 shell 逻辑也在本机用假 `sysctl` 跑过：正常路径 EXIT=0，
+键名缺失 / 四项全 0 / 值非数字三种坏情况都正确失败。
+
 ---
 
-## 四条修复的验证程度（重要）
+## 五条修复的验证程度（重要）
 
 | 修复 | 验证方式 | 置信度 |
 |------|---------|--------|
@@ -274,9 +319,11 @@ Windows 分支保持原样（explorer.exe 要的就是那个字面格式）。
 | P2 选择框 | 仅编译通过 + 生成的 pattern 列表已核对 | 依据是 `NSOpenPanel` 类型过滤大小写敏感，**未在 mac 上实测** |
 | P3 访达 | **本机实测**（argv 桩程序，新旧对比 7 组路径） | Linux 分支已证实；macOS 分支同理但未在 mac 上跑 |
 | P4 菜单栏 | **本机实测**（headless 探针，见下）+ 反编译核对 Avalonia 行为 | 菜单树、绑定、手势已证实；**顶端菜单栏本身没在 mac 上看过** |
+| P5 内存探测 | **本机实测**（P/Invoke `out` 清零的 C 桩库、CI 步骤的假 `sysctl`）+ 按真实 `vm_stat` 量级模拟 | 算术与 CI 守卫已证实；**sysctl 键本身要等 CI 的 macos 格跑一次**——那一步就是为此加的 |
 
-本机是 Kubuntu，P1/P2/P4 的 `OperatingSystem.IsMacOS()` 分支在这里跑不到。
-**落地前建议在 mac 上过一遍**。
+本机是 Kubuntu，P1/P2/P4/P5 的 `OperatingSystem.IsMacOS()` 分支在这里跑不到。
+**落地前建议在 mac 上过一遍**。P5 与前四条的差别在于：它的关键未知项（sysctl 键存不存在）
+已经交给 CI 自动验证，不再依赖人工过一遍。
 
 ### P4 是怎么测的
 

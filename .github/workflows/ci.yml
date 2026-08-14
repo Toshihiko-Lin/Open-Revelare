@@ -74,3 +74,23 @@ jobs:
           test -f /tmp/pub/libraw.23.dylib      || { echo "dylib 没进产物 —— 检查 Gui.csproj 里按 RID 条件的 Content 项"; exit 1; }
           test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
           ls /tmp/pub/*.dll > /dev/null
+      # SystemMemory.TryMacOS 依赖的 sysctl 键是否真的存在、是否真的读得出数。
+      # 这些键在 Linux 上无法验证，而写错一个键名不会编译失败也不会崩 —— 只会静默
+      # 退回按总内存估算，也就是 P5 原本的毛病，无声无息地回来。
+      - name: 内存探测所依赖的 sysctl 键
+        run: |
+          set -e
+          for k in hw.pagesize vm.page_free_count vm.page_speculative_count \
+                   vm.page_purgeable_count vm.page_external_count; do
+            v=$(sysctl -n "$k") || { echo "缺 sysctl 键 $k —— SystemMemory 会退回总内存估算"; exit 1; }
+            echo "$k = $v"
+            case "$v" in ''|*[!0-9]*) echo "$k 不是无符号整数：$v"; exit 1;; esac
+          done
+          # free 单独为 0 是正常的（统一缓冲区缓存会吃满空闲），但四项全 0 说明读法有问题。
+          total=0
+          for k in vm.page_free_count vm.page_speculative_count \
+                   vm.page_purgeable_count vm.page_external_count; do
+            total=$((total + $(sysctl -n "$k")))
+          done
+          [ "$total" -gt 0 ] || { echo "四项页计数全为 0 —— 读法有问题"; exit 1; }
+          echo "可回收+空闲合计 $((total * $(sysctl -n hw.pagesize) / 1024 / 1024)) MB"
