@@ -557,18 +557,24 @@
                                     Background="{DynamicResource ChromeBrush}"
                                     BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
                                     Padding="12,8" MaxWidth="620">
-                                <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <TextBlock Name="BannerText" Text="" VerticalAlignment="Center"
+                                <!-- Grid rather than a horizontal StackPanel, for the reason spelled
+                                     out on the roll-analysis card below: a StackPanel measures with
+                                     infinite width, so a long banner overflowed the border once the
+                                     preview pane was narrower than the text wanted to be. -->
+                                <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <TextBlock Grid.Column="0" Name="BannerText" Text="" VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextBrush}"
                                                TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
                                     <!-- Explicit buttons, not just the Enter/Esc shortcuts: after
                                          picking a preset the keyboard focus is still in the combo,
                                          so a hidden key is not a reliable way to apply a crop. -->
-                                    <Button Name="CropApplyBtn" Content="{i18n:T '应用'}" Classes="primary"
+                                    <Button Grid.Column="1" Name="CropApplyBtn" Content="{i18n:T '应用'}" Classes="primary"
+                                            Margin="10,0,0,0"
                                             IsVisible="False" Click="OnCropApplyClick" />
-                                    <Button Name="CropCancelBtn" Content="{i18n:T '取消'}"
+                                    <Button Grid.Column="2" Name="CropCancelBtn" Content="{i18n:T '取消'}"
+                                            Margin="10,0,0,0"
                                             IsVisible="False" Click="OnCropCancelClick" />
-                                </StackPanel>
+                                </Grid>
                             </Border>
                             <!-- Dismisses the HINT, never the Apply/Cancel pair: a tall crop frame
                                  (a vertical strip, a 3:4) reaches up under this banner and the
@@ -598,14 +604,22 @@
                                 Margin="0,0,0,14" CornerRadius="8" Padding="12,8" MaxWidth="620"
                                 Background="{DynamicResource ChromeBrush}"
                                 BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
-                            <StackPanel Orientation="Horizontal" Spacing="10">
-                                <ProgressBar IsIndeterminate="True" Width="90" Height="3"
+                            <!-- Grid, not a horizontal StackPanel: a StackPanel measures its children
+                                 with INFINITE width, so the text only ever wrapped at its own
+                                 MaxWidth and never at the width actually available. Once the preview
+                                 pane was narrower than the card's natural width the Border clamped to
+                                 the pane while the StackPanel kept arranging at full desired width —
+                                 the sentence ran straight out past the border line. The star column
+                                 hands the TextBlock the leftover width and TextWrapping does the rest,
+                                 so the card shrinks with the pane instead of overflowing it. -->
+                            <Grid ColumnDefinitions="Auto,10,*,10,Auto">
+                                <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="90" Height="3"
                                              VerticalAlignment="Center" />
-                                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
-                                           FontSize="12" MaxWidth="440"
+                                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap"
+                                           FontSize="12"
                                            Foreground="{DynamicResource TextBrush}"
                                            Text="{i18n:T '正在分析整卷……当前画面用的是第一帧的参数，仅供预览。分析完成后全卷会自动刷新为最终结果。'}" />
-                                <Button Classes="icon" Width="24" Height="24" MinHeight="24"
+                                <Button Grid.Column="4" Classes="icon" Width="24" Height="24" MinHeight="24"
                                         CornerRadius="12" VerticalAlignment="Center"
                                         Click="OnDismissRollAnalysisNoticeClick"
                                         Background="{DynamicResource ChromeBrush}"
@@ -613,7 +627,7 @@
                                         ToolTip.Tip="{i18n:T '关闭提示'}">
                                     <ctl:Icon Data="{StaticResource IcoClose}" />
                                 </Button>
-                            </StackPanel>
+                            </Grid>
                         </Border>
                     </Grid>
                 </Border>
