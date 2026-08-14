@@ -32,7 +32,7 @@
         <Border DockPanel.Dock="Top" Padding="6,3" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*,Auto">
-                <Menu Grid.Column="0" VerticalAlignment="Center">
+                <Menu Name="WindowMenu" Grid.Column="0" VerticalAlignment="Center">
                     <MenuItem Header="_File" SubmenuOpened="OnFileMenuOpened">
                         <MenuItem Header="{i18n:T '新建卷…'}" InputGesture="{i18n:Accel 'N'}" Click="OnOpenClick" />
                         <MenuItem Header="{i18n:T '添加图像到当前卷…'}" InputGesture="{i18n:Accel 'O'}"

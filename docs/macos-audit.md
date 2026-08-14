@@ -17,7 +17,7 @@ macOS 只在 release 时构建一次（`release.yml:139`），且只验"能否�
 
 下面按"确定性 × 影响面"排序。
 
-> **状态**：P1、P2、P3 已修（见文末「已修内容」）。P4、P5 待定。
+> **状态**：P1、P2、P3、P4 已修（见文末「已修内容」）。P5 待定。
 
 ---
 
@@ -139,7 +139,7 @@ Windows 分支**保持原样**：explorer.exe 不收正常 argv，
 
 ---
 
-## P4 ── 没有 macOS 原生菜单栏（设计缺口，非 bug）
+## P4 ── 没有 macOS 原生菜单栏（设计缺口，非 bug）✅ 已修
 
 全项目搜不到 `NativeMenu` / `NativeMenuBar`；菜单是画在窗口内的 `Menu`。
 在 macOS 上意味着：屏幕顶部系统菜单栏基本是空的；
@@ -147,8 +147,10 @@ Windows 分支**保持原样**：explorer.exe 不收正常 argv，
 ⌘, 即使修好 P1 也仍不在系统菜单里；⌘Q / ⌘W 缺失。
 
 对 mac 用户这会被直接感知为"这不是个 mac 应用"。
-Avalonia 的 `NativeMenu.Menu` 可与现有窗口内菜单共存（mac 挂 NativeMenu，其余平台保留 Menu）。
-工作量比 P1–P3 大，属产品决定。
+
+**修法**（已实施，细节见文末）：mac 上挂 `NativeMenu` 并把窗口内的 `Menu` 藏掉，
+其余平台保留原样。⌘Q / ⌘W 不用自己写——Avalonia 和 NSWindow 各自会补上；
+偏好设置 / 关于 按 mac 约定搬进应用菜单，`设置` 那一栏在 mac 上随之消失。
 
 ---
 
@@ -188,11 +190,12 @@ mac 用户报"导入大 RAW 卡死 / 被系统杀掉"时先看这里。
 1. ~~**P1 + P2**~~ ✅ 已修。
 2. ~~**P3**~~ ✅ 已修。
 3. ~~**CI 加一格 macOS**~~ ✅ 已加（见下）。
-4. P4 / P5 按产品优先级排期。
+4. ~~**P4**~~ ✅ 已修。
+5. P5 按产品优先级排期。
 
 ---
 
-## 已修内容（P1 + P2 + P3）
+## 已修内容（P1 + P2 + P3 + P4）
 
 `dotnet build -c Release` 通过，0 警告 0 错误。**未提交**，改动都在工作区。
 
@@ -236,18 +239,62 @@ Windows 分支保持原样（explorer.exe 要的就是那个字面格式）。
 这条是**唯一在本机实测过**的修复——用记录 argv 的桩程序对比了新旧写法，
 也正因为实测，才发现我上一版报告把 Linux 那条说重了（详见 P3 正文的更正）。
 
+### P4 原生菜单栏
+
+| 文件 | 改动 |
+|------|------|
+| `Views/MainWindow.NativeMenu.cs`（新增） | 整棵 `NativeMenu` 在 C# 里建；应用菜单挂 `Application.Current`，File/Edit/View/Help 挂 `Window` |
+| `Views/MainWindow.axaml.cs` | `DataContextChanged` 里调 `SetUpNativeMenu()`；`OnClosing` 里配对退订；`SyncViewerBgChecks` 多同步一份原生项 |
+| `Views/MainWindow.axaml` | 窗口内 `Menu` 加 `Name="WindowMenu"`（mac 上把它藏掉） |
+| `App.axaml` | 加 `Name="OpenRevelare"`——否则系统菜单里是「Hide Application」 |
+| `Assets/i18n/en.json` | 补 `实际像素 100%`（原表只有带「（Ctrl+1）」的那条） |
+
+**为什么用 C# 建而不是再写一份 XAML**：窗口内那条 `Menu` 在 Windows / Linux 上仍要用，
+两份菜单必须点出同一件事。写成两段 XAML 就是两份独立清单，改一处忘一处是迟早的。
+现在原生菜单复用**同一批 Click 处理器**和同一批 VM 绑定，行为上不可能漂移——
+和 `OnKeyDown` 那条注释在意的是同一件事，只是换到了菜单与菜单之间。
+
+**没有自己加 Quit**：反编译 `AvaloniaNativeMenuExporter` 确认，Avalonia 会在应用菜单尾部
+自动补 Services / Hide / Hide Others / Show All / Quit ⌘Q 一整套。自己再加就是两个 Quit。
+⌘W 同理不写——mac 上 NSWindow 自己管。
+
+**过程中查出并修掉的一个真 bug**：`NativeMenuItem` 派生自 `AvaloniaObject` 而非
+`StyledElement`——它**没有 DataContext**，也不在逻辑树上。最初写的
+`new Binding("HasImage")` 会静默失效，`IsEnabled` 停在默认值 `true`：
+没开卷时「导出当前帧…」照样可点，且只在 mac 上出现。改成显式 `Source = Vm` 才对。
+这条是靠下面那个 headless 探针跑出来的，不是看出来的。
+
 ---
 
-## 三条修复的验证程度（重要）
+## 四条修复的验证程度（重要）
 
 | 修复 | 验证方式 | 置信度 |
 |------|---------|--------|
 | P1 快捷键 | 仅编译通过 + 文案对齐用 Python 模拟验证 | 依据是 Avalonia 把 ⌘ 映射为 `Meta` 这一确定行为，**未在 mac 上实测** |
 | P2 选择框 | 仅编译通过 + 生成的 pattern 列表已核对 | 依据是 `NSOpenPanel` 类型过滤大小写敏感，**未在 mac 上实测** |
 | P3 访达 | **本机实测**（argv 桩程序，新旧对比 7 组路径） | Linux 分支已证实；macOS 分支同理但未在 mac 上跑 |
+| P4 菜单栏 | **本机实测**（headless 探针，见下）+ 反编译核对 Avalonia 行为 | 菜单树、绑定、手势已证实；**顶端菜单栏本身没在 mac 上看过** |
 
-本机是 Kubuntu，P1/P2 的 `OperatingSystem.IsMacOS()` 分支在这里跑不到。
+本机是 Kubuntu，P1/P2/P4 的 `OperatingSystem.IsMacOS()` 分支在这里跑不到。
 **落地前建议在 mac 上过一遍**。
+
+### P4 是怎么测的
+
+写了个 headless 探针（`Avalonia.Headless` + 反射调 `BuildAppMenu` / `BuildWindowMenu`），
+在 Linux 上把整棵菜单树建出来打印，并断言绑定确实是活的：
+
+- `HasImage=false` 时「导出当前帧…」为 disabled → **这一步第一次跑就红了**，
+  暴露出上面那条 `Source = Vm` 的 bug；
+- 改完后置 `HasImage=true`，同一项转为 enabled → 绑定确认是响应式的，不是一次性赋值；
+- 逐条比对原生菜单与 XAML 菜单的 Click 处理器和标题，差异只剩**有意为之**的那几处
+  （Quit 交给 Avalonia、偏好设置/关于 搬进应用菜单、背景色走闭包）。
+
+另外两处显示细节是反编译确认的，不是猜的：`Ctrl+OemComma` / `Ctrl+D1` 在
+`KeyGesture.ToString()` 里是难看的枚举名，但原生层走的是 `(AvnKey)gesture.Key`，
+`AvnKeyOemComma = 142`、`AvnKeyD1 = 35` 与 Avalonia 的 `Key` 值**逐一对应**，
+所以 mac 上渲染出来就是 ⌘, 和 ⌘1。
+
+探针本身在 scratchpad 里，没进仓库——它依赖反射私有方法，作为长期测试太脆。
 
 ---
 

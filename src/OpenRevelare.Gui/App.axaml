@@ -3,6 +3,7 @@
              x:Class="OpenRevelare.Gui.App"
              xmlns:local="using:OpenRevelare.Gui"
              xmlns:ctl="using:OpenRevelare.Gui.Controls"
+             Name="OpenRevelare"
              RequestedThemeVariant="Dark">
 
     <Application.DataTemplates>
