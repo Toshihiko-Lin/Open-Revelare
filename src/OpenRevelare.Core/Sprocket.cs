@@ -74,7 +74,75 @@ public static class Sprocket
     private const double MinEdgeConnected = 0.70;
 
     /// <summary>
-    /// Least peak luma for a bright cluster to be a light board rather than bare film base.
+    /// How far up the FILM's own range the dark-end search for a blocking mask runs, as a share of
+    /// it. Relative rather than a fixed luma so the search means the same thing on a copy stand
+    /// exposed two stops down as on one exposed to clip.
+    ///
+    /// The mask is the darkest thing in frame by a wide margin, so the search only has to cover the
+    /// bottom of the range; going higher lets ordinary shadow content supply the "mask peak". A
+    /// little under half is generous for the former and still short of the midtones.
+    /// </summary>
+    private const double DarkSearchShare = 0.45;
+
+    /// <summary>
+    /// Share of a dark cluster that must be edge-connected before its SHAPE is allowed to overrule
+    /// the dark end's colour test — see <see cref="EnclosesFrame"/>.
+    ///
+    /// Deliberately far above <see cref="MinEdgeConnected"/>: that bar answers "does this reach the
+    /// edge?", which a dark subject can, whereas this one answers "is this the surround?", which
+    /// only hardware is. Measured 0.98 for the unexposed surround on 21/P8060012, against 0.25 and
+    /// 0.13 for the dark picture regions on its neighbours — the two populations are nowhere near
+    /// each other and the exact bar is not load-bearing.
+    /// </summary>
+    private const double MinSurroundConnected = 0.90;
+
+    /// <summary>
+    /// Fewest near-identical interior blobs before they are read as a row of sprocket holes
+    /// rather than as picture content.
+    ///
+    /// A 135 frame photographed whole shows two rows of eight to ten holes, so the real count is
+    /// an order of magnitude above this floor; a 120 frame shows none. Four is low enough for a
+    /// crop that keeps only a corner of one row, and high enough that a coincidence — two similar
+    /// specular highlights, a pair of matched windows — cannot reach it.
+    /// </summary>
+    private const int MinHoleCount = 4;
+
+    /// <summary>
+    /// Greatest coefficient of variation among the blobs' areas (and, separately, their bounding
+    /// boxes) before a group stops being "the same shape repeated".
+    ///
+    /// Sprocket holes are punched to a standard by the same die, so on the samples here they
+    /// measure a CV of 0.004-0.007 — identical to three decimal places. Picture highlights that
+    /// happen to repeat are nothing like that uniform. The bar sits far above the measured spread
+    /// so that soft edges, dust in a hole and preview downsampling cannot push a genuine row over
+    /// it, and still far below anything a photograph produces.
+    /// </summary>
+    private const double MaxHoleSpread = 0.25;
+
+    /// <summary>
+    /// Least fill ratio — blob area over its bounding box — for a blob to count as a hole.
+    ///
+    /// A sprocket hole is a rounded rectangle, so it fills ~0.95 of its box (measured 0.94-0.96
+    /// here). This is what separates a row of holes from a row of irregular bright shapes, which
+    /// are the same size only by accident and do not fill their boxes. Set well below the measured
+    /// value because a hole clipped by the frame edge or softened by downsampling fills slightly
+    /// less.
+    /// </summary>
+    private const double MinHoleFill = 0.65;
+
+    /// <summary>
+    /// Largest share of the frame a single blob may occupy and still be a sprocket hole.
+    ///
+    /// Bounds the test from above so it cannot be satisfied by a few big bright regions: a hole is
+    /// a small window, and on a whole 135 frame each one is well under a percent. The limit is
+    /// generous against a tightly cropped frame where the holes loom larger.
+    /// </summary>
+    private const double MaxHoleShare = 0.05;
+
+    /// <summary>
+    /// Least peak luma for a bright cluster to be a light board rather than bare film base, on the
+    /// ABSOLUTE scale. Satisfying either this or <see cref="MinBoardOverFilm"/> is enough — see
+    /// the test in <see cref="EstimateSprocketThreshold"/>.
     ///
     /// A board is unattenuated light source and is exposed at or near clipping; base is that same
     /// light seen THROUGH the orange mask, which costs it most of a stop and then some. Measured
@@ -84,6 +152,25 @@ public static class Sprocket
     /// stand exposed conservatively.
     /// </summary>
     private const double MinBoardLuma = 0.55;
+
+    /// <summary>
+    /// How far the board's peak must outrank the FILM's brightest tone before it is believed to be
+    /// a light source rather than part of the picture — the relative counterpart to
+    /// <see cref="MinBoardLuma"/>.
+    ///
+    /// This exists because the absolute bar encodes an exposure, not a physical fact. What is
+    /// actually true of a board is a RATIO: it is bare light, the film is that same light minus
+    /// the orange mask's density, so the board comes out some multiple brighter whatever the stop.
+    /// A copy stand set two stops down keeps that ratio and loses the absolute — its board lands
+    /// under 0.55 and the frame is read as boardless — which is the fragility a fixed threshold
+    /// always carries into an exposure it was not measured on.
+    ///
+    /// Measured board-to-film ratios on the samples here: 4.38 and 4.20 (roll 21), 2.85
+    /// (_B040116). The bright picture that must keep failing, FS-76221534, sits at 1.58 — a dark
+    /// subject against sky, where "board" and "film" are both picture and so cannot be far apart.
+    /// Two is comfortably between the two populations.
+    /// </summary>
+    private const double MinBoardOverFilm = 2.0;
 
     /// <summary>Detect mask: per-pixel mean luma &gt; threshold (matches image.mean(axis=2)).</summary>
     public static bool[] MakeMask(float[] data, int pixelCount, float threshold)
@@ -167,12 +254,10 @@ public static class Sprocket
         if (Centre(boardPk) - valleyLuma < MinBoardSeparation) return NoBoard;
         if (smooth[valleyIdx] > MaxValleyDepth * smooth[boardPk]) return NoBoard;
 
-        // (c) The board lies at the EDGE of the frame — the one test a bright picture cannot pass,
-        //     because the board is the thing the film is lying ON and can only show around the
-        //     film's edges. On FS-76221534.tif a dark subject at luma 0.21 against bright sky at
-        //     0.59 satisfies every photometric rule above; what gives it away is that 643k of
-        //     those pixels sit in the frame's interior against 63k in the border band.
-        if (!BorderDominant(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
+        // (c) The cluster is HARDWARE rather than picture. Two shapes qualify, and a frame need
+        //     only match one — see <see cref="LooksLikeHardware"/> for why the edge test alone
+        //     rejected the sprocket case this feature is named after.
+        if (!LooksLikeHardware(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
 
         // (d) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
         //     brightest thing present.
@@ -187,9 +272,20 @@ public static class Sprocket
         // The two are far apart on an absolute scale and cannot be confused once it is consulted:
         // a copy-stand board is exposed to clip or near it (0.93-0.95 on the synthetic cases here,
         // and the estimator's own remarks cite a dim board at 0.9), while base seen through the
-        // orange mask cannot exceed roughly a third of that. Anything dimmer than this bar is
-        // film, whatever else it looks like.
-        if (Centre(boardPk) < MinBoardLuma) return NoBoard;
+        // orange mask cannot exceed roughly a third of that.
+        //
+        // Measured EITHER WAY, because the absolute form alone bakes in an exposure. What makes a
+        // board a board is that it is bare light while the film is that light minus the mask's
+        // density — a RATIO, which survives a copy stand set darker; the absolute bar does not,
+        // and a conservatively exposed rig lands under it with a perfectly good board. So a
+        // cluster qualifies by being bright outright OR by clearly outranking the film's own
+        // brightest tone. Both are ways of saying "this is the lamp, not the negative", and the
+        // picture that has to keep failing fails both (FS-76221534: peak 0.584, ratio 1.58).
+        double filmTopLuma = Centre(filmTop);
+        bool brightAbsolute = Centre(boardPk) >= MinBoardLuma;
+        bool brightRelative = filmTopLuma > 0
+                              && Centre(boardPk) / filmTopLuma >= MinBoardOverFilm;
+        if (!brightAbsolute && !brightRelative) return NoBoard;
 
         return Math.Clamp(valleyLuma, 0.1, 0.99);
     }
@@ -305,6 +401,211 @@ public static class Sprocket
     }
 
     /// <summary>
+    /// True when the dark region at or below <paramref name="cut"/> WRAPS the frame — it is almost
+    /// entirely edge-connected AND it reaches at least three of the four sides.
+    ///
+    /// This is the shape an unexposed surround has and a photograph does not. It is a strictly
+    /// stronger claim than <see cref="BorderDominant"/>, which asks only that the region reach the
+    /// edge somewhere: a dark subject running off one side satisfies that, but nothing in a
+    /// photograph wraps the picture on three sides at once except the hardware around it.
+    ///
+    /// Three sides and not four, because the fourth is routinely something else: on 21/P8060012
+    /// the surround reaches bottom, left and right while the top edge of the frame is the light
+    /// board's own bright strip. Demanding all four rejected exactly the case this test exists
+    /// for.
+    ///
+    /// It exists so the dark end's colour test can be overruled on geometry alone — the surround
+    /// of a copy-stand frame is orange-cast like everything else in shot, so the colour test reads
+    /// it as picture and cannot be the last word. See <see cref="EstimateDarkValley"/>.
+    /// </summary>
+    private static bool EnclosesFrame(float[] luma, int w, int h, double cut)
+    {
+        if (!BorderDominant(luma, w, h, cut, below: true)) return false;
+
+        // Nearly ALL of the dark population edge-connected, not merely most of it. The ordinary
+        // border test passes at 0.70, which a dark subject touching one side can reach; a surround
+        // has essentially nothing of itself stranded in the picture's interior.
+        int n = w * h;
+        long matching = 0, connected = 0;
+        var seen = new bool[n];
+        var stack = new Stack<int>();
+        void Seed(int p) { if (!seen[p] && luma[p] <= cut) { seen[p] = true; stack.Push(p); } }
+
+        for (int x = 0; x < w; x++) { Seed(x); Seed((h - 1) * w + x); }
+        for (int y = 0; y < h; y++) { Seed(y * w); Seed(y * w + w - 1); }
+
+        // Which sides the edge-connected region actually touches.
+        bool top = false, bottom = false, left = false, right = false;
+        while (stack.Count > 0)
+        {
+            int p = stack.Pop();
+            connected++;
+            int px = p % w, py = p / w;
+            if (py == 0) top = true;
+            if (py == h - 1) bottom = true;
+            if (px == 0) left = true;
+            if (px == w - 1) right = true;
+            if (px > 0) Seed(p - 1);
+            if (px < w - 1) Seed(p + 1);
+            if (py > 0) Seed(p - w);
+            if (py < h - 1) Seed(p + w);
+        }
+        for (int p = 0; p < n; p++) if (luma[p] <= cut) matching++;
+
+        int sides = (top ? 1 : 0) + (bottom ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
+        if (sides < 3) return false;
+        return matching > 0 && (double)connected / matching >= MinSurroundConnected;
+    }
+
+    /// <summary>
+    /// True when the bright cluster above <paramref name="cut"/> is hardware — the light board or
+    /// the sprocket holes lit through it — rather than picture content.
+    ///
+    /// Hardware presents in two shapes and the frame need only match ONE of them:
+    ///
+    ///   • It REACHES THE FRAME'S EDGE (<see cref="BorderDominant"/>). This is the bare panel
+    ///     around the film: a full-width strip, a ring, a corner wedge.
+    ///
+    ///   • It is a row of NEAR-IDENTICAL INTERIOR BLOBS (<see cref="RepeatedHoles"/>) — the
+    ///     sprocket holes, which are windows onto that same panel.
+    ///
+    /// The second test is here because the edge rule alone rejects the very case this class is
+    /// named after. A 135 frame photographed whole on a copy stand shows twenty holes punched by
+    /// the same die, and a hole is by construction an ISLAND: it is surrounded by film on all
+    /// sides and touches no border. On the 21 roll the histogram could not have been cleaner — a
+    /// board cluster at luma 0.69, a valley at 0.40 with a depth of 0.007 — and every frame was
+    /// still thrown out, because only 20% of the lit pixels were edge-connected (the two thin
+    /// strips past the film's long edges) against the 70% the rule demands. The user had to enable
+    /// 齿孔遮罩 by hand and find the cut themselves on all forty frames.
+    ///
+    /// Both rules answer the same question — "is this thing the film, or the machine the film is
+    /// sitting in?" — and a photograph passes neither, which is what keeps the disjunction safe: a
+    /// bright subject is neither edge-connected nor stamped out twenty times to the same
+    /// dimensions.
+    /// </summary>
+    private static bool LooksLikeHardware(float[] luma, int w, int h, double cut)
+        => BorderDominant(luma, w, h, cut) || RepeatedHoles(luma, w, h, cut);
+
+    /// <summary>
+    /// True when the lit pixels form several interior blobs of the SAME size and shape — a row of
+    /// sprocket holes.
+    ///
+    /// Identity is the whole test, and it is what a photograph cannot fake. Holes are punched to a
+    /// standard, so their areas and bounding boxes agree to within a fraction of a percent
+    /// (<see cref="MaxHoleSpread"/>), each one fills its box like the rounded rectangle it is
+    /// (<see cref="MinHoleFill"/>), and each is small (<see cref="MaxHoleShare"/>). Bright picture
+    /// content that survives the photometric tests — a specular row, a line of windows — is never
+    /// uniform to that tolerance.
+    ///
+    /// Edge-touching blobs are excluded before the statistics rather than counted: they are the
+    /// bare panel past the film's edge and the partial holes the frame cuts through, and both have
+    /// arbitrary size. Leaving them in would inflate the spread and cost the frame its own test.
+    /// </summary>
+    private static bool RepeatedHoles(float[] luma, int w, int h, double cut)
+    {
+        int n = w * h;
+        var seen = new bool[n];
+        var areas = new List<double>();
+        var widths = new List<double>();
+        var heights = new List<double>();
+        var fills = new List<double>();
+        var stack = new Stack<int>();
+
+        for (int start = 0; start < n; start++)
+        {
+            if (seen[start] || !(luma[start] > cut)) continue;
+
+            // One blob, flood-filled 4-connected — the same connectivity BorderDominant uses.
+            seen[start] = true;
+            stack.Push(start);
+            long area = 0;
+            int minX = w, maxX = -1, minY = h, maxY = -1;
+            bool touchesEdge = false;
+
+            while (stack.Count > 0)
+            {
+                int p = stack.Pop();
+                area++;
+                int px = p % w, py = p / w;
+                if (px < minX) minX = px;
+                if (px > maxX) maxX = px;
+                if (py < minY) minY = py;
+                if (py > maxY) maxY = py;
+                if (px == 0 || py == 0 || px == w - 1 || py == h - 1) touchesEdge = true;
+
+                void Push(int q) { if (!seen[q] && luma[q] > cut) { seen[q] = true; stack.Push(q); } }
+                if (px > 0) Push(p - 1);
+                if (px < w - 1) Push(p + 1);
+                if (py > 0) Push(p - w);
+                if (py < h - 1) Push(p + w);
+            }
+
+            if (touchesEdge) continue;                       // panel, or a hole the frame cut through
+            if (area > MaxHoleShare * n) continue;           // too big to be a hole
+            // Speckle floor: grain and dust in the highlight tail are interior blobs too, and a
+            // handful of single pixels would otherwise set the spread. Scaled to the frame so it
+            // means the same thing on a preview as on a full decode.
+            if (area < 0.0002 * n) continue;
+
+            double bw = maxX - minX + 1, bh = maxY - minY + 1;
+            areas.Add(area);
+            widths.Add(bw);
+            heights.Add(bh);
+            fills.Add(area / (bw * bh));
+        }
+
+        if (areas.Count < MinHoleCount) return false;
+
+        // The holes that AGREE WITH EACH OTHER, not every blob found. Demanding that the whole
+        // interior population be uniform makes the test fail exactly where it is needed most: a
+        // frame cropped tight enough that one row of holes merges into the edge strip leaves a
+        // mixture of merged shapes and clean ones, and on _B040113 that mixture measured an area
+        // CV of 0.97 while the intact holes among it were identical as ever. So the question is
+        // "are there several blobs of one repeated size here?", not "is everything here one size?".
+        //
+        // The median is the reference because it is the middle of the largest consistent group by
+        // construction — irregular debris scatters to both sides of it and cannot drag it the way
+        // a mean would.
+        double median = Median(areas);
+        if (median <= 0) return false;
+        var kA = new List<double>();
+        var kW = new List<double>();
+        var kH = new List<double>();
+        for (int i = 0; i < areas.Count; i++)
+        {
+            if (Math.Abs(areas[i] - median) > MaxHoleSpread * median) continue;
+            if (fills[i] < MinHoleFill) continue;
+            kA.Add(areas[i]);
+            kW.Add(widths[i]);
+            kH.Add(heights[i]);
+        }
+
+        if (kA.Count < MinHoleCount) return false;
+        return Cv(kA) <= MaxHoleSpread && Cv(kW) <= MaxHoleSpread && Cv(kH) <= MaxHoleSpread;
+    }
+
+    /// <summary>Median of a list, by sorting a copy — the caller's order is meaningful.</summary>
+    private static double Median(List<double> vals)
+    {
+        var s = new List<double>(vals);
+        s.Sort();
+        int m = s.Count / 2;
+        return s.Count % 2 == 1 ? s[m] : (s[m - 1] + s[m]) / 2.0;
+    }
+
+    /// <summary>Coefficient of variation (σ/μ) — a scale-free "how alike are these?".</summary>
+    private static double Cv(List<double> vals)
+    {
+        double mean = 0;
+        foreach (double v in vals) mean += v;
+        mean /= vals.Count;
+        if (mean <= 0) return double.PositiveInfinity;
+        double var = 0;
+        foreach (double v in vals) var += (v - mean) * (v - mean);
+        return Math.Sqrt(var / vals.Count) / mean;
+    }
+
+    /// <summary>
     /// Auto-estimate the DARK-END valley separating a light-blocking mask (the opaque card
     /// / film-edge line a copy stand uses to block stray light) from the picture's own
     /// darkest highlights — the mirror of <see cref="EstimateSprocketThreshold"/>.
@@ -323,11 +624,29 @@ public static class Sprocket
         if (luma.Length < 100) return NoMaskDark;
         double[] smooth = Smooth7(Histogram256(luma));
 
+        // 0. The top of the FILM's range. Everything below keys off this rather than off the
+        //    absolute scale, because "dark" only means anything relative to how the frame was
+        //    exposed — a copy stand two stops down puts the whole picture where another one puts
+        //    its shadows, and a fixed cut then reads that frame's midtones as a blocking card.
+        //
+        //    The light board is not film, so when there is one it sets the ceiling: on a
+        //    board-heavy frame the board owns the tallest bins outright, and a search that runs to
+        //    the top of the histogram picks the BOARD as the "picture peak". That is what happened
+        //    on 21/P8060015 — picture peak at luma 0.697, i.e. the panel — which put the valley at
+        //    0.44 and declared 66% of the frame a mask. Only the empty-mask fallback in
+        //    HighDensityKeepMask kept that from reaching the statistics.
+        double boardCut = EstimateSprocketThreshold(image);
+        int filmCeil = boardCut >= NoBoard ? smooth.Length : SearchSortedLeftCentres(boardCut);
+        if (filmCeil <= 1) return NoMaskDark;
+
         // 1. Mask peak: the DARKEST significant peak, NOT the tallest bin in the dark
         //    region — the opaque mask sits near luma 0 but mid-tone content easily
-        //    out-counts it, so "tallest bin below 0.45" would land on the picture. Scan
-        //    from the dark end for the first local maximum clearing 1% of the global peak.
-        int darkHi = SearchSortedLeftCentres(0.45);
+        //    out-counts it, so "the tallest bin in the dark region" would land on the picture.
+        //    Scan from the dark end for the first local maximum clearing 1% of the global peak.
+        //
+        //    The region searched is the bottom DarkSearchShare of the film's own range, not a
+        //    fixed luma: the mask is at the very bottom of whatever range this frame occupies.
+        int darkHi = Math.Max(2, (int)(DarkSearchShare * filmCeil));
         if (darkHi <= 1) return NoMaskDark;
         double floor = 0.01 * smooth.Max();
         int maskPk = -1;
@@ -341,16 +660,16 @@ public static class Sprocket
         }
         if (maskPk < 0) return NoMaskDark;
 
-        // 2. Picture peak: tallest bin to the RIGHT of the mask peak (the darkest real
-        //    picture tones — the highlight cluster we want to keep).
+        // 2. Picture peak: tallest bin to the RIGHT of the mask peak but still BELOW the board
+        //    (the darkest real picture tones — the highlight cluster we want to keep).
         //
         // ArgMax already returns an ABSOLUTE index into `smooth`, so its result is used as-is.
         // Re-adding the `maskPk + 1` offset (as this line once did) pushed picPk past the end of
         // the array whenever the picture peak sat in the upper half, and ArgMin(maskPk, picPk)
         // then indexed out of bounds — an outright crash, reached by any frame whose brightest
         // cluster is bright enough, e.g. a 120 negative with the light panel showing.
-        if (maskPk >= smooth.Length - 1) return NoMaskDark;
-        int picPk = ArgMax(smooth, maskPk + 1, smooth.Length);
+        if (maskPk >= filmCeil - 1) return NoMaskDark;
+        int picPk = ArgMax(smooth, maskPk + 1, filmCeil);
         if (picPk <= maskPk) return NoMaskDark;
 
         // 3. Valley: deepest point between the two peaks.
@@ -360,6 +679,18 @@ public static class Sprocket
         double maskVal = smooth[maskPk], picVal = smooth[picPk], valleyVal = smooth[valleyIdx];
         if (maskVal <= 0 || picVal <= 0) return NoMaskDark;
         if (valleyVal > 0.5 * Math.Min(maskVal, picVal)) return NoMaskDark;
+
+        // Spatial gate: a blocking card / unlit surround is at the frame's EDGE, whereas a dark
+        // SUBJECT is not. This is the mirror of the bright end's test and it runs FIRST, because
+        // it is the one of the two that is decisive on its own — see the neutrality gate below.
+        //
+        // On its own it is necessary but not sufficient, which is why the colour test still
+        // follows: a genuinely neutral dark subject — a shadow under an overhang, a black object,
+        // a night sky — that happens to run off the edge of the frame would otherwise be clipped,
+        // and since those pixels are the scene's brightest highlights, losing them sends D-max to
+        // an extreme.
+        bool borderDominant = BorderDominant(luma, image.Width, image.Height, valleyLuma, below: true);
+        if (!borderDominant) return NoMaskDark;
 
         // Neutrality gate: an opaque mask blocks all light equally, so it is NEUTRAL
         // (R≈G≈B); a real negative highlight is seen THROUGH the orange base and carries a
@@ -375,6 +706,20 @@ public static class Sprocket
         // Requiring the spread to be absolutely large as well keeps the test meaningful at both
         // ends of the scale, since a genuine C-41 highlight separates its channels by far more
         // than sensor noise does.
+        //
+        // WHAT THE COLOUR TEST CANNOT DECIDE ALONE. Its premise is that a coloured dark cluster
+        // must be light that came THROUGH the orange base, i.e. picture. That inference fails for
+        // the unexposed surround around a copy-stand frame, which is lit by the same flare and
+        // edge spill as everything else and so is dark AND orange at once: on 21/P8060012 it
+        // measured (0.0157, 0.0133, 0.0048) — a cast of 0.96, read as "highlight" and kept. It is
+        // 62% of the frame and 98% edge-connected, and keeping it put the black point ten times
+        // too low (kept-luma p0.1 of 0.005 against 0.040 on the neighbouring frame).
+        //
+        // So the colour test only gets to REJECT while the region's shape is ambiguous. Once the
+        // cluster is essentially all edge-connected it is hardware by construction — picture does
+        // not wrap the frame on four sides — and geometry outranks colour. Below that bar the
+        // colour test still runs, which is what keeps a dark subject that merely touches an edge
+        // (P8060013 at 0.25 connected, P8060017 at 0.13) out of the mask.
         double s0 = 0, s1 = 0, s2 = 0;
         long n = 0;
         float[] d = image.Data;
@@ -389,19 +734,8 @@ public static class Sprocket
         double m0 = s0 / n, m1 = s1 / n, m2 = s2 / n;
         double spread = Math.Max(Math.Max(m0, m1), m2) - Math.Min(Math.Min(m0, m1), m2);
         double cast = spread / Math.Max((m0 + m1 + m2) / 3.0, 1e-6);
-        if (cast > 0.08 && spread > MinCastSpread) return NoMaskDark;
-
-        // Spatial gate, the mirror of the one on the bright end: a blocking card / unlit surround
-        // is at the frame's EDGE, whereas a dark SUBJECT is not.
-        //
-        // The neutrality test above is necessary but not sufficient. It rejects a dark cluster
-        // that carries the orange base's cast, but a genuinely neutral dark subject — a shadow
-        // under an overhang, a black object, a night sky — passes it, and clipping there throws
-        // away the densest real pixels. Since those pixels are precisely the scene's brightest
-        // highlights, losing them is what sends D-max to an extreme: the endpoint is then read
-        // off whatever survives instead of off the true highlight. Requiring the dark cluster to
-        // live at the border keeps the card and the surround while leaving picture shadows alone.
-        if (!BorderDominant(luma, image.Width, image.Height, valleyLuma, below: true))
+        if (cast > 0.08 && spread > MinCastSpread
+            && !EnclosesFrame(luma, image.Width, image.Height, valleyLuma))
             return NoMaskDark;
 
         return Math.Clamp(valleyLuma, 0.0, 0.9);
