@@ -231,18 +231,15 @@ them needs a parameter of its own:
 
 | What you want | How | Measured side effect |
 |---|---|---|
-| **Overall lightness** | Drag **Density zero** (both ends together) | contrast 0.15%, cast ~3% |
-| **Contrast** | Drag either D_min or D_max (ends closer / further apart) | cast <1% |
+| **Contrast** | Drag D_min or D_max (ends closer / further apart) | cast <1% |
 | **Colour cast** | Expand **Per channel** and adjust the components | contrast ~1% |
+| **Overall lightness** | Use **Exposure** in Frame edit | cast exactly 0 |
 
-#### Density zero
-
-Moves both ends together. t_base removes the base's **colour** but does not guarantee its
-**absolute level** lands on density 0 — a fluctuating light panel or edge falloff leaves the base
-grey. **Zero on the film base** selects bare base and subtracts its residual density from both ends.
-
-> This used to be a separate parameter called `scan_ev`, applied after the density floor, which
-> made it not quite equivalent to moving the ends (measured 10.7% apart). It is now that move.
+> **Why lightness is not here.** No pair-of-endpoints move in the density domain can change
+> lightness with zero cast: `offset[c] = −range − scale[c]·D_min[c]`, so adding a constant to both
+> ends preserves the slopes but shifts each channel's offset by a different amount (R/B measured at
+> ±3.5%). A cast-free brightness has to be a multiply in linear light — which is exposure, and
+> Stage 2 already has one.
 
 #### D_min (black end)
 

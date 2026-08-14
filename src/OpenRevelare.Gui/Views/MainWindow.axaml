@@ -718,23 +718,6 @@
                                      分量同步平移（色偏不变），改分量则只动色偏（标量不变）。
                                      「亮度」「反差」「色温」都是这六个数的派生读数，不另立字段。-->
 
-                                <!-- 密度零点：两端同步升降 -->
-                                <Expander Header="{i18n:T '密度零点'}" IsExpanded="True"
-                                          ToolTip.Tip="{i18n:T '两端一起升降。实测反差变化仅 ±0.1%、色偏不变，所以这是纯粹的整体明暗。'}">
-                                    <StackPanel Spacing="2">
-                                        <ctl:SliderRow Label="{i18n:T '零点'}" Minimum="-1.5" Maximum="1.5" Decimals="3" Increment="0.01" DefaultValue="0"
-                                                       Value="{Binding DensityZero}" />
-                                        <ToggleButton Name="ScanEvBtn" Classes="sampling"
-                                                      Click="OnSampleScanEvClick" IsEnabled="{Binding HasImage}"
-                                                      ToolTip.Tip="{i18n:T '框一块应为纯片基的区域，把它的残余密度从两端一起减掉。t_base 消掉的是片基的颜色，不保证它恰好落在密度 0。'}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
-                                                <TextBlock Text="{i18n:T '片基归零'}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </ToggleButton>
-                                    </StackPanel>
-                                </Expander>
-
                                 <!-- D_min：暗端 -->
                                 <Expander Header="{i18n:T 'D_min（黑端）'}" IsExpanded="True"
                                           ToolTip.Tip="{i18n:T '每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。'}">

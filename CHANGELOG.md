@@ -25,6 +25,17 @@
   | **反差** | D_min / D_max 拉近拉远 | 色偏 <1% |
   | **色偏** | 展开【逐通道】改分量 | 反差 ~1% |
 
+- **删除【密度零点】**。它的设想是「两端同步升降 = 纯亮度」，但实测有 ±3.5% 的色偏：
+  `offset[c] = −输出范围 − scale[c]·D_min[c]`，两端同加一个常数虽然保住了 scale（跨度不变），
+  却让各通道的 offset 变得**不一样多**——`scale` 三通道分别是 0.952/1.026/0.877，乘上同一个
+  位移就得到三个不同的 offset 变化。
+
+  这不是实现瑕疵而是数学结论：要 offset 不变且 scale 不变，D_min 就必须不变，即什么都没动。
+  **密度域内不存在「改亮度且零色偏」的两端操作。** 零色偏的亮度只能是线性域乘常数——那就是
+  曝光，Stage 2 已经有了。
+
+  【片基归零】按钮一并移除：它与【片基采样】瞄准同一处、写同一个字段。
+
 - **输出范围改为常量**（黑位恒为 10⁻²）。它可调时与两端争夺同一自由度，这正是「D_max 和亮度
   都在控制亮度」的根源。固定之后语义才各归其位。
 
@@ -182,6 +193,20 @@ base survives only as a sliver at the edge, and rolls with a light blocker in sh
   | **Overall lightness** | Density zero — both ends together | contrast 0.15% |
   | **Contrast** | D_min / D_max closer or further apart | cast <1% |
   | **Colour cast** | Expand "Per channel" | contrast ~1% |
+
+- **Density zero removed.** The idea was "move both ends together = pure lightness", but it
+  measured a ±3.5% cast: `offset[c] = −range − scale[c]·D_min[c]`, so adding a constant to both
+  ends preserves the slopes yet shifts each channel's offset by a *different* amount — the three
+  slopes are 0.952/1.026/0.877, and one shared displacement times three different slopes gives
+  three different offsets.
+
+  This is a conclusion, not a defect: for offset and scale both to hold still, D_min must not move
+  — i.e. nothing moved. **No pair-of-endpoints operation in the density domain can change lightness
+  with zero cast.** A cast-free brightness has to be a multiply in linear light, which is exposure,
+  and Stage 2 already has one.
+
+  The "Zero on the film base" button goes with it: it aimed at the same place and wrote the same
+  field as "Sample the film base".
 
 - **The output range is now a constant** (black fixed at 10⁻²). While adjustable it competed with
   the endpoints for one degree of freedom, which is exactly why "D_max and brightness both control

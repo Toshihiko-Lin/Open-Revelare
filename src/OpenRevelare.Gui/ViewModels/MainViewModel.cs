@@ -739,9 +739,11 @@ public partial class MainViewModel : ViewModelBase
     //
     // 用户想调的三件事都是这六个数的不同读法，**不需要额外字段**：
     //
-    //   两端同向移动  → 整体明暗（密度零点）   实测反差仅 ±0.1%
-    //   两端反向移动  → 反差                   实测 ±23%
-    //   通道间差      → 色偏                   展开三个分量各自调整
+    //   两端拉近/拉远  → 反差    实测 ±23%
+    //   通道间差       → 色偏    展开三个分量各自调整
+    //
+    // 没有「亮度」：两端同向移动虽然保住跨度，却会让各通道 offset 变得不一样多（实测 R/B
+    // 偏 ±3.5%），不是零色偏的亮度。真正零色偏的亮度是线性域乘常数 = 曝光，在 Stage 2。
     //
     // 所以界面上没有「亮度」「反差」「色温」这些字段——它们是 D_min / D_max 两个标量与其
     // 展开分量的派生读数，任何为它们单独立字段的做法都是在重新制造上面那个局面。
@@ -754,7 +756,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnTBaseGChanged(double value) => ScheduleRender();
     partial void OnTBaseBChanged(double value) => ScheduleRender();
 
-    /// <summary>暗端：逐通道黑点密度。片基归零后未标定的卷就是 0,0,0——真实读数，非哨兵值。</summary>
+    /// <summary>暗端：逐通道黑点密度（对 T=1 的绝对值）。橙色片基必然 R&lt;G&lt;B。</summary>
     [ObservableProperty] private double _dMinR;
     [ObservableProperty] private double _dMinG;
     [ObservableProperty] private double _dMinB;
@@ -784,7 +786,7 @@ public partial class MainViewModel : ViewModelBase
         set { if (value is { Length: 3 }) { DMaxR = value[0]; DMaxG = value[1]; DMaxB = value[2]; } }
     }
 
-    // ── 三个标量：密度零点 / D_min / D_max ─────────────────────────────────────
+    // ── 两个标量：D_min / D_max ────────────────────────────────────────────────
     //
     // 每个标量是那一端的**算术均值**，展开的三个分量是它的明细。父子关系：拖标量 = 三个
     // 分量同步平移（加性，严格保住通道间差 = 色偏不变）；改分量 = 只动色偏，标量不变。
@@ -794,38 +796,13 @@ public partial class MainViewModel : ViewModelBase
 
     private bool _syncingEndpointView;
 
-    /// <summary>密度零点：两端同步升降。实测反差变化仅 ±0.1%，是纯粹的整体明暗。</summary>
-    [ObservableProperty] private double _densityZero;
     /// <summary>暗端位置（三个暗端密度的均值）。</summary>
     [ObservableProperty] private double _dMinLevel;
     /// <summary>亮端位置（三个亮端密度的均值）。与 D_min 的距离即反差。</summary>
     [ObservableProperty] private double _dMaxLevel = 2.0;
 
-    partial void OnDensityZeroChanged(double value) => PushDensityZero();
     partial void OnDMinLevelChanged(double value) => PushLevel(shadow: true);
     partial void OnDMaxLevelChanged(double value) => PushLevel(shadow: false);
-
-    /// <summary>上一次推送后的密度零点，用来把滑块的绝对值换算成本次的增量。</summary>
-    private double _densityZeroApplied;
-
-    /// <summary>密度零点 → 两端同步平移。</summary>
-    private void PushDensityZero()
-    {
-        if (_syncingEndpointView) return;
-        double delta = DensityZero - _densityZeroApplied;
-        if (Math.Abs(delta) < 1e-12) return;
-        _syncingEndpointView = true;
-        try
-        {
-            DMinR += delta; DMinG += delta; DMinB += delta;
-            DMaxR += delta; DMaxG += delta; DMaxB += delta;
-            _densityZeroApplied = DensityZero;
-            DMinLevel = Mean(DMinPerChannel);
-            DMaxLevel = Mean(DMaxPerChannel);
-        }
-        finally { _syncingEndpointView = false; }
-        ScheduleRender();
-    }
 
     /// <summary>某一端的标量 → 该端三个分量同步平移，保住通道间差。</summary>
     private void PushLevel(bool shadow)
@@ -858,10 +835,6 @@ public partial class MainViewModel : ViewModelBase
         {
             DMinLevel = Mean(DMinPerChannel);
             DMaxLevel = Mean(DMaxPerChannel);
-            // 密度零点是相对量（「在实测基础上升降了多少」），采样重置它到 0：新的实测值
-            // 本身就是新的基准，再显示一个历史增量只会误导。
-            DensityZero = 0.0;
-            _densityZeroApplied = 0.0;
         }
         finally { _syncingEndpointView = false; }
     }
@@ -2196,31 +2169,6 @@ public partial class MainViewModel : ViewModelBase
     /// explicitly-pressed button rather than something that re-runs on its own.
     /// </summary>
     public Task AutoInvertRollCommandAsync() => AutoInvertRollAsync();
-
-    /// <summary>
-    /// 片基归零：框一块应当是纯片基的区域，把它的残余密度从两端一起减掉。
-    ///
-    /// t_base 消掉的是片基的**颜色**，不保证它的**绝对亮度**恰好落在密度 0——灯箱亮度波动
-    /// 或镜头边缘衰减会让片基发灰。这里测出残余量 D_resid，两端同步减去它。
-    ///
-    /// 这曾经是 scan_ev 一个独立参数，加在密度地板之后，与两端移动并不严格等价（实测差
-    /// 10.7%）。现在它就是「两端同向平移」本身，不再是第七个数。
-    /// </summary>
-    public void SampleScanEv((double X, double Y, double W, double H) rect)
-    {
-        double[]? t = MeanOfNegative(rect);
-        if (t is null) return;
-        // 框中区域的绝对密度（对 T=1），与两端同基准。
-        double[] patch = TBaseToDensity(t);
-        // 它应当正好落在黑端上——两者之差就是要平移的量。取三通道均值，因为这是一个整体
-        // 升降控件；通道间的差属于色偏，由展开的分量负责，不该被这里改动。
-        double shift = 0.0;
-        for (int c = 0; c < 3; c++) shift += patch[c] - DMinPerChannel[c];
-        shift /= 3.0;
-        DMinR += shift; DMinG += shift; DMinB += shift;
-        DMaxR += shift; DMaxG += shift; DMaxB += shift;
-        StatusText = Loc.F($"片基归零 → 两端各移 {shift:+0.000;-0.000}");
-    }
 
     /// <summary>
     /// A normalised (x,y,w,h) selection turned into half-open pixel bounds on <paramref name="img"/>.
