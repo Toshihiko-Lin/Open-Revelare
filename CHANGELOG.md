@@ -45,6 +45,8 @@
 - **macOS 上 ⌘ 快捷键全部失效**，统一为一处定义，macOS 显示 ⌘、其余平台显示 Ctrl。
 - **macOS 文件选择框选不进大写扩展名的 RAW**（.CR2、.NEF、.3FR 等）。
 - **macOS 上导入大 RAW 容易卡死**，补上可用内存探测的 macOS 实现。
+- **整卷自动后再点「自动（单张）」或「自动黑点」，结果被覆盖到其他帧**。片基估算改为
+  单帧路径时只写当前帧，其余帧保持不变。
 
 ---
 
@@ -95,6 +97,9 @@ bar and proper memory management.
   Ctrl elsewhere.
 - **macOS: the file picker rejected uppercase RAW extensions** (.CR2, .NEF, .3FR, etc.).
 - **macOS: importing large RAWs could freeze the app** — macOS memory detection added.
+- **After "Auto (whole roll)", clicking "Auto (this frame)" or "Auto black point" overwrote
+  other frames' results.** The film-base estimator no longer broadcasts when called from a
+  per-frame path; only the current frame is updated.
 
 ---
 
