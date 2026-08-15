@@ -79,7 +79,7 @@
                         <Separator />
                         <MenuItem Header="{i18n:T '复制（按当前面板）'}" InputGesture="{i18n:Accel 'C'}"
                                   Click="OnCopyActiveClick" IsEnabled="{Binding HasImage}"
-                                  ToolTip.Tip="{i18n:T '整卷校准面板 → 复制标定；帧编辑面板 → 复制场景'}">
+                                  ToolTip.Tip="{i18n:T '整卷校准面板 → 复制 Cineon 标定；帧编辑面板 → 复制 Display 参数'}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoCopy}" />
                             </MenuItem.Icon>
@@ -92,36 +92,36 @@
                         </MenuItem>
                         <Separator />
                         <MenuItem Header="{i18n:T '标定（Stage 1）'}" IsEnabled="{Binding HasImage}">
-                            <MenuItem Header="{i18n:T '复制标定'}" Click="OnCopyCalClick">
+                            <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
                                       IsEnabled="{Binding HasCalClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '应用标定到勾选帧'}" Click="OnPasteCalClick"
+                            <MenuItem Header="{i18n:T '应用 Cineon 标定到勾选帧'}" Click="OnPasteCalClick"
                                       IsEnabled="{Binding HasCalClipboard}" />
-                            <MenuItem Header="{i18n:T '应用标定到整卷'}" Click="OnApplyCalToRollClick" />
+                            <MenuItem Header="{i18n:T '应用 Cineon 标定到整卷'}" Click="OnApplyCalToRollClick" />
                         </MenuItem>
                         <MenuItem Header="{i18n:T '场景（Stage 2）'}" IsEnabled="{Binding HasImage}">
-                            <MenuItem Header="{i18n:T '复制场景'}" Click="OnCopySceneClick">
+                            <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴场景到本帧'}" Click="OnPasteSceneToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
                                       IsEnabled="{Binding HasSceneClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '应用场景到勾选帧'}" Click="OnPasteSceneClick"
+                            <MenuItem Header="{i18n:T '应用 Display 参数到勾选帧'}" Click="OnPasteSceneClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
-                            <MenuItem Header="{i18n:T '应用场景到整卷'}" Click="OnApplySceneToRollClick" />
+                            <MenuItem Header="{i18n:T '应用 Display 参数到整卷'}" Click="OnApplySceneToRollClick" />
                         </MenuItem>
                         <Separator />
                         <MenuItem Header="{i18n:T '选择同步项…'}" Click="OnSyncOptionsClick" IsEnabled="{Binding HasImage}" />
@@ -278,27 +278,27 @@
                                 </MenuItem.Icon>
                             </MenuItem>
                             <Separator />
-                            <MenuItem Header="{i18n:T '复制标定'}" Click="OnCopyCalClick">
+                            <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
                                       IsEnabled="{Binding HasCalClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '应用标定到勾选帧'}" Click="OnPasteCalClick"
+                            <MenuItem Header="{i18n:T '应用 Cineon 标定到勾选帧'}" Click="OnPasteCalClick"
                                       IsEnabled="{Binding HasCalClipboard}" />
-                            <MenuItem Header="{i18n:T '应用标定到整卷'}" Click="OnApplyCalToRollClick" />
+                            <MenuItem Header="{i18n:T '应用 Cineon 标定到整卷'}" Click="OnApplyCalToRollClick" />
                             <Separator />
-                            <MenuItem Header="{i18n:T '复制场景'}" Click="OnCopySceneClick" />
-                            <MenuItem Header="{i18n:T '粘贴场景到本帧'}" Click="OnPasteSceneToCurrentClick"
+                            <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick" />
+                            <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
-                            <MenuItem Header="{i18n:T '应用场景到勾选帧'}" Click="OnPasteSceneClick"
+                            <MenuItem Header="{i18n:T '应用 Display 参数到勾选帧'}" Click="OnPasteSceneClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
-                            <MenuItem Header="{i18n:T '应用场景到整卷'}" Click="OnApplySceneToRollClick" />
+                            <MenuItem Header="{i18n:T '应用 Display 参数到整卷'}" Click="OnApplySceneToRollClick" />
                             <Separator />
                             <MenuItem Header="{i18n:T '按文件名排序'}" Click="OnSortFramesClick"
                                       ToolTip.Tip="{i18n:T '把整卷恢复成文件名顺序（撤销手动排序）'}">
@@ -394,19 +394,19 @@
                             <!-- Copy/paste of the frame's parameters leads the menu: it is the
                                  one thing here you reach for mid-edit. Ctrl+C / Ctrl+V do
                                  whichever of the two the open panel is showing. -->
-                            <MenuItem Header="{i18n:T '复制标定'}" Click="OnCopyCalClick">
+                            <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
                                       IsEnabled="{Binding HasCalClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '复制场景'}" Click="OnCopySceneClick" />
-                            <MenuItem Header="{i18n:T '粘贴场景到本帧'}" Click="OnPasteSceneToCurrentClick"
+                            <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick" />
+                            <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
                             <!-- Which field groups a copy actually carries is decided here, so it
                                  belongs beside the copy commands rather than only in 编辑. -->
@@ -944,7 +944,7 @@
                                         ToolTip.Tip="{i18n:T '把当前帧的标定（按同步项）写入本卷所有其他帧。复制/粘贴到勾选帧见 编辑 菜单或胶片条右键。'}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <ctl:Icon Data="{StaticResource IcoCheck}" />
-                                        <TextBlock Text="{i18n:T '应用标定到整卷'}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{i18n:T '应用 Cineon 标定到整卷'}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
@@ -1006,7 +1006,7 @@
                                         ToolTip.Tip="{i18n:T '把当前帧的场景调整（白平衡/曝光/影调/曲线）写入本卷所有其他帧。复制/粘贴到勾选帧见 编辑 菜单或胶片条右键。'}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <ctl:Icon Data="{StaticResource IcoCheck}" />
-                                        <TextBlock Text="{i18n:T '应用场景到整卷'}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{i18n:T '应用 Display 参数到整卷'}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>

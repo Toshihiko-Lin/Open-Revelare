@@ -122,10 +122,10 @@ public partial class MainWindow
         {
             Items =
             {
-                Item(Loc.T("复制标定"), OnCopyCalClick),
-                Bind(Item(Loc.T("粘贴标定到本帧"), OnPasteCalToCurrentClick), nameof(Vm.HasCalClipboard)),
-                Bind(Item(Loc.T("应用标定到勾选帧"), OnPasteCalClick), nameof(Vm.HasCalClipboard)),
-                Item(Loc.T("应用标定到整卷"), OnApplyCalToRollClick),
+                Item(Loc.T("复制 Cineon 标定"), OnCopyCalClick),
+                Bind(Item(Loc.T("粘贴 Cineon 标定到本帧"), OnPasteCalToCurrentClick), nameof(Vm.HasCalClipboard)),
+                Bind(Item(Loc.T("应用 Cineon 标定到勾选帧"), OnPasteCalClick), nameof(Vm.HasCalClipboard)),
+                Item(Loc.T("应用 Cineon 标定到整卷"), OnApplyCalToRollClick),
             },
         };
 
@@ -133,10 +133,10 @@ public partial class MainWindow
         {
             Items =
             {
-                Item(Loc.T("复制场景"), OnCopySceneClick),
-                Bind(Item(Loc.T("粘贴场景到本帧"), OnPasteSceneToCurrentClick), nameof(Vm.HasSceneClipboard)),
-                Bind(Item(Loc.T("应用场景到勾选帧"), OnPasteSceneClick), nameof(Vm.HasSceneClipboard)),
-                Item(Loc.T("应用场景到整卷"), OnApplySceneToRollClick),
+                Item(Loc.T("复制 Display 参数"), OnCopySceneClick),
+                Bind(Item(Loc.T("粘贴 Display 参数到本帧"), OnPasteSceneToCurrentClick), nameof(Vm.HasSceneClipboard)),
+                Bind(Item(Loc.T("应用 Display 参数到勾选帧"), OnPasteSceneClick), nameof(Vm.HasSceneClipboard)),
+                Item(Loc.T("应用 Display 参数到整卷"), OnApplySceneToRollClick),
             },
         };
 

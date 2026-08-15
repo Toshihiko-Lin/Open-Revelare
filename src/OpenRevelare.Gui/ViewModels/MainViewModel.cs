@@ -3921,8 +3921,8 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Copy Stage-2 scene adjustments (per SyncOptions) from the current frame to every other frame.</summary>
     public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, Loc.T("场景"));
 
-    public void CopyCalibration() { _calClipboard = BuildParams(); HasCalClipboard = true; StatusText = Loc.T("已复制标定"); }
-    public void CopyScene() { _sceneClipboard = BuildParams(); HasSceneClipboard = true; StatusText = Loc.T("已复制场景"); }
+    public void CopyCalibration() { _calClipboard = BuildParams(); HasCalClipboard = true; StatusText = Loc.T("已复制 Cineon 标定"); }
+    public void CopyScene() { _sceneClipboard = BuildParams(); HasSceneClipboard = true; StatusText = Loc.T("已复制 Display 参数"); }
 
     /// <summary>Paste the copied calibration onto the ticked frames.</summary>
     public void PasteCalibrationToSelected() => Paste(_calClipboard, cal: true, scene: false, Loc.T("标定"));
