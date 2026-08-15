@@ -2,10 +2,21 @@
 
 ## v1.5.1（2026-08-15）
 
+**新增**
+
+- **过曝/欠曝指示器**。直方图下方的按钮或快捷键 J 开启，预览上以红色叠加标记过曝区域
+  （亮度 ≥ 98%）、蓝色标记欠曝区域（亮度 ≤ 2%）。纯诊断功能，不影响导出。
+
 **修复**
 
 - **整卷自动后再点「自动（单张）」或「自动黑点」，结果被覆盖到其他帧**。片基估算改为
   单帧路径时只写当前帧，其余帧保持不变。
+
+**Added**
+
+- **Over-exposure / under-exposure indicator.** Toggle via the button below the histogram or
+  the J key. Over-exposed areas (luminance ≥ 98%) are overlaid in red; under-exposed areas
+  (≤ 2%) in blue. View-only diagnostic — does not affect exports.
 
 **Fixed**
 

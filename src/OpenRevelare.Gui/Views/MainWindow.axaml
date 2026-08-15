@@ -510,6 +510,9 @@
                             <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
                                    IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"
                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                            <Image Source="{Binding ClippingOverlay}" Stretch="Uniform"
+                                   IsVisible="{Binding ShowClipping}" IsHitTestVisible="False"
+                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                             <Canvas Name="Overlay" Background="Transparent"
                                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                     PointerPressed="OnOverlayPressed"
@@ -684,9 +687,17 @@
 
             <!-- Col 4 — histogram + FilmBase/SceneBase/备注 tabs -->
             <Grid Grid.Column="4" RowDefinitions="Auto,*" Background="{DynamicResource PanelBrush}">
-                <Border Grid.Row="0" Padding="10,8,10,8" Background="{DynamicResource Panel2Brush}"
+                <Border Grid.Row="0" Padding="10,8,10,4" Background="{DynamicResource Panel2Brush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
-                    <ctl:HistogramView Data="{Binding Histogram}" Height="64" HorizontalAlignment="Stretch" />
+                    <StackPanel Spacing="4">
+                        <ctl:HistogramView Data="{Binding Histogram}" Height="64" HorizontalAlignment="Stretch" />
+                        <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
+                                      IsChecked="{Binding ShowClipping, Mode=TwoWay}"
+                                      IsEnabled="{Binding HasImage}"
+                                      ToolTip.Tip="{i18n:T '在预览上叠加红色（过曝 ≥98%）和蓝色（欠曝 ≤2%）指示（J）'}">
+                            <TextBlock Text="{i18n:T '过曝 / 欠曝指示'}" FontSize="11" VerticalAlignment="Center" />
+                        </ToggleButton>
+                    </StackPanel>
                 </Border>
 
                 <!-- Which of these two is open decides what Ctrl+C / Ctrl+V act on: 整卷校准 →

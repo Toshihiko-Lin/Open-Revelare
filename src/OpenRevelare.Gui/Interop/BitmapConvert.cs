@@ -86,6 +86,44 @@ public static class BitmapConvert
         return bmp;
     }
 
+    /// <summary>Two boolean masks → dual-colour Bgra8888 overlay (shadow = blue, highlight = red, else transparent).</summary>
+    public static WriteableBitmap ToClippingOverlay(bool[] shadows, bool[] highlights, int w, int h)
+    {
+        const byte sR = 13, sG = 87, sB = 255, sA = 140;   // underexposed: blue
+        const byte hR = 255, hG = 31, hB = 15, hA = 140;   // overexposed:  red
+
+        var bmp = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96),
+                                      PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+        using ILockedFramebuffer fb = bmp.Lock();
+        unsafe
+        {
+            byte* basePtr = (byte*)fb.Address;
+            int stride = fb.RowBytes;
+            for (int y = 0; y < h; y++)
+            {
+                byte* row = basePtr + y * stride;
+                int mi = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    int px = x * 4;
+                    if (shadows[mi + x])
+                    {
+                        row[px + 0] = sB; row[px + 1] = sG; row[px + 2] = sR; row[px + 3] = sA;
+                    }
+                    else if (highlights[mi + x])
+                    {
+                        row[px + 0] = hB; row[px + 1] = hG; row[px + 2] = hR; row[px + 3] = hA;
+                    }
+                    else
+                    {
+                        row[px + 0] = 0; row[px + 1] = 0; row[px + 2] = 0; row[px + 3] = 0;
+                    }
+                }
+            }
+        }
+        return bmp;
+    }
+
     private static byte To8(float v)
     {
         float s = v * 255.0f + 0.5f;

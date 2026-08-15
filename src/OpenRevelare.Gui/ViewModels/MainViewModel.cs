@@ -940,6 +940,28 @@ public partial class MainViewModel : ViewModelBase
     partial void OnShadowsChanged(double value) => ScheduleRender();
     partial void OnSaturationChanged(double value) => ScheduleRender();
 
+    // ── 过曝/欠曝指示（纯视图诊断，不存工程） ──────────────────────────────────
+    [ObservableProperty] private bool _showClipping;
+    [ObservableProperty] private Bitmap? _clippingOverlay;
+
+    partial void OnShowClippingChanged(bool value)
+    {
+        if (!value) ClippingOverlay = null;
+        else ScheduleRender();
+    }
+
+    partial void OnClippingOverlayChanging(Bitmap? oldValue, Bitmap? newValue)
+    {
+        if (!ReferenceEquals(oldValue, newValue)) Retire(oldValue);
+    }
+
+    private WriteableBitmap? BuildClippingOverlay(ImageBuffer outImg)
+    {
+        ClippingDetect.Detect(outImg.Data, outImg.PixelCount,
+                              0.02f, 0.98f, out bool[] shadows, out bool[] highlights);
+        return BitmapConvert.ToClippingOverlay(shadows, highlights, outImg.Width, outImg.Height);
+    }
+
     // ══ Geometry (Core applies: orientation → straighten → crop) ════════════════
     [ObservableProperty] private double _rotation;                 // 拉直角度（CW）
     private int _quarterTurns;
@@ -4953,6 +4975,7 @@ public partial class MainViewModel : ViewModelBase
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
             Histogram = HistogramData.FromBuffer(outImg.Data);
+            ClippingOverlay = ShowClipping ? BuildClippingOverlay(outImg) : null;
             PreviewImage = BitmapConvert.ToBitmap(outImg);
         }
         catch (Exception ex) { ReportRenderFailure(ex); }
@@ -4966,12 +4989,15 @@ public partial class MainViewModel : ViewModelBase
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
         RollFrame? frame = CurrentFrame;
 
-        (Bitmap bmp, HistogramData hist, Bitmap thumb) = await Task.Run(() =>
+        bool wantClipping = ShowClipping;
+
+        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip) = await Task.Run(() =>
         {
             ImageBuffer outImg = Pipeline.ProcessFrame(src, p);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
             HistogramData h = HistogramData.FromBuffer(outImg.Data);
+            WriteableBitmap? c = wantClipping ? BuildClippingOverlay(outImg) : null;
             // The film strip gets a SCALED COPY of this same finished positive — it does not run
             // its own pipeline pass. Until now the current frame's thumbnail was only rebuilt when
             // you LEFT the frame, so the strip showed a stale version of whatever you were
@@ -4981,14 +5007,15 @@ public partial class MainViewModel : ViewModelBase
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
             var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge));
-            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t);
+            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c);
         }, ct);
 
-        if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); return; }
+        if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }
         void Apply()
         {
             PreviewImage = bmp;
             Histogram = hist;
+            ClippingOverlay = clip;
             if (frame is not null) SetThumbnail(frame, thumb); else thumb.Dispose();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();

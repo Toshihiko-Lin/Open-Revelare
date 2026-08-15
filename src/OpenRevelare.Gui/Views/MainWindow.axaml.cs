@@ -899,6 +899,7 @@ public partial class MainWindow : Window
         else if (bare && !typing && e.Key == Key.F && img) { ResetZoom(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.K && img) { ToggleCompare(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.N && img) { ToggleNegative(); e.Handled = true; }
+        else if (bare && !typing && e.Key == Key.J && img) { if (Vm is { } v) v.ShowClipping = !v.ShowClipping; e.Handled = true; }
         // Not while typing: Ctrl+C in a text field still has to copy the text.
         else if (ctrl && !typing && !shift && e.Key == Key.C && img && Vm?.IsLibraryMode == false)
         { OnCopyActiveClick(this, e); e.Handled = true; }
