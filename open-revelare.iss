@@ -10,7 +10,7 @@
 ; 编译：ISCC.exe open-revelare.iss（先跑 README「从源码构建」里的 dotnet publish）
 
 #define MyAppName "OpenRevelare"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.1"
 #define MyAppPublisher "Toshihiko-Lin"
 #define MyAppURL "https://github.com/Toshihiko-Lin/Open-Revelare"
 #define MyAppExeName "OpenRevelare.exe"
