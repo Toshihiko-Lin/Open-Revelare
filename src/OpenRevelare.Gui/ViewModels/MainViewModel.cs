@@ -1679,7 +1679,8 @@ public partial class MainViewModel : ViewModelBase
     /// the roll estimator when no mode clears the density floor.
     /// </param>
     /// <returns>True if a base was estimated; false if the estimator rejected the frame.</returns>
-    private bool AutoFilmBaseFromRoll(double? sprocketThreshold, bool useMode = false)
+    private bool AutoFilmBaseFromRoll(double? sprocketThreshold, bool useMode = false,
+                                      bool broadcastToRoll = true)
     {
         if (_previewLinear is null) return false;
         bool ok = false;
@@ -1705,8 +1706,14 @@ public partial class MainViewModel : ViewModelBase
                                                  valueImages: new[] { values });
             // 片基的绝对密度进黑端；TBase 保持中性 1,1,1（参考点是完全透光）。
             DMinPerChannel = TBaseToDensity(tb);
-            double[] dmin = DMinPerChannel;
-            foreach (RollFrame f in Frames) f.Params.DMinPerChannel = (double[])dmin.Clone();
+            // Only broadcast to the whole roll when invoked from the roll-wide chain. Per-frame
+            // buttons (自动黑点, 自动单张) pass broadcastToRoll: false so the other frames keep
+            // whatever they already hold — overwriting their d_min is the bug those callers fix.
+            if (broadcastToRoll)
+            {
+                double[] dmin = DMinPerChannel;
+                foreach (RollFrame f in Frames) f.Params.DMinPerChannel = (double[])dmin.Clone();
+            }
             _filmBaseSampled = true;
             ok = true;
 
@@ -1728,9 +1735,11 @@ public partial class MainViewModel : ViewModelBase
             }
         }
         catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
-        // t_base just changed for every frame, so every existing thumbnail is stale. They have to
-        // be dropped first: DecodeThumbnailsAsync skips frames that already have one.
-        if (ok) foreach (RollFrame f in Frames) SetThumbnail(f, null);
+        // When broadcasting, every frame just took new d_min so all thumbnails are stale — drop
+        // them before restarting. Otherwise DecodeThumbnailsAsync skips frames that still show
+        // stale thumbnails. For per-frame calls only the current frame's thumbnail needs refresh;
+        // the caller handles that.
+        if (ok && broadcastToRoll) foreach (RollFrame f in Frames) SetThumbnail(f, null);
         RestartThumbnails();
         return ok;
     }
@@ -2252,20 +2261,10 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_previewLinear is null) return;
 
-        // Snapshot every OTHER frame's t_base before measuring.
-        //
-        // AutoFilmBaseFromRoll is the roll-wide estimator and writes its result to every frame —
-        // correct when the whole chain is roll-wide, wrong here. Restoring only the current
-        // frame's params afterwards does NOT undo that: the others keep the broadcast base, so
-        // pressing 单张 silently re-based the entire roll. The snapshot is what makes this button
-        // mean what its name says.
-        var restore = new List<(RollFrame Frame, double[] TBase)>();
-        foreach (RollFrame f in Frames)
-            if (!ReferenceEquals(f, CurrentFrame))
-                restore.Add((f, (double[])f.Params.TBase.Clone()));
-
+        // broadcastToRoll: false — this button is the single-frame escape hatch; the other frames
+        // must keep whatever the roll-wide solve (or their own per-frame edits) already gave them.
         double? cut = AutoBoardCut();
-        if (!AutoFilmBaseFromRoll(cut, useMode: true)) return;
+        if (!AutoFilmBaseFromRoll(cut, useMode: true, broadcastToRoll: false)) return;
 
         bool highlightMeasured;
         _suppressRender = true;
@@ -2287,16 +2286,11 @@ public partial class MainViewModel : ViewModelBase
         }
         finally { _suppressRender = false; }
 
-        // Undo AutoFilmBaseFromRoll's broadcast, then persist: the restore is itself a direct
-        // mutation of other frames' params, so without marking the roll dirty the saved project
-        // could keep the broadcast this method just reverted.
-        foreach (var (f, tb) in restore) f.Params.TBase = tb;
         CommitLiveParams(CurrentFrame);
         MarkRollDirty();
 
         ScheduleRender();
-        // Only this frame's thumbnail changed; the rest were restored, so re-rendering the whole
-        // strip would be wasted work (and would flicker the roll for no reason).
+        // Only this frame's thumbnail changed — the other frames were untouched.
         if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
         StatusText = highlightMeasured
             ? Loc.F($"单张去色罩完成 · 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxLevel:F3}")
@@ -2368,7 +2362,10 @@ public partial class MainViewModel : ViewModelBase
     public void AutoFilmBase()
     {
         if (_previewLinear is null) return;
-        if (!AutoFilmBaseFromRoll(AutoBoardCut(), useMode: true)) return;
+        if (!AutoFilmBaseFromRoll(AutoBoardCut(), useMode: true, broadcastToRoll: false)) return;
+        CommitLiveParams(CurrentFrame);
+        MarkRollDirty();
+        if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
         ScheduleRender();
     }
 
