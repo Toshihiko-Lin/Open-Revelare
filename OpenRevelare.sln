@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.DeepWb.Onnx", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Gui", "src\OpenRevelare.Gui\OpenRevelare.Gui.csproj", "{EC17BAE3-5AB7-45E7-9311-026DF1479E68}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Tests", "src\OpenRevelare.Tests\OpenRevelare.Tests.csproj", "{72B5A333-7EFD-476B-90B9-7998BE0B99C4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -35,6 +37,10 @@ Global
 		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EC17BAE3-5AB7-45E7-9311-026DF1479E68}.Release|Any CPU.Build.0 = Release|Any CPU
+		{72B5A333-7EFD-476B-90B9-7998BE0B99C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72B5A333-7EFD-476B-90B9-7998BE0B99C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72B5A333-7EFD-476B-90B9-7998BE0B99C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72B5A333-7EFD-476B-90B9-7998BE0B99C4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -44,5 +50,6 @@ Global
 		{208DA85C-D01A-41E0-BC8A-ADD1D61B0BFE} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 		{C6D5DFFF-77B9-47B9-89D1-863D1CDAD800} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 		{EC17BAE3-5AB7-45E7-9311-026DF1479E68} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+		{72B5A333-7EFD-476B-90B9-7998BE0B99C4} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 	EndGlobalSection
 EndGlobal

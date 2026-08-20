@@ -22,10 +22,6 @@ namespace OpenRevelare.Core;
 /// WHY IT LIVES HERE RATHER THAN IN THE INVERSION. The inversion has no business knowing that a
 /// LUT exists downstream; it states the two endpoints and stops. This is the piece that says what
 /// those endpoints mean to a consumer that speaks code values.
-///
-/// WHY IT LIVES HERE RATHER THAN IN THE INVERSION. The inversion has no business knowing that a
-/// LUT exists downstream; it states the two endpoints and stops. This is the piece that says what
-/// those endpoints mean to a consumer that speaks code values.
 /// </summary>
 public static class LogEncoding
 {
