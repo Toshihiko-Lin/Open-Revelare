@@ -134,10 +134,11 @@ public static class Stage2
         float hiGamma = (float)Math.Pow(2.0, hi * HsGammaStrength);
         float shAmt = Math.Abs(sh), hiAmt = Math.Abs(hi);
 
-        float[]? lutM = BuildLut(cal.CurvePointsM);
-        float[]? lutR = BuildLut(cal.CurvePointsR);
-        float[]? lutG = BuildLut(cal.CurvePointsG);
-        float[]? lutB = BuildLut(cal.CurvePointsB);
+        bool curveEnds = cal.CurveHasEndpoints;
+        float[]? lutM = BuildLut(cal.CurvePointsM, curveEnds);
+        float[]? lutR = BuildLut(cal.CurvePointsR, curveEnds);
+        float[]? lutG = BuildLut(cal.CurvePointsG, curveEnds);
+        float[]? lutB = BuildLut(cal.CurvePointsB, curveEnds);
         bool doCurves = lutM != null || lutR != null || lutG != null || lutB != null;
         bool preserveHue = cal.CurvePreserveHue;
 
@@ -369,25 +370,56 @@ public static class Stage2
         return lut[lo] * (1.0f - frac) + lut[lo + 1] * frac;
     }
 
-    /// <summary>Build a 256-entry LUT from control points via monotone PCHIP; null = identity.</summary>
-    private static float[]? BuildLut(List<(double X, double Y)> points)
+    /// <summary>
+    /// Build a 256-entry LUT from control points via monotone PCHIP; null = identity.
+    ///
+    /// <paramref name="hasEndpoints"/> says the first and last point are the curve's OWN black and
+    /// white point (see <see cref="FrameParams.CurveHasEndpoints"/>). Those are not anchored to the
+    /// corners and the value is held beyond them, so a black point actually clips. Without it the
+    /// ends are interior points with the corners implied, and the curve ramps on to (0,0)/(1,1) as
+    /// it always did.
+    /// </summary>
+    private static float[]? BuildLut(List<(double X, double Y)> points, bool hasEndpoints)
     {
         if (points.Count == 0) return null;
         var pts = points.OrderBy(p => p.X).ToList();
         var xs = pts.Select(p => p.X).ToList();
         var ys = pts.Select(p => p.Y).ToList();
-        if (xs[0] > 0.0) { xs.Insert(0, 0.0); ys.Insert(0, 0.0); }
-        if (xs[^1] < 1.0) { xs.Add(1.0); ys.Add(1.0); }
+
+        // Anchor to the corners only for a curve WITHOUT its own endpoints — an S-curve whose
+        // shadows and highlights have always ramped on to (0,0) and (1,1).
+        //
+        // Anchoring a user-placed endpoint is wrong twice over. It defeats the black point (the
+        // shadows ramp up out of the origin instead of clipping), and the flat segment it creates
+        // forces the shape-preserving derivative to zero AT the endpoint, which bends the straight
+        // line the user drew between the two ends — measured up to 0.21 off.
+        //
+        // With the anchor skipped the user's own points are the only knots, and two knots are
+        // exactly a straight line. The flat shoulders come from the hold below, which is not a
+        // knot and therefore cannot bend anything — the reason they must not be added as points.
+        if (!hasEndpoints)
+        {
+            if (xs[0] > 0.0) { xs.Insert(0, 0.0); ys.Insert(0, 0.0); }
+            if (xs[^1] < 1.0) { xs.Add(1.0); ys.Add(1.0); }
+        }
         if (xs.Count < 2) return null;
         for (int i = 1; i < xs.Count; i++)
             if (xs[i] <= xs[i - 1]) return null; // need strictly increasing x
+
+        // Pchip.Eval EXTRAPOLATES outside its knots — it continues the end interval's cubic — so
+        // the hold has to be explicit here rather than left to Eval. CurveCanvas samples its
+        // preview through the same rule, so what is drawn is what renders.
+        double x0 = xs[0], x1 = xs[^1];
+        float y0 = (float)Math.Clamp(ys[0], 0.0, 1.0), y1 = (float)Math.Clamp(ys[^1], 0.0, 1.0);
 
         var pchip = new Pchip(xs.ToArray(), ys.ToArray());
         var lut = new float[CurveLutSize];
         for (int i = 0; i < CurveLutSize; i++)
         {
             double t = (double)i / (CurveLutSize - 1);
-            lut[i] = Math.Clamp((float)pchip.Eval(t), 0.0f, 1.0f);
+            lut[i] = t <= x0 ? y0
+                   : t >= x1 ? y1
+                   : Math.Clamp((float)pchip.Eval(t), 0.0f, 1.0f);
         }
         return lut;
     }

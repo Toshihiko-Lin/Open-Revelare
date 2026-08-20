@@ -1,5 +1,104 @@
 # OpenRevelare — 更新日志
 
+## v1.5.2（2026-08-19）
+
+**修复**
+
+- **macOS 上印样导出颜色反相，蓝色变成橙色**。印样合成后回读像素时写死了 BGRA 字节序，
+  而这个布局由平台决定：Windows / Linux 上是 BGRA，macOS 上是 RGBA，于是红蓝两通道被
+  互换。改为按位图实际格式取字节偏移。软件内的预览一直是正确的——预览直接交给系统渲染，
+  不经过这段回读，所以只有导出的文件受影响。
+
+- **分割帧裁切后翻转，裁切框漂移**。裁切框在界面与内部使用两套坐标：内部以整张扫描图
+  归一化，界面以「帧 + 余量」的框归一化。翻转时两边各自做镜像，但镜像只在自己的坐标系里
+  才是自逆的，于是两者偏离了余量框偏心距的两倍；胶条首帧和末帧的余量框被文件边缘裁掉一侧、
+  偏心最大，裁切框会直接跑出画面。翻转和旋转后改为从内部状态重新投影，不再各自变换。
+  普通帧行为完全不变。
+
+**改进**
+
+- **进入按比例裁切时保留当前构图**。以现有裁切框的最长边（按屏幕实际比例计算）作为新比例的
+  长边，另一边按比例生长，保持原中心；横竖方向跟随现有框——竖构图切到 3:2 会得到 2:3，
+  而不是翻成横的。此前每次切换预设都会丢弃已摆好的框，重新扔一个居中的大框。
+
+- **曲线端点可以拖动**。两个端点此前只在绘制时临时生成，界面上点不中，没法在曲线上设
+  黑白场——点角落只会新增一个游离点。现在是真实控制点（方形显示，区别于内部圆点），可沿
+  所在边滑动，也可离开边形成褪色黑；右键是复位端点而非删除。
+
+  端点与【黑场】【白场】滑块**相互独立**：滑块作用在 levels 环节（在曲线之前），端点是
+  曲线自己的黑白场，各调各的、互不干扰，也不会重复施加。
+
+  相应地，带端点的曲线不再向角点补点：端点以外保持端点取值，黑点才能真正截断暗部。补出来
+  的角点是一个**节点**，会把保形插值在端点处的导数压到 0，从而把两端点之间的直线顶弯——
+  实测最多偏离 0.21。跳过补点后，用户拖的两个点就是仅有的节点，两点即直线，平顶由端点外的
+  保持逻辑提供（保持不是节点，弯不了曲线）。所以**同时调整黑白两端仍是严格直线**。
+
+  「有没有自己的端点」记录为 `curve_has_endpoints` 存进工程，而不是从点的位置去猜——末点
+  落在 (0.8, 1.0) 究竟是拖过的白场、还是隐含角点的内部点，几何上无法区分，猜错要么弯掉直线、
+  要么静默改写所有已存 S 曲线。旧工程读入时该字段缺省为假，渲染逐点不变。
+
+  另修正：端点播种只做一次。此前每次按下鼠标都会重新判断「点列表有没有触到边」，于是刚把
+  白端拖到 0.8、再去拖黑端时，(1,1) 会被重新补回来——刚设好的白场被悄悄降级成普通内部点，
+  曲线随之弯掉。这正是「调完一端再调另一端就不是直线」的原因。
+
+**Fixed**
+
+- **On macOS the exported contact sheet had red and blue swapped — blue skies came out
+  orange.** Reading the composed sheet back out assumed a BGRA byte order, but that layout is
+  the platform's choice: Skia hands back BGRA on Windows and Linux and RGBA on macOS. The
+  channel offsets are now taken from the bitmap's actual format. The in-app preview was always
+  correct — it draws the render target directly and never goes through that readback — so only
+  the saved file was affected.
+
+- **Flipping a split frame after cropping made the crop frame drift.** The crop rect lives in
+  two coordinate spaces: the model normalises it over the whole scan, the view over the margin
+  box (the frame plus its slack). Both were mirrored independently, but a mirror is only
+  self-inverse within its own space, so the two diverged by twice the box's offset from the
+  file's centre. On a strip's first and last frame — where the box is clamped against the file
+  edge and is therefore most off-centre — the rect could land clean outside the picture. Turns
+  and flips now re-project the draft from the model instead of transforming the view's own copy.
+  Ordinary frames are unaffected.
+
+**Improved**
+
+- **Switching to an aspect-ratio preset keeps the framing you already set.** The new rectangle
+  takes the current one's longest on-screen edge, grows the other side to the ratio and stays
+  centred on what was there. Orientation follows the existing frame: a portrait crop switched to
+  3:2 becomes 2:3 rather than flipping to landscape. Previously every preset change discarded the
+  placement and dropped a fresh centred box.
+
+- **Curve endpoints are draggable.** The two ends used to be synthesised at draw time, so there was
+  nothing to click and no way to set a black or white point on the curve — clicking near a corner
+  just added a stray point. They are now real control points (drawn as squares to distinguish them
+  from the round interior points): they slide along their edge, and can lift off it for a matte
+  black. Right-click resets an endpoint instead of deleting it.
+
+  The endpoints and the Black / White sliders are **independent**: the sliders act in the levels
+  stage (which runs before the curve), the endpoints are the curve's own black and white point.
+  Neither drives the other, so nothing is applied twice.
+
+  Accordingly, a curve that has endpoints is no longer anchored to the corners: values beyond an
+  endpoint are held at it, so a black point actually clips the shadows. An anchor is a KNOT, and it
+  forces the shape-preserving derivative at the endpoint to zero, which bows the straight line
+  between the two ends — measured up to 0.21 off. With it skipped, the two points the user dragged
+  are the only knots, and two knots are exactly a straight line; the flat shoulders come from the
+  hold, which is not a knot and so cannot bend anything. **Adjusting both ends therefore still
+  gives a straight line.**
+
+  Whether a curve has its own endpoints is stored in the project as `curve_has_endpoints` rather
+  than inferred from the points: a last point at (0.8, 1.0) is indistinguishable by geometry from
+  an interior point with the corner implied, and guessing wrong either bends a straight line or
+  silently re-renders every S-curve ever saved. Projects written before this default the field to
+  false and render point-for-point as they did.
+
+  Also fixed: the endpoints are seeded only once. Every pointer press used to re-test whether the
+  point list reached the edges, so after dragging the white end to 0.8, reaching for the black end
+  re-appended (1,1) — quietly demoting the white point just set back to an ordinary interior point
+  and bowing the curve. That was the cause of "adjust one end, then the other, and it is no longer
+  straight".
+
+---
+
 ## v1.5.1（2026-08-15）
 
 **新增**

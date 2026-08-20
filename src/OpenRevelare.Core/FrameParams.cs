@@ -248,6 +248,22 @@ public sealed class FrameParams
     /// <summary>Master curve: true = hue-preserving luminance map; false = per-channel RGB.</summary>
     public bool CurvePreserveHue { get; set; } = true;
 
+    /// <summary>
+    /// The curves' first and last points are the user's own endpoints — do NOT anchor to (0,0)
+    /// and (1,1), and hold the endpoint value beyond them instead.
+    ///
+    /// Set by the curve editor, which materialises both ends the moment a curve is touched, so
+    /// its first and last point always mean "the curve's black / white point, wherever it sits".
+    ///
+    /// Curves written before endpoints were draggable have interior points only, with the corners
+    /// implied — they load with this FALSE and keep ramping into the corners exactly as they
+    /// always did. That is why this is a stored flag rather than something inferred from the
+    /// points: a dragged endpoint and an ordinary interior point are indistinguishable by
+    /// geometry, and guessing wrong either bends a straight line or silently re-renders every
+    /// S-curve ever saved.
+    /// </summary>
+    public bool CurveHasEndpoints { get; set; }
+
     // ── Geometry (export path: orientation → rotation → crop) ──────────────────
     /// <summary>Normalised crop rect (x,y,w,h) in [0,1]; null = no crop.</summary>
     public (double X, double Y, double W, double H)? CropRect { get; set; }
@@ -297,6 +313,7 @@ public sealed class FrameParams
         CurvePointsG = new List<(double, double)>(CurvePointsG),
         CurvePointsB = new List<(double, double)>(CurvePointsB),
         CurvePreserveHue = CurvePreserveHue,
+        CurveHasEndpoints = CurveHasEndpoints,
         CropRect = CropRect,
         Rotation = Rotation,
         QuarterTurns = QuarterTurns,

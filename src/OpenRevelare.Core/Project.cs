@@ -252,6 +252,7 @@ public static class Project
             ["curve_points_g"] = Pts(p.CurvePointsG),
             ["curve_points_b"] = Pts(p.CurvePointsB),
             ["curve_preserve_hue"] = p.CurvePreserveHue,
+            ["curve_has_endpoints"] = p.CurveHasEndpoints,
             // Geometry
             ["crop_rect"] = p.CropRect is { } c ? new JsonArray(c.X, c.Y, c.W, c.H) : null,
             ["split_rects"] = null,                          // C# build has no split
@@ -314,6 +315,9 @@ public static class Project
             CurvePointsG = DesPts(d["curve_points_g"]),
             CurvePointsB = DesPts(d["curve_points_b"]),
             CurvePreserveHue = Bool(d, "curve_preserve_hue", true),
+            // Absent in projects written before endpoints were draggable: those curves have
+            // interior points only and must keep ramping into the corners.
+            CurveHasEndpoints = Bool(d, "curve_has_endpoints", false),
             CropRect = DesRect(d["crop_rect"]),
             Rotation = Dbl(d, "rotation", 0.0),
             QuarterTurns = (int)Dbl(d, "quarter_turns", 0),

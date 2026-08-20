@@ -50,13 +50,80 @@ public sealed class CurveCanvas : Control
     {
         _points = pts;
         _dragIdx = _hoverIdx = null;
+        // A different channel (or frame) is a different curve: whether ITS ends are materialised
+        // is its own business, decided the next time this one is clicked.
+        _hasEndpoints = false;
         InvalidateVisual();
     }
 
+    /// <summary>
+    /// Give the curve real endpoint handles, so the two ends can be dragged like every other point.
+    ///
+    /// The ends used to be SYNTHESISED at draw time — <see cref="BuildCurveGeometry"/> prepends
+    /// (0,0) and appends (1,1) when the point list does not reach the edges — which drew the right
+    /// curve but left nothing for <see cref="Hit"/> to find there. Setting a black or white point
+    /// on the curve, the most ordinary thing there is to do with one, was simply impossible: a
+    /// click near a corner landed on empty canvas and ADDED a stray point instead.
+    ///
+    /// Materialising them costs nothing downstream: an explicit (0,0)/(1,1) is exactly what the
+    /// synthesiser would have inserted, and both this canvas and <c>Stage2.BuildLut</c> anchor
+    /// only when the list does NOT already reach the edge, so a curve with real endpoints and one
+    /// with implied ones evaluate identically.
+    ///
+    /// Idempotent, and only ever called on a list already bound to a channel — a curve the user
+    /// has moved off the corners keeps the points it has.
+    /// </summary>
+    private void EnsureEndpoints()
+    {
+        // Already has endpoints of its own — leave them exactly where the user put them.
+        //
+        // This guard is the whole method. Without it, every pointer press re-ran the "does the
+        // list reach the edge?" test against a curve whose end had been DRAGGED INWARD, decided it
+        // did not, and appended a fresh (1,1) — silently converting the white point the user had
+        // just set back into an ordinary interior point. Adjusting one end and then reaching for
+        // the other therefore always found the first one undone, and the curve bowed because the
+        // re-added corner is a knot. The endpoints must be seeded ONCE, on a curve that has none.
+        if (_hasEndpoints) return;
+
+        if (_points.Count == 0)
+        {
+            _points.Add(new Point(0, 0));
+            _points.Add(new Point(1, 1));
+        }
+        else
+        {
+            // A legacy curve (interior points only, corners implied): give it the corners it has
+            // always been drawn with, so they become grabbable without changing what it renders.
+            if (_points[0].X > 0.0) _points.Insert(0, new Point(0, 0));
+            if (_points[^1].X < 1.0) _points.Add(new Point(1, 1));
+        }
+        _hasEndpoints = true;
+    }
+
+    /// <summary>
+    /// Whether <see cref="_points"/> already carries the two endpoint handles.
+    ///
+    /// Tracked as state rather than re-derived from the geometry because the two are genuinely
+    /// indistinguishable: a last point at (0.8, 1.0) is a dragged white point, but it looks exactly
+    /// like an interior point of a curve whose corner is implied. Reset by
+    /// <see cref="SetPoints"/> — a different channel's list is a different curve — and set once the
+    /// ends have been materialised.
+    /// </summary>
+    private bool _hasEndpoints;
+
+    /// <summary>True when <paramref name="idx"/> is one of the two endpoint handles.</summary>
+    private bool IsEndpoint(int idx) => idx == 0 || idx == _points.Count - 1;
+
     public void Reset()
     {
+        // Back to a bare identity: no interior points and both ends at the corners. Left EMPTY
+        // rather than re-seeded with endpoints so the channel still serialises as "no curve" —
+        // an empty list is what the params treat as untouched, and a stored (0,0)/(1,1) pair
+        // would make every reset frame look edited. The endpoints reappear the moment the canvas
+        // is clicked, via EnsureEndpoints.
         _points.Clear();
         _dragIdx = _hoverIdx = null;
+        _hasEndpoints = false;   // emptied: the ends are seeded again on the next click
         PointsChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
@@ -98,11 +165,21 @@ public sealed class CurveCanvas : Control
     {
         Point pos = e.GetPosition(this);
         var props = e.GetCurrentPoint(this).Properties;
+        // Both buttons act on the endpoints too, so they have to exist before the hit test.
+        EnsureEndpoints();
         if (props.IsRightButtonPressed)
         {
+            // Endpoints are not deletable: a curve with no start or end has no domain, and the
+            // synthesiser would put them straight back on the next repaint anyway. Right-click
+            // RESETS them to the corners instead, which is the useful meaning of "remove" here
+            // and the only way back to a neutral curve once an end has been dragged.
             if (Hit(pos) is int di)
             {
-                _points.RemoveAt(di);
+                if (IsEndpoint(di))
+                {
+                    _points[di] = di == 0 ? new Point(0, 0) : new Point(1, 1);
+                }
+                else _points.RemoveAt(di);
                 _dragIdx = null;
                 PointsChanged?.Invoke(this, EventArgs.Empty);
                 InvalidateVisual();
@@ -119,8 +196,14 @@ public sealed class CurveCanvas : Control
         else if (Plot().Contains(pos))
         {
             var (ux, uy) = ToUnit(pos);
-            _points.Add(new Point(ux, uy));
-            _dragIdx = _points.Count - 1;
+            // Insert in x order rather than appending. The list used to be sorted only at draw
+            // time, which was enough while every point was interchangeable; now that index 0 and
+            // index ^1 MEAN the two endpoints, an out-of-order append would make a mid-curve click
+            // masquerade as an endpoint and drag the black point around.
+            int at = _points.FindIndex(p => p.X > ux);
+            if (at < 0) at = _points.Count;
+            _points.Insert(at, new Point(ux, uy));
+            _dragIdx = at;
             EditBegan?.Invoke(this, EventArgs.Empty);
             PointsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -135,7 +218,36 @@ public sealed class CurveCanvas : Control
         if (_dragIdx is int di)
         {
             var (ux, uy) = ToUnit(pos);
-            _points[di] = new Point(ux, uy);
+            if (IsEndpoint(di))
+            {
+                // An endpoint owns one axis and is pinned on the other, exactly as Lightroom's
+                // curve ends behave: the LEFT end may slide right along the floor (raising the
+                // black point — everything below it clips to the shadow value) and may lift off
+                // the floor (a matte/faded black), but it may never leave x=0 heading left nor
+                // cross the neighbour it must stay behind. The right end mirrors that.
+                //
+                // Clamping against the INNER neighbour rather than against 0/1 is what keeps the
+                // x sequence strictly increasing, which BuildLut requires and silently refuses a
+                // curve for when it is violated — the curve would just stop applying.
+                const double MinGap = 1e-3;
+                if (di == 0)
+                {
+                    double lim = _points.Count > 1 ? _points[1].X - MinGap : 1.0;
+                    _points[0] = new Point(Math.Clamp(ux, 0.0, Math.Max(0.0, lim)), uy);
+                }
+                else
+                {
+                    double lim = _points.Count > 1 ? _points[^2].X + MinGap : 0.0;
+                    _points[di] = new Point(Math.Clamp(ux, Math.Min(1.0, lim), 1.0), uy);
+                }
+            }
+            else
+            {
+                // Interior points keep their old freedom, but must not slide past an endpoint —
+                // now that the ends are real entries, overtaking one would reorder the list.
+                double lo = _points[di - 1].X + 1e-3, hi = _points[di + 1].X - 1e-3;
+                _points[di] = new Point(lo <= hi ? Math.Clamp(ux, lo, hi) : ux, uy);
+            }
             PointsChanged?.Invoke(this, EventArgs.Empty);
             InvalidateVisual();
         }
@@ -214,10 +326,28 @@ public sealed class CurveCanvas : Control
         var ringFill = CPlot;
         var chanBrush = new SolidColorBrush(CurveColor);
         var innerPen = new Pen(new SolidColorBrush(Color.FromRgb(20, 22, 24)), 1.5);
+        // The two ends are drawn as squares so they read as what they are — the black and white
+        // points, which behave differently from the round interior points (they are pinned to
+        // their edge and cannot be deleted).
         for (int i = 0; i < _points.Count; i++)
         {
             Point wp = ToWidget(_points[i].X, _points[i].Y);
             bool active = i == _dragIdx || i == _hoverIdx;
+            bool end = IsEndpoint(i) && _points.Count >= 2;
+
+            if (end)
+            {
+                double s = active ? 5.5 : 4.5;
+                var box = new Rect(wp.X - s, wp.Y - s, s * 2, s * 2);
+                if (active)
+                {
+                    ctx.DrawEllipse(new SolidColorBrush(CurveColor, 0.24), null, wp, 9, 9);
+                    ctx.DrawRectangle(chanBrush, innerPen, box, 1.5, 1.5);
+                }
+                else ctx.DrawRectangle(ringFill, new Pen(chanBrush, 2), box, 1.5, 1.5);
+                continue;
+            }
+
             if (active)
             {
                 ctx.DrawEllipse(new SolidColorBrush(CurveColor, 0.24), null, wp, 9, 9);
@@ -237,26 +367,35 @@ public sealed class CurveCanvas : Control
         var geo = new StreamGeometry();
         using var gc = geo.Open();
 
-        // Anchor + sanitise to strictly-increasing x (matches Stage2.BuildLut).
+        // Sanitise to strictly-increasing x, then hold outside the ends — the exact rule
+        // Stage2.BuildLut applies to a curve with endpoints, so the drawn curve is the one that
+        // renders. NO anchoring: the canvas materialises both ends (EnsureEndpoints) and the
+        // params it feeds carry CurveHasEndpoints, so the first and last point are the curve's own
+        // black and white point. Anchoring them would add a knot that bends the straight line
+        // between two dragged ends — see the note in BuildLut.
         var ordered = _points.OrderBy(p => p.X).ToList();
         var xs = new List<double>();
         var ys = new List<double>();
-        if (ordered.Count == 0 || ordered[0].X > 0.0) { xs.Add(0); ys.Add(0); }
         foreach (var p in ordered)
         {
             if (xs.Count > 0 && p.X <= xs[^1] + 1e-6) continue; // drop duplicate/backward x
             xs.Add(p.X); ys.Add(p.Y);
         }
-        if (xs[^1] < 1.0) { xs.Add(1); ys.Add(1); }
+        // An empty channel is the identity, drawn corner to corner by the fallback below.
+        if (xs.Count == 0) { xs.Add(0); ys.Add(0); }
 
         bool first = true;
         if (xs.Count >= 2)
         {
+            double x0 = xs[0], x1 = xs[^1];
+            double y0 = Math.Clamp(ys[0], 0.0, 1.0), y1 = Math.Clamp(ys[^1], 0.0, 1.0);
             var pchip = new Pchip(xs.ToArray(), ys.ToArray());
             for (int i = 0; i < CurveSamples; i++)
             {
                 double t = i / (CurveSamples - 1);
-                double v = Math.Clamp(pchip.Eval(t), 0.0, 1.0);
+                double v = t <= x0 ? y0
+                         : t >= x1 ? y1
+                         : Math.Clamp(pchip.Eval(t), 0.0, 1.0);
                 Point wp = ToWidget(t, v);
                 if (first) { gc.BeginFigure(wp, false); first = false; }
                 else gc.LineTo(wp);

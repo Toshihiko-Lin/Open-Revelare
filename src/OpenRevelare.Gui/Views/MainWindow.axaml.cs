@@ -351,6 +351,56 @@ public partial class MainWindow : Window
         RenderCropFrame();
     }
 
+    /// <summary>
+    /// Re-seed the draft at the locked ratio while KEEPING the area the user has already framed:
+    /// the new rectangle takes the current one's longest on-screen edge and grows the other side
+    /// to match the preset, staying centred on what was there.
+    ///
+    /// Switching to a ratio preset used to throw the existing frame away and drop a fresh centred
+    /// 90% box, so a carefully placed crop was lost the moment a format was picked — the user had
+    /// to re-place it every time they compared 3:2 against 4:3.
+    ///
+    /// Orientation FOLLOWS the existing frame rather than the preset's nominal one: a portrait
+    /// crop switched to 3:2 becomes 2:3, not landscape. <see cref="_cropAspect"/> is rewritten so
+    /// the subsequent handle drags stay locked to the orientation actually on screen — the same
+    /// bookkeeping <see cref="MaybeSwapCropOrientation"/> does mid-drag.
+    ///
+    /// The result is clamped back inside the frame: preserving the long edge can push the grown
+    /// side past an edge when the existing crop already sits against one.
+    /// </summary>
+    private void ReseedCropDraftFromCurrent()
+    {
+        if (_cropDraft is not { } c || NormAspect() is null
+            || Vm?.CropFrameSize is not var (fw, fh) || fw <= 0 || fh <= 0)
+        {
+            BeginCropDraft();
+            return;
+        }
+
+        // Work in SCREEN proportions — the stored rect is normalised over a frame that is not
+        // square, so "longest edge" is only meaningful once the frame's own aspect is folded in.
+        double sw = c.W * fw, sh = c.H * fh;
+        if (sw <= 0 || sh <= 0) { BeginCropDraft(); return; }
+
+        // Present the preset in the orientation the existing frame already has.
+        double a = _cropAspect!.Value;
+        bool wantPortrait = sh > sw;
+        if ((a < 1.0) != wantPortrait && Math.Abs(a - 1.0) > 1e-6) _cropAspect = a = 1.0 / a;
+
+        // Keep the longest side, derive the other from the ratio.
+        double nw, nh;
+        if (sw >= sh) { nw = sw; nh = sw / a; } else { nh = sh; nw = sh * a; }
+
+        // Back to normalised, centred on the old rect, then clamped into the frame.
+        double w = nw / fw, h = nh / fh;
+        double scale = Math.Min(1.0, Math.Min(w > 0 ? 1.0 / w : 1.0, h > 0 ? 1.0 / h : 1.0));
+        w *= scale; h *= scale;
+        double cxm = c.X + c.W / 2, cym = c.Y + c.H / 2;
+        _cropDraft = (Math.Clamp(cxm - w / 2, 0, Math.Max(0, 1 - w)),
+                      Math.Clamp(cym - h / 2, 0, Math.Max(0, 1 - h)), w, h);
+        RenderCropFrame();
+    }
+
     /// <summary>Which handle the cursor is over. Tolerance is in SCREEN pixels, so grabbing is
     /// equally easy at any zoom — hence the division by the zoom factor.</summary>
     private string? CropHitHandle(Point p)
@@ -1234,7 +1284,7 @@ public partial class MainWindow : Window
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)
     {
         Vm?.RotateCw();
-        if (_cropDraft is { } d) _cropDraft = MainViewModel.RotateCropCw(d);
+        ResyncCropDraft();
         InvertCropAspect();
         RenderCropFrame();
     }
@@ -1242,7 +1292,7 @@ public partial class MainWindow : Window
     private void OnRotateCcwClick(object? sender, RoutedEventArgs e)
     {
         Vm?.RotateCcw();
-        if (_cropDraft is { } d) _cropDraft = MainViewModel.RotateCropCcw(d);
+        ResyncCropDraft();
         InvertCropAspect();
         RenderCropFrame();
     }
@@ -1250,15 +1300,41 @@ public partial class MainWindow : Window
     private void OnFlipHClick(object? sender, RoutedEventArgs e)
     {
         Vm?.FlipHorizontal();
-        if (_cropDraft is { } d) _cropDraft = MainViewModel.FlipCropH(d);
+        ResyncCropDraft();
         RenderCropFrame();
     }
 
     private void OnFlipVClick(object? sender, RoutedEventArgs e)
     {
         Vm?.FlipVertical();
-        if (_cropDraft is { } d) _cropDraft = MainViewModel.FlipCropV(d);
+        ResyncCropDraft();
         RenderCropFrame();
+    }
+
+    /// <summary>
+    /// Re-read the draft from the model after an orientation change, instead of applying the same
+    /// turn/flip to the view's own copy.
+    ///
+    /// The two rects live in DIFFERENT spaces on a split frame — the model stores whole-file
+    /// coordinates, the draft is normalised against the margin box (see the coordinate-bridge note
+    /// on <see cref="MainViewModel.CurrentCrop"/>) — and a mirror is only self-inverse within the
+    /// space it is taken in. Applying <c>FlipCropH</c> to both mirrored the stored rect about the
+    /// whole scan and the draft about the box, so the frame on screen slid away from the picture
+    /// by twice the box's offset from the file's centre; on a strip's first or last frame, where
+    /// the margin box is clamped against the file edge and is therefore most off-centre, the drift
+    /// was large enough to throw the rect clean outside the box.
+    ///
+    /// <see cref="MainViewModel.CurrentCrop"/> already performs the conversion the view needs, and
+    /// the model has by this point applied the orientation to the stored rect — so re-projecting is
+    /// both correct in every space and the single source of truth. Ordinary frames are unaffected:
+    /// there the conversion is the identity and this reproduces the old result exactly.
+    ///
+    /// Only touches the draft when one is up; with the tool closed there is nothing to re-seed.
+    /// </summary>
+    private void ResyncCropDraft()
+    {
+        if (_cropDraft is null) return;
+        _cropDraft = Vm?.CurrentCrop ?? _cropDraft;
     }
 
     /// <summary>A quarter turn puts a 4:3 format on its side, so the lock becomes 3:4. Without
@@ -1301,9 +1377,13 @@ public partial class MainWindow : Window
             ToggleButton? btn = ToggleFor(SampleMode.Crop);
             SetTogglesExcept(btn);
             if (btn is not null) btn.IsChecked = true;
+            // Seeds _cropDraft from the applied crop when there is one, which is what
+            // ReseedCropDraftFromCurrent then re-shapes to the chosen ratio.
             EnterMode(SampleMode.Crop, Loc.T("裁切：拖动框内移动位置，拖角/拖边改变大小（选了预设则锁定比例）。回车应用，Esc 取消。"), useNegative: false);
         }
-        BeginCropDraft();   // re-seed at the new ratio
+        // Re-shape whatever frame is up to the new ratio, keeping its longest edge and its
+        // centre, instead of discarding the user's placement for a fresh centred box.
+        ReseedCropDraftFromCurrent();
     }
 
     // ── Rubber-band drag on the overlay ─────────────────────────────────────────

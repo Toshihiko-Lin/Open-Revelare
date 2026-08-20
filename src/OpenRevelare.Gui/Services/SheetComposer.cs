@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
@@ -155,29 +156,48 @@ public static class SheetComposer
         }
     }
 
-    /// <summary>Read a composed sheet back out as an sRGB [0,1] buffer for the encoders.
-    /// Call on the UI thread.</summary>
+    /// <summary>
+    /// Read a composed sheet back out as an sRGB [0,1] buffer for the encoders.
+    /// Call on the UI thread.
+    ///
+    /// The byte order is taken from the bitmap rather than assumed. A render target's layout is
+    /// the platform's choice, not Avalonia's: Skia hands back Bgra8888 on Windows and Linux but
+    /// Rgba8888 on macOS, and this used to unpack Bgra unconditionally. On macOS that swapped R
+    /// and B in the EXPORTED file while the on-screen preview — which never goes through this
+    /// method, it draws the RenderTargetBitmap directly — stayed correct, so a blue sky came out
+    /// orange in the saved sheet and nowhere else.
+    ///
+    /// Anything other than the two 32-bit RGB orders would be a channel layout this loop cannot
+    /// describe, so it is rejected rather than silently mis-unpacked.
+    /// </summary>
     public static ImageBuffer ToBuffer(RenderTargetBitmap sheet)
     {
         int w = sheet.PixelSize.Width, h = sheet.PixelSize.Height;
         int stride = w * 4;
-        byte[] bgra = new byte[stride * h];
+        byte[] px = new byte[stride * h];
         var buf = new ImageBuffer(w, h);
         float[] d = buf.Data;
 
+        PixelFormat fmt = sheet.Format ?? PixelFormat.Bgra8888;
+        if (fmt != PixelFormat.Bgra8888 && fmt != PixelFormat.Rgba8888)
+            throw new NotSupportedException($"contact sheet render target has unsupported pixel format {fmt}");
+        // Byte offsets of R and B within each 4-byte pixel; G and A sit in the same place either way.
+        int rOff = fmt == PixelFormat.Rgba8888 ? 0 : 2;
+        int bOff = fmt == PixelFormat.Rgba8888 ? 2 : 0;
+
         unsafe
         {
-            fixed (byte* p = bgra)
-                sheet.CopyPixels(new PixelRect(0, 0, w, h), (IntPtr)p, bgra.Length, stride);
+            fixed (byte* p = px)
+                sheet.CopyPixels(new PixelRect(0, 0, w, h), (IntPtr)p, px.Length, stride);
         }
 
-        for (int i = 0, o = 0; i < bgra.Length; i += 4, o += 3)
+        for (int i = 0, o = 0; i < px.Length; i += 4, o += 3)
         {
-            // Premultiplied BGRA, but the sheet is fully opaque so the straight channels
+            // Premultiplied, but the sheet is fully opaque so the straight channels
             // are already correct.
-            d[o] = bgra[i + 2] / 255f;
-            d[o + 1] = bgra[i + 1] / 255f;
-            d[o + 2] = bgra[i] / 255f;
+            d[o] = px[i + rOff] / 255f;
+            d[o + 1] = px[i + 1] / 255f;
+            d[o + 2] = px[i + bOff] / 255f;
         }
         return buf;
     }

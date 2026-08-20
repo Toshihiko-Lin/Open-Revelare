@@ -1315,11 +1315,23 @@ public partial class MainViewModel : ViewModelBase
     private List<(double X, double Y)> _curveM = new(), _curveR = new(), _curveG = new(), _curveB = new();
     private bool _curvePreserveHue = true;
 
+    /// <summary>
+    /// The live curves carry their own endpoints (see <see cref="FrameParams.CurveHasEndpoints"/>).
+    ///
+    /// True for anything the editor has touched — it materialises both ends on first click — and
+    /// false for a curve loaded from a project written before endpoints were draggable, which has
+    /// interior points only and must keep ramping into the corners.
+    /// </summary>
+    private bool _curveHasEndpoints;
+
     /// <summary>Push the four channel curves + hue-preserve flag from the editor and re-render.</summary>
     public void SetCurves(IReadOnlyList<(double X, double Y)> m, IReadOnlyList<(double X, double Y)> r,
                           IReadOnlyList<(double X, double Y)> g, IReadOnlyList<(double X, double Y)> b,
                           bool preserveHue)
     {
+        // Anything arriving from the editor has been through EnsureEndpoints, so its ends are the
+        // user's own black and white point from here on.
+        _curveHasEndpoints = true;
         _curveM = new List<(double, double)>(m);
         _curveR = new List<(double, double)>(r);
         _curveG = new List<(double, double)>(g);
@@ -1368,6 +1380,7 @@ public partial class MainViewModel : ViewModelBase
         CurvePointsG = _curveG,
         CurvePointsB = _curveB,
         CurvePreserveHue = _curvePreserveHue,
+        CurveHasEndpoints = _curveHasEndpoints,
         // Geometry
         Rotation = Rotation,
         QuarterTurns = _quarterTurns,
@@ -2824,6 +2837,7 @@ public partial class MainViewModel : ViewModelBase
         Temp = 0; Tint = 0; ExposureEv = 0;
         Black = 0; White = 0; Contrast = 0; Highlights = 0; Shadows = 0; Saturation = 0;
         _curveM = new(); _curveR = new(); _curveG = new(); _curveB = new(); _curvePreserveHue = true;
+        _curveHasEndpoints = false;
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
         FilmBaseText = "";
@@ -3736,6 +3750,8 @@ public partial class MainViewModel : ViewModelBase
         _curveG = new List<(double, double)>(p.CurvePointsG);
         _curveB = new List<(double, double)>(p.CurvePointsB);
         _curvePreserveHue = p.CurvePreserveHue;
+        // Carried, not assumed: a legacy curve stays legacy until the user edits it.
+        _curveHasEndpoints = p.CurveHasEndpoints;
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
@@ -4048,6 +4064,9 @@ public partial class MainViewModel : ViewModelBase
                 d.CurvePointsG = new List<(double, double)>(s.CurvePointsG);
                 d.CurvePointsB = new List<(double, double)>(s.CurvePointsB);
                 d.CurvePreserveHue = s.CurvePreserveHue;
+                // Travels WITH the points — the flag says how to read them, so copying one
+                // without the other would re-anchor the curve on the receiving frames.
+                d.CurveHasEndpoints = s.CurveHasEndpoints;
             }
         }
         if (Sync.GeomOrientation) { d.QuarterTurns = s.QuarterTurns; d.FlipH = s.FlipH; d.FlipV = s.FlipV; }
