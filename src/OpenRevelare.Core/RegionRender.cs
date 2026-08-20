@@ -110,18 +110,19 @@ public static class RegionRender
     /// preview underneath.
     /// </summary>
     public static (ImageBuffer Image, Roi Realised) Render(ImageBuffer full, FrameParams cal, Roi roi,
-                                                          bool negative = false)
+                                                          bool negative = false,
+                                                          double[]? negativeWb = null)
     {
         // The negative path reads the frame in its own coordinates, so hand it the whole buffer
         // rather than the geometry-derived slice RequiredSourceBounds computes for the positive.
-        if (negative) return RenderNegative(full, 0, 0, full.Width, full.Height, cal, roi);
+        if (negative) return RenderNegative(full, 0, 0, full.Width, full.Height, cal, roi, negativeWb);
 
         var b = RequiredSourceBounds(full.Width, full.Height, cal, roi);
         int sw = b.X1 - b.X0, sh = b.Y1 - b.Y0;
         var slice = new ImageBuffer(sw, sh);
         for (int y = 0; y < sh; y++)
             Array.Copy(full.Data, ((b.Y0 + y) * full.Width + b.X0) * 3, slice.Data, y * sw * 3, sw * 3);
-        return RenderFromSlice(slice, b.X0, b.Y0, full.Width, full.Height, cal, roi, negative);
+        return RenderFromSlice(slice, b.X0, b.Y0, full.Width, full.Height, cal, roi, negative, negativeWb);
     }
 
     /// <summary>
@@ -139,12 +140,17 @@ public static class RegionRender
     /// sampling view shows. Hands off to <see cref="RenderNegative"/>, which applies the step-4
     /// conversion and nothing else; see there for why not even geometry runs.
     /// </param>
+    /// <param name="negativeWb">
+    /// Green-normalised display white balance for the negative path (<see cref="RawDecode.CameraWhiteBalance"/>),
+    /// or null to show the bare UniWB decode. Ignored unless <paramref name="negative"/> is set —
+    /// the positive path white-balances in Stage 2, from the user's own temp/tint.
+    /// </param>
     public static (ImageBuffer Image, Roi Realised) RenderFromSlice(
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
-        FrameParams cal, Roi roi, bool negative = false)
+        FrameParams cal, Roi roi, bool negative = false, double[]? negativeWb = null)
     {
         if (negative)
-            return RenderNegative(source, sourceX0, sourceY0, frameW, frameH, cal, roi);
+            return RenderNegative(source, sourceX0, sourceY0, frameW, frameH, cal, roi, negativeWb);
 
         var (rect, realised) = Realise(frameW, frameH, cal, roi);
         var b = SourceBounds(frameW, frameH, cal, rect);
@@ -245,7 +251,7 @@ public static class RegionRender
     /// </summary>
     private static (ImageBuffer Image, Roi Realised) RenderNegative(
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
-        FrameParams cal, Roi roi)
+        FrameParams cal, Roi roi, double[]? negativeWb = null)
     {
         Roi raw = UnorientRoi(roi, cal);
         int x0 = Math.Clamp((int)Math.Floor(raw.X * frameW), 0, frameW - 1);
@@ -272,6 +278,11 @@ public static class RegionRender
         // mapping the result forward keeps the two consistent — reporting the requested ROI
         // instead would land the patch fractionally off and shimmer against the preview.
         outImg = Geometry.ApplyOrientation(outImg, cal.QuarterTurns, cal.FlipH, cal.FlipV);
+        // The camera's own white balance, for VIEWING ONLY — same gains, same place in the chain
+        // (scene-linear, before the encode) as ShowNegativeView. Without it a UniWB negative reads
+        // green and the orange film base this view exists to point at does not look orange. The
+        // samplers are unaffected: they read the UniWB preview buffer, never these pixels.
+        NegativeView.ApplyWhiteBalance(outImg.Data, negativeWb);
         // PLAIN step 4 — never the roll's print-film emulation, even when one is selected. This
         // patch is un-inverted film, and a print stock characterises how a finished POSITIVE
         // prints; running the negative through it renders a look over the very pixels the user

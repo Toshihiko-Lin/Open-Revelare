@@ -225,6 +225,53 @@ public static class RawDecode
         }
     }
 
+    /// <summary>
+    /// The camera's AS-SHOT white balance, normalised to unit gain on green — the multipliers
+    /// that turn a UniWB decode back into what the camera itself would have called neutral.
+    /// Null when the file is not a RAW we can open, or carries no usable as-shot coefficients.
+    ///
+    /// STRICTLY A VIEWING AID, and the reason it is not part of any decode: the pipeline decodes
+    /// UniWB on purpose (see <see cref="OpenAndProcess"/>), because the density maths wants the
+    /// sensor's own untouched numbers and t_base normalisation sets the white itself. But UniWB
+    /// pixels shown raw are not what the negative looks like — a Bayer sensor's green channel
+    /// has roughly twice the response of red and blue, so an un-inverted frame displayed at unit
+    /// gain reads GREEN, and the orange film base the user is being asked to point at does not
+    /// look orange. Applying these gains for display only makes the negative on screen look like
+    /// the negative on the light table, while every number Stage 1 measures still comes off the
+    /// UniWB buffer underneath.
+    ///
+    /// GREEN-NORMALISED rather than raw cam_mul because the absolute level is not ours to set:
+    /// the negative view is a look-at-it view with no exposure control, and cam_mul's own scale
+    /// (green is typically 1.0 already, but not guaranteed — some bodies report 256-based
+    /// integers) would otherwise brighten or darken the picture as a side effect of white
+    /// balancing it.
+    /// </summary>
+    public static double[]? CameraWhiteBalance(string path)
+    {
+        try
+        {
+            // Header parse only, like CameraToSrgbMatrix: cam_mul comes from metadata, and
+            // Unpack() here would cost seconds to read three numbers.
+            using RawContext ctx = RawContext.OpenFile(path);
+
+            // cam_mul is (R, G1, B, G2). G2 is 0 on three-multiplier bodies, so G1 is the green
+            // reference either way.
+            double r = ctx.CameraMultipler[0], g = ctx.CameraMultipler[1], b = ctx.CameraMultipler[2];
+
+            // No as-shot record (all zero), or a green of zero we cannot normalise against:
+            // "unknown", not "unit gain" — the caller shows the UniWB frame rather than
+            // scaling by garbage.
+            if (!(g > 0) || !(r > 0) || !(b > 0)) return null;
+            if (!double.IsFinite(r) || !double.IsFinite(g) || !double.IsFinite(b)) return null;
+
+            return new[] { r / g, 1.0, b / g };
+        }
+        catch
+        {
+            return null;   // a metadata probe must never break the view it decorates
+        }
+    }
+
     // NOTE: there is deliberately no public half-size DECODE entry point any more
     // (raw_decode.py::decode_raw_fast has no live C# counterpart). It existed and became
     // unreachable once the roll warm-up started sharing ONE full-quality decode between the

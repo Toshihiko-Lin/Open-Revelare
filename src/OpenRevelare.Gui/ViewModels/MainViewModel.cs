@@ -1294,6 +1294,39 @@ public partial class MainViewModel : ViewModelBase
     private bool _showingNegative;
 
     /// <summary>
+    /// Per-source-file camera as-shot white balance, green-normalised — the DISPLAY gain that
+    /// makes the negative view look like film on a light table instead of a green cast.
+    ///
+    /// Cached because the negative view is re-drawn on every turn of the frame while it is up,
+    /// and because a null answer (TIFF scan, a camera with no as-shot record) must be remembered
+    /// too — otherwise every redraw re-opens the file to learn nothing again. Hence the nullable
+    /// VALUE in the dictionary rather than "absent means unknown".
+    ///
+    /// Keyed by PATH, like the preview cache, so a split scan's frames and any virtual copies
+    /// share the one probe. Cleared with the roll.
+    /// </summary>
+    private readonly Dictionary<string, double[]?> _negativeWb = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The display white balance for the frame on screen, probing the file at most once.
+    ///
+    /// Null — meaning "show the UniWB decode as-is" — for a TIFF (a scanner's output is already
+    /// balanced; there is no camera and no as-shot record to undo) and for any RAW whose
+    /// coefficients cannot be read. Deliberately NOT a fallback guess: inventing gains would put
+    /// an invented colour under a tool whose whole job is judging colour by eye.
+    /// </summary>
+    private double[]? CurrentNegativeWb()
+    {
+        if (CurrentFrame is not { } f) return null;
+        string path = f.Path;
+        if (_negativeWb.TryGetValue(path, out double[]? cached)) return cached;
+
+        double[]? wb = RawDecode.IsRawExtension(path) ? RawDecode.CameraWhiteBalance(path) : null;
+        _negativeWb[path] = wb;
+        return wb;
+    }
+
+    /// <summary>
     /// True while the preview is showing the positive WITHOUT Stage-2 edits (before/after compare).
     ///
     /// Unlike the negative view this one has no patch: it strips Stage 2 out of the middle of a
@@ -1431,6 +1464,15 @@ public partial class MainViewModel : ViewModelBase
         // that. Leaving it off meant turning a sideways scan upright and then having the negative
         // flop back onto its side the moment the film-base tool was armed.
         disp = OrientForNegative(disp);
+        // The camera's own white balance, applied for VIEWING ONLY. The buffer underneath stays
+        // UniWB — every Stage-1 sampler reads _previewLinear, not this copy — but a UniWB negative
+        // shown raw reads GREEN, because a Bayer sensor's green channel has about twice the
+        // response of red and blue. That is exactly the wrong thing under a tool that asks the
+        // user to point at "the brightest ORANGE film base": the base does not look orange, and
+        // the highlight sampler's "darkest part of the negative" is judged through a cast too.
+        // Null for a scanner TIFF or a camera with no as-shot record, in which case this is a
+        // no-op and the view is what it always was.
+        NegativeView.ApplyWhiteBalance(disp.Data, CurrentNegativeWb());
         // Plain step 4, never the roll's print-film emulation: this buffer is a NEGATIVE. A print
         // stock characterises how a finished positive prints, so feeding it un-inverted film would
         // render a look nobody asked for over an image the user is only here to sample.
@@ -3346,7 +3388,7 @@ public partial class MainViewModel : ViewModelBase
         // previews of every frame it decodes, and a later Clear() would throw that work away.
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
-        _previews.Clear(); ClearTiles(); _fullSlot = null; _regionSlot = null;
+        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
         lock (_decoding) _decoding.Clear();
 
         // Recompute the roll-level ops (never stored in the file) from their source paths.
@@ -3433,7 +3475,7 @@ public partial class MainViewModel : ViewModelBase
         StatusText = Loc.T("正在准备导入 …");
         // The roll changes here, not in LoadRollAsync — the prep below already caches previews for
         // the frames it decodes, and a later Clear() would throw that work away.
-        _previews.Clear(); ClearTiles(); _fullSlot = null; _regionSlot = null;
+        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
         lock (_decoding) _decoding.Clear();
 
         double[,]? dm = null, cm = null;
@@ -3622,7 +3664,7 @@ public partial class MainViewModel : ViewModelBase
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         if (!_configLoad)   // the config path already cleared, and has since cached real work
         {
-            _previews.Clear(); ClearTiles(); _fullSlot = null; _regionSlot = null;   // never serve the previous roll's pixels
+            _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;   // never serve the previous roll's pixels
             lock (_decoding) _decoding.Clear();
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
@@ -5002,6 +5044,9 @@ public partial class MainViewModel : ViewModelBase
         // does have one — see the negative flag threaded below.
         if (_showingBeforeEdits) return;
         bool negative = _showingNegative;
+        // Read on the UI thread, where CurrentFrame is safe to touch, and captured for the
+        // background render — the patch must carry the same gain as the preview it lands on.
+        double[]? negativeWb = negative ? CurrentNegativeWb() : null;
 
         FrameParams p = BuildParams();
         string srcPath = frame.Path;
@@ -5057,7 +5102,7 @@ public partial class MainViewModel : ViewModelBase
                 {
                     RegionSlot s = _regionSlot!;
                     (img, realised) = RegionRender.RenderFromSlice(slice, s.X0, s.Y0, frameW, frameH,
-                                                                   p, roi, negative);
+                                                                   p, roi, negative, negativeWb);
                 }
                 else
                 {
@@ -5065,7 +5110,7 @@ public partial class MainViewModel : ViewModelBase
                     // to the whole frame, which is what this path always used to do.
                     ImageBuffer full = LoadFullLinear(srcPath);
                     cts.Token.ThrowIfCancellationRequested();
-                    (img, realised) = RegionRender.Render(full, p, roi, negative);
+                    (img, realised) = RegionRender.Render(full, p, roi, negative, negativeWb);
                 }
                 cts.Token.ThrowIfCancellationRequested();
                 return new SharpPatch((Bitmap)BitmapConvert.ToBitmap(img),
