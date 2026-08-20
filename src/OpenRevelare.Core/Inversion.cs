@@ -79,7 +79,9 @@ public static class Inversion
         // [0,1] (exact for 16-bit). Pre-inversion ops (vignette, later RAW
         // highlights) can push T above 1, where the LUT would clamp and get the
         // density wrong — those rare pixels compute steps 1–4 directly instead.
-        // Per-channel: with measured endpoints the floor follows the channel, not d_max.
+        // The floor is the encoding ceiling, the same constant for all three channels — see
+        // DensityFloor for why it is not the measured endpoint. Kept as three locals so the
+        // inner loop reads them like the per-channel t_base beside it.
         double floorV0 = Math.Pow(10.0, -DensityFloor(cal, 0));
         double floorV1 = Math.Pow(10.0, -DensityFloor(cal, 1));
         double floorV2 = Math.Pow(10.0, -DensityFloor(cal, 2));
@@ -224,9 +226,9 @@ public static class Inversion
     // call REGARDLESS of image size, so on a 256 px thumbnail it dwarfed the actual pixel work
     // and it was the main thing dragging the process into full Gen2 collections mid-drag.
     //
-    // The tables depend on exactly eleven numbers, and a Stage-2 edit (exposure, contrast,
-    // curves, saturation, levels, WB gains) changes none of them — so dragging any Stage-2
-    // slider now reuses them outright.
+    // The tables depend on exactly three numbers — t_base, one per channel. Neither a Stage-2
+    // edit (exposure, contrast, curves, saturation, levels, WB gains) nor a Stage-1 endpoint
+    // solve touches those, so dragging any of those sliders reuses the tables outright.
     //
     // ONE slot, and the key is compared with EXACT double equality rather than a tolerance:
     // the whole point of the LUT is to be bit-identical to the direct computation, so "close
@@ -238,32 +240,27 @@ public static class Inversion
     // observe a half-built table, and nobody ever mutates a published one.
     private sealed class DensityLutEntry
     {
-        // Exactly what BuildDensityLuts reads, and nothing more. The endpoints are NOT here:
-        // steps 1–4 stop at the film-base-normalised density, and both ends enter afterwards at
-        // step 5. DMaxPerCh is the one exception — not as an endpoint, but because it sets the
-        // per-channel density FLOOR (see DensityFloor), so two rolls differing only there must
-        // not share tables. Keying on values the tables do not depend on would only cost rebuilds.
+        // Exactly what BuildDensityLuts reads, and nothing more — which is now t_base alone. The
+        // endpoints are NOT here: steps 1–4 stop at the film-base-normalised density, and both
+        // ends enter afterwards at step 5.
+        //
+        // DMaxPerCh USED TO BE HERE, not as an endpoint but because it set the per-channel density
+        // floor. Now that the floor is FrameParams.DensityCeiling — a constant — the tables do not
+        // depend on it, so keying on it would only cost rebuilds. That is the practical half of
+        // the fix in DensityFloor: every automatic solve writes DMaxPerChannel, and each write
+        // used to invalidate three 512 KB tables it had no influence over.
         public double Tb0, Tb1, Tb2;
-        public double[]? DMaxPerCh;
         public double[][] Luts = null!;
 
         public bool Matches(FrameParams c) =>
-            Tb0 == c.TBase[0] && Tb1 == c.TBase[1] && Tb2 == c.TBase[2] &&
-            SameEndpoints(DMaxPerCh, c.DMaxPerChannel);
-
-        private static bool SameEndpoints(double[]? a, double[]? b)
-        {
-            if (a is null || b is null) return a is null && b is null;
-            if (a.Length != b.Length) return false;
-            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
-            return true;
-        }
+            Tb0 == c.TBase[0] && Tb1 == c.TBase[1] && Tb2 == c.TBase[2];
     }
 
     private static DensityLutEntry? _lutCache;
 
     /// <summary>The per-channel T→density tables for <paramref name="cal"/>, from the cache when
-    /// the eleven inputs are bit-identical to the last build. READ ONLY — shared across callers.</summary>
+    /// the three t_base values are bit-identical to the last build. READ ONLY — shared across
+    /// callers.</summary>
     private static double[][] DensityLuts(FrameParams cal)
     {
         DensityLutEntry? hit = _lutCache;
@@ -272,7 +269,6 @@ public static class Inversion
         var entry = new DensityLutEntry
         {
             Tb0 = cal.TBase[0], Tb1 = cal.TBase[1], Tb2 = cal.TBase[2],
-            DMaxPerCh = cal.DMaxPerChannel is { Length: 3 } dmc ? (double[])dmc.Clone() : null,
             Luts = BuildDensityLuts(cal),
         };
         _lutCache = entry;
@@ -301,15 +297,30 @@ public static class Inversion
     }
 
     /// <summary>
-    /// How deep density is allowed to go for channel <paramref name="c"/> — the channel's measured
-    /// highlight endpoint. Kept in one place because the LUT and the direct &gt;1 path must agree.
+    /// How deep density is allowed to go — <see cref="FrameParams.DensityCeiling"/>, the encoding
+    /// domain's ceiling. Kept in one place because the LUT and the direct &gt;1 path must agree.
     ///
-    /// This is the DEEPEST DENSITY, which is a different quantity from the OUTPUT RANGE
-    /// (<see cref="FrameParams.OutputRange"/>): clamping at the range would truncate the highlight
-    /// end before step 5 sees it, landing the darkest area short of white and tinted.
+    /// THREE DIFFERENT QUANTITIES live near each other here, and this used to conflate two of them:
+    ///
+    ///   OutputRange     where the output's black lands           — a constant
+    ///   DensityCeiling  where -log10 is allowed to stop          — a constant  ← this one
+    ///   DMaxPerChannel  the measured highlight endpoint          — CALIBRATION
+    ///
+    /// Clamping at the OUTPUT RANGE would truncate the highlight end before step 5 sees it,
+    /// landing the darkest area short of white and tinted — which is why it was not that.
+    ///
+    /// But clamping at the MEASURED ENDPOINT, as this did, is the Cineon equivalent of using 685
+    /// where 1032 belongs: the encoding domain's ceiling became a calibration output. Two
+    /// consequences, both real. Any pixel legitimately denser than the endpoint was silently
+    /// truncated. And the tables' validity became tied to a value every automatic solve writes
+    /// (roll calibration, highlight alignment, Deep-WB), so each of those forced a full rebuild —
+    /// 196,608 Math.Log10 calls and three 512 KB LOH allocations — for tables whose contents the
+    /// endpoint no longer influences at all.
+    ///
+    /// The ceiling is a constant, so it is not read from <paramref name="cal"/>; the parameter
+    /// stays for call-site symmetry with the per-channel form this replaced.
     /// </summary>
-    private static double DensityFloor(FrameParams cal, int c) =>
-        cal.DMaxPerChannel is { Length: 3 } dm ? Math.Max(dm[c], 1e-6) : FrameParams.OutputRange;
+    private static double DensityFloor(FrameParams cal, int c) => FrameParams.DensityCeiling;
 
     private static bool ApproxAll(double[] v, double target)
     {

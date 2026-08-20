@@ -89,9 +89,9 @@ public static class Decouple
         Parallel.For(0, n, p =>
         {
             int i = p * 3;
-            double d0 = -Math.Log10(Math.Max(data[i]     / tb0, 1e-10));
-            double d1 = -Math.Log10(Math.Max(data[i + 1] / tb1, 1e-10));
-            double d2 = -Math.Log10(Math.Max(data[i + 2] / tb2, 1e-10));
+            double d0 = FrameParams.DensityOf(data[i]     / tb0);
+            double d1 = FrameParams.DensityOf(data[i + 1] / tb1);
+            double d2 = FrameParams.DensityOf(data[i + 2] / tb2);
 
             double dMean = (d0 + d1 + d2) / 3.0;
             double c0 = d0 - dMean, c1 = d1 - dMean, c2 = d2 - dMean;

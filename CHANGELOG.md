@@ -1,5 +1,50 @@
 # OpenRevelare — 更新日志
 
+## v1.5.3（2026-08-20）
+
+**修复**
+
+- **黑位没有真正落到纯黑**。片基采样得越准，黑位反而浮得越高——采过片基的工程会发现暗部
+  发灰、不够沉。现在采样为黑的位置就是纯黑。
+- **某些源文件的通道值为 0 时，该处颜色不对**。齿孔黑边、扫描件黑边、部分相机 RAW 的填充
+  边会出现本不该有的偏色；现在这些位置正确地渲染为白。
+- **【自动白点】与【自动（整卷）】在同一张片子上可能给出不同的亮端**。两者现在用同一套
+  测量方法。测不到高光时会明确提示，而不是静默保持原值。
+
+**改进**
+
+- **反差对齐 Cineon 标准**。黑白两端之间的密度跨度改为 Cineon 的 95–1032，此前略宽。
+  画面整体反差略降，中间调略提亮。
+
+  这一版的渲染结果与旧版不同，已有工程打开后画面会有变化——主要是暗部更沉。如果对某卷的
+  成品不满意，重跑一次【自动（整卷）】即可。
+
+---
+
+**Fixed**
+
+- **Blacks never reached true black.** The more accurately you sampled the film base, the
+  higher the black floated — projects with a sampled base looked washed out in the shadows.
+  What you sample as black is now black.
+- **Wrong colour where a source file has a channel at zero.** Sprocket edges, scan borders
+  and the padding some camera RAWs carry showed a colour cast they should not have; these
+  now render as white.
+- **"Auto white point" and "Auto (whole roll)" could disagree** on the same frame. Both now
+  use the same measurement. When no highlight can be found you are told, instead of the
+  value silently staying put.
+
+**Improved**
+
+- **Contrast now matches the Cineon standard.** The density span between the two endpoints
+  is Cineon's 95–1032, slightly narrower than before. Overall contrast is a little lower and
+  midtones a little brighter.
+
+  This release renders differently from previous ones — existing projects will look
+  different, mainly deeper shadows. If a roll no longer looks right, re-run
+  "Auto (whole roll)".
+
+---
+
 ## v1.5.2（2026-08-19）
 
 **修复**

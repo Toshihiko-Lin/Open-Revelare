@@ -50,13 +50,78 @@ public sealed class FrameParams
     public double[] TBase { get; set; } = { 1.0, 1.0, 1.0 };
 
     /// <summary>
-    /// 输出范围：黑端落在 10^-OutputRange。
+    /// 输出范围：对数域的跨度，黑端落在 D_adj = -OutputRange，白端落在 D_adj = 0。
     ///
     /// **常量，不是参数。** 它曾经是可调的 d_max，于是与亮端端点争夺同一个自由度——两者都
     /// 同时改亮度和反差，用户看到两个滑块做同一件事。固定之后黑位恒定，明暗与反差改由两端
     /// 端点表达（见上），语义才各归其位。
+    ///
+    /// **取值 = Cineon 的 95→1032。** 这是 Stage 1 转线性**之前**的对数中间产物该有的跨度：
+    /// Cineon 每码 0.002 密度，937 码即 1.874。用户框选的黑端落在码值 95、白端落在 1032，
+    /// 与 <c>-log10</c> 域天然同构——这正是 DaVinci 把 CineonLog 交给下游 LUT 时的形状。
+    ///
+    /// 曾经是 2.0，那是个为消灭自由度而取的整数，不是照 Cineon 定的。差 0.126 密度 = 63 码，
+    /// 表现为黑端落在码值 32 而非 95，即黑位过冲。
+    ///
+    /// 转线性（步骤 6 的 10^x）不改变基色，也不钳位——它是逐通道双射，超白与次黑都照常通过。
+    /// 所以 Stage 1 出口仍是 ACEScg，色域到步骤 4 才收敛。
     /// </summary>
-    public const double OutputRange = 2.0;
+    public const double OutputRange = (CineonWhiteCode - CineonBlackCode) * CineonDensityPerCode;
+
+    /// <summary>Cineon 10-bit 每码步进的密度——该编码的定义常量。</summary>
+    private const double CineonDensityPerCode = 0.002;
+
+    /// <summary>Cineon 黑端码值：用户框选为黑的位置。</summary>
+    private const double CineonBlackCode = 95.0;
+
+    /// <summary>Cineon 白端码值：用户框选为白的位置。</summary>
+    private const double CineonWhiteCode = 1032.0;
+
+    /// <summary>
+    /// 密度编码域的上限——Cineon 的 1032，**不是标定点**。
+    ///
+    /// 它只做一件事：让 T→0 的像素得到一个有限密度。源文件里通道值为 0 的像素（LibRaw 0.21
+    /// 的零填充边、齿孔的不透光芯、扫描件的黑边）取 -log10 会跑到无穷，必须夹住。
+    ///
+    /// **为什么不能用 <see cref="DMaxPerChannel"/> 夹。** 那是一个**实测标定值**，等于拿
+    /// Cineon 的 685 当 1032 用：标定一改（整卷标定、高光对齐、Deep-WB 都写它），密度的合法域
+    /// 跟着变，而任何真实高于该端点的像素被静默截断。编码底座必须是常量，才谈得上"底座"。
+    ///
+    /// **为什么是 4.0 而不是更大。** 这个值要能被统计量无歧义地拒绝：真实底片密度上界约 3.0
+    /// （见 <see cref="RealDensityCeiling"/>），4.0 落在"绝无可能是真实画面"的一侧，又没有大到
+    /// 变成一个没人定义过的数字。曾经用的 1e-10 夹出密度 10，它不溢出——它以合法数值的身份
+    /// 污染统计量，这正是三处启发式补丁要各自挡掉的东西。
+    ///
+    /// 不变式：<see cref="RealDensityCeiling"/> &lt; <c>DensityCeiling</c>。两者的关系是被
+    /// **声明**的，而不是靠 3.0 &lt; 10 碰巧成立。
+    /// </summary>
+    public const double DensityCeiling = 4.0;
+
+    /// <summary>
+    /// 真实底片密度的上界——超过它的像素不是画面，是不透光的物件。
+    ///
+    /// 齿孔黑边、遮光卡、片框边缘完全不透光，密度直接顶到 <see cref="DensityCeiling"/>；而真实
+    /// 高光只有 1.0–1.5。取 D_max 的统计量若不先剔除前者，会把死黑锁成白端。
+    ///
+    /// 曾经是 FilmBase 里两处各自写死的 <c>MaxRealDensity = 3.0</c>。同一个物理量在两个地方
+    /// 各定义一次，就是等着有一天只改其中一个。
+    /// </summary>
+    public const double RealDensityCeiling = 3.0;
+
+    /// <summary>
+    /// <c>-log10(T)</c> clamped at <see cref="DensityCeiling"/> — the one place a transmittance
+    /// becomes a density, so every measurement clamps at the same place the render does.
+    ///
+    /// Callers pass an ALREADY-NORMALISED transmittance (<c>T / t_base</c>). The divisor guard is
+    /// a separate concern and stays at the call site: a near-zero t_base is a broken calibration,
+    /// whereas a near-zero T is an ordinary opaque pixel.
+    /// </summary>
+    public static double DensityOf(double transmittance) =>
+        -Math.Log10(Math.Max(transmittance, DensityFloorTransmittance));
+
+    /// <summary>The transmittance <see cref="DensityCeiling"/> corresponds to. Precomputed —
+    /// <see cref="DensityOf"/> runs per sample over multi-megapixel frames.</summary>
+    private static readonly double DensityFloorTransmittance = Math.Pow(10.0, -DensityCeiling);
 
     /// <summary>
     /// 亮端：每个通道读作白的密度（典型 1.8–2.4）。

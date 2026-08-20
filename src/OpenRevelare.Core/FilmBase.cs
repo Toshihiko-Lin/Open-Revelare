@@ -387,24 +387,24 @@ public static class FilmBase
             int n = img.PixelCount;
 
             // Density ceiling, same constant and same reason as AutoWbHighFromRoll: an opaque
-            // sprocket / film-frame edge is fully light-blocking, so it slams into the -log10
-            // clamp (~6–10) far above any real picture tone (~1–1.5). The dark valley misses it
-            // whenever the histogram is not cleanly bimodal — which is exactly the case on rolls
-            // that kept the sprockets in frame — so the ceiling is what actually rejects it.
+            // sprocket / film-frame edge is fully light-blocking, so it lands on
+            // FrameParams.DensityCeiling (4.0), above any real picture tone (~1–1.5). The dark
+            // valley misses it whenever the histogram is not cleanly bimodal — which is exactly
+            // the case on rolls that kept the sprockets in frame — so the ceiling is what
+            // actually rejects it.
             // Applied on TOTAL density so a pixel is judged as one physical sample, not per
             // channel; dropping channels independently would bias the endpoints against each
             // other, which is the very thing they are supposed to measure.
-            const double MaxRealDensity = 3.0;
             var dens = new double[3][];
             for (int c = 0; c < 3; c++) dens[c] = new double[n];
             int k = 0;
             for (int p = 0; p < n; p++)
             {
                 if (!keep[p]) continue;
-                double d0 = -Math.Log10(Math.Max(img.Data[p * 3] / Math.Max(tBase[0], 1e-10), 1e-10));
-                double d1 = -Math.Log10(Math.Max(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10), 1e-10));
-                double d2 = -Math.Log10(Math.Max(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10), 1e-10));
-                if ((d0 + d1 + d2) / 3.0 >= MaxRealDensity) continue;
+                double d0 = FrameParams.DensityOf(img.Data[p * 3] / Math.Max(tBase[0], 1e-10));
+                double d1 = FrameParams.DensityOf(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10));
+                double d2 = FrameParams.DensityOf(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10));
+                if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) continue;
                 dens[0][k] = d0; dens[1][k] = d1; dens[2][k] = d2;
                 k++;
             }
@@ -600,7 +600,7 @@ public static class FilmBase
         {
             if (keep is not null && !keep[p]) continue;
             for (int c = 0; c < 3; c++)
-                density[n++] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
+                density[n++] = FrameParams.DensityOf(d[p * 3 + c]);
         }
         if (n == 0) return 0.0;
         var used = new double[n];
@@ -660,7 +660,7 @@ public static class FilmBase
             for (int p = 0; p < n; p++)
             {
                 if (keep is not null && !keep[p]) continue;
-                col[k++] = -Math.Log10(Math.Max(d[p * 3 + c], 1e-10));
+                col[k++] = FrameParams.DensityOf(d[p * 3 + c]);
             }
             if (k == 0) return DetectDMaxPerChannel(image);   // all masked out → measure everything
             var used = new double[k];
@@ -1077,7 +1077,7 @@ public static class FilmBase
                 double sum = 0;
                 for (int c = 0; c < 3; c++)
                 {
-                    double dc = -Math.Log10(Math.Max(vd[p * 3 + c] / tb[c], 1e-10));
+                    double dc = FrameParams.DensityOf(vd[p * 3 + c] / tb[c]);
                     dens[k * 3 + c] = dc;
                     sum += dc;
                 }
@@ -1086,14 +1086,13 @@ public static class FilmBase
             }
 
             // Reject opaque sprocket / film-frame BLACK edges before picking the highlight.
-            // These are fully light-blocking (t_norm → 0), so their density slams into the
-            // -log10 clamp far above any real picture tone (~6–10 vs a true highlight
-            // ~1–1.5). Both the bright cut and the dark valley miss them on rolls where the
-            // user kept the sprockets in frame and the valley returned its no-op sentinel —
-            // and "pick max density" then locks onto dead black instead of the highlight.
-            const double MaxRealDensity = 3.0;
+            // These are fully light-blocking (t_norm → 0), so their density lands on
+            // FrameParams.DensityCeiling (4.0), above any real picture tone (~1–1.5). Both the
+            // bright cut and the dark valley miss them on rolls where the user kept the sprockets
+            // in frame and the valley returned its no-op sentinel — and "pick max density" then
+            // locks onto dead black instead of the highlight.
             int realCount = 0;
-            for (int i = 0; i < keptCount; i++) if (totalD[i] < MaxRealDensity) realCount++;
+            for (int i = 0; i < keptCount; i++) if (totalD[i] < FrameParams.RealDensityCeiling) realCount++;
             if (realCount > 0 && realCount < keptCount)
             {
                 var d2 = new double[realCount * 3];
@@ -1101,7 +1100,7 @@ public static class FilmBase
                 int j = 0;
                 for (int i = 0; i < keptCount; i++)
                 {
-                    if (!(totalD[i] < MaxRealDensity)) continue;
+                    if (!(totalD[i] < FrameParams.RealDensityCeiling)) continue;
                     d2[j * 3] = dens[i * 3]; d2[j * 3 + 1] = dens[i * 3 + 1]; d2[j * 3 + 2] = dens[i * 3 + 2];
                     t2[j] = totalD[i];
                     j++;
@@ -1193,7 +1192,7 @@ public static class FilmBase
         var sum = new double[3];
         for (int p = 0; p < n; p++)
             for (int c = 0; c < 3; c++)
-                sum[c] += -Math.Log10(Math.Max(patch[p * 3 + c] / tb[c], 1e-10));
+                sum[c] += FrameParams.DensityOf(patch[p * 3 + c] / tb[c]);
         return new[] { sum[0] / n, sum[1] / n, sum[2] / n };
     }
 

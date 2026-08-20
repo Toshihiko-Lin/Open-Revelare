@@ -2425,19 +2425,50 @@ public partial class MainViewModel : ViewModelBase
         ImageBuffer? raw = AutoRegion();
         ImageBuffer? val = AutoRegionStage1();
         if (raw is null || val is null) return;
+
+        // 参考一律中性，与【自动（整卷）】和【自动高光】完全一致。
+        //
+        // 这里曾传 TBaseArr()，那会让估计器产出「相对片基」的密度，而黑端是**对 T=1 的绝对
+        // 密度**——两端基准不一致，跨度 D_max − D_min 就会各通道少算一个 D_min，而三通道少得
+        // 不一样多（整卷路径实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。新工程的 TBase
+        // 恒为 1,1,1 所以看不出来，但旧工程会从文件里读回非中性的 TBase，那时这个按钮与另外
+        // 两条路径就给出不同的亮端。
+        double[] neutralRef = { 1.0, 1.0, 1.0 };
+        IReadOnlyList<ImageBuffer>? values = ReferenceEquals(raw, val) ? null : new[] { val };
+        double? cut = AutoBoardCut();
+
+        // 同样的两个估计器、同样的顺序，与 AutoDetectDMax 和整卷链一致：逐通道端点优先，
+        // 它弃权时才回退到最浓高光解。此前这里只有后者，于是三条「自动白端」路径在同一张片子
+        // 上可能给出两个不同的答案。
+        double[]? highlight = null;
         try
         {
-            double[] wh = FilmBase.AutoWbHighFromRoll(
-                new[] { raw }, TBaseArr(),
-                AutoBoardCut(),
-                valueImages: ReferenceEquals(raw, val) ? null : new[] { val });
-            DMaxR = wh[0]; DMaxG = wh[1]; DMaxB = wh[2];
-            StatusText = Loc.F($"自动白点 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
+            highlight = FilmBase.DetectDMaxPerChannelFromRoll(
+                new[] { val }, neutralRef, 90.0, new[] { raw }, cut);
         }
-        catch (Exception ex)
+        catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
+
+        if (highlight is null)
         {
-            StatusText = Loc.T("自动白平衡失败：") + ex.Message;
+            try
+            {
+                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, neutralRef, cut, values);
+            }
+            catch (Exception ex)
+            {
+                StatusText = Loc.T("自动白平衡失败：") + ex.Message;
+                return;
+            }
         }
+
+        if (highlight is null)
+        {
+            StatusText = Loc.T("⚠ 这一帧测不到高光——亮端保持原值，请用【高光采样】手动标定或改用【自动（整卷）】");
+            return;
+        }
+
+        DMaxPerChannel = highlight;
+        StatusText = Loc.F($"自动白点 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
     }
 
     // ── Smart WB (Deep-WB net → affine wb_high/wb_offset) ───────────────────────

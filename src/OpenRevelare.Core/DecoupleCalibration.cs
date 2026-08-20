@@ -186,14 +186,16 @@ public static class DecoupleCalibration
     /// Uses a coarse stride-8 spatial subsample for speed, as Python does.
     /// </summary>
     public static (double Alpha, double ChromaAmp) ComputeDecoupleParams(
-        double[,] m, ImageBuffer image, double dMax = 4.0, double negThreshold = 0.005)
+        double[,] m, ImageBuffer image, double? dMax = null, double negThreshold = 0.005)
     {
         double[][] sub = Subsample(image, 8);
         double[] tBase = PercentileAxis0(sub, 99.0);
         for (int c = 0; c < 3; c++) tBase[c] = Math.Max(tBase[c], 1e-6);
 
         int n = sub.Length;
-        double clampD = Math.Pow(10.0, -dMax);
+        // Default is FrameParams.DensityCeiling — this parameter's 4.0 default was independently
+        // the same number, which is what makes the shared constant a rename rather than a change.
+        double clampD = Math.Pow(10.0, -(dMax ?? FrameParams.DensityCeiling));
         var dMeanPx = new double[n];
         var dChroma = new double[n][];
         for (int i = 0; i < n; i++)
@@ -573,9 +575,9 @@ public static class DecoupleCalibration
 
         for (int i = 0; i < n; i++)
         {
-            double d0 = -Math.Log10(Math.Max(r[i] / fr, 1e-10));
-            double d1 = -Math.Log10(Math.Max(g[i] / fg, 1e-10));
-            double d2 = -Math.Log10(Math.Max(b[i] / fb, 1e-10));
+            double d0 = FrameParams.DensityOf(r[i] / fr);
+            double d1 = FrameParams.DensityOf(g[i] / fg);
+            double d2 = FrameParams.DensityOf(b[i] / fb);
             double m = (d0 + d1 + d2) / 3.0;
             r[i] = d0 - m; g[i] = d1 - m; b[i] = d2 - m;
         }
