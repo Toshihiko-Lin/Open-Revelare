@@ -39,6 +39,7 @@ public partial class MainWindow : Window
             if (DataContext is MainViewModel vm)
             {
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
+                vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
                 {
                     if (args.PropertyName == nameof(MainViewModel.Histogram))
@@ -1701,6 +1702,8 @@ public partial class MainWindow : Window
         {
             var shown = new OpenRevelare.Core.ImageBuffer(
                 preview.Width, preview.Height, (float[])preview.Data.Clone());
+            // Plain step 4, not the roll's print-film emulation — see the negative view in
+            // MainViewModel: a print stock renders positives, and this strip is un-inverted film.
             OpenRevelare.Core.ColorPipeline.ToOutputSpace(shown.Data, Vm.CurrentOutputSpace);
             plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
         }
@@ -1901,6 +1904,25 @@ public partial class MainWindow : Window
         });
         string? path = files.FirstOrDefault()?.TryGetLocalPath();
         if (path != null) await Vm.LoadLccAsync(path);
+    }
+
+    /// <summary>
+    /// Asks for a print-film .cube. The view owns the dialog; the view-model owns what to do with
+    /// the answer, including telling the user when the file will not load.
+    /// </summary>
+    private async Task<string?> PickPrintLutFileAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("选择印片 LUT（.cube，需以 Cineon log 为输入）"),
+            AllowMultiple = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType(Loc.T("3D LUT (.cube)")) { Patterns = new[] { "*.cube" } },
+                new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
+            },
+        });
+        return files.FirstOrDefault()?.TryGetLocalPath();
     }
 
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)

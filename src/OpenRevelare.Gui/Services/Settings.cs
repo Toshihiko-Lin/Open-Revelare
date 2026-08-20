@@ -105,6 +105,16 @@ public static class Settings
         /// </summary>
         public bool SplitStripsOnImport { get; set; }
 
+        /// <summary>
+        /// Print-film cubes the user has picked, most recent first.
+        ///
+        /// Remembered because the app ships none — the stocks people want are licensed by their
+        /// vendors, not redistributable — so every roll would otherwise start with a file dialog
+        /// pointed at wherever Resolve or an ARRI download put them. The roll stores the path it
+        /// uses; this is only the picker's history.
+        /// </summary>
+        public List<string> RecentPrintLuts { get; set; } = new();
+
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
         public Models.ExportOptions Export { get; set; } = new();

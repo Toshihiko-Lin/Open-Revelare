@@ -198,6 +198,34 @@ public sealed class FrameParams
         }
     }
 
+    /// <summary>
+    /// The print-film emulation applied between Stage 1 and the output space — a path to a
+    /// <c>.cube</c> file, or empty for none.
+    ///
+    /// WHY THIS IS NOT AN OUTPUT SPACE. The picker used to carry "Kodak2383" as a
+    /// <see cref="ColorSpaceDef"/>, i.e. three chromaticity coordinates standing in for a print
+    /// stock. That was a category error and it was removed: a stock's look is per-channel density
+    /// curves plus cross-channel coupling, which no set of primaries can express. It is a
+    /// function of three variables, so a cube is the right shape for it and a gamut is not.
+    /// The two choices stay orthogonal — a roll picks a stock AND a space to write, because
+    /// after the emulation the picture still has to be encoded into something.
+    ///
+    /// WHY IT DOES NOT ADD ADJUSTMENT CONTROLS. In a DI suite the grade before the print
+    /// emulation is a separate log-domain stage (printer lights). Here that stage already exists
+    /// and is already on screen: it is <see cref="DMaxPerChannel"/> and
+    /// <see cref="DMinPerChannel"/>, whose distance is the roll's contrast and whose per-channel
+    /// differences are its colour balance. Adding a second set of log-domain sliders under
+    /// Stage 2 would put two differently-named controls on one degree of freedom — the exact
+    /// failure <see cref="DensityEndpoints"/> exists to prevent, and the one the Display tab
+    /// already refuses for colour balance. So Stage 2 is untouched by this feature: everything it
+    /// does happens AFTER the cube, in the display domain where its definitions hold.
+    ///
+    /// Stored as a path rather than a built-in name because the cubes cannot be redistributed
+    /// with the app — vendors license them individually — and because a path generalises to any
+    /// stock the user owns without this enum growing a case per film.
+    /// </summary>
+    public string PrintLut { get; set; } = "";
+
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
@@ -352,6 +380,7 @@ public sealed class FrameParams
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,
+        PrintLut = PrintLut,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,

@@ -343,7 +343,13 @@ public static class Stage2
         //
         // Note this converts primaries as well as applying the curve — the earlier version only
         // did the curve, because working and output were the same space by assumption.
-        ColorPipeline.ToOutputSpace(d, output);
+        //
+        // With a print-film emulation selected, the cube performs the display rendering instead:
+        // same entry (scene-linear working space), same exit (display-encoded output space), a
+        // stock's response in between. Everything below is unaffected — the perceptual ops need
+        // display-encoded data in the output space, and both routes deliver exactly that, which
+        // is why this feature adds no Stage-2 controls of its own.
+        ColorPipeline.ToOutputSpaceFor(d, cal);
 
         // ── Stage B: output space ────────────────────────────────────────────────
         var perceptual = cal.Clone();

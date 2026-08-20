@@ -646,7 +646,7 @@
                      exited in whatever 输出空间 named. It is a checkbox in the export dialog now. -->
                 <Border Grid.Row="2" Padding="8,5" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
@@ -655,7 +655,16 @@
                             <ComboBoxItem Content="{i18n:T 'Adobe RGB（宽色域）'}" />
                         </ComboBox>
 
-                        <Button Grid.Column="3" Name="ExportButton" Classes="primary" Click="OnExportClick"
+                        <!-- 胶片风格与输出空间并列，不并入其中：前者决定画面被渲染成什么样，
+                             后者决定它被装进哪个容器，两者正交。本软件不附带 LUT 文件——印片
+                             表征由各厂商授权，随附即是再分发；下拉里出现的厂商名来自用户自己
+                             文件的 TITLE。 -->
+                        <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
+                        <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
+                                  ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
+                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;需要以 Cineon log 为输入的 .cube 文件。本软件不附带：这类文件由各厂商单独授权。DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到；网上也有第三方重建的版本。&#10;&#10;选「无」即直通，与不使用本功能完全一致。属于胶卷参数，会保存进工程。'}" />
+
+                        <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
                                 ToolTip.Tip="{i18n:T '导出当前帧（Ctrl+E）'}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -663,7 +672,7 @@
                                 <TextBlock Text="{i18n:T '导出…'}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="4" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
+                        <Button Grid.Column="6" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
                                 CornerRadius="0,6,6,0" Padding="6,6" Margin="1,0,0,0"
                                 ToolTip.Tip="{i18n:T '整卷导出 / 印样'}">
                             <ctl:Icon Data="{StaticResource IcoChevron}" Width="12" Height="12"

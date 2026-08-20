@@ -168,6 +168,26 @@ public static class OutputRender
     }
 
     /// <summary>
+    /// Undoes <see cref="Encode"/> in place, taking encoded back to linear.
+    ///
+    /// The exact inverse, curve for curve, so an encode/decode pair is a true round trip. Needed
+    /// wherever a render arrives already encoded and has to be re-containered — the print-film
+    /// path, whose cube emits Rec709, is the current caller.
+    /// </summary>
+    public static void Decode(float[] data, ColorSpaceDef space)
+    {
+        if (space.Name.Equals("sRGB", StringComparison.OrdinalIgnoreCase)
+         || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase))
+        {
+            Srgb.ApplyInverseInPlace(data);
+            return;
+        }
+
+        float g = (float)EncodingGamma(space);
+        Parallel.For(0, data.Length, i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+    }
+
+    /// <summary>
     /// The display gamma each space's ICC profile declares. ACEScg is scene-linear and carries no
     /// encoding curve, so it stays linear (gamma 1). sRGB and Display P3 are absent because their
     /// TRC is piecewise, not a power curve — <see cref="Encode"/> routes them separately.

@@ -272,6 +272,13 @@ public static class RegionRender
         // mapping the result forward keeps the two consistent — reporting the requested ROI
         // instead would land the patch fractionally off and shimmer against the preview.
         outImg = Geometry.ApplyOrientation(outImg, cal.QuarterTurns, cal.FlipH, cal.FlipV);
+        // PLAIN step 4 — never the roll's print-film emulation, even when one is selected. This
+        // patch is un-inverted film, and a print stock characterises how a finished POSITIVE
+        // prints; running the negative through it renders a look over the very pixels the user
+        // opened this view to sample. It must also match ShowNegativeView, which composes the
+        // whole-frame version of this picture the same plain way — the patch and the preview
+        // underneath it are the same image at two resolutions, so a difference here shows up as
+        // the patch flashing a different colour wherever the user zooms.
         ColorPipeline.ToOutputSpace(outImg.Data, cal.ResolvedOutputSpace);
         return (outImg, OrientRoi(new Roi((double)x0 / frameW, (double)y0 / frameH,
                                           (double)w / frameW, (double)h / frameH), cal));

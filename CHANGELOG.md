@@ -1,6 +1,16 @@
 # OpenRevelare — 更新日志
 
-## v1.5.3（2026-08-20）
+## v1.6.0（2026-08-21）
+
+**新增**
+
+- **胶片风格**。在「输出空间」旁边选一张印片（如 Kodak 2383、Fujifilm 3513DI），画面就按那张
+  胶片的反差和色彩渲染。选「无」则和以前一样。
+
+  需要自备 `.cube` 文件，且必须是**以 Cineon log 为输入**的印片 LUT——软件不附带，这类文件
+  由各厂商单独授权。装了 DaVinci Resolve 的话，其安装目录 `LUT/Film Looks/` 下就有。
+
+  想调胶片之前的画面，去【整卷校准】拉 D_max / D_min。
 
 **修复**
 
@@ -20,6 +30,17 @@
   成品不满意，重跑一次【自动（整卷）】即可。
 
 ---
+
+**Added**
+
+- **Film look.** Pick a print stock (Kodak 2383, Fujifilm 3513DI, …) beside "output space" and the
+  picture is rendered with that film's contrast and colour. "None" renders exactly as before.
+
+  You supply the `.cube` yourself, and it must be a print LUT that takes **Cineon log** in — none
+  ship with the app, as these are licensed individually by their vendors. If you have DaVinci
+  Resolve, look under `LUT/Film Looks/` in its install directory.
+
+  To adjust the picture *before* the film, set D_max / D_min in roll calibration.
 
 **Fixed**
 

@@ -1352,6 +1352,13 @@ public partial class MainViewModel : ViewModelBase
         OutputIntent = OutputIntent.Basic,
         // Step-4 target: the space Stage 2 runs in and the file is written in.
         OutputSpace = OutputSpaces[_outputSpaceIndex].Name,
+        // The print-film emulation that runs INSIDE step 4. Like the output space it belongs to
+        // this snapshot rather than being read off the frame: this is the state the picker is
+        // showing, and the preview, the thumbnails and an export all have to render the same
+        // thing. Omitting it left the roll's frames carrying the LUT while every render built its
+        // parameters from here — so the preview stayed pass-through and moving to another frame
+        // wrote the pass-through value back over the roll.
+        PrintLut = _printLutIndex > 0 ? _printLutPaths[_printLutIndex] : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
@@ -1424,6 +1431,9 @@ public partial class MainViewModel : ViewModelBase
         // that. Leaving it off meant turning a sideways scan upright and then having the negative
         // flop back onto its side the moment the film-base tool was armed.
         disp = OrientForNegative(disp);
+        // Plain step 4, never the roll's print-film emulation: this buffer is a NEGATIVE. A print
+        // stock characterises how a finished positive prints, so feeding it un-inverted film would
+        // render a look nobody asked for over an image the user is only here to sample.
         ColorPipeline.ToOutputSpace(disp.Data, CurrentOutputSpace);
         PreviewImage = BitmapConvert.ToBitmap(disp);
     }
@@ -2905,6 +2915,11 @@ public partial class MainViewModel : ViewModelBase
         // contact-sheet dialog has to dirty the roll like any other change.
         Notes.PropertyChanged += (_, _) => MarkRollDirty();
         Loc.Changed += RetranslateText;
+        // Populate the film-look picker before anything binds to it. It was only ever filled on
+        // frame load, so with no roll open the collection was empty, the ComboBox had no row to
+        // select, and it rendered blank instead of 无（直通） — which is what an empty PrintLut
+        // actually means and what the pipeline is doing.
+        RebuildPrintLutList("");
     }
 
     /// <summary>
@@ -3755,6 +3770,7 @@ public partial class MainViewModel : ViewModelBase
         // Adopt the roll's saved step-4 target without writing it back or dirtying the roll —
         // this is loading, not choosing.
         SyncOutputSpace(p.ResolvedOutputSpace.Name);
+        SyncPrintLut(p.PrintLut);
         // Stage 1 — film base
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMinPerChannel = (double[])p.DMinPerChannel.Clone();
@@ -4201,6 +4217,180 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>The roll's output space — what an export will be written in.</summary>
     public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
+
+    // ══ 胶片风格（印片 LUT） ═══════════════════════════════════════════════════
+    //
+    // 与【输出空间】并列而不是并入其中，因为两者正交：LUT 决定画面被渲染成什么样，输出空间
+    // 决定它被装进哪个容器。曾经把 "Kodak2383" 当成一个 ColorSpaceDef 塞进输出空间下拉——
+    // 那是类型错误，三个色度坐标表达不了一张印片的响应，后来删掉了。
+    //
+    // 本软件不附带任何 LUT 文件。这些印片表征由各厂商自行授权，随附即是再分发；界面上出现的
+    // 厂商名一律来自用户自己文件里的 TITLE，不是我们的声明。
+
+    /// <summary>Cubes the picker offers, in order: 无 → 最近用过的 → 选择文件…</summary>
+    public ObservableCollection<string> PrintLutNames { get; } = new();
+
+    /// <summary>Full paths parallel to <see cref="PrintLutNames"/>; "" for 无.</summary>
+    private readonly List<string> _printLutPaths = new();
+
+    private int _printLutIndex;
+
+    /// <summary>
+    /// The roll's print-film emulation, as an index into <see cref="PrintLutNames"/>. The last
+    /// entry is the "choose a file" action rather than a stock, so selecting it opens a dialog and
+    /// the index lands wherever that ends up.
+    ///
+    /// Roll-uniform for the same reason the output space is: a strip whose frames used different
+    /// stocks would be a contact sheet of incomparable renders.
+    /// </summary>
+    public int PrintLutIndex
+    {
+        get => _printLutIndex;
+        set
+        {
+            if (value < 0 || value >= PrintLutNames.Count) return;
+
+            // The trailing "选择 .cube 文件…" row is a verb, not a choice.
+            if (value == PrintLutNames.Count - 1)
+            {
+                OnPropertyChanged(nameof(PrintLutIndex));   // snap the box back
+                _ = PickPrintLutAsync();
+                return;
+            }
+
+            if (_printLutIndex == value) return;
+            _printLutIndex = value;
+            ApplyPrintLut(_printLutPaths[value]);
+        }
+    }
+
+    /// <summary>What the selected entry is, shown under the picker.</summary>
+    public string PrintLutHint => _printLutIndex == 0
+        ? Loc.T("直通：反相结果直接转到输出空间。")
+        : Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。");
+
+    /// <summary>Writes the chosen cube to every frame and re-renders the roll.</summary>
+    private void ApplyPrintLut(string path)
+    {
+        foreach (RollFrame f in Frames) f.Params.PrintLut = path;
+        if (Frames.Count > 0) MarkRollDirty();
+
+        OnPropertyChanged(nameof(PrintLutIndex));
+        OnPropertyChanged(nameof(PrintLutHint));
+
+        // Thumbnails change too — this alters what each frame IS, not how it is shown.
+        foreach (RollFrame f in Frames) SetThumbnail(f, null);
+        RestartThumbnails();
+        ScheduleRender();
+    }
+
+    /// <summary>Rebuilds the picker from settings, selecting <paramref name="active"/>.</summary>
+    private void RebuildPrintLutList(string active)
+    {
+        // Selecting an EXISTING entry must not touch the collection. Clearing an ObservableCollection
+        // that a ComboBox is bound to drives its SelectedIndex to -1, and -1 renders as an empty
+        // box — so rebuilding on every frame load blanked the picker even though the roll's LUT
+        // was unchanged and still rendering. Frame switches are the common case and they never
+        // change the list, only which row is current.
+        int existing = _printLutPaths.Count == 0 ? -1
+            : string.IsNullOrWhiteSpace(active) ? 0
+            : _printLutPaths.FindIndex(1, Math.Max(_printLutPaths.Count - 2, 0),
+                                       p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0)
+        {
+            if (_printLutIndex != existing)
+            {
+                _printLutIndex = existing;
+                OnPropertyChanged(nameof(PrintLutIndex));
+                OnPropertyChanged(nameof(PrintLutHint));
+            }
+            return;
+        }
+
+        PrintLutNames.Clear();
+        _printLutPaths.Clear();
+
+        PrintLutNames.Add(Loc.T("无（直通）"));
+        _printLutPaths.Add("");
+
+        // A roll can name a cube that is not in this machine's history — a project from another
+        // computer, or a file picked before the list was trimmed. It still belongs in the list,
+        // otherwise the picker would show 无 while the render used a LUT.
+        var paths = new List<string>(Settings.Current.RecentPrintLuts);
+        if (!string.IsNullOrWhiteSpace(active)
+            && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))
+            paths.Insert(0, active);
+
+        foreach (string p in paths)
+        {
+            // The cube's own TITLE when it loads, so the vendor name on screen is the user's file
+            // describing itself. A file that has gone missing is still listed, marked, so the user
+            // can see WHY the roll stopped looking right instead of finding 无 selected.
+            string label;
+            try { label = PrintLuts.Validate(p).Title; }
+            catch { label = Loc.F($"{Path.GetFileNameWithoutExtension(p)}（文件缺失）"); }
+            PrintLutNames.Add(label);
+            _printLutPaths.Add(p);
+        }
+
+        PrintLutNames.Add(Loc.T("选择 .cube 文件…"));
+        _printLutPaths.Add("");
+
+        int i = _printLutPaths.FindIndex(1, _printLutPaths.Count - 2,
+                                         p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
+        _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0 : (i < 0 ? 0 : i);
+
+        // Posted rather than raised inline. The collection change above reaches the ComboBox
+        // first and resets its selection to -1; a notification raised in the same turn is
+        // overwritten by that reset and the box is left blank. Queuing it puts the selection
+        // back after the items have settled.
+        OnPropertyChanged(nameof(PrintLutIndex));
+        OnPropertyChanged(nameof(PrintLutHint));
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(PrintLutIndex));
+            OnPropertyChanged(nameof(PrintLutHint));
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Adopt a roll's saved cube into the picker. Loading, not choosing — not dirty.</summary>
+    private void SyncPrintLut(string path) => RebuildPrintLutList(path ?? "");
+
+    /// <summary>
+    /// Asks for a .cube and adopts it. Validation happens here, where there is a user to tell:
+    /// the render path silently degrades to pass-through, which is right for rendering and wrong
+    /// for the moment someone hands us a file.
+    /// </summary>
+    public async Task PickPrintLutAsync()
+    {
+        if (PickFileAsync is null) return;
+        string? path = await PickFileAsync();
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        try
+        {
+            PrintLuts.Forget(path);
+            CubeLut lut = PrintLuts.Validate(path);
+            StatusText = Loc.F($"已载入胶片风格：{lut.Title}（{lut.Size}³）。");
+        }
+        catch (Exception ex)
+        {
+            StatusText = Loc.F($"无法载入 LUT：{ex.Message}");
+            return;
+        }
+
+        var recents = Settings.Current.RecentPrintLuts;
+        recents.RemoveAll(p => p.Equals(path, StringComparison.OrdinalIgnoreCase));
+        recents.Insert(0, path);
+        while (recents.Count > 8) recents.RemoveAt(recents.Count - 1);
+        Settings.Save();
+
+        RebuildPrintLutList(path);
+        ApplyPrintLut(path);
+    }
+
+    /// <summary>Supplied by the view: shows a .cube open dialog, null if cancelled.</summary>
+    public Func<Task<string?>>? PickFileAsync { get; set; }
 
     /// <summary>What the selected output space is for, shown under the picker.</summary>
     public string OutputSpaceHint => OutputSpaces[_outputSpaceIndex].Name switch

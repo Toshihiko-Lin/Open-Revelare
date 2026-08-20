@@ -83,6 +83,7 @@ static int Run(string[] args)
             case "--dump-preinv": flags.Add("dump-preinv"); break;
             case "--wb-target": opts["wb-target"] = Next(args, ref i, a); break;
             case "--color-space": opts["color-space"] = Next(args, ref i, a); break;
+            case "--print-lut": opts["print-lut"] = Next(args, ref i, a); break;
             case "--description": opts["description"] = Next(args, ref i, a); break;
             case "--sprocket": opts["sprocket"] = Next(args, ref i, a); break;
             case "-h": case "--help": PrintUsage(); return 0;
@@ -167,6 +168,25 @@ static int Run(string[] args)
             return 2;
         }
         cal.OutputSpace = target.Name;
+    }
+
+    // --print-lut names a print-film cube applied between the inversion and the output space.
+    // Validated here rather than left to the render path, which deliberately degrades a bad LUT
+    // to pass-through: silently exporting an un-emulated file would be the wrong answer for a
+    // batch run that asked for one.
+    if (opts.TryGetValue("print-lut", out var lutPath))
+    {
+        try
+        {
+            CubeLut lut = PrintLuts.Validate(lutPath);
+            Console.WriteLine($"print LUT: {lut.Title} ({lut.Size}^3, {lut.InputEncoding} in)");
+            cal.PrintLut = lutPath;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"--print-lut: {ex.Message}");
+            return 2;
+        }
     }
 
     try
@@ -597,6 +617,9 @@ static void PrintUsage()
         "  --grade <v>                 density-domain contrast (paper grade)\n" +
         "  --pivot <v>                 mid-tone anchor\n" +
         "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
+        "  --color-space <name>        step-4 target / output space (default: sRGB)\n" +
+        "  --print-lut <path.cube>     print-film emulation; a 3D LUT taking Cineon log in.\n" +
+        "                              Not bundled — these are licensed by their vendors.\n" +
         "  --lcc <path>                LCC flat-field reference (RAW/TIFF); per-channel divide\n" +
         "  --lcc-linear                treat the LCC TIFF as linear (default: sRGB gamma)\n" +
         "  --decouple-matrix <9 vals>  Path-A decouple 3×3 (row-major m00,m01,...,m22)\n" +

@@ -107,4 +107,77 @@ public static class ColorPipeline
         OutputRender.Encode(data, output);
     }
 
+    /// <summary>
+    /// Step 4 as the roll has configured it — with its print-film emulation if it names one,
+    /// plain otherwise.
+    ///
+    /// The single entry point for every caller that renders a finished scene-linear positive for
+    /// display or export. Callers used to reach for <see cref="ToOutputSpace"/> directly from
+    /// four places (the region renderer, two preview paths, Stage 2); with a second route through
+    /// step 4 that would be four places to remember the fork, and the preview would silently
+    /// disagree with the export the first time one was missed.
+    /// </summary>
+    public static void ToOutputSpaceFor(float[] data, FrameParams cal)
+    {
+        ColorSpaceDef output = cal.ResolvedOutputSpace;
+        if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
+            ToOutputSpaceVia(data, lut, output);
+        else
+            ToOutputSpace(data, output);
+    }
+
+    /// <summary>
+    /// The space a print-film cube renders INTO. Resolve's film looks — and every other cube of
+    /// this kind — are authored to land on Rec709 with a 2.4 display gamma, which their headers
+    /// state outright.
+    ///
+    /// Hard-coded rather than configurable because it is a fact about the cube, not a choice: a
+    /// stock emulation has one output by construction, and offering a picker would invite the
+    /// user to declare something the file already decided.
+    /// </summary>
+    private static ColorSpaceDef LutOutput => ColorSpaces.Rec709;
+
+    /// <summary>
+    /// Step 4 with a print-film emulation in the middle: scene-linear positive → Cineon log →
+    /// the cube → <paramref name="output"/>.
+    ///
+    /// WHY THE CUBE REPLACES THE GAMUT MAP RATHER THAN FOLLOWING IT. A print stock emulation IS a
+    /// display rendering transform — its shoulder, toe and cross-channel coupling are precisely a
+    /// tone and gamut compression, fitted to a real stock. Running
+    /// <see cref="GamutMapping.Desaturate"/> before it would compress the picture twice, once by
+    /// a generic per-pixel rule and again by the stock's own curve, and the stock would be fed a
+    /// signal already stripped of the saturation it was characterised against. So the conversion
+    /// into the cube's primaries is a plain matrix and the cube does the rest.
+    ///
+    /// The exit converts the cube's Rec709 output into the roll's chosen space. When that space
+    /// is Rec709 the whole exit is a no-op; otherwise it is a decode, a matrix and a re-encode —
+    /// the same round trip <see cref="OutputRender.FromSrgbEncoded"/> performs, for the same
+    /// reason (the render is finished, the container is not).
+    /// </summary>
+    public static void ToOutputSpaceVia(float[] data, CubeLut lut, ColorSpaceDef output)
+    {
+        // Into the cube's own primaries. Rec709 shares sRGB's, so for the common case this is the
+        // same matrix the pass-through path applies — what differs is what happens after it.
+        OutputRender.Convert(data, Working, LutOutput, GamutMapping.Clip);
+
+        switch (lut.InputEncoding)
+        {
+            case LutInputEncoding.Cineon:
+                LogEncoding.ToCineon(data);
+                break;
+            default:
+                throw new NotSupportedException($"未支持的 LUT 输入编码：{lut.InputEncoding}");
+        }
+
+        lut.Apply(data);
+
+        // The cube's output is display-encoded Rec709. Re-container it if the roll wants
+        // something else; a Rec709 roll keeps the cube's values untouched.
+        if (output != LutOutput)
+        {
+            OutputRender.Decode(data, LutOutput);
+            OutputRender.Convert(data, LutOutput, output);
+            OutputRender.Encode(data, output);
+        }
+    }
 }
