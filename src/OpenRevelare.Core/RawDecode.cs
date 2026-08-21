@@ -23,6 +23,12 @@ public static class RawDecode
     // misparse anything. A too-narrow list is the damaging direction — an unlisted RAW goes to
     // TiffIO, and since most RAW formats ARE TIFF containers it may not fail cleanly but decode
     // to a wrong image. Hence: err towards listing.
+    //
+    // WHAT THAT REASONING MISSED: "LibRaw rejects it cleanly" is only harmless when the file has
+    // nowhere else to go. For .fff it does — a Flextight scanner export is a plain RGB TIFF that
+    // TiffIO reads perfectly — so listing it here turned a readable file into a failed import
+    // rather than into a caught error. Extensions with that split live in ContentSniffExts below
+    // and are routed by content; the "err towards listing" rule still holds for everything else.
     private static readonly HashSet<string> RawExts = new(StringComparer.OrdinalIgnoreCase)
     {
         ".arw", ".srf", ".sr2",                                  // Sony
@@ -45,13 +51,119 @@ public static class RawDecode
         ".bay",                                                  // Casio
     };
 
-    /// <summary>True when the path's extension is a known camera RAW format.</summary>
-    public static bool IsRawExtension(string path) => RawExts.Contains(Path.GetExtension(path));
+    /// <summary>Extensions where the name alone does NOT settle the routing, because one vendor
+    /// spends it on two unrelated things. <c>.fff</c> is both an Imacon/Hasselblad digital-back
+    /// RAW and a Flextight SCANNER export — and the scanner's is an ordinary uncompressed 16-bit
+    /// RGB TIFF with no CFA to demosaic. LibRaw rejects that outright (verified against 0.21.5,
+    /// the version shipped here: <c>-2 Unsupported file format or not RAW file</c>), so routing
+    /// it by extension made a perfectly readable file fail to import. These get
+    /// <see cref="LooksLikeFullColorTiff"/> asked of them instead.</summary>
+    private static readonly HashSet<string> ContentSniffExts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".fff",
+    };
+
+    /// <summary>
+    /// True when the file should be handed to LibRaw rather than to TiffIO.
+    ///
+    /// Extension decides it for everything except <see cref="ContentSniffExts"/>, where the same
+    /// extension covers both a real RAW and a finished RGB raster and only the CONTENT separates
+    /// them. Sniffing is deliberately confined to that short list: it costs a file open, and for
+    /// every other extension the name is already unambiguous.
+    /// </summary>
+    public static bool IsRawExtension(string path)
+    {
+        string ext = Path.GetExtension(path);
+        if (!RawExts.Contains(ext)) return false;
+        if (!ContentSniffExts.Contains(ext)) return true;
+        return !LooksLikeFullColorTiff(path);
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> is a baseline TIFF already carrying full per-pixel RGB —
+    /// i.e. nothing for a RAW decoder to do.
+    ///
+    /// Reads IFD0 only. The test is PhotometricInterpretation == RGB(2) with SamplesPerPixel == 3,
+    /// which a Bayer RAW can never satisfy: CFA files declare photometric 32803 (CFA) or 34892
+    /// (LinearRaw) and one sample per pixel. Most camera RAWs are TIFF containers, so "parses as
+    /// TIFF" alone would be far too weak a signal — the photometric tag is the discriminating one.
+    ///
+    /// Anything unreadable, unexpected or ambiguous returns FALSE, i.e. falls back to the RAW
+    /// path. That direction is the safe one: LibRaw rejects a non-RAW cleanly, whereas TiffIO
+    /// handed a Bayer file would decode it to a wrong image without erroring.
+    /// </summary>
+    public static bool LooksLikeFullColorTiff(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> head = stackalloc byte[8];
+            if (fs.Read(head) != 8) return false;
+
+            bool big = head[0] == 'M' && head[1] == 'M';
+            if (!big && !(head[0] == 'I' && head[1] == 'I')) return false;
+            if (ReadU16(head[2..4], big) != 42) return false;       // 43 == BigTIFF, not handled here
+
+            long ifd = ReadU32(head[4..8], big);
+            if (ifd < 8 || ifd >= fs.Length) return false;
+            fs.Seek(ifd, SeekOrigin.Begin);
+
+            Span<byte> buf = stackalloc byte[12];
+            if (fs.Read(buf[..2]) != 2) return false;
+            int count = ReadU16(buf[..2], big);
+            if (count is <= 0 or > 512) return false;
+
+            int photometric = -1, samples = -1;
+            for (int i = 0; i < count; i++)
+            {
+                if (fs.Read(buf) != 12) return false;
+                int tag = ReadU16(buf[..2], big);
+                if (tag is not (262 or 277)) continue;
+
+                // Both are SHORT(3) or LONG(4), count 1, so the value sits inline in the last
+                // four bytes — left-aligned, hence the leading two bytes for a SHORT.
+                int type = ReadU16(buf[2..4], big);
+                int v = type switch
+                {
+                    3 => ReadU16(buf[8..10], big),
+                    4 => (int)ReadU32(buf[8..12], big),
+                    _ => -1,
+                };
+                if (tag == 262) photometric = v; else samples = v;
+                if (photometric >= 0 && samples >= 0) break;
+            }
+
+            return photometric == 2 && samples == 3;
+        }
+        catch (Exception)
+        {
+            return false;   // unreadable → RAW path, where LibRaw reports the real problem
+        }
+    }
+
+    private static int ReadU16(ReadOnlySpan<byte> b, bool big) =>
+        big ? (b[0] << 8) | b[1] : (b[1] << 8) | b[0];
+
+    private static uint ReadU32(ReadOnlySpan<byte> b, bool big) => big
+        ? ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3]
+        : ((uint)b[3] << 24) | ((uint)b[2] << 16) | ((uint)b[1] << 8) | b[0];
 
     /// <summary>The RAW extensions above, for callers that build file-dialog filters or scan a
     /// folder. Exposed so the GUI's lists derive from this one rather than restating it — three
     /// hand-copied lists is how <c>.3fr</c> ended up decodable but unselectable.</summary>
     public static IReadOnlyCollection<string> RawExtensions => RawExts;
+
+    /// <summary>
+    /// True when the path's extension is on the RAW list, WITHOUT looking at the file's content.
+    ///
+    /// Distinct from <see cref="IsRawExtension"/>, which additionally sniffs the sniff-list
+    /// extensions and is the one routing should use. This is for callers that need to know
+    /// "could this extension have been RAW?" — notably telling a scanner export apart from a file
+    /// that was never a RAW candidate at all. Exposed because <see cref="RawExtensions"/> is an
+    /// <c>IReadOnlyCollection</c>, so <c>Contains</c> on it is a case-SENSITIVE linear scan, and
+    /// cameras write the upper-case form constantly.
+    /// </summary>
+    public static bool HasRawExtension(string path) => RawExts.Contains(Path.GetExtension(path));
 
     /// <summary>FBDD Bayer-domain chroma noise reduction (pre-demosaic). Port of raw_decode.py's
     /// FBDD_OFF/LIGHT/FULL. Values match LibRaw's fbdd_noiserd (0/1/2).</summary>

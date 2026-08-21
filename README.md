@@ -209,6 +209,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 | | |
 |---|---|
 | **RAW 输入** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ 等（LibRaw） |
+| **扫描仪输入** | 哈苏 Flextight `.fff`（按内容识别，自动线性化） |
 | **其他输入** | TIFF / JPEG / PNG |
 | **导出** | 16-bit TIFF、JPEG，三种输出色彩空间（另可导出场景线性 ACEScg），嵌入的 ICC 与实际像素一致 |
 

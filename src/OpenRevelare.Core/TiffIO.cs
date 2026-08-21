@@ -27,6 +27,42 @@ public static class TiffIO
     private static Tiff.TiffExtendProc? _parentExtender;
     private static bool _extenderRegistered;
 
+    /// <summary>
+    /// Silences LibTiff's WARNING stream while leaving errors untouched.
+    ///
+    /// A Flextight .fff is a valid TIFF carrying Hasselblad's private tags, and LibTiff announces
+    /// each one it does not recognise — six lines per open (tags 34152 / 46277 / 46279 / 50457 /
+    /// 50458, plus "tags are not sorted in ascending order"). Nothing is wrong, and the file is
+    /// read correctly, but the noise repeats on every preview and every export, and it reads to a
+    /// user as though their scan were damaged.
+    ///
+    /// Only <see cref="TiffErrorHandler.WarningHandler"/> is overridden. The error handlers are
+    /// deliberately left to the base implementation: a genuine failure must stay visible, and a
+    /// handler that swallowed both would hide the diagnostics that make a broken file
+    /// debuggable.
+    /// </summary>
+    private sealed class WarningSuppressor : TiffErrorHandler
+    {
+        public override void WarningHandler(Tiff tif, string method, string format, params object[] args) { }
+        public override void WarningHandlerExt(Tiff tif, object clientData, string method, string format, params object[] args) { }
+    }
+
+    private static bool _warningsSuppressed;
+
+    /// <summary>
+    /// Install <see cref="WarningSuppressor"/> once per process.
+    ///
+    /// LibTiff's handler is global rather than per-file, so this is set up on first use and left
+    /// in place — swapping it around individual opens would race as soon as two decodes overlap,
+    /// which they routinely do (see ImageIo's decode gate).
+    /// </summary>
+    private static void SuppressLibTiffWarnings()
+    {
+        if (_warningsSuppressed) return;
+        _warningsSuppressed = true;
+        Tiff.SetErrorHandler(new WarningSuppressor());
+    }
+
     private static void RegisterUserCommentTag()
     {
         if (_extenderRegistered) return;
@@ -82,11 +118,11 @@ public static class TiffIO
     /// plain sRGB inverse and bypasses the profile entirely, preserving the old
     /// caller contract; otherwise the profile's own curves and matrix are used.
     /// </summary>
-    private static IccTransform ResolveIcc(Tiff tif, bool inputIsSrgb)
+    private static IccTransform ResolveIcc(Tiff tif, bool inputIsSrgb, string path)
     {
         if (inputIsSrgb) return default;
         byte[]? icc = ReadIccBytes(tif);
-        if (icc is null) return default;
+        if (icc is null) return FlextightTransform(path);
 
         // Step 1 — per-channel TRC. Skipped when every channel is already identity,
         // so a genuinely linear scan keeps its exact sample values.
@@ -95,6 +131,27 @@ public static class TiffIO
 
         // Step 2 — device→working-space primaries. Null (skipped) on LUT-only profiles.
         return new IccTransform { Luts = luts, Matrix = IccRead.ReadMatrix(icc) };
+    }
+
+    /// <summary>
+    /// Fallback for a file with NO embedded ICC: recover the transfer function from a Flextight
+    /// scanner's own settings block if that is what this is.
+    ///
+    /// Only reached when <see cref="ReadIccBytes"/> came back empty, so it cannot override a real
+    /// profile. A Flextight .fff claims <c>EmbedProfile = true</c> and then embeds nothing, which
+    /// is precisely the case that used to be read as "already linear" — see
+    /// <see cref="FlextightMeta"/> for what that costs.
+    ///
+    /// Only the TRC is filled in. No matrix is applied: the file names its space
+    /// "Negative RGB standard" but carries no primaries for it, and inventing a matrix would put
+    /// an uncharacterised guess in the colour path. Gamma is declared and therefore honoured;
+    /// primaries are not declared and therefore left alone.
+    /// </summary>
+    private static IccTransform FlextightTransform(string path)
+    {
+        var meta = FlextightMeta.Read(path);
+        if (!meta.HasEncodingGamma) return default;
+        return new IccTransform { Luts = FlextightMeta.BuildGammaLuts(meta.Gamma!.Value) };
     }
 
     /// <summary>Apply the resolved ICC transform to one pixel, in place.</summary>
@@ -124,6 +181,7 @@ public static class TiffIO
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
     {
+        SuppressLibTiffWarnings();
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF: {path}");
 
@@ -141,7 +199,7 @@ public static class TiffIO
         if (spp < 1)
             throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
 
-        IccTransform icc = ResolveIcc(tif, inputIsSrgb);
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path);
 
         var data = new float[w * h * 3];
         int scanlineSize = tif.ScanlineSize();
@@ -191,6 +249,7 @@ public static class TiffIO
     /// <summary>Pixel dimensions from the header alone — no image data is decoded.</summary>
     public static (int Width, int Height) ReadTiffSize(string path)
     {
+        SuppressLibTiffWarnings();
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF: {path}");
         return (tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt(),
@@ -216,6 +275,7 @@ public static class TiffIO
     public static ImageBuffer LoadTiffRegion(string path, (double X, double Y, double W, double H) rect,
                                              bool inputIsSrgb, int maxEdge)
     {
+        SuppressLibTiffWarnings();
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF: {path}");
 
@@ -244,7 +304,7 @@ public static class TiffIO
             while (Math.Max(cw, ch) / (factor + 1) >= maxEdge) factor++;
         int outW = Math.Max(1, cw / factor), outH = Math.Max(1, ch / factor);
 
-        IccTransform icc = ResolveIcc(tif, inputIsSrgb);
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path);
 
         var acc = new float[outW * outH * 3];
         var counts = new int[outW * outH];

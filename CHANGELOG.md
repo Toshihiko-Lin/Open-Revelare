@@ -6,27 +6,24 @@
 
 **新增**
 
-- **新增【胶片风格】**。可以在【输出空间】旁边选一张印片，或导入自定义 film print LUT。
-  内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，装好即用。
+- **新增【胶片风格】**。可以在【输出空间】旁边选一张印片，或导入自定义 film print LUT。内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，装好即用。
 
-- **新增 LUT 文件夹**。把 `.cube` 复制进去，重启后自动出现在【胶片风格】里，不用一个个
-  「选择文件…」。菜单【帮助 → 打开 LUT 文件夹】会创建并打开它。
+- **新增 LUT 文件夹**。把 `.cube` 复制进去，重启后自动出现在【胶片风格】里，不用一个个「选择文件…」。菜单【帮助 → 打开 LUT 文件夹】会创建并打开它。
 
 - **扫描件分格现在可以识别双列**。平板扫描仪的片夹一次能放好几条片——6×12 的一版就是两列各六格——现在每一条都会被识别并各自独立分格。
+
+- **新增哈苏 Flextight 扫描仪 `.fff` 支持**。Flextight 导出的 `.fff` 现在可以直接导入。这类文件虽然用的是相机 RAW 的扩展名，实际是扫描仪出的 RGB 图像，程序会按文件内容自动判断该走哪条路——同名的哈苏数码后背 RAW 不受影响，照旧交给 RAW 解码器。扫描仪出的 `.fff` 也和扫描 TIFF 一样会进入分格流程，一次扫一整条片可以直接拆成单格。
+
+  程序会读取扫描时写在文件里的 gamma 设置来还原线性光。FlexColor 声称给 `.fff` 嵌了 ICC 但实际并没有，此前这类文件会被当成已经是线性的，导致密度整体偏低约一半。
 
 
 **修复**
 
-- **修复了宽色域输出空间预览颜色不对的问题**。选 Display P3 或 Adobe RGB 时，预览画面此前
-  被当成 sRGB 直接送屏，三个平台各显示成不一样的结果——macOS 上尤其明显，会明显过饱和，
-  因为系统会把这些数值当 sRGB 再转一次。现在预览会声明自己的色彩空间并正确转换，三平台
-  一致，也与导出文件一致。导出文件本身一直是正确的，不受影响。
+- **修复了宽色域输出空间预览颜色不对的问题**。
 
-  注意：预览窗口本身仍受限于 sRGB（Avalonia 框架限制，见 AvaloniaUI/Avalonia#8450），
-  超出 sRGB 的颜色在宽色域屏幕上仍然看不到，需要以导出文件为准。
+  注意：预览窗口本身仍受限于 sRGB（Avalonia 框架限制，见 AvaloniaUI/Avalonia#8450），超出 sRGB 的颜色在宽色域屏幕上仍然看不到，需要以导出文件为准。
 
-- **修复了某些源文件通道值为 0 时颜色不对的问题**。齿孔黑边、扫描件黑边、部分相机 RAW 的
-  填充边此前会出现本不该有的偏色，现在正确地渲染为白。
+- **修复了某些源文件通道值为 0 时颜色不对的问题**。齿孔黑边、扫描件黑边、部分相机 RAW 的填充边此前会出现本不该有的偏色，现在正确地渲染为白。
 
 - **修复了【自动白点】与【自动（整卷）】在同一张片子上给出不同亮端的问题**。
 
@@ -37,6 +34,8 @@
 - **修复了重开工程后分格卷第一帧预裁切失效的问题**。
 
 - **理论上修复了 macOS 上使用裁切工具会闪退的问题**。
+
+- **修复了打开哈苏 `.fff` 时刷屏的无害警告**。这类文件带有哈苏的私有标记，此前每打开一次都会往控制台打一串看着像出错的提示，实际文件读取完全正常。真正的读取错误仍会照常报出。
 
 **改进**
 
@@ -54,23 +53,21 @@ new, along with a batch of related fixes.
 
 **Added**
 
-- **New: film look.** Pick a print stock beside "output space", or import your own film print
-  LUT. Rec709 Kodak 2383 D65 and Rec709 Fujifilm 3513DI D65 are built in and ready to use.
+- **New: film look.** Pick a print stock beside "output space", or import your own film print LUT. Rec709 Kodak 2383 D65 and Rec709 Fujifilm 3513DI D65 are built in and ready to use.
 
-- **New: a LUT folder.** Copy `.cube` files into it and they appear in 【胶片风格】 on the next
-  start, instead of being picked one at a time. Help → "打开 LUT 文件夹" creates and opens it.
+- **New: a LUT folder.** Copy `.cube` files into it and they appear in 【胶片风格】 on the next start, instead of being picked one at a time. Help → "打开 LUT 文件夹" creates and opens it.
 
-- **Scan splitting now recognises two-column scans.** A flatbed holder takes several strips at
-  once — a 6×12 sheet is two columns of six — and every strip is now detected and split on its own.
+- **Scan splitting now recognises two-column scans.** A flatbed holder takes several strips at once — a 6×12 sheet is two columns of six — and every strip is now detected and split on its own.
+
+- **New: Hasselblad Flextight `.fff` scanner support.** A `.fff` exported by a Flextight can now be imported directly. These files borrow a camera-RAW extension but hold a scanner's RGB image, so the format is decided by the file's content — Hasselblad digital-back RAW of the same name is unaffected and still goes to the RAW decoder. A scanner `.fff` also goes through frame splitting like a scan TIFF, so a whole strip in one file can be cut into single frames.
+
+  The gamma the scanner recorded in the file is read back to recover linear light. FlexColor claims to embed an ICC profile in a `.fff` and does not actually write one, so these files were previously taken to be linear already, which put the whole density scale low by about half.
 
 **Fixed**
 
-- **Fixed wrong colour where a source file has a channel at zero.** Sprocket edges, scan borders
-  and the padding some camera RAWs carry showed a colour cast they should not have; these now
-  render as white.
+- **Fixed wrong colour where a source file has a channel at zero.** Sprocket edges, scan borders and the padding some camera RAWs carry showed a colour cast they should not have; these now render as white.
 
-- **Fixed "Auto white point" and "Auto (whole roll)" giving different highlight ends on the same
-  frame.**
+- **Fixed "Auto white point" and "Auto (whole roll)" giving different highlight ends on the same frame.**
 
 - **Fixed smart white balance pushing the picture into overexposure.**
 
@@ -79,6 +76,8 @@ new, along with a batch of related fixes.
 - **Fixed the first frame of a split roll losing its pre-crop after reopening the project.**
 
 - **Should fix the crop tool crashing on macOS.**
+
+- **Fixed a wall of harmless warnings when opening a Hasselblad `.fff`.** These files carry Hasselblad's private tags, and every open used to print a run of error-looking messages to the console even though the file read correctly. Real read errors are still reported.
 
 **Improved**
 

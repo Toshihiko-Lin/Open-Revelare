@@ -212,6 +212,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 | | |
 |---|---|
 | **RAW input** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ etc. (LibRaw) |
+| **Scanner input** | Hasselblad Flextight `.fff` (detected by content, linearised automatically) |
 | **Other input** | TIFF / JPEG / PNG |
 | **Export** | 16-bit TIFF, JPEG, three output colour spaces (plus a scene-linear ACEScg export); the embedded ICC matches the pixels |
 

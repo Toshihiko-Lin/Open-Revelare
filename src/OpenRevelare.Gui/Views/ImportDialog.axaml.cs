@@ -32,8 +32,23 @@ public partial class ImportDialog : Window
     private static readonly HashSet<string> ScanExt = new(StringComparer.OrdinalIgnoreCase)
     { ".tif", ".tiff" };
 
-    /// <summary>True when <paramref name="path"/> is a scanner TIFF rather than a camera RAW.</summary>
-    public static bool IsScan(string path) => ScanExt.Contains(System.IO.Path.GetExtension(path));
+    /// <summary>
+    /// True when <paramref name="path"/> is scanner output rather than a camera RAW — i.e. a file
+    /// that may hold a whole strip and so earns the split pre-pass.
+    ///
+    /// Extension settles it for TIFF, but <c>.fff</c> is written by BOTH a Flextight scanner and
+    /// an Imacon digital back, and only one of those can hold several frames. That is the same
+    /// split <see cref="RawDecode.IsRawExtension"/> already resolves by reading the file's
+    /// photometric tag, so the answer is taken from there rather than decided a second time:
+    /// whatever is NOT routed to LibRaw is, by definition, the scanner raster.
+    /// </summary>
+    public static bool IsScan(string path)
+    {
+        if (ScanExt.Contains(System.IO.Path.GetExtension(path))) return true;
+        // A RAW extension that content-sniffing rejected as RAW is a scanner export (today only
+        // .fff reaches this). Anything the decoder still claims is one frame per file.
+        return RawDecode.HasRawExtension(path) && !RawDecode.IsRawExtension(path);
+    }
 
     internal static readonly string[] FormatPresets =
     {
