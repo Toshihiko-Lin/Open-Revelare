@@ -3542,17 +3542,38 @@ public partial class MainViewModel : ViewModelBase
 
         // Rebuild the roll (caches already cleared above, before calibration warmed them).
         _prevFrame = null;
+        // Same guard LoadRollAsync raises, and for the same reason: rebuilding Frames pushes the
+        // strip's two-way SelectedItem binding back into CurrentFrame, re-entering
+        // OnCurrentFrameChanged while the controls still hold the OUTGOING roll's state. Clearing
+        // _prevFrame is not enough — the binding's own null-then-reselect sets it again, and the
+        // reselect's fold then stamps the incoming frame 1 with the old roll's _cropRect (null on
+        // an ordinary roll). On a reopened SPLIT scan that is frame 1's pre-crop, erased before it
+        // is ever applied. This flag is the half of the guard that covers it (see CommitLiveParams).
+        _paramsLoaded = false;
         _pendingSprocketPrompt = false;
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
-        Frames.Clear();
-        foreach (Project.Frame pf in data.Frames)
+        // Rebuild under the reorder guard, so the strip's binding cannot start a switch MID-build.
+        // Frames.Clear() pushes null through SelectedItem and the first Frames.Add makes the
+        // ListBox auto-select it and push it straight back — a switch that would decode frame 1
+        // while _splitPaths still describes the OUTGOING roll, i.e. without the region path, and
+        // that the deliberate assignment below could not supersede: CurrentFrame would already
+        // hold that very frame, so [ObservableProperty]'s equality check makes the write a no-op
+        // and OnCurrentFrameChanged never fires again. Frame 1 kept the whole scan, un-split.
+        _reordering = true;
+        try
         {
-            FrameParams fp = pf.Params;
-            fp.DecoupleMatrix = dm; fp.DecoupleMode = DecoupleMode.Linear; fp.DecoupleChromaMatrix = cm;
-            fp.LccFlatField = lcc;   // roll-uniform (matches import); global toggle gates it
-            Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
+            Frames.Clear();
+            foreach (Project.Frame pf in data.Frames)
+            {
+                FrameParams fp = pf.Params;
+                fp.DecoupleMatrix = dm; fp.DecoupleMode = DecoupleMode.Linear; fp.DecoupleChromaMatrix = cm;
+                fp.LccFlatField = lcc;   // roll-uniform (matches import); global toggle gates it
+                Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
+            }
+            CurrentFrame = null;   // so the assignment below is a real change, not a no-op
         }
+        finally { _reordering = false; }
         LccEnabled = lcc is not null;
         RefreshSplitPaths();        // reopened split rolls get the sharp region previews too
         IsBusy = false;
