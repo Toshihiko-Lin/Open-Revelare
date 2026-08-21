@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace OpenRevelare.Core;
 
@@ -20,6 +21,52 @@ public static class PrintLuts
     private static readonly ConcurrentDictionary<string, CubeLut?> Cache = new();
 
     /// <summary>
+    /// Print stocks shipped inside the assembly, keyed by the sentinel a project stores.
+    ///
+    /// WHY A SENTINEL AND NOT A PATH. A built-in has no stable path: it lives inside the
+    /// assembly, and the assembly moves with the install. Storing one would make a project
+    /// unopenable on another machine — exactly the failure the picker already works around for
+    /// user cubes ("文件缺失"). A sentinel names the stock rather than a location, so a roll
+    /// calibrated here renders the same anywhere the app is installed.
+    ///
+    /// The leading ':' cannot begin a real path on either platform, so a sentinel can never
+    /// collide with a file the user picked, and older projects — which only ever stored real
+    /// paths — are unaffected.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Id, string Name)> Builtins = new[]
+    {
+        (":kodak-2383",      "Kodak 2383"),
+        (":fujifilm-3513di", "Fujifilm 3513DI"),
+    };
+
+    /// <summary>Whether <paramref name="path"/> names a built-in rather than a file on disk.</summary>
+    public static bool IsBuiltin(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && path[0] == ':' && FindBuiltin(path) is not null;
+
+    private static string? FindBuiltin(string path)
+    {
+        foreach ((string id, _) in Builtins)
+            if (id.Equals(path, StringComparison.OrdinalIgnoreCase)) return id;
+        return null;
+    }
+
+    /// <summary>
+    /// Loads a built-in from the embedded resource named after its sentinel. Throws like
+    /// <see cref="CubeLut.Load"/> does, so <see cref="Validate"/> can report a broken build the
+    /// same way it reports a broken file.
+    /// </summary>
+    private static CubeLut LoadBuiltin(string id)
+    {
+        string name = $"OpenRevelare.Core.Assets.Luts.{id[1..]}.cube";
+        var asm = typeof(PrintLuts).Assembly;
+        using Stream? stream = asm.GetManifestResourceStream(name)
+            ?? throw new InvalidDataException($"内置 LUT 缺失：{name}");
+        using var reader = new StreamReader(stream);
+        string fallback = Builtins.First(b => b.Id == id).Name;
+        return CubeLut.Parse(reader, fallback);
+    }
+
+    /// <summary>
     /// The cube for <paramref name="path"/>, or null when the path is empty (pass-through) or the
     /// file cannot be read.
     ///
@@ -32,7 +79,7 @@ public static class PrintLuts
         if (string.IsNullOrWhiteSpace(path)) return null;
         return Cache.GetOrAdd(path, static p =>
         {
-            try { return CubeLut.Load(p); }
+            try { return IsBuiltin(p) ? LoadBuiltin(p) : CubeLut.Load(p); }
             catch { return null; }
         });
     }
@@ -43,7 +90,7 @@ public static class PrintLuts
     /// </summary>
     public static CubeLut Validate(string path)
     {
-        var lut = CubeLut.Load(path);
+        var lut = IsBuiltin(path) ? LoadBuiltin(path) : CubeLut.Load(path);
         Cache[path] = lut;
         return lut;
     }

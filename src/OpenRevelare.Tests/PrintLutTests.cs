@@ -437,6 +437,84 @@ public class PrintLutTests
         }
     }
 
+    // ══ 内置印片 ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The two built-in stocks must resolve without touching the filesystem, because that is the
+    /// whole point of embedding them: a project stores <c>:kodak-2383</c> rather than a path, so
+    /// it renders identically on a machine that has never seen a .cube file.
+    /// </summary>
+    [Theory]
+    [InlineData(":kodak-2383", "Kodak 2383")]
+    [InlineData(":fujifilm-3513di", "Fujifilm 3513DI")]
+    public void A_built_in_stock_resolves_from_the_assembly(string sentinel, string name)
+    {
+        Assert.True(PrintLuts.IsBuiltin(sentinel));
+
+        CubeLut lut = PrintLuts.Validate(sentinel);
+        Assert.Equal(name, lut.Title);          // the name the picker shows
+        Assert.Equal(33, lut.Size);
+        Assert.Equal(LutInputEncoding.Cineon, lut.InputEncoding);
+
+        // Resolve is the render path's entry point and must agree, and cache to one instance.
+        Assert.Same(lut, PrintLuts.Resolve(sentinel));
+    }
+
+    /// <summary>Every sentinel the picker offers must actually load — a typo in the table, or a
+    /// cube dropped from the build, would otherwise reach users as a silent pass-through.</summary>
+    [Fact]
+    public void Every_advertised_built_in_loads()
+    {
+        Assert.NotEmpty(PrintLuts.Builtins);
+        foreach ((string id, string name) in PrintLuts.Builtins)
+        {
+            CubeLut? lut = PrintLuts.Resolve(id);
+            Assert.NotNull(lut);
+            Assert.Equal(name, lut!.Title);
+        }
+    }
+
+    /// <summary>
+    /// A sentinel is not a path, and nothing that IS a path may be mistaken for one. The leading
+    /// ':' cannot begin a real filename on either platform, which is what keeps a user's own cube
+    /// from ever colliding with a built-in.
+    /// </summary>
+    [Fact]
+    public void Only_known_sentinels_count_as_built_in()
+    {
+        Assert.False(PrintLuts.IsBuiltin(":no-such-stock"));   // right shape, unknown name
+        Assert.False(PrintLuts.IsBuiltin("/tmp/kodak-2383.cube"));
+        Assert.False(PrintLuts.IsBuiltin("kodak-2383"));       // no colon
+        Assert.False(PrintLuts.IsBuiltin(""));
+        Assert.False(PrintLuts.IsBuiltin(null));
+
+        // An unknown sentinel is not a file either, so it degrades to pass-through rather than
+        // throwing out of the render path.
+        Assert.Null(PrintLuts.Resolve(":no-such-stock"));
+    }
+
+    /// <summary>
+    /// A built-in must actually render as a print stock. It is reached through FrameParams, the
+    /// same way a roll reaches it, so the sentinel is proven to survive the whole path from the
+    /// project file to the pixels.
+    /// </summary>
+    [Fact]
+    public void A_built_in_changes_the_render()
+    {
+        var withStock = new[] { 0.2f, 0.5f, 0.8f };
+        ColorPipeline.ToOutputSpaceFor(withStock, new FrameParams { PrintLut = ":kodak-2383" });
+
+        var plain = new[] { 0.2f, 0.5f, 0.8f };
+        ColorPipeline.ToOutputSpace(plain, ColorPipeline.DefaultOutput);
+
+        Assert.NotEqual(plain, withStock);
+        foreach (float v in withStock)
+        {
+            Assert.True(v is >= 0f and <= 1f, $"out of range: {v}");
+            Assert.False(float.IsNaN(v));
+        }
+    }
+
     /// <summary>
     /// A roll naming a cube that is missing or unreadable must still render. The render path has
     /// no way to present an error and a roll whose LUT moved should not fail to open — it falls

@@ -86,14 +86,29 @@ public sealed class CubeLut
     /// which stock this is.</param>
     public static CubeLut Load(string path, LutInputEncoding encoding = LutInputEncoding.Cineon)
     {
+        using var reader = new StreamReader(path);
+        return Parse(reader, Path.GetFileNameWithoutExtension(path), encoding);
+    }
+
+    /// <summary>
+    /// Parses a cube from an already-open reader. Split out from <see cref="Load"/> so the
+    /// built-in stocks can be parsed straight from an embedded resource stream — they have no
+    /// path on disk to open, and writing them to a temp file just to read them back would be
+    /// a filesystem round-trip in the middle of the render path.
+    /// </summary>
+    /// <param name="fallbackTitle">Used when the cube declares no TITLE, in place of the
+    /// filename <see cref="Load"/> would have taken it from.</param>
+    public static CubeLut Parse(TextReader reader, string fallbackTitle,
+                                LutInputEncoding encoding = LutInputEncoding.Cineon)
+    {
         int size = -1;
-        string title = Path.GetFileNameWithoutExtension(path);
+        string title = fallbackTitle;
         float[] domainMin = { 0f, 0f, 0f };
         float[] domainMax = { 1f, 1f, 1f };
         float[]? data = null;
         int written = 0;
 
-        foreach (string raw in File.ReadLines(path))
+        for (string? raw = reader.ReadLine(); raw is not null; raw = reader.ReadLine())
         {
             // '#' starts a comment anywhere on the line; the spec allows trailing comments.
             string line = raw;
@@ -109,7 +124,7 @@ public sealed class CubeLut
                 case "TITLE":
                     // Quoted string, possibly containing spaces.
                     title = line[tok[0].Length..].Trim().Trim('"');
-                    if (title.Length == 0) title = Path.GetFileNameWithoutExtension(path);
+                    if (title.Length == 0) title = fallbackTitle;
                     continue;
 
                 case "LUT_3D_SIZE":

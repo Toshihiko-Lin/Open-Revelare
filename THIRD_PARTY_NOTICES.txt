@@ -159,6 +159,32 @@ The licenses below apply to all of them.
     Includes Tmds.DBus.Protocol (MIT) on the Linux build.
 
 -------------------------------------------------------------------------------
+16. Resolve Film Look LUTs  (built-in 胶片风格: Kodak 2383, Fujifilm 3513DI)
+    ⚠ NOT COVERED BY THIS PROGRAM'S GPL-3.0 LICENCE — SEE BELOW
+    Author   : Blackmagic Design Pty Ltd
+    Source   : Shipped with DaVinci Resolve, under LUT/Film Looks/
+               ("Rec709 Kodak 2383 D65.cube", "Rec709 Fujifilm 3513DI D65.cube")
+
+    src/OpenRevelare.Core/Assets/Luts/*.cube are these files, embedded in the
+    OpenRevelare.Core assembly. Only a TITLE line has been added so the picker
+    can name each stock; the lattice data is unmodified.
+
+    These are a third-party asset shipped alongside OpenRevelare, not a part of
+    it. OpenRevelare's own GPL-3.0 grant does not extend to them and could not:
+    the copyright is Blackmagic Design's. They are made available by Blackmagic
+    Design under the DaVinci Resolve licence terms, which do not grant a general
+    right of redistribution; anyone redistributing OpenRevelare — and especially
+    anyone doing so commercially — should satisfy themselves of their own
+    position, or delete src/OpenRevelare.Core/Assets/Luts/ and rebuild.
+    Everything except the two built-in 胶片风格 entries works without them, and
+    the picker still accepts any Cineon-log .cube the user supplies.
+
+    "Kodak" and "2383" are trademarks of Eastman Kodak Company; "Fujifilm" and
+    "3513DI" are trademarks of FUJIFILM Corporation. Neither company is
+    affiliated with, nor endorses, OpenRevelare. The names identify which film
+    stock each LUT emulates, nothing more.
+
+-------------------------------------------------------------------------------
 
 The MIT License (referenced above)
     Permission is hereby granted, free of charge, to any person obtaining a

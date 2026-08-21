@@ -656,13 +656,13 @@
                         </ComboBox>
 
                         <!-- 胶片风格与输出空间并列，不并入其中：前者决定画面被渲染成什么样，
-                             后者决定它被装进哪个容器，两者正交。本软件不附带 LUT 文件——印片
-                             表征由各厂商授权，随附即是再分发；下拉里出现的厂商名来自用户自己
-                             文件的 TITLE。 -->
+                             后者决定它被装进哪个容器，两者正交。内置两张印片（见
+                             PrintLuts.Builtins），其余条目是用户自己选的文件，名字取自各自
+                             cube 的 TITLE。 -->
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;需要以 Cineon log 为输入的 .cube 文件。本软件不附带：这类文件由各厂商单独授权。DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到；网上也有第三方重建的版本。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
+                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Kodak 2383 与 Fujifilm 3513DI 两张印片，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 
                         <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"

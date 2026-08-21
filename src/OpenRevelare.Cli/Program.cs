@@ -619,7 +619,7 @@ static void PrintUsage()
         "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
         "  --color-space <name>        step-4 target / output space (default: sRGB)\n" +
         "  --print-lut <path.cube>     print-film emulation; a 3D LUT taking Cineon log in.\n" +
-        "                              Not bundled — these are licensed by their vendors.\n" +
+        "                              Built in: :kodak-2383, :fujifilm-3513di\n" +
         "  --lcc <path>                LCC flat-field reference (RAW/TIFF); per-channel divide\n" +
         "  --lcc-linear                treat the LCC TIFF as linear (default: sRGB gamma)\n" +
         "  --decouple-matrix <9 vals>  Path-A decouple 3×3 (row-major m00,m01,...,m22)\n" +

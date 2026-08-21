@@ -4415,15 +4415,18 @@ public partial class MainViewModel : ViewModelBase
     // 决定它被装进哪个容器。曾经把 "Kodak2383" 当成一个 ColorSpaceDef 塞进输出空间下拉——
     // 那是类型错误，三个色度坐标表达不了一张印片的响应，后来删掉了。
     //
-    // 本软件不附带任何 LUT 文件。这些印片表征由各厂商自行授权，随附即是再分发；界面上出现的
-    // 厂商名一律来自用户自己文件里的 TITLE，不是我们的声明。
+    // 内置两张印片（Kodak 2383、Fujifilm 3513DI），嵌在程序集里，见 PrintLuts.Builtins；
+    // 工程存的是 :kodak-2383 这样的记号而不是本机路径，所以换机器打开照样渲染。用户自选的
+    // cube 仍按路径存，下拉里的名字取自各自文件的 TITLE。
 
-    /// <summary>Cubes the picker offers, in order: 标准渲染 → 最近用过的 → 选择文件…</summary>
+    /// <summary>Cubes the picker offers, in order: 标准渲染 → 内置印片 → 最近用过的 → 选择文件…</summary>
     public ObservableCollection<string> PrintLutNames { get; } = new();
 
-    /// <summary>How many rows at the head of the picker are renderings rather than cube files —
-    /// just the standard display rendering. Everything from here to the trailing "choose a file"
-    /// verb is a path.
+    /// <summary>
+    /// The picker's shape: row 0 is the standard display rendering, then the built-in print
+    /// stocks, then whatever cubes the user has picked before, then the "choose a file" verb.
+    /// Only row 0 and the trailing verb are not paths, which is why the lookups below scan
+    /// <c>1 .. Count-2</c>.
     ///
     /// A pure CST (Cineon log decoded, no rendering) briefly sat at row 1. It is gone from the
     /// pipeline too, not merely hidden here — an unrendered log plate is a step in someone else's
@@ -4431,8 +4434,6 @@ public partial class MainViewModel : ViewModelBase
     /// old <c>:cineon-log</c> sentinel now falls through to the standard rendering, which is what
     /// <see cref="ColorPipeline.ToOutputSpaceFor"/> does with any value that is not a resolvable
     /// cube.</summary>
-    private const int FixedRows = 1;
-
     /// <summary>Full paths parallel to <see cref="PrintLutNames"/>; "" for 无.</summary>
     private readonly List<string> _printLutPaths = new();
 
@@ -4562,12 +4563,13 @@ public partial class MainViewModel : ViewModelBase
         // box — so rebuilding on every frame load blanked the picker even though the roll's LUT
         // was unchanged and still rendering. Frame switches are the common case and they never
         // change the list, only which row is current.
-        // ONE fixed row heads the list — the standard display rendering — so a lookup starts at
-        // FixedRows, and the trailing "choose a file" verb is excluded as before.
+        // Row 0 is the standard display rendering, which "" already selects above, so a path
+        // lookup starts at 1 — that includes the BUILT-IN rows, whose sentinels are perfectly
+        // findable paths. The trailing "choose a file" verb is excluded as before.
         //
         int existing = _printLutPaths.Count == 0 ? -1
             : string.IsNullOrWhiteSpace(active) ? 0
-            : _printLutPaths.FindIndex(FixedRows, Math.Max(_printLutPaths.Count - FixedRows - 1, 0),
+            : _printLutPaths.FindIndex(1, Math.Max(_printLutPaths.Count - 2, 0),
                                        p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0)
         {
@@ -4586,11 +4588,20 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Add(Loc.T("标准显示渲染（CST + 显示渲染）"));
         _printLutPaths.Add("");
 
+        // The built-in stocks, always offered and never "文件缺失": they ship inside the assembly,
+        // so unlike a recent path they cannot go missing between sessions.
+        foreach ((string id, string name) in PrintLuts.Builtins)
+        {
+            PrintLutNames.Add(name);
+            _printLutPaths.Add(id);
+        }
+
         // A roll can name a cube that is not in this machine's history — a project from another
         // computer, or a file picked before the list was trimmed. It still belongs in the list,
         // otherwise the picker would show 无 while the render used a LUT.
         var paths = new List<string>(Settings.Current.RecentPrintLuts);
         if (!string.IsNullOrWhiteSpace(active)
+            && !PrintLuts.IsBuiltin(active)          // already a fixed row above
             && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))
             paths.Insert(0, active);
 
@@ -4609,7 +4620,7 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Add(Loc.T("选择 .cube 文件…"));
         _printLutPaths.Add("");
 
-        int i = _printLutPaths.FindIndex(FixedRows, _printLutPaths.Count - FixedRows - 1,
+        int i = _printLutPaths.FindIndex(1, _printLutPaths.Count - 2,
                                          p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0 : (i < 0 ? 0 : i);
 

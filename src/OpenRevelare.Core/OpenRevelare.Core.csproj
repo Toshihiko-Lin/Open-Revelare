@@ -13,6 +13,15 @@
   </ItemGroup>
 
   <!--
+    内置印片 LUT。两张随 DaVinci Resolve 发行的 Resolve Film Look LUT，嵌进程序集，
+    这样工程文件里存的是 :kodak-2383 这样的记号而不是本机绝对路径 —— 换台机器打开照样渲染。
+    资源名即 OpenRevelare.Core.Assets.Luts.<文件名>.cube，见 PrintLuts.Builtins。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Luts\*.cube" />
+  </ItemGroup>
+
+  <!--
     RAW 原生库：Sdcb 只发 win/linux 两个 runtime 包，按目标平台挑一个，别三份都塞进产物。
     没有 RuntimeIdentifier 时（普通 dotnet build / 跑对拍）默认给 Windows，本机开发照旧。
     linux64 包是 Ubuntu 22.04 上编的（glibc 2.35 起），见 packaging/linux/build-appimage.sh。
