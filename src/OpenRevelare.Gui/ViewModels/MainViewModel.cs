@@ -2139,6 +2139,10 @@ public partial class MainViewModel : ViewModelBase
                 // AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
+                // The detector fixed the three channels' relative spans; this fixes where the
+                // picture sits. Metered across the whole roll so the roll keeps its own internal
+                // exposure differences.
+                PlaceExposure(values);
                 // Levels are measured last and on the CURRENT frame's rendered positive, because
                 // they are the only step that reads output rather than negative density. With the
                 // three roll-wide values above already in place, that render is the roll's look,
@@ -2326,6 +2330,12 @@ public partial class MainViewModel : ViewModelBase
 
         if (highlight is not null) DMaxPerChannel = highlight;
         _lastHighlightMeasured = highlight is not null;
+
+        // Same two-part answer as the roll pass: the detector sets the channels' relative spans,
+        // the meter sets where the picture sits. Metered on this frame alone, which is what
+        // 单张 means.
+        if (highlight is not null && _previewLinear is not null)
+            PlaceExposure(new[] { _previewLinear });
 
         StatusText = highlight is not null
             ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
@@ -2802,6 +2812,63 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>Auto black/white points from the 0.1 / 99.9 percentiles across all channels of the
     /// ungraded positive (port of Python levels.auto_levels) → 黑场 / 白场 sliders.</summary>
+    /// <summary>
+    /// Places the roll's exposure: meter the average tone and re-solve D_max so it lands on
+    /// Cineon's mid-grey reference (code ~336).
+    ///
+    /// WHY THIS RUNS AFTER THE HIGHLIGHT DETECTOR RATHER THAN INSTEAD OF IT. The detector
+    /// establishes the three channels' RELATIVE spans, which is the roll's colour balance and is
+    /// a real measurement of the film. What it cannot establish is where the picture sits, because
+    /// it reads the 99.9th percentile — a specular highlight, whose distance above the diffuse
+    /// white is a property of the scene rather than of the film. So the detector's answer is kept
+    /// for its colour and rescaled for its placement; <see cref="ExposureMeter.SolveDMaxForAverage"/>
+    /// applies one ratio to all three spans, which moves the exposure without touching the balance.
+    ///
+    /// <paramref name="frames"/> is the whole roll for 自动（整卷）and the current frame alone for
+    /// 自动（单张）. Averaging the metered codes across the roll — rather than solving each frame
+    /// to its own grey — is what keeps a roll looking like one roll: a deliberately dark frame
+    /// stays dark relative to its neighbours instead of being pushed up to match them.
+    /// </summary>
+    private void PlaceExposure(IReadOnlyList<ImageBuffer> frames)
+    {
+        if (frames.Count == 0) return;
+
+        FrameParams p = BuildParams();
+        p.OutputIntent = OutputIntent.None;   // Stage 1 only — the meter reads the Cineon picture
+        p.BlackPoint = 0.0; p.WhitePoint = 1.0;
+
+        var codes = new List<double>();
+        foreach (ImageBuffer f in frames)
+        {
+            double code = double.NaN;
+            Pipeline.ProcessFrame(f, p, m => code = m.Code);
+            if (double.IsFinite(code)) codes.Add(code);
+        }
+        if (codes.Count == 0) return;
+
+        double mean = codes.Average();
+        DMaxPerChannel = ExposureMeter.SolveDMaxForAverage(mean, DMaxPerChannel, DMinPerChannel);
+        MeteredStops = (mean - ExposureMeter.ReferenceCode) / 150.51499783199056;
+    }
+
+    /// <summary>How far the last metered average sat from the grey reference, in stops. Reported
+    /// so the placement is visible rather than silent.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MeteredText))]
+    private double _meteredStops;
+
+    /// <summary>
+    /// The meter, as it reads on screen: the frame's average tone against Cineon's mid grey.
+    ///
+    /// Signed and in stops, because that is the unit the correction is made in — "+0.4 挡" says
+    /// both how far off and which way. The grey is the reference rather than the 685 white for
+    /// the reason <see cref="ExposureMeter"/> sets out: a correct exposure averages to a mid
+    /// grey, so zero here means correct rather than meaning blown.
+    /// </summary>
+    public string MeteredText => Math.Abs(MeteredStops) < 0.05
+        ? Loc.T("测光 ±0.0 挡（对齐中灰）")
+        : Loc.F($"测光 {MeteredStops:+0.0;-0.0} 挡（相对中灰 336）");
+
     public void AutoLevels()
     {
         if (_previewLinear is null) return;
@@ -2959,7 +3026,7 @@ public partial class MainViewModel : ViewModelBase
         Loc.Changed += RetranslateText;
         // Populate the film-look picker before anything binds to it. It was only ever filled on
         // frame load, so with no roll open the collection was empty, the ComboBox had no row to
-        // select, and it rendered blank instead of 无（直通） — which is what an empty PrintLut
+        // select, and it rendered blank instead of the standard entry — which is what an empty PrintLut
         // actually means and what the pipeline is doing.
         RebuildPrintLutList("");
     }
@@ -4307,8 +4374,16 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>What the selected entry is, shown under the picker.</summary>
+    ///
+    /// Entry 0 is NOT "no transform" — it is the standard Cineon display rendering, the analytic
+    /// equivalent of a Cineon→Rec709 conversion LUT (see ColorPipeline.CineonToDisplay). It used
+    /// to be labelled 无（直通）, which read as "nothing happens here" and left the film base's
+    /// rendering looking like a defect rather than the standard's own placement of code 95.
+    ///
+    /// It does not name Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
+    /// says — naming a fixed space here would contradict the control beside it.
     public string PrintLutHint => _printLutIndex == 0
-        ? Loc.T("直通：反相结果直接转到输出空间。")
+        ? Loc.T("标准转换：Cineon 编码按标准解到输出空间，不加印片风格。")
         : Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。");
 
     /// <summary>Writes the chosen cube to every frame and re-renders the roll.</summary>
@@ -4352,7 +4427,7 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Clear();
         _printLutPaths.Clear();
 
-        PrintLutNames.Add(Loc.T("无（直通）"));
+        PrintLutNames.Add(Loc.T("标准（Cineon → 输出空间）"));
         _printLutPaths.Add("");
 
         // A roll can name a cube that is not in this machine's history — a project from another
@@ -4443,8 +4518,6 @@ public partial class MainViewModel : ViewModelBase
         // Spaces still resolvable from older projects, so they need a label even though the picker
         // no longer offers them.
         "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
-        "KodakEnduraPremier" or "Kodak2383" =>
-            Loc.T("旧工程指定的染料集基色。已不再提供选择——它描述的是染料编码基色，而非相纸/拷贝片实际能呈现的色域。"),
         _ => "",
     };
 
@@ -4452,8 +4525,8 @@ public partial class MainViewModel : ViewModelBase
     /// Adopt a saved output space into the picker. Called when a frame or roll is loaded — this is
     /// loading, not choosing, so it does not mark the roll dirty on its own.
     ///
-    /// A roll naming a space the picker no longer offers (the two Kodak dye-set spaces, or Rec709)
-    /// is MIGRATED to sRGB and the frames are rewritten to say so. Leaving the name in place while
+    /// A roll naming a space the picker no longer offers (Rec709, or the two Kodak dye-set spaces
+    /// that older versions registered) is MIGRATED to sRGB and the frames are rewritten to say so. Leaving the name in place while
     /// the picker showed index 0 would be the worst outcome: the label would read sRGB while the
     /// render still used the old space, and the next edit would silently rewrite it anyway. The
     /// migration is stated in the status bar rather than done behind the user's back.
@@ -5276,9 +5349,10 @@ public partial class MainViewModel : ViewModelBase
 
         bool wantClipping = ShowClipping;
 
-        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip) = await Task.Run(() =>
+        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip, double metered) = await Task.Run(() =>
         {
-            ImageBuffer outImg = Pipeline.ProcessFrame(src, p);
+            double metered = double.NaN;
+            ImageBuffer outImg = Pipeline.ProcessFrame(src, p, m => metered = m.Code);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
             HistogramData h = HistogramData.FromBuffer(outImg.Data);
@@ -5292,7 +5366,7 @@ public partial class MainViewModel : ViewModelBase
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
             var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge));
-            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c);
+            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c, metered);
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }
@@ -5301,6 +5375,8 @@ public partial class MainViewModel : ViewModelBase
             PreviewImage = bmp;
             Histogram = hist;
             ClippingOverlay = clip;
+            if (double.IsFinite(metered))
+                MeteredStops = (metered - ExposureMeter.ReferenceCode) / 150.51499783199056;
             if (frame is not null) SetThumbnail(frame, thumb); else thumb.Dispose();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();

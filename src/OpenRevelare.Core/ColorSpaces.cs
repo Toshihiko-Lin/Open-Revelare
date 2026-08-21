@@ -122,30 +122,9 @@ public static class ColorSpaces
     public static readonly ColorSpaceDef AcesCg = new(
         "ACEScg", (0.7130, 0.2930), (0.1650, 0.8300), (0.1280, 0.0440), (0.32168, 0.33767));
 
-    /// <summary>
-    /// Kodak Endura Premier colour paper. This is the space the DiVERE ColorChecker
-    /// datasets are expressed in — rendering into it is what reproduces the look of a
-    /// darkroom print, and is the honest replacement for what chroma_grade was
-    /// approximating with a scalar.
-    /// </summary>
-    public static readonly ColorSpaceDef KodakEnduraPremier = new(
-        "KodakEnduraPremier",
-        (0.6635212396720807, 0.32411816662609266),
-        (0.2592092094845883, 0.6664046572656293),
-        (0.15456877810311515, 0.049802203945821064),
-        (0.32168, 0.33767));
-
-    /// <summary>Kodak Vision 2383 print film — the projection-print look.</summary>
-    public static readonly ColorSpaceDef Kodak2383 = new(
-        "Kodak2383",
-        (0.6793722285220385, 0.3144251767600739),
-        (0.25249108689540845, 0.6898080814131717),
-        (0.15168387801166677, 0.03670767619874616),
-        (0.32168, 0.33767));
-
     /// <summary>Every registered space, keyed by <see cref="ColorSpaceDef.Name"/>.</summary>
     public static readonly IReadOnlyDictionary<string, ColorSpaceDef> All =
-        new[] { Srgb, Rec709, AdobeRgb, DisplayP3, AcesCg, KodakEnduraPremier, Kodak2383 }
+        new[] { Srgb, Rec709, AdobeRgb, DisplayP3, AcesCg }
             .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

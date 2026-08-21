@@ -69,13 +69,13 @@ public sealed class FrameParams
     public const double OutputRange = (CineonWhiteCode - CineonBlackCode) * CineonDensityPerCode;
 
     /// <summary>Cineon 10-bit 每码步进的密度——该编码的定义常量。</summary>
-    private const double CineonDensityPerCode = 0.002;
+    public const double CineonDensityPerCode = 0.002;
 
     /// <summary>Cineon 黑端码值：用户框选为黑的位置。</summary>
-    private const double CineonBlackCode = 95.0;
+    public const double CineonBlackCode = 95.0;
 
     /// <summary>Cineon 白端码值：用户框选为白的位置。</summary>
-    private const double CineonWhiteCode = 1032.0;
+    public const double CineonWhiteCode = 1032.0;
 
     /// <summary>
     /// 密度编码域的上限——Cineon 的 1032，**不是标定点**。
@@ -225,6 +225,7 @@ public sealed class FrameParams
     /// stock the user owns without this enum growing a case per film.
     /// </summary>
     public string PrintLut { get; set; } = "";
+
 
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>

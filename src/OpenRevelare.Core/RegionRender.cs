@@ -189,9 +189,8 @@ public static class RegionRender
         if (cal.DecoupleMatrix != null)
             Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
 
-        double blackFloor = DensityEndpoints.For(cal).BlackFloor;
         ImageBuffer inverted = Inversion.Invert(slice, cal, cal.DecoupleChromaAmp,
-                                                Pipeline.ResolveChromaMatrix(cal), blackFloor);
+                                                Pipeline.ResolveChromaMatrix(cal));
         if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);
 
         // ── Geometry: one composed inverse map, output rect → source coordinate ──

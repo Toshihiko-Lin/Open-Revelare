@@ -526,5 +526,9 @@
   "⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】": "⚠ No bare film base found — the automatic result is just the brightest part of the picture. Use \"Sample the film base\" by hand.",
   "⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定": "⚠ No orange film base found: this roll may already be cropped past the base, so the automatic result is only a starting point — calibrate it by hand with Film-base sample",
   "片基采样 → 黑端 {0:F3} / {1:F3} / {2:F3}": "Film base sampled → D_min {0:F3} / {1:F3} / {2:F3}",
-  "每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。": "The density each channel reads as black, measured against clear (T=1). A C-41 orange base is always R<G<B, typically 0.09 / 0.29 / 0.54 — verifiable physical numbers, not an offset from some baseline. Expand the three components to adjust the shadow cast."
+  "每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。": "The density each channel reads as black, measured against clear (T=1). A C-41 orange base is always R<G<B, typically 0.09 / 0.29 / 0.54 — verifiable physical numbers, not an offset from some baseline. Expand the three components to adjust the shadow cast.",
+  "标准（Cineon → 输出空间）": "Standard (Cineon → output space)",
+  "标准转换：Cineon 编码按标准解到输出空间，不加印片风格。": "Standard conversion: the Cineon encoding is decoded to the output space by the standard, with no print-film look.",
+  "印片模拟：{0}。反差与色彩由该胶片决定，帧编辑在它之后。": "Print film: {0}. Contrast and colour come from that stock; frame edits are applied after it.",
+  "胶片风格": "Film look"
 }

@@ -662,7 +662,7 @@
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;需要以 Cineon log 为输入的 .cube 文件。本软件不附带：这类文件由各厂商单独授权。DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到；网上也有第三方重建的版本。&#10;&#10;选「无」即直通，与不使用本功能完全一致。属于胶卷参数，会保存进工程。'}" />
+                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;需要以 Cineon log 为输入的 .cube 文件。本软件不附带：这类文件由各厂商单独授权。DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到；网上也有第三方重建的版本。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 
                         <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
@@ -700,6 +700,12 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
                         <ctl:HistogramView Data="{Binding Histogram}" Height="64" HorizontalAlignment="Stretch" />
+                        <!-- 测光读数：画面平均落在 Cineon 码值轴的哪里，相对中灰 336。
+                             与直方图分开，因为直方图读的是渲染后的画面（换印片就变），而这里
+                             读的是标定后的 Cineon 编码——每张 Cineon LUT 都按同一个位置设计。 -->
+                        <TextBlock Text="{Binding MeteredText}" FontSize="11"
+                                   IsVisible="{Binding HasImage}"
+                                   Foreground="{DynamicResource TextDimBrush}" />
                         <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}"
                                       IsEnabled="{Binding HasImage}"
