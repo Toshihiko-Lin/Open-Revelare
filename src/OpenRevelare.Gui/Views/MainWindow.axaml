@@ -185,6 +185,9 @@
                         <MenuItem Header="{i18n:T '操作指引 / 技术原理…'}" Click="OnDocsClick" />
                         <MenuItem Header="{i18n:T '快捷键…'}" Click="OnHelpClick" />
                         <Separator />
+                        <!-- 放进【帮助】而不是【设置】：它是「东西放哪儿」的答案，不是一个可调的项。 -->
+                        <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
+                        <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '关于 OpenRevelare'}" Click="OnAboutClick" />
@@ -662,7 +665,7 @@
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Kodak 2383 与 Fujifilm 3513DI 两张印片，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
+                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 
                         <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"

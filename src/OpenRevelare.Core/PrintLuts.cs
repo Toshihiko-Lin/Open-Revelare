@@ -35,8 +35,8 @@ public static class PrintLuts
     /// </summary>
     public static readonly IReadOnlyList<(string Id, string Name)> Builtins = new[]
     {
-        (":kodak-2383",      "Kodak 2383"),
-        (":fujifilm-3513di", "Fujifilm 3513DI"),
+        (":kodak-2383",      "Rec709 Kodak 2383 D65"),
+        (":fujifilm-3513di", "Rec709 Fujifilm 3513DI D65"),
     };
 
     /// <summary>Whether <paramref name="path"/> names a built-in rather than a file on disk.</summary>
@@ -64,6 +64,33 @@ public static class PrintLuts
         using var reader = new StreamReader(stream);
         string fallback = Builtins.First(b => b.Id == id).Name;
         return CubeLut.Parse(reader, fallback);
+    }
+
+    /// <summary>
+    /// The .cube files in <paramref name="dir"/>, sorted by name, as full paths.
+    ///
+    /// This is the drop-in folder: anything the user copies here shows up in the picker on the
+    /// next start, without picking it file by file. It lives under the per-user data directory
+    /// rather than beside the executable, because the install location is not writable on any of
+    /// the three platforms — Program Files needs admin, a signed .app must not be modified, and
+    /// an AppImage is a read-only mount whose path changes every run.
+    ///
+    /// NEVER THROWS. A missing folder is the normal case (nobody has added a LUT yet) and an
+    /// unreadable one must not take the picker down with it: the built-ins and the recents are
+    /// still perfectly usable, so a failure here returns nothing rather than propagating.
+    /// Individual files are NOT parsed here — a folder of 50 cubes would mean 50 parses on every
+    /// start, and the picker only needs the names until one is actually selected.
+    /// </summary>
+    public static IReadOnlyList<string> InFolder(string dir)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return Array.Empty<string>();
+            var files = Directory.GetFiles(dir, "*.cube", SearchOption.TopDirectoryOnly);
+            Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+            return files;
+        }
+        catch { return Array.Empty<string>(); }
     }
 
     /// <summary>

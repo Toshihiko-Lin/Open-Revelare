@@ -159,7 +159,7 @@ The licenses below apply to all of them.
     Includes Tmds.DBus.Protocol (MIT) on the Linux build.
 
 -------------------------------------------------------------------------------
-16. Resolve Film Look LUTs  (built-in 胶片风格: Kodak 2383, Fujifilm 3513DI)
+16. Resolve Film Look LUTs  (built-in 胶片风格)
     ⚠ NOT COVERED BY THIS PROGRAM'S GPL-3.0 LICENCE — SEE BELOW
     Author   : Blackmagic Design Pty Ltd
     Source   : Shipped with DaVinci Resolve, under LUT/Film Looks/

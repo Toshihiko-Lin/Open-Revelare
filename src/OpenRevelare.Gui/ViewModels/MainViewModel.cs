@@ -4419,12 +4419,14 @@ public partial class MainViewModel : ViewModelBase
     // 工程存的是 :kodak-2383 这样的记号而不是本机路径，所以换机器打开照样渲染。用户自选的
     // cube 仍按路径存，下拉里的名字取自各自文件的 TITLE。
 
-    /// <summary>Cubes the picker offers, in order: 标准渲染 → 内置印片 → 最近用过的 → 选择文件…</summary>
+    /// <summary>Cubes the picker offers, in order:
+    /// 标准渲染 → 内置印片 → LUT 文件夹里的 → 最近用过的 → 选择文件…</summary>
     public ObservableCollection<string> PrintLutNames { get; } = new();
 
     /// <summary>
     /// The picker's shape: row 0 is the standard display rendering, then the built-in print
-    /// stocks, then whatever cubes the user has picked before, then the "choose a file" verb.
+    /// stocks, then the drop-in folder, then whatever cubes the user picked before, then the
+    /// "choose a file" verb.
     /// Only row 0 and the trailing verb are not paths, which is why the lookups below scan
     /// <c>1 .. Count-2</c>.
     ///
@@ -4596,10 +4598,20 @@ public partial class MainViewModel : ViewModelBase
             _printLutPaths.Add(id);
         }
 
+        // The drop-in folder (Settings.LutDir), so a collection of stocks is added once by copying
+        // rather than picked file by file. Listed ahead of the recents because it is a deliberate
+        // library rather than a history, and deduplicated against them: a folder cube that was
+        // also picked through the dialog is one stock and must be one row, or selecting it would
+        // land on whichever row the lookup happened to find first.
+        var paths = new List<string>(PrintLuts.InFolder(Settings.LutDir));
+
         // A roll can name a cube that is not in this machine's history — a project from another
         // computer, or a file picked before the list was trimmed. It still belongs in the list,
         // otherwise the picker would show 无 while the render used a LUT.
-        var paths = new List<string>(Settings.Current.RecentPrintLuts);
+        foreach (string recent in Settings.Current.RecentPrintLuts)
+            if (!paths.Contains(recent, StringComparer.OrdinalIgnoreCase))
+                paths.Add(recent);
+
         if (!string.IsNullOrWhiteSpace(active)
             && !PrintLuts.IsBuiltin(active)          // already a fixed row above
             && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))

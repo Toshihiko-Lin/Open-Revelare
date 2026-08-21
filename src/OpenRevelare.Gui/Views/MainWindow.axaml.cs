@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -2028,6 +2029,45 @@ public partial class MainWindow : Window
 
     private async void OnDocsClick(object? sender, RoutedEventArgs e)
         => await new DocDialog().ShowDialog(this);
+
+    /// <summary>
+    /// Opens the drop-in LUT folder in the file manager, creating it first.
+    ///
+    /// CREATED ON DEMAND rather than at startup: an empty folder that appears for everyone is
+    /// clutter for the majority who never add a LUT, while someone who chose this menu item is
+    /// about to put a file in it. Creating it here also means the reveal never fails on a missing
+    /// path, which is the one way this silently did nothing when it was tried the other way round.
+    ///
+    /// The picker reads the folder at startup, so a cube copied in now appears after a restart —
+    /// which is what the confirmation below says, rather than leaving the user to wonder why the
+    /// list did not change.
+    /// </summary>
+    private void OnOpenLutFolderClick(object? sender, RoutedEventArgs e)
+    {
+        string dir = Services.Settings.LutDir;
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{dir}\""));
+            else if (OperatingSystem.IsMacOS())
+                Process.Start(new ProcessStartInfo("open") { ArgumentList = { dir } });
+            else
+                Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir } });
+
+            if (Vm is { } vm)
+                vm.StatusText = Loc.F($"把 .cube 复制进 {dir}，重启后出现在【胶片风格】里。");
+        }
+        // A machine with no file manager is not worth a dialog, but the path still has to reach
+        // the user — otherwise the menu item looks broken. The status bar carries it either way.
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[lut-folder] {dir}: {ex.Message}");
+            if (Vm is { } vm)
+                vm.StatusText = Loc.F($"LUT 文件夹：{dir}");
+        }
+    }
 
     private static string AppVersion => Services.AppInfo.Version;
 

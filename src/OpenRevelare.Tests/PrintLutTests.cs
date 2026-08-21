@@ -445,8 +445,8 @@ public class PrintLutTests
     /// it renders identically on a machine that has never seen a .cube file.
     /// </summary>
     [Theory]
-    [InlineData(":kodak-2383", "Kodak 2383")]
-    [InlineData(":fujifilm-3513di", "Fujifilm 3513DI")]
+    [InlineData(":kodak-2383", "Rec709 Kodak 2383 D65")]
+    [InlineData(":fujifilm-3513di", "Rec709 Fujifilm 3513DI D65")]
     public void A_built_in_stock_resolves_from_the_assembly(string sentinel, string name)
     {
         Assert.True(PrintLuts.IsBuiltin(sentinel));
@@ -513,6 +513,45 @@ public class PrintLutTests
             Assert.True(v is >= 0f and <= 1f, $"out of range: {v}");
             Assert.False(float.IsNaN(v));
         }
+    }
+
+    /// <summary>
+    /// The drop-in folder is the "copy files in, restart" path, so it must list .cube files in a
+    /// stable order and ignore everything else — a folder people put things in will contain
+    /// things that are not cubes.
+    /// </summary>
+    [Fact]
+    public void The_drop_in_folder_lists_cubes_in_name_order()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "orv-luts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "zebra.cube"), "LUT_3D_SIZE 2\n");
+            File.WriteAllText(Path.Combine(dir, "alpha.cube"), "LUT_3D_SIZE 2\n");
+            File.WriteAllText(Path.Combine(dir, "notes.txt"), "not a cube");
+            File.WriteAllText(Path.Combine(dir, "preset.json"), "{}");
+
+            var found = PrintLuts.InFolder(dir);
+
+            Assert.Equal(2, found.Count);
+            Assert.EndsWith("alpha.cube", found[0]);   // sorted, not filesystem order
+            Assert.EndsWith("zebra.cube", found[1]);
+            Assert.All(found, p => Assert.True(Path.IsPathRooted(p)));   // full paths, pickable
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    /// <summary>
+    /// Nobody has a LUT folder until they add one, so its absence is the normal case and must be
+    /// silent. An exception here would take down the whole picker — including the built-ins, which
+    /// have nothing to do with this folder.
+    /// </summary>
+    [Fact]
+    public void A_missing_drop_in_folder_is_not_an_error()
+    {
+        Assert.Empty(PrintLuts.InFolder(Path.Combine(Path.GetTempPath(), "orv-no-such-" + Guid.NewGuid().ToString("N"))));
+        Assert.Empty(PrintLuts.InFolder(""));
     }
 
     /// <summary>

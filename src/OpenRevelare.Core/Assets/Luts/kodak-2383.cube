@@ -5,7 +5,7 @@
 #        : floating point data (range 0.0 - 1.0)
 # Display: ITU-Rec.709, Gamma 2.4
 
-TITLE "Kodak 2383"
+TITLE "Rec709 Kodak 2383 D65"
 LUT_3D_SIZE 33
 LUT_3D_INPUT_RANGE 0.0 1.0
 

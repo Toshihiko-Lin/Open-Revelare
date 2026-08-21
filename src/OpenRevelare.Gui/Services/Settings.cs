@@ -140,6 +140,17 @@ public static class Settings
         : Path.Combine(Environment.GetEnvironmentVariable("XDG_DATA_HOME")
               ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share"), "OpenRevelare");
 
+    /// <summary>
+    /// Drop-in folder for print LUTs: any .cube copied here is offered in 【胶片风格】 on the next
+    /// start, so a collection of stocks is added once rather than picked file by file.
+    ///
+    /// Under <see cref="DataDir"/> and not beside the executable, because the install location is
+    /// not writable on any of the three platforms — Program Files needs admin, a signed .app must
+    /// not be modified, and an AppImage is a read-only mount whose path changes every run. Here it
+    /// also survives an upgrade and an uninstall, which is what a user's own files should do.
+    /// </summary>
+    public static readonly string LutDir = Path.Combine(DataDir, "luts");
+
     private static readonly string File_ = Path.Combine(ConfigDir, "settings.json");
 
     private static Model? _current;
