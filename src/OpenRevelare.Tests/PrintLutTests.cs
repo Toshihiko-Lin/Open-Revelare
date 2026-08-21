@@ -357,57 +357,6 @@ public class PrintLutTests
     }
 
     /// <summary>
-    /// THE PURE CST HANDS THE CALIBRATION BACK UNCHANGED, which is the entire reason it exists.
-    ///
-    /// The roll's calibration and the exposure meter are stated in two scene-linear quantities: an
-    /// 18% mid grey and Cineon's 90% diffuse white. A transform that only decodes the encoding must
-    /// return exactly those, or every metered frame is quietly rescaled. The 0.90 factor in
-    /// ToOutputSpacePureCst is what makes this hold — decoding code 685 to 1.0 instead would put
-    /// the grey at 0.200.
-    /// </summary>
-    [Fact]
-    public void The_pure_CST_preserves_the_calibration_anchors()
-    {
-        const double dpc = FrameParams.CineonDensityPerCode;
-        double greyCode = 685.0 - Math.Log10(0.90 / 0.18) / dpc;
-
-        static float[] AtCode(double code)
-        {
-            float lin = (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
-            return new[] { lin, lin, lin };
-        }
-
-        // Into ACEScg, which is scene-linear, so what comes back is the decoded value itself.
-        var grey = AtCode(greyCode);
-        ColorPipeline.ToOutputSpacePureCst(grey, ColorSpaces.AcesCg);
-        Assert.All(grey, v => Assert.Equal(0.18f, v, 3));
-
-        var white = AtCode(685.0);
-        ColorPipeline.ToOutputSpacePureCst(white, ColorSpaces.AcesCg);
-        Assert.All(white, v => Assert.Equal(0.90f, v, 3));
-    }
-
-    /// <summary>
-    /// THE PURE CST APPLIES NO DISPLAY RENDERING, and the film base is where that shows. The
-    /// standard rendering normalises code 95 to black; the CST leaves it a light grey, because
-    /// taking it to black is a look decision and this transform makes none.
-    /// </summary>
-    [Fact]
-    public void The_pure_CST_does_not_normalise_the_film_base()
-    {
-        float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
-
-        var cst = new[] { floor, floor, floor };
-        ColorPipeline.ToOutputSpacePureCst(cst, ColorSpaces.Srgb);
-        Assert.All(cst, v => Assert.InRange(v, 0.20f, 0.35f));
-
-        // The standard rendering, on the same input, takes it to black.
-        var std = new[] { floor, floor, floor };
-        ColorPipeline.ToOutputSpace(std, ColorSpaces.Srgb);
-        Assert.All(std, v => Assert.Equal(0f, v, 4));
-    }
-
-    /// <summary>
     /// THE TRANSFORM MATCHES A CUBE IN THE MIDS AND IS ALLOWED TO DIVERGE IN THE SHADOWS.
     ///
     /// Both render the same encoding, so a mid grey has to land in the same place — measured

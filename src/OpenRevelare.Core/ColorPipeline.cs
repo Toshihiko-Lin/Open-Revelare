@@ -247,86 +247,29 @@ public static class ColorPipeline
     }
 
     /// <summary>
-    /// The sentinel <see cref="FrameParams.PrintLut"/> value selecting the PURE Colour Space
-    /// Transform — Cineon log decoded to scene-linear with no display rendering at all.
+    /// Step 4 as the roll has configured it — its print-film emulation if it names one, and the
+    /// standard display rendering otherwise.
     ///
-    /// A sentinel rather than a path because the field is a path everywhere else, and rather than
-    /// an enum because every other value IS a path (see FrameParams.PrintLut's remarks on why
-    /// stocks are not enumerated). It begins with a character no file path starts with, so it
-    /// cannot collide with a cube the user owns, and PrintLuts.Resolve returns null for it just as
-    /// it does for "" — the fork lives here, where the two renderings are chosen between.
-    /// </summary>
-    public const string PureCstSentinel = ":cineon-log";
-
-    /// <summary>
-    /// Step 4 as the roll has configured it — its print-film emulation if it names one, the pure
-    /// CST if it asks for that, and the standard display rendering otherwise.
-    ///
-    /// THE THREE ARE NOT VARIATIONS OF ONE THING. They differ in who performs the display
-    /// rendering:
+    /// THE TWO ARE NOT VARIATIONS OF ONE THING. They differ in who performs the display rendering:
     ///
     ///   • A CUBE performs it, fitted to a real stock. Its toe and shoulder are the look.
     ///   • The STANDARD path performs it analytically — <see cref="CineonToDisplay"/>, a decode
     ///     with Kodak's response gamma folded in and the film base normalised to display black.
     ///     This is a display rendering, not a bare conversion: it is doing the job a cube would.
-    ///   • The PURE CST performs NONE. It decodes the encoding and stops, which is what a Colour
-    ///     Space Transform means in the Cineon workflow — the picture arrives flat and log-looking
-    ///     because that is what log IS, and the look is expected to come from a LUT or a grade
-    ///     downstream. Its value is that the calibration's anchors survive it exactly: an 18% grey
-    ///     leaves at 0.180 scene-linear and a 90% diffuse white at 0.900.
     ///
-    /// The default is the standard rendering, because a roll that names nothing should show a
-    /// picture rather than a log plate.
+    /// Every path here RENDERS. There was briefly a third — a pure CST that decoded the encoding
+    /// and stopped, handing back a flat log plate for grading elsewhere — and it was removed
+    /// because nobody used it: an unrendered picture is a step in someone else's pipeline, not a
+    /// look a roll picks. The default is the standard rendering, because a roll that names nothing
+    /// should show a picture.
     /// </summary>
     public static void ToOutputSpaceFor(float[] data, FrameParams cal)
     {
         ColorSpaceDef output = cal.ResolvedOutputSpace;
         if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
             ToOutputSpaceVia(data, lut, output);
-        else if (cal.PrintLut == PureCstSentinel)
-            ToOutputSpacePureCst(data, output);
         else
             ToOutputSpace(data, output);
-    }
-
-    /// <summary>
-    /// Step 4 with NO display rendering: Cineon log → scene-linear → the output space's container.
-    ///
-    /// This is the Colour Space Transform proper, the thing DaVinci's CST node does when its tone
-    /// mapping is set to None. The decode is the encoding's own inverse about its own anchor:
-    ///
-    ///   linear = 0.90 · 10^((code − 685) · 0.002)
-    ///
-    /// The 0.90 is what makes the anchors come out right rather than merely proportional. Code 685
-    /// is Cineon's 90% DIFFUSE WHITE, so it must leave as 0.900 scene-linear, not as 1.0; with
-    /// that scaling an 18% grey — which the encoding places log10(0.90/0.18) below the white, at
-    /// code 335.5 — leaves at exactly 0.180. Those are the two numbers the roll's calibration and
-    /// the exposure meter are stated in, so this transform hands them back unchanged. Decoding
-    /// 685 to 1.0 instead would put the grey at 0.200 and quietly rescale every metered frame.
-    ///
-    /// NOTHING IS NORMALISED AND NOTHING IS CLAMPED ON THE WAY IN. The film base at code 95 leaves
-    /// at 0.060 linear and renders as a light grey, not as black — correct here, where the whole
-    /// point is that no look has been applied yet. Codes above 685 exceed 1.0 (1032 reaches 4.45)
-    /// and are bounded by the output space's encoder, which is the only clamp in the path.
-    /// </summary>
-    public static void ToOutputSpacePureCst(float[] data, ColorSpaceDef output)
-    {
-        LogEncoding.ToCineon(data);
-
-        const double codeFullScale = 1023.0;
-        const double refWhite = 685.0;
-        // Cineon's 90% diffuse white, as a scene-linear value. See the remarks: this is what keeps
-        // the metered grey at 0.180 rather than 0.200.
-        const double diffuseWhite = 0.90;
-
-        float scale = (float)(codeFullScale * FrameParams.CineonDensityPerCode);
-        float white = (float)(refWhite / codeFullScale);
-
-        Parallel.For(0, data.Length, i =>
-            data[i] = (float)diffuseWhite * MathF.Pow(10.0f, (data[i] - white) * scale));
-
-        OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
-        OutputRender.Encode(data, output);
     }
 
     /// <summary>

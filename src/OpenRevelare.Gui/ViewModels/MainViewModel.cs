@@ -4440,13 +4440,20 @@ public partial class MainViewModel : ViewModelBase
     // 本软件不附带任何 LUT 文件。这些印片表征由各厂商自行授权，随附即是再分发；界面上出现的
     // 厂商名一律来自用户自己文件里的 TITLE，不是我们的声明。
 
-    /// <summary>Cubes the picker offers, in order: 标准渲染 → 纯 CST → 最近用过的 → 选择文件…</summary>
+    /// <summary>Cubes the picker offers, in order: 标准渲染 → 最近用过的 → 选择文件…</summary>
     public ObservableCollection<string> PrintLutNames { get; } = new();
 
     /// <summary>How many rows at the head of the picker are renderings rather than cube files —
-    /// the standard display rendering and the pure CST. Everything from here to the trailing
-    /// "choose a file" verb is a path.</summary>
-    private const int FixedRows = 2;
+    /// just the standard display rendering. Everything from here to the trailing "choose a file"
+    /// verb is a path.
+    ///
+    /// A pure CST (Cineon log decoded, no rendering) briefly sat at row 1. It is gone from the
+    /// pipeline too, not merely hidden here — an unrendered log plate is a step in someone else's
+    /// grading pipeline rather than a look a roll picks, and it had no users. A roll naming the
+    /// old <c>:cineon-log</c> sentinel now falls through to the standard rendering, which is what
+    /// <see cref="ColorPipeline.ToOutputSpaceFor"/> does with any value that is not a resolvable
+    /// cube.</summary>
+    private const int FixedRows = 1;
 
     /// <summary>Full paths parallel to <see cref="PrintLutNames"/>; "" for 无.</summary>
     private readonly List<string> _printLutPaths = new();
@@ -4488,16 +4495,16 @@ public partial class MainViewModel : ViewModelBase
     /// cube does (see ColorPipeline.CineonToDisplay). It used to be labelled 无（直通）, which read
     /// as "nothing happens here", and then 标准（Cineon → 输出空间）, which claimed to be a plain
     /// standard conversion. Neither was true: it folds in a response gamma and normalises the film
-    /// base to black, which is a look, not a container change. Entry 1 is the plain conversion —
-    /// naming both makes the difference visible instead of hiding a rendering behind the word
-    /// "standard".
+    /// base to black, which is a look, not a container change.
     ///
-    /// Neither names Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
+    /// It does not name Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
     /// says — naming a fixed space here would contradict the control beside it.
+    ///
+    /// Row 1 was the pure CST and is now the first cube; the switch below therefore has no
+    /// special case left between the standard rendering and the stocks.
     public string PrintLutHint => _printLutIndex switch
     {
         0 => Loc.T("标准显示渲染：解 Cineon 编码并套用显示渲染（响应 gamma 0.6，片基归零）。想直接看片子就用它。"),
-        1 => Loc.T("纯 CST：只解编码，不做任何渲染——18% 中灰出来是 0.180、90% 白是 0.900，标定原样保留。画面平且发灰是 log 本来的样子，观感请交给 LUT 或后期调色。"),
         _ => Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。"),
     };
 
@@ -4577,11 +4584,11 @@ public partial class MainViewModel : ViewModelBase
         // box — so rebuilding on every frame load blanked the picker even though the roll's LUT
         // was unchanged and still rendering. Frame switches are the common case and they never
         // change the list, only which row is current.
-        // Two FIXED rows head the list — the standard display rendering and the pure CST — so a
-        // lookup starts at FixedRows, and the trailing "choose a file" verb is excluded as before.
+        // ONE fixed row heads the list — the standard display rendering — so a lookup starts at
+        // FixedRows, and the trailing "choose a file" verb is excluded as before.
+        //
         int existing = _printLutPaths.Count == 0 ? -1
             : string.IsNullOrWhiteSpace(active) ? 0
-            : active == ColorPipeline.PureCstSentinel ? 1
             : _printLutPaths.FindIndex(FixedRows, Math.Max(_printLutPaths.Count - FixedRows - 1, 0),
                                        p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0)
@@ -4600,15 +4607,12 @@ public partial class MainViewModel : ViewModelBase
 
         PrintLutNames.Add(Loc.T("标准显示渲染（CST + 显示渲染）"));
         _printLutPaths.Add("");
-        PrintLutNames.Add(Loc.T("Cineon log（纯 CST，未渲染）"));
-        _printLutPaths.Add(ColorPipeline.PureCstSentinel);
 
         // A roll can name a cube that is not in this machine's history — a project from another
         // computer, or a file picked before the list was trimmed. It still belongs in the list,
         // otherwise the picker would show 无 while the render used a LUT.
         var paths = new List<string>(Settings.Current.RecentPrintLuts);
         if (!string.IsNullOrWhiteSpace(active)
-            && active != ColorPipeline.PureCstSentinel     // a rendering, not a file to list
             && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))
             paths.Insert(0, active);
 
@@ -4629,9 +4633,7 @@ public partial class MainViewModel : ViewModelBase
 
         int i = _printLutPaths.FindIndex(FixedRows, _printLutPaths.Count - FixedRows - 1,
                                          p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
-        _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0
-            : active == ColorPipeline.PureCstSentinel ? 1
-            : (i < 0 ? 0 : i);
+        _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0 : (i < 0 ? 0 : i);
 
         // Posted rather than raised inline. The collection change above reaches the ComboBox
         // first and resets its selection to -1; a notification raised in the same turn is
