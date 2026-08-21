@@ -25,11 +25,7 @@ public static class Pipeline
         cal.DecoupleChromaMatrix ?? (cal.UseC41Crosstalk ? C41Crosstalk.Direction : null);
 
     /// <summary>Run Stage 1 and, for BASIC intent, the sRGB exit TRC.</summary>
-    /// <param name="meter">Receives the frame's exposure reading, taken on Stage 1's output
-    /// BEFORE any display rendering — see <see cref="ExposureMeter"/> for why it cannot be read
-    /// off the finished picture.</param>
-    public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal,
-                                           Action<(double Code, double Stops)>? meter = null)
+    public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal)
     {
         // ── Pre-inversion linear-domain corrections (distortion → vignette) ───────
         // Applied to a working copy so the caller's buffer is untouched. Order
@@ -97,10 +93,6 @@ public static class Pipeline
         if (cal.CropRect != null)
             result = Geometry.ApplyCrop(result, cal.CropRect.Value);
 
-
-        // Metered here: this is the last point at which the data is the calibrated Cineon
-        // picture and nothing else — after this a display rendering moves every tone.
-        meter?.Invoke(ExposureMeter.Measure(result.Data));
 
         // ── Output intent gate ────────────────────────────────────────────────
         if (cal.OutputIntent == OutputIntent.None)

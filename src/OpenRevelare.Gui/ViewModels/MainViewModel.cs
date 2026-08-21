@@ -2172,9 +2172,7 @@ public partial class MainViewModel : ViewModelBase
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
                 // The detector's endpoints ARE the placement — both the channels' relative spans
-                // (the colour balance) and where the picture sits. The meter below only reports;
-                // it used to re-solve D_max here and that is what darkened every LUT render.
-                MeterExposure(values);
+                // (the colour balance) and where the picture sits.
                 // Levels stay neutral — the display rendering has already placed both ends; see
                 // the note in AutoInvertRollAsync's stage 1.
                 Black = 0.0; White = 0.0;
@@ -2359,11 +2357,6 @@ public partial class MainViewModel : ViewModelBase
 
         if (highlight is not null) DMaxPerChannel = highlight;
         _lastHighlightMeasured = highlight is not null;
-
-        // Same as the roll pass: the detector's endpoints stand, and the meter only reports where
-        // this frame landed. Metered on this frame alone, which is what 单张 means.
-        if (highlight is not null && _previewLinear is not null)
-            MeterExposure(new[] { _previewLinear });
 
         StatusText = highlight is not null
             ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
@@ -2898,94 +2891,6 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>Auto black/white points from the 0.1 / 99.9 percentiles across all channels of the
     /// ungraded positive (port of Python levels.auto_levels) → 黑场 / 白场 sliders.</summary>
-    /// <summary>
-    /// Meters the roll's tone and REPORTS it. It writes nothing.
-    ///
-    /// THE MID-GREY READING IS AN INSTRUMENT, NOT A CONTROLLER. It used to re-solve D_max so the
-    /// metered tone landed on Cineon's mid-grey reference (code ~336), overwriting the endpoint
-    /// the highlight detector had just measured — and that overwrite is what stopped the
-    /// calibration doing its one job.
-    ///
-    /// THE CALIBRATION'S JOB IS THE TWO ENDS. D_min maps to code 95 and D_max to code 1032, so a
-    /// correctly calibrated frame fills the encoding with nothing clipped at either end. Solving
-    /// D_max from the metered tone instead pins the MIDDLE and lets the top fall where it may:
-    /// the picture's brightest content stopped reaching 1032, the upper part of the histogram sat
-    /// empty, and a print-film cube's shoulder — which lives exactly there — was never reached.
-    ///
-    /// So the endpoints are measured and kept, and the meter tells the user where this frame's
-    /// tone landed inside them. A frame that reads far off mid-grey is a frame the photographer
-    /// exposed that way, and moving it is the user's decision, made with the exposure control and
-    /// this reading in front of them — not something the calibration does silently.
-    ///
-    /// <see cref="ExposureMeter.SolveDMaxForAverage"/> still exists and is still correct for a
-    /// caller that genuinely wants "place this tone at this code"; nothing in the auto chain wants
-    /// that any more.
-    ///
-    /// <paramref name="frames"/> is the whole roll for 自动（整卷）and the current frame alone for
-    /// 自动（单张）.
-    /// </summary>
-    private void MeterExposure(IReadOnlyList<ImageBuffer> frames)
-    {
-        if (frames.Count == 0) return;
-
-        FrameParams p = BuildParams();
-        p.OutputIntent = OutputIntent.None;   // Stage 1 only — the meter reads the Cineon picture
-        p.BlackPoint = 0.0; p.WhitePoint = 1.0;
-
-        var codes = new List<double>();
-        foreach (ImageBuffer f in frames)
-        {
-            double code = double.NaN;
-            Pipeline.ProcessFrame(f, p, m => code = m.Code);
-            if (double.IsFinite(code)) codes.Add(code);
-        }
-        if (codes.Count == 0) return;
-
-        // MEDIAN ACROSS THE ROLL, for the same reason ExposureMeter.Measure takes one across the
-        // pixels: a few frames that are genuinely different — a handful shot indoors, a couple
-        // badly underexposed, the odd blank — should not drag the placement the whole roll gets.
-        // Measured on a roll where two of eight frames were two stops down, the mean sat 39 codes
-        // (0.26 stops) below the median, and every correctly exposed frame paid for it.
-        //
-        // A MODE WAS CONSIDERED AND NOT USED. It only diverges from the median when the roll is
-        // genuinely BIMODAL with the two halves near equal — half indoors, half outdoors — where
-        // it picks the larger cluster and the median falls in the empty middle. But that roll has
-        // no single right answer: whichever cluster wins, the other half is a stop off, and the
-        // fix a user actually wants there is per-frame placement (自动（单张）), not a cleverer
-        // roll-wide statistic. On every other shape measured — a consistent roll, a few outliers,
-        // a continuous drift, a minority second cluster — the two agree to within 0.01 stops, so a
-        // mode would add a binning parameter and a failure mode for no gain in the cases that
-        // occur. The median is what the roll pass uses.
-        double code0 = MedianOf(codes);
-        MeteredStops = (code0 - ExposureMeter.ReferenceCode) / 150.51499783199056;
-    }
-
-    /// <summary>Median of <paramref name="values"/>, computed in place.</summary>
-    private static double MedianOf(List<double> values)
-    {
-        values.Sort();
-        int n = values.Count;
-        return (n & 1) == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
-    }
-
-    /// <summary>How far the last metered average sat from the grey reference, in stops. Reported
-    /// so the placement is visible rather than silent.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(MeteredText))]
-    private double _meteredStops;
-
-    /// <summary>
-    /// The meter, as it reads on screen: the frame's average tone against Cineon's mid grey.
-    ///
-    /// Signed and in stops, because that is the unit the correction is made in — "+0.4 挡" says
-    /// both how far off and which way. The grey is the reference rather than the 685 white for
-    /// the reason <see cref="ExposureMeter"/> sets out: a correct exposure averages to a mid
-    /// grey, so zero here means correct rather than meaning blown.
-    /// </summary>
-    public string MeteredText => Math.Abs(MeteredStops) < 0.05
-        ? Loc.T("测光 ±0.0 挡（对齐中灰）")
-        : Loc.F($"测光 {MeteredStops:+0.0;-0.0} 挡（相对中灰 336）");
-
     /// <summary>
     /// Measure the rendered positive's ends and normalise to them.
     ///
@@ -5581,10 +5486,9 @@ public partial class MainViewModel : ViewModelBase
 
         bool wantClipping = ShowClipping;
 
-        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip, double metered) = await Task.Run(() =>
+        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip) = await Task.Run(() =>
         {
-            double metered = double.NaN;
-            ImageBuffer outImg = Pipeline.ProcessFrame(src, p, m => metered = m.Code);
+            ImageBuffer outImg = Pipeline.ProcessFrame(src, p);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
             HistogramData h = HistogramData.FromBuffer(outImg.Data);
@@ -5598,7 +5502,7 @@ public partial class MainViewModel : ViewModelBase
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
             var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge));
-            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c, metered);
+            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c);
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }
@@ -5607,8 +5511,6 @@ public partial class MainViewModel : ViewModelBase
             PreviewImage = bmp;
             Histogram = hist;
             ClippingOverlay = clip;
-            if (double.IsFinite(metered))
-                MeteredStops = (metered - ExposureMeter.ReferenceCode) / 150.51499783199056;
             if (frame is not null) SetThumbnail(frame, thumb); else thumb.Dispose();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();

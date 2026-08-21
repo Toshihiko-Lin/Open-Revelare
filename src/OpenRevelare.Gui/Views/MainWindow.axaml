@@ -700,12 +700,6 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
                         <ctl:HistogramView Data="{Binding Histogram}" Height="64" HorizontalAlignment="Stretch" />
-                        <!-- 测光读数：画面平均落在 Cineon 码值轴的哪里，相对中灰 336。
-                             与直方图分开，因为直方图读的是渲染后的画面（换印片就变），而这里
-                             读的是标定后的 Cineon 编码——每张 Cineon LUT 都按同一个位置设计。 -->
-                        <TextBlock Text="{Binding MeteredText}" FontSize="11"
-                                   IsVisible="{Binding HasImage}"
-                                   Foreground="{DynamicResource TextDimBrush}" />
                         <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}"
                                       IsEnabled="{Binding HasImage}"
