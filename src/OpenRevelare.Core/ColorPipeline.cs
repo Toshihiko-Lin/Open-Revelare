@@ -352,10 +352,34 @@ public static class ColorPipeline
     /// signal already stripped of the saturation it was characterised against. So the conversion
     /// into the cube's primaries is a plain matrix and the cube does the rest.
     ///
-    /// The exit converts the cube's Rec709 output into the roll's chosen space. When that space
-    /// is Rec709 the whole exit is a no-op; otherwise it is a decode, a matrix and a re-encode —
-    /// the same round trip <see cref="OutputRender.FromSrgbEncoded"/> performs, for the same
-    /// reason (the render is finished, the container is not).
+    /// THE EXIT DOES NOT RE-APPLY A TONE CURVE, AND THAT IS THE WHOLE POINT. The cube's output is
+    /// a FINISHED display rendering — the stock's toe and shoulder ARE the tone curve, already
+    /// baked into the numbers. What the roll's output space still gets to decide is its PRIMARIES;
+    /// what it does not get to decide is the tone response, because the cube has spent it.
+    ///
+    /// It used to decode with Rec709's curve and re-encode with the destination's, on the reading
+    /// that "the render is finished, the container is not". That reading is right for
+    /// <see cref="OutputRender.FromSrgbEncoded"/>, whose input really is sRGB-encoded data being
+    /// re-containered. It is wrong here, because Rec709's 2.4 power and sRGB's piecewise curve are
+    /// genuinely different transfer functions: converting between them is a legitimate operation
+    /// that legitimately CHANGES the numbers, and applying it to a finished render re-interprets
+    /// the stock's own toe as if it had been a container artefact.
+    ///
+    /// Measured on the real Kodak 2383 cube: the film base at Cineon code 95 leaves the cube at
+    /// 3.74% luminance, and the round trip delivered it to an sRGB roll at 0.49% — under the 2%
+    /// mark <see cref="ClippingDetect"/> flags, so the base and every shadow the stock had placed
+    /// below 0.0675 lit up as under-exposed in an sRGB or Display P3 roll while looking correct in
+    /// a Rec709 one. Nothing was under-exposed; the exit was crushing them.
+    ///
+    /// This mirrors what a finishing application does with a rendered frame — DaVinci's Grab Still
+    /// writes the timeline's display-encoded values out as they stand and lets the container
+    /// DECLARE the space, rather than re-transforming a finished picture on the way to disk. The
+    /// declaration is <see cref="IccProfiles"/>'s job here, and it now reads the same
+    /// <see cref="TransferFunction"/> field this path respects.
+    ///
+    /// So a wider-gamut roll (Display P3, AdobeRGB) still gets its matrix — the cube's Rec709
+    /// primaries are mapped into the destination's, in the linear light the tone curve implies —
+    /// but the curve that goes back on is the cube's own, never the destination's.
     /// </summary>
     public static void ToOutputSpaceVia(float[] data, CubeLut lut, ColorSpaceDef output)
     {
@@ -374,14 +398,18 @@ public static class ColorPipeline
 
         lut.Apply(data);
 
-        // The cube's output is display-encoded Rec709. Re-container it if the roll wants
-        // something else; a Rec709 roll keeps the cube's values untouched.
-        if (output != LutOutput)
-        {
-            OutputRender.Decode(data, LutOutput);
-            OutputRender.Convert(data, LutOutput, output);
-            OutputRender.Encode(data, output);
-        }
+        // Primaries only. Same primaries (sRGB, Rec709) ⇒ nothing to do at all: the cube's values
+        // pass through byte-for-byte, which is what keeps an sRGB roll agreeing with a Rec709 one.
+        if (output.Red == LutOutput.Red && output.Green == LutOutput.Green
+            && output.Blue == LutOutput.Blue && output.White == LutOutput.White)
+            return;
+
+        // A real gamut change. Undo the cube's OWN curve to reach linear light, rotate the
+        // primaries there, then put the cube's own curve back — not the destination's, which
+        // would re-grade the finished render.
+        OutputRender.Decode(data, LutOutput);
+        OutputRender.Convert(data, LutOutput, output);
+        OutputRender.Encode(data, LutOutput);
     }
 
 }

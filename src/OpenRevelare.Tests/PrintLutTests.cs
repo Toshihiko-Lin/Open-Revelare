@@ -664,4 +664,135 @@ public class PrintLutTests
                 Assert.Equal(original[i], data[i], 4);
         }
     }
+
+    // ── The output-space round trip ──────────────────────────────────────────────
+
+    /// <summary>
+    /// THE ROLL'S OUTPUT SPACE MUST NOT RE-GRADE A FINISHED RENDER — it used to crush the
+    /// shadows by 87%.
+    ///
+    /// A print-film cube emits a FINISHED display rendering in Rec709: the stock's toe and
+    /// shoulder are already in the numbers. <see cref="ColorPipeline.ToOutputSpaceVia"/> used to
+    /// re-container it for any other roll space by decoding with Rec709's curve and re-encoding
+    /// with the DESTINATION's. Rec709's 2.4 power and sRGB's piecewise curve are genuinely
+    /// different transfer functions, so that conversion legitimately changes the numbers — and
+    /// applying it to a finished render re-interprets the stock's own toe as a container artefact.
+    ///
+    /// Measured on the real Kodak 2383 cube, the film base at Cineon code 95 leaves the cube at
+    /// 3.74% luminance. The old exit delivered it to an sRGB roll at 0.49% — below the 2% mark
+    /// <see cref="ClippingDetect"/> flags — so the base and every shadow the stock had placed
+    /// below 0.0675 lit up blue in an sRGB or Display P3 roll while looking correct in a Rec709
+    /// one. Nothing was under-exposed; the exit was crushing them.
+    ///
+    /// So the assertion is that the roll's output space does not change what the eye receives.
+    /// The cube here is the IDENTITY, so any departure is the exit's doing and nothing else.
+    ///
+    /// LUMINANCE IS MEASURED THROUGH THE CUBE'S OWN CURVE for every destination, because that is
+    /// the curve the data still carries — the exit deliberately does not swap it for the
+    /// destination's. Decoding with the destination's curve instead would be assuming the very
+    /// re-encode this test exists to forbid.
+    /// </summary>
+    [Theory]
+    [InlineData("sRGB")]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void The_roll_output_space_does_not_regrade_a_cube_render(string spaceName)
+    {
+        string path = WriteCube(TempCube("identity-rt"), 33, v => v);
+        try
+        {
+            CubeLut lut = CubeLut.Load(path);
+            ColorSpaceDef target = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+
+            // Scene-linear neutrals spanning the shadows, including the film base at code 95.
+            float baseLin = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+            var probes = new[] { baseLin, 0.02f, 0.05f, 0.18f };
+
+            foreach (float probe in probes)
+            {
+                var viaRec709 = new[] { probe, probe, probe };
+                ColorPipeline.ToOutputSpaceVia(viaRec709, lut, ColorSpaces.Rec709);
+
+                var viaTarget = new[] { probe, probe, probe };
+                ColorPipeline.ToOutputSpaceVia(viaTarget, lut, target);
+
+                // Luminance is the quantity the indicator tests and the quantity the exit must
+                // preserve; a real gamut change may still redistribute it between channels.
+                double lumRec709 = Luma(viaRec709, ColorSpaces.Rec709);
+                double lumTarget = Luma(viaTarget, target);
+
+                Assert.True(Math.Abs(lumTarget - lumRec709) < 0.01,
+                    $"{spaceName} at linear {probe}: luminance moved {lumRec709:F4} → {lumTarget:F4}");
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>
+    /// Relative luminance of a cube's encoded output, weighted by <paramref name="space"/>'s own
+    /// Y row — not sRGB's, which would be wrong for P3.
+    ///
+    /// The TRC undone is always the CUBE's (Rec709), whatever the destination, because the exit
+    /// leaves the cube's curve in place rather than substituting the destination's.
+    /// </summary>
+    private static double Luma(float[] encoded, ColorSpaceDef space)
+    {
+        var lin = (float[])encoded.Clone();
+        OutputRender.Decode(lin, ColorSpaces.Rec709);
+        double[,] toXyz = space.ToXyz();
+        return toXyz[1, 0] * lin[0] + toXyz[1, 1] * lin[1] + toXyz[1, 2] * lin[2];
+    }
+
+    /// <summary>
+    /// Encode and Decode must be inverses for EVERY registered space. This is the property the
+    /// round trip above depends on, stated directly: it held for the power-curve spaces and broke
+    /// silently across a piecewise/power pair, because each half resolved its curve independently.
+    ///
+    /// TOLERANCE. The piecewise spaces apply their TRC through a shared 65536-entry table
+    /// (<see cref="Srgb.ApplyForwardInPlace"/>), so a decode/encode pair quantises twice and the
+    /// round trip is exact only to the table's granularity — measured worst case 6.3e-05, near
+    /// code 0.03 where the curve is steepest. That is a quarter of one 8-bit step and cannot
+    /// reach a pixel. The 1e-4 bound here is therefore the TABLE's precision, not slack for a
+    /// curve mismatch: the bug this guards against moved 0.0301 to 0.0029, four hundred times
+    /// wider, so no tolerance that admits LUT granularity could also admit it.
+    /// </summary>
+    [Fact]
+    public void Encode_and_Decode_are_inverses_for_every_space()
+    {
+        foreach (ColorSpaceDef space in ColorSpaces.All.Values)
+        {
+            var original = new[] { 0.001f, 0.0301f, 0.0386f, 0.1f, 0.5f, 0.9f, 1f };
+            var round = (float[])original.Clone();
+
+            OutputRender.Decode(round, space);
+            OutputRender.Encode(round, space);
+
+            for (int i = 0; i < original.Length; i++)
+                Assert.True(Math.Abs(original[i] - round[i]) < 1e-4,
+                    $"{space.Name}: {original[i]} round-tripped to {round[i]}");
+        }
+    }
+
+    /// <summary>
+    /// Each space carries its OWN declared curve, and the two that share sRGB's piecewise TRC are
+    /// the two that are specified against it. Pinned because the values were previously implied by
+    /// name matching in three separate places (Encode, Decode, IccProfiles) rather than stated once.
+    /// </summary>
+    [Fact]
+    public void Every_space_declares_the_transfer_function_its_standard_specifies()
+    {
+        Assert.Equal(TransferFunction.SrgbPiecewise, ColorSpaces.Srgb.Transfer);
+        Assert.Equal(TransferFunction.SrgbPiecewise, ColorSpaces.DisplayP3.Transfer);
+        Assert.Equal(TransferFunction.Linear, ColorSpaces.AcesCg.Transfer);
+
+        Assert.Equal(TransferFunction.Power, ColorSpaces.Rec709.Transfer);
+        Assert.Equal(2.4, ColorSpaces.Rec709.Gamma, 6);          // BT.1886
+        Assert.Equal(TransferFunction.Power, ColorSpaces.AdobeRgb.Transfer);
+        Assert.Equal(563.0 / 256.0, ColorSpaces.AdobeRgb.Gamma, 6);
+
+        // A piecewise space has no single exponent, and must refuse to invent one.
+        Assert.Throws<InvalidOperationException>(
+            () => OutputRender.EncodingGamma(ColorSpaces.Srgb));
+    }
 }

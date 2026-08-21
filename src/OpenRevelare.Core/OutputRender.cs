@@ -149,22 +149,28 @@ public static class OutputRender
     /// <summary>
     /// Applies <paramref name="space"/>'s encoding TRC in place, taking linear to encoded.
     ///
-    /// sRGB gets its piecewise curve (the linear toe is the whole point of it); everything else
-    /// is a pure power curve. AdobeRGB's 563/256 goes through the same path as any other gamma,
-    /// which is what its profile declares.
+    /// The curve comes from <see cref="ColorSpaceDef.Transfer"/> — the space's own declaration —
+    /// so this and <see cref="Decode"/> read the SAME field and are inverses by construction.
+    /// They used to infer it from the name in two places that disagreed; see the remarks on
+    /// <see cref="TransferFunction"/> for what that cost.
     /// </summary>
     public static void Encode(float[] data, ColorSpaceDef space)
     {
-        // sRGB and Display P3 share the same piecewise TRC — P3 differs only in its primaries.
-        if (space.Name.Equals("sRGB", StringComparison.OrdinalIgnoreCase)
-         || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase))
+        switch (space.Transfer)
         {
-            Srgb.ApplyForwardInPlace(data);
-            return;
-        }
+            case TransferFunction.SrgbPiecewise:
+                Srgb.ApplyForwardInPlace(data);
+                return;
 
-        float g = 1.0f / (float)EncodingGamma(space);
-        Parallel.For(0, data.Length, i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+            case TransferFunction.Linear:
+                return;
+
+            default:
+                float g = 1.0f / (float)space.Gamma;
+                Parallel.For(0, data.Length,
+                             i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+                return;
+        }
     }
 
     /// <summary>
@@ -172,32 +178,43 @@ public static class OutputRender
     ///
     /// The exact inverse, curve for curve, so an encode/decode pair is a true round trip. Needed
     /// wherever a render arrives already encoded and has to be re-containered — the print-film
-    /// path, whose cube emits Rec709, is the current caller.
+    /// path, whose cube emits Rec709, is the current caller, and the one the mismatch broke.
     /// </summary>
     public static void Decode(float[] data, ColorSpaceDef space)
     {
-        if (space.Name.Equals("sRGB", StringComparison.OrdinalIgnoreCase)
-         || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase))
+        switch (space.Transfer)
         {
-            Srgb.ApplyInverseInPlace(data);
-            return;
-        }
+            case TransferFunction.SrgbPiecewise:
+                Srgb.ApplyInverseInPlace(data);
+                return;
 
-        float g = (float)EncodingGamma(space);
-        Parallel.For(0, data.Length, i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+            case TransferFunction.Linear:
+                return;
+
+            default:
+                float g = (float)space.Gamma;
+                Parallel.For(0, data.Length,
+                             i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+                return;
+        }
     }
 
     /// <summary>
-    /// The display gamma each space's ICC profile declares. ACEScg is scene-linear and carries no
-    /// encoding curve, so it stays linear (gamma 1). sRGB and Display P3 are absent because their
-    /// TRC is piecewise, not a power curve — <see cref="Encode"/> routes them separately.
+    /// The power-curve exponent for a space whose TRC is <see cref="TransferFunction.Power"/>,
+    /// for consumers that must describe the curve rather than apply it —
+    /// <see cref="IccProfiles"/> writing a 'curv' tag is the only one.
+    ///
+    /// Scene-linear spaces report 1.0, which is what an ICC profile should say. A piecewise space
+    /// has no single exponent and must not be described by one, so asking for it is a caller bug
+    /// rather than something to approximate with 2.2 — that silent approximation is exactly what
+    /// the old name-keyed lookup did.
     /// </summary>
-    public static double EncodingGamma(ColorSpaceDef space) => space.Name switch
+    public static double EncodingGamma(ColorSpaceDef space) => space.Transfer switch
     {
-        "AdobeRGB" => 563.0 / 256.0,
-        "Rec709" => 2.4,   // BT.1886 display gamma — the Cineon workflow's step-4 target
-        "ACEScg" => 1.0,
-        _ => 2.2,   // the paper/print spaces are published at 2.2
+        TransferFunction.Power => space.Gamma,
+        TransferFunction.Linear => 1.0,
+        _ => throw new InvalidOperationException(
+                 $"{space.Name} 的传递函数是分段曲线，没有单一 gamma 可用。"),
     };
 
     /// <summary>
