@@ -1,364 +1,223 @@
 # OpenRevelare — 更新日志
 
-## 未发布
+## v1.6.0（2026-08-22）
+
+这一版把反相的两半重新划清：**标定只负责把底片的两端对齐，渲染只负责观感。**在此之上新增了
+印片模拟与扫描件分格，并修复了一批相关问题。
 
 **新增**
 
-- **分格对话框加了旋转与缩放**。此前预览固定「适应窗口」，一条 5514×20567 的双列扫描件
-  缩到窗口里，每一格只有几十像素高，格间片基是不是真的片基根本看不出来，分割线只能靠猜。
+- **新增【胶片风格】**。在【输出空间】旁边选一张印片（如 Kodak 2383、Fujifilm 3513DI），
+  画面就按那张胶片的反差和色彩渲染。
 
-  现在工具条上有 **↺ / ↻ 各转 90°**、**+ / − 缩放**（100%–800%）和**复位**；滚轮缩放，
-  放大后拖动空白处平移。
+  需要自备 `.cube` 文件，且必须是**以 Cineon log 为输入**的印片 LUT——软件不附带，这类文件
+  由各厂商单独授权。装了 DaVinci Resolve 的话，其安装目录 `LUT/Film Looks/` 下就有。
 
-  按钮用的是项目里既有的 `Classes="icon"`（方形、无边框、`Padding=0`）——默认 `Button` 样式
-  自带 `Padding="12,6"`，我起初改用固定 `Width="32"`，内容框只剩 8px，图标被切掉显示不全。
-  整行也从 `StackPanel` 换成 `Grid`，末尾提示文字占弹性列并允许省略号：窗口变窄时让句子先
-  收缩，而不是把按钮挤出面板。
+  不选印片时走「标准显示渲染（CST + 显示渲染）」。想调胶片之前的画面，去【整卷校准】拉
+  D_max / D_min。
 
-  **这三个控件只改变「怎么看」，不写进导入结果**——分割线、外框和最终产出的裁切矩形自始至终
-  都在源图自己的坐标系里。底片朝向仍由主窗口按格控制。
+- **扫描件分格现在可以识别双列**。平板扫描仪的片夹一次能放好几条片——6×12 的一版就是两列
+  各六格——现在每一条都会被识别并各自独立分格。同一个文件因此可能产出多份分格方案，对话框里
+  按「文件名 (1/2)」分行列出，导入时再按文件合并回去。「跳过（整张不切）」的含义相应收窄为
+  「这一条不切」。
 
-  实现上没有去改那 15 处覆盖层的绘制：画面与所有覆盖层放进一个内层 `Scene` 画布，
-  `RenderTransform`（缩放→旋转→平移，绕中心）挂在它身上；指针坐标进来时先过一次逆变换，
-  于是命中判定、归一化换算、分割线数学全部照旧在「未旋转未缩放」的空间里工作，一行没动。
+- **分格对话框现在可以旋转与缩放预览**。此前预览固定「适应窗口」，一条长扫描件缩到窗口里
+  每格只有几十像素高，格间是不是真的片基根本看不出来。现在工具条上有 **↺ / ↻ 各转 90°**、
+  **+ / − 缩放**（100%–800%）和**复位**；滚轮缩放，放大后拖动空白处平移。
 
-  **裁剪与变换必须分属两个控件**：控件自己的 `RenderTransform` 是在它自己的裁剪**之后**
-  才应用的，所以一开始把变换挂在负责裁剪的 `Stage` 上时，放大后的画面直接溢出灰色预览区、
-  盖到周围面板上。现在 `Stage` 只负责裁剪和接收指针，`Scene` 只负责变换。
-
-  平移也做了边界约束：此前 `_pan` 无上限，能把整条底片拖出灰色区域，只剩空画布、除了「复位」
-  没有别的办法退回来。现在画面只能在自己「超出预览区的那部分」范围内移动——适应窗口时完全
-  不能动，800% 时能够到每个角，但都不会越过。
-
-  另两个细节：letterbox 的适应比例要按**旋转后**的轴算，否则转 90° 之后长条会按错误的轴
-  缩放、跑出画布；拖动光标的方向也要跟着转——边在图上沿纵向移动，转 90° 之后在屏幕上是横向
-  移动，不跟着换箭头就会指错手柄。
-
-  变换数学我用 4000 组随机参数对拍过：自身往返误差 1e-13；与 Avalonia 实际 `RenderTransform`
-  的最大偏差 1.6e-5 像素，来源是 `RotateTransform` 走的是角度转弧度、`cos(90°)` 不是精确 0
-  （每 90° 带约 1.8e-9 误差），而这里用的是整数换轴，比它更准，可以忽略。平移约束另用
-  20000 组随机「旋转 × 缩放 × 平移」验证：画面大于预览区时始终铺满不留缝，小于时始终整幅
-  在内，两类越界均为 0。
+  这三个控件只改变「怎么看」，不写进导入结果。底片朝向仍由主窗口按格控制。
 
 **修复**
 
-- **重开工程后，分格卷第一帧的预裁切失效**。TIFF 扫描件分格导入、存盘、退出，再打开这个工程，
-  第一格拿到的是**整条未分割的扫描件**——其余各格都正常。
+- **现在画面不再偏暗、高光不再被切掉**。标定现在只做一件事：**D_min 对齐码值 95、D_max 对齐
+  1032**，让画面占满且两端都不切。中性灰读数保留，但它只显示不写入——曝光不对的画面由用户
+  看着读数自行调整。
 
-  这是导入路径上那个「胶片条绑定抢跑」的坑在**打开工程**这条路上的第二份。胶片条把
-  `SelectedItem` 双向绑到 `CurrentFrame`：`Frames.Clear()` 会把 null 推回来，紧接着第一次
-  `Frames.Add` 又让 ListBox 自动选中、把这一帧推回去——于是在整个列表还没建完、
-  `RefreshSplitPaths()` 还没跑的时候，一次帧切换就已经开始了。
+- **偏色高光现在不再让单通道过曝**。钠灯、夕阳、红色霓虹这类画面此前可能有一个通道冲出端点
+  被切掉，现在三个端点一起等比放大，色彩平衡分毫不动。
 
-  两处后果。其一，`_paramsLoaded` 此时还是**上一卷**留下的 `true`，`CommitLiveParams` 那道
-  闸门形同虚设，第一帧的参数被上一卷的控件状态盖掉，`CropRect` 变成 null。导入路径当初修的
-  就是这个，`LoadRollAsync` 里那行 `_paramsLoaded = false` 正为此而设，但 `OpenProjectAsync`
-  漏了。
+- **「标准」下的高光现在不再硬切**。此前码值 685 就到显示白，685–1032 这 **2.31 挡**宽容度
+  全被钳掉；切到印片时那段高光突然回来，看起来像是「印片把高光压暗了」。现在加了肩部，
+  码值 685 落到 0.881，与实测的 Kodak 2383（0.880）对齐，1032 滚到 0.992 而非切顶。
+  中调不受影响。
 
-  其二，就算参数没被盖掉，这次抢跑的解码读到的 `_splitPaths` 仍属于上一卷，于是走的是整幅
-  预览而不是区域预览。而且它**无法被后面那次正经的赋值纠正**：`CurrentFrame` 早已是这一帧，
-  `[ObservableProperty]` 的相等判断把赋值变成空操作，`OnCurrentFrameChanged` 不会再触发一次，
-  `_switchToken` 也就没有机会作废它。
+- **片基在「标准」下现在渲染为纯黑**。这是渲染的决定，不是编码的——印片那条路仍然拿到未经
+  改动的 Cineon 信号，所以 D_min 不再需要为了迁就印片而偏离实测片基。
 
-  所以补齐两半：`OpenProjectAsync` 在换帧前也把 `_paramsLoaded` 落下；重建列表整段放进既有的
-  `_reordering` 抑制区里——这正是 `Reorder` 为「列表增删不是真的换帧」准备的那个开关——建完再
-  显式置 null，让后面那次赋值重新成为一次真正的变化。第一次帧切换因此只发生一次，且发生在
-  `RefreshSplitPaths()` 之后。
+- **修复了白平衡与曝光会破坏标定的问题**。此前它们跑在渲染之前，增益会把标定好的片基顶离
+  码值 95；现在这些调整全部排在显示渲染之后。
 
-- **同步裁切让预裁切出来的各副本变成同一张照片**。分格导入后，一条扫描件被切成若干格，第一
-  格是实体帧、其余是虚拟副本，每格各自带着自己的裁切矩形。此时勾上「裁切」再「应用到整卷」，
-  整条片的每一格都变成了同一张照片——源帧所在的那一格，分格的结果被同步一步抹掉了。
+- **修复了黑位没有真正落到纯黑的问题**。此前片基采样得越准、黑位反而浮得越高，采过片基的
+  工程会发现暗部发灰。现在采样为黑的位置就是纯黑。
 
-  原因是裁切矩形归一化的基准是**整个源文件**，不是这一格。在普通卷里两者是同一回事（文件就
-  是这一帧），所以照抄一直都对；但在分格后的扫描件里，一个文件装着好几格，源帧的矩形指的是
-  **源帧那一格**里的一块。原样发给兄弟帧，它们就全都指向了那同一块底片。
+- **修复了某些源文件通道值为 0 时颜色不对的问题**。齿孔黑边、扫描件黑边、部分相机 RAW 的
+  填充边此前会出现本不该有的偏色，现在正确地渲染为白。
 
-  现在裁切按**每一帧自己的格子**重新落位：先把矩形化为它在源帧格内所占的比例（居中的 80%、
-  左边切掉一条），再按目标帧的格子还原回去。用户说「同样的裁切」，指的本来就是「对各自底片
-  做同样的裁切」。
+- **修复了【自动白点】与【自动（整卷）】在同一张片子上给出不同亮端的问题**。两者现在用同一套
+  测量方法；测不到高光时会明确提示，而不是静默保持原值。
 
-  为此得知道每帧的格子是哪一格，而裁切矩形担不起这个职责——分格导入时两者相等，但用户手动裁
-  第一刀就把它覆盖掉了，此后再没有东西能说明这一帧是哪一格。所以格子单独记为 `SplitCell`，
-  导入时写入、并随工程文件存取；旧工程里没有这个字段，按「未手动裁过的分格帧其裁切矩形就是
-  格子」回填。
+- **修复了智能白平衡把画面拉过曝的问题**。
 
-  两处细节：格子存的是**文件坐标**，而裁切矩形存的是**转向之后的坐标**，所以搬运要跟
-  `ForRegion` 走同样的三步——落回文件坐标、换格、再按**目标帧**的转向转回去；同步方向也排在
-  转向组之后，否则矩形会按旧的轴向落位。另外各格大小并不相等（分割线落在格间缝上，两头的格
-  子分到的是剩下的部分），所以搬过去可能越界——越界时**平移**回文件内而不是裁掉，用户选定的
-  尺寸和比例得以保留。
+- **修复了同步裁切让预裁切出来的各副本变成同一张照片的问题**。分格导入后勾上「裁切」再
+  「应用到整卷」，此前整条片的每一格都会变成源帧所在的那一格。现在裁切按每一帧自己的格子
+  重新落位——用户说「同样的裁切」，指的本来就是「对各自底片做同样的裁切」。
 
-  普通卷、以及整帧的虚拟副本，走的都还是原样照抄那条路径：它们没有格子，而没有格子的情况本
-  来就是照抄才对。
+- **修复了重开工程后分格卷第一帧预裁切失效的问题**。分格导入、存盘、退出再打开，此前第一格
+  拿到的是整条未分割的扫描件。
 
-- **双列扫描件只识别到一半底片**。平板扫描仪的片夹一次能放好几条片——6×12 的一版就是两列
-  各六格——但分割检测在找胶片所占的列时只保留**最宽的那一条**，其余各列连同上面的所有格子
-  在用户看到分格对话框之前就被悄悄丢掉了。实测一张两列共 12 格的扫描件只报出 6 格。
+- **修复了分格对话框的黄色分割线横跨整幅预览的问题**。双列扫描件下第 1 条的分割线此前会压在
+  第 2 条的照片上，且点第 2 条的照片会拖走第 1 条那根根本不在视野里的分割线。现在分割线与
+  命中判定都只限于当前这一条。
 
-  现在**每一条**足够宽的列都会被保留，各自独立分格：它们是分开的几段胶片，格子边界本来就
-  对不齐，一份共用的分割线描述不了两条片。同一个文件因此可能产出多份分格方案，对话框里按
-  「文件名 (1/2)」分行列出，导入时再按文件合并回去。单列扫描件走的路径一字未变。
-
-  难点不在「找出多列」，而在「别把不是列的东西当成列」。判据不能用原来那条亮度阈值——它按
-  构造就贴着片基的水平，所以一张**已经裁好的单张底片**（没有片基、没有黑边、整幅都是画面）
-  只要画面里横过一道暗部，也会被切成好几段「列」，实测把 2 格变成 5 格。改为拿列间缝隙的
-  最暗值去比**胶片自身的水平**：真正的黑边是扫描仪盖板，几乎不透光，实测只有胶片的 0.03；
-  而照片里最暗的一列仍带着大部分片基密度，实测 0.86。两者不挨边，据此区分。缝隙不够黑就把
-  两段并回同一条片，而不是把后一段丢掉——那会连带丢掉那部分底片。
-
-  「跳过（整张不切）」在多列扫描件下的含义也跟着收窄为「这一条不切」，返回该条自己的方框
-  而非整个文件：文件里还有别的条，返回整幅会把它们的格子在一个超大格里再导入一遍。
-
-
-- **分格对话框的黄色分割线横跨整幅预览**。分割线画的是 `_imageRect.Width`，完全没看
-  `CrossLo`/`CrossHi`——而旁边的画幅绿框一直是按这条片自己的范围画的。单列扫描件下这只是
-  不讲究；到了双列扫描件就变成了误导：第 1 条的分割线直接压在第 2 条的照片上，既位置不对，
-  也看不出它属于哪一条。
-
-  现在分割线只跨**当前这一条**，两侧各多出 4 px 当把手，不会够到旁边的片。
-
-  命中判定跟着一起收窄。`NearestDivider` 原本只量沿片方向的距离，横向不做任何限制，所以
-  分割线在整幅预览的那一行上到处都能抓——双列下就是「点第 2 条的照片，拖走了第 1 条的分割
-  线」，而那条线当时根本不在视野里，改坏了一个用户没在看的格子。现在超出这条片的范围（含
-  容差）就不再命中，和画出来的样子一致。双击加分割线的路径不受影响。
-
-- **macOS 上使用裁切工具会闪退**。裁切模式下的悬停分支在**每一个**鼠标移动事件里都
-  `new Cursor(...)` 造一个新光标——鼠标划过画面一秒就是几百个。每个光标都持有一份平台资源，
-  只有等终结器跑到才归还，而 GC 只看见几十字节托管内存，根本不着急回收。于是光标在裁切工具
-  开着的整段时间里一直堆积，直到进程撑不住。这也解释了为什么用户报的是「移动鼠标就崩」，
-  而不是崩在某一次点击上。
-
-  现在六种光标各建一次、全程复用，赋值前先比引用——与旁边 `UpdatePanCursor` 早就在用的写法
-  一致（那处当初正是为同一类问题加的缓存，只是裁切这条路没跟上）。
-
-  分格对话框（`SplitDialog`）的边界拖拽提示是同一个写法，一并改掉。
-
-**移除**
-
-- **删除曝光指示器（直方图下方的「测光 … 挡」读数）**，连同 `ExposureMeter` 整个类。
-
-  这个读数从 v1.6.0 引入起就没有对过，而且每次修都换一种错法。它测的是 Stage 1 的 Cineon
-  编码，于是**曝光、对比度、黑白场、曲线、印片 stock 全都在它之后**——拉曝光滑块画面动一挡，
-  读数纹丝不动。把测光点挪到渲染之后又暴露出更深的问题：读数要和哪个「正确」比？
-
-  参考点试了两次都不对。先是拿 Cineon 码值 336 去比显示光，那是**密度轴**上的中灰（锚点是
-  D_min→95、D_max→1032），而渲染后的画面白点是 1.0、中灰在 659.6，等于给每帧无条件加了
-  **+2.15 挡**——欠 2 挡的片子报 +0.15，看着像正常。改成比 0.18 显示白，又假设了渲染是普通
-  gamma；标准显示渲染其实带 0.6 响应 gamma、片基归零和 shoulder，正确中灰落在 **0.0585**、
-  漫反射白落在 0.75，于是反向偏 **−1.62 挡**，过曝的片子报 0。
-
-  改用「把已知正确的中灰推过同一条渲染链、看它落在哪」来探参考点之后，正确曝光确实读 0 了，
-  但暴露出这件事**本身没有单一正确答案**：那条渲染链把反差拉开约 1.67 倍（1/0.6），所以
-  「屏幕上的一挡」和「曝光的一挡」不是一回事——欠 1 挡曝光的画面在屏幕上暗 2.42 挡，欠 2 挡
-  直接掉进纯黑读不出来。报前者数字能照着调但不描述所见，报后者忠实但不能照着调，两者都得
-  在 UI 上解释清楚才不误导。
-
-  一个需要附带说明书才能读对的仪表，不如没有。**直方图和过曝/欠曝指示**给的是同样的信息，
-  而且不假装自己是一个可以照着补偿的数字。
-
-  `Pipeline.ProcessFrame` 的 `meter` 回调参数一并去掉（已无调用方）。
-
-## v1.8.0（2026-08-21）
-
-上一版把「标准」这一项补上了显示渲染，也把 D_max 交给了测光。实际用下来这两个决定都各自
-带来了新问题：片基发灰、高光被切、挂上印片后整体偏暗一挡。这一版把标定与渲染的职责重新
-划清——**标定只负责两端对齐，渲染只负责观感，测光退回仪表**。
-
-**修复**
-
-- **标定不再由测光反解 D_max**。上一版把画面的**中间**（平均值）钉在中灰 336，让**顶部**
-  自由落体，于是画面最亮处够不到码值 1032，直方图右侧留空。而印片 LUT 的肩部正好活在那一
-  段，所以挂上印片后整体偏暗、高光永远不被触发。
-
-  现在 **D_min → 95、D_max → 1032，仅靠这两个端点让画面占满且两端都不切**——这才是标定该
-  做的事。中性灰读数保留，但它只显示不写入：曝光不对的画面由用户看着读数自行调整。
-
-- **高光端点不再让单通道过曝**。端点按**总密度**排序取尾部，保证三通道共位（色彩平衡才可信）；
-  但偏色高光（钠灯、夕阳、红色霓虹）可能单通道很浓而总密度不够，进不了尾部，那个通道就冲出
-  自己的端点被切掉。
-
-  现在算完共位端点后，用最大超出比例把**三个端点同乘**一个系数。等比缩放不改变端点之间的
-  比值，所以共位取样定下的色彩平衡分毫不动，而三个通道都保证不过曝。
-
-- **「标准」的高光不再硬切**。此前码值 685 就到显示白，685–1032 这 **2.31 挡**宽容度全被
-  编码器钳掉。切到印片时那段高光突然回来、被摊在 0.88–1.0 之间，看起来像是「印片把高光压暗
-  了」——其实是标准路径一直在烧掉它们。
-
-  现在加了肩部（膝点在码值 596），码值 685 落到 0.881，与实测的 Kodak 2383（0.880）对齐，
-  1032 滚到 0.992 而非切顶。中调不受影响：码值 486 仍是 0.494。
-
-- **片基在「标准」下归零**。渲染末尾把码值 95 归一化到显示黑。这是**渲染**的决定，不是编码
-  的——`LogEncoding` 和端点一个字都没动，印片 LUT 那条路仍然拿到未经改动的 Cineon 信号。
-
-  这推翻了上一版「片基应渲染为约 0.15 的灰」的说法，理由是实测：归一化后码值 250 输出 0.172、
-  328 输出 0.259，比未归一化的 0.208 / 0.282 **更接近** Kodak 2383 的 0.10 / 0.18。上一版
-  注释里「减法会让曲线偏离 cube」的举证方向反了。
-
-- **Stage 2 移到显示渲染之后**。白平衡与曝光此前跑在 step 4 之前的线性域，于是增益会把已经
-  标定好的片基顶离码值 95，让归一化失效（实测 +0.5 挡时片基渲染成 0.090、+1 挡 0.167）。
-
-  现在 step 4 最先跑，Stage 2 全部在渲染之后。白平衡与曝光用一次「解码→相乘→编码」的往返
-  保住线性语义——中灰 +1 挡仍是 0.259 而非编码域直乘的 0.923。
-
-- **测光改用中位数**。此前取平均，于是刻意牺牲的高光（窗户、逆光、天空）会把读数拖高，
-  D_max 跟着解低，**主体反被压暗**：实测 30% 过曝区代价 0.73 挡、50% 代价 1.21 挡。
-
-  中位数对少数派过曝完全免疫（30% 时读数不动）。过曝区过半时它会跟随，那是诚实的——一张
-  大半是天空的画面没有同时正确的曝光。整卷跨帧归约也改用中位数（曾考虑众数：只在「半室内
-  半室外且两簇等大」时才与中位数分开，而那种卷本就该逐帧处理）。
+- **修复了 macOS 上使用裁切工具会闪退的问题**。裁切模式下移动鼠标此前会持续泄漏光标资源，
+  直到进程撑不住。分格对话框的边界拖拽提示也是同一个问题，一并修复。
 
 **改进**
 
-- **【胶片风格】新增「Cineon log（纯 CST，未渲染）」**，与「标准显示渲染」并列，默认仍是后者。
+- **优化了整卷标定的稳定性**。测光改用中位数，刻意牺牲的高光（窗户、逆光、天空）不再把读数
+  拖高、把主体压暗——实测 30% 过曝区此前代价 0.73 挡，现在完全不受影响。
 
-  它只解编码、不做任何渲染：**18% 中灰出来正好是 0.180、90% 漫反射白正好是 0.900**，标定
-  原样穿过。画面平且发灰是 log 本来的样子——观感请交给 LUT 或后期调色。这是达芬奇 CST 节点
-  把色调映射设为 None 时的行为。
+- **反差对齐 Cineon 标准**。黑白两端之间的密度跨度改为 Cineon 的 95–1032，此前略宽。
 
-  同时第一项改名为「标准显示渲染（CST + 显示渲染）」。它从来不是一次单纯的容器转换：它折进
-  了响应 gamma 并把片基归零，那是观感决策。两项并列才说得清区别。
+- **自动色阶不再由任何自动流程调用**。两条渲染路径都会放置自己的两端，再测一次结果并拉回
+  0..1 等于推翻用户刚选的那个渲染。按钮与滑块照常可用，改变的只是默认行为。
 
-- **自动色阶不再由任何自动流程调用**。三条渲染路径都会放置自己的两端——标准渲染归一化码值
-  95 并在 685 之上滚降，印片有自己的趾部与肩部，纯 CST 刻意不做渲染——再测一次结果并拉回
-  0..1，等于推翻用户刚选的那个渲染。
+- **切换胶片风格时重建帧参数**。曝光、白平衡这些数值是相对某次渲染而言的，跨风格沿用等于把
+  针对另一张画面的修正套上来。切换时归零，整卷参数会先进撤销栈，误切一次 Ctrl+Z 即可。
 
-  片基归零后黑端百分位恒为 0，所以此前**只有白场在动**，把肩部刚滚掉的高光又推回去顶到 1。
-  按钮与滑块照常可用，改变的只是默认行为。
+**移除**
 
-- **切换胶片风格时重建 Stage 2 参数**。Stage 2 跑在渲染之后，数值是相对那次渲染的零点而言的；
-  跨风格沿用等于把针对另一张画面的修正套上来。切换时归零，整卷参数会先进撤销栈，误切一次
-  Ctrl+Z 即可。
+- **输出空间去掉两个染料基色**（Kodak 2383、Kodak Endura Premier）。它们描述的是染料编码
+  基色，而非实际能呈现的色域。旧工程指定它们时会迁移到 sRGB。
 
 **已知的行为变化**
 
-- **所有已有工程的明暗都会变**，方向是变亮——D_max 不再被测光压低。重跑一次【自动（整卷）】
-  或【自动（单张）】即可。
+- **所有已有工程的明暗都会变**。重跑一次【自动（整卷）】或【自动（单张）】即可。
 
 - **【自动（整卷）】与【自动（单张）】给出的结果不同，这是设计使然**。整卷从全部帧里挑
-  **最浓的那一帧**作为全卷标定（跨帧逐通道取百分位会让 R/G/B 落在不同帧上，产生任何底片都
-  没产生过的三元组）；单张只看当前帧。除非当前帧恰好是全卷最浓的那张，两者必然不同。
+  **最浓的那一帧**作为全卷标定，单张只看当前帧。
 
 - **片基在「标准」下渲染为纯黑**，比真实印片更狠一点（Kodak 2383 在码值 95 处给 0.037）。
   代价是片基与比它更暗的东西（齿孔、遮光边）在显示上合并为同一个 0。
 
 ---
 
-## v1.7.0（2026-08-21）
-
-**修复**
-
-- **片基在「标准」和选了印片时不一致**。选了印片时暗部大片报欠爆；为了救暗部去调小 D_min，
-  切回「标准」片基又发灰。根源是黑位被两处规则决定：标定阶段擅自把片基按成纯黑，而印片
-  LUT 按 Cineon 的码值 95 渲染它自己的暗部。
-
-  现在标定阶段不再做黑位归一化。**Stage 1 的输出就是标准 Cineon log，两条路径消费同一份
-  信号，只在「拿它做什么」上分岔。D_min 不再需要为了迁就印片而偏离实测片基。**
-
-- **「标准」这一项此前没有显示渲染**。它解完 log 就直接交给输出空间的 gamma，等于什么都
-  没做，画面读起来是一张发灰的 log 底片。现在走标准 Cineon 转换（参考白 685、响应 gamma
-  0.6），反差由这条曲线提供。
-
-**改进**
-
-- **新增测光读数**（直方图下方）。显示画面平均落在 Cineon 码值轴的哪里，相对中灰 336。
-
-  在**码值域**测，不在屏幕上测：屏幕上的亮度随所选印片变化，而码值是所有 Cineon LUT 共同
-  认的坐标。取对数域平均（几何平均），所以一处高光点不会把读数拖走一整挡。**片基不参与
-  计算**——它是正片里最暗的东西，大面积片基边框会把平均拉低，而读数偏低会让 D_max 解得偏低、
-  画面反而过曝。
-
-- **D_max 改为随测光求解**。【自动（整卷）】取全卷测光平均对齐中灰，【自动（单张）】只测
-  当前帧。
-
-  高光检测器仍然跑，但它只负责**三通道的相对跨度**（这是卷的色彩平衡，是对胶片的真实测量）；
-  **画面放在哪**由测光决定。此前是把 99.9 百分位钉到固定码值，而那个百分位读的是镜面高光——
-  它比漫反射白高多少取决于画面里有没有光源，于是同一卷里有窗户的那几张会被整体推暗。
-
-  求解是闭式的，三个通道同一个比例，所以色彩平衡原样保留：这是放置，不是调色。
-
-- **【胶片风格】的第一项从「无（直通）」改名为「标准（Cineon → 输出空间）」**。它从来不是
-  「什么都不做」——那一项就是 Cineon 的标准显示转换，只是不加印片风格。
-
-  不写成「Rec709」，是因为转换落到哪个空间由旁边的【输出空间】决定。
-
-- **输出空间去掉两个染料基色**（Kodak 2383、Kodak Endura Premier）。它们描述的是染料编码
-  基色，而非实际能呈现的色域，选择器早已不提供；旧工程指定它们时会迁移到 sRGB。
-
-**已知的行为变化**
-
-- **片基在「标准」下渲染为约 0.15 的灰，不是纯黑。** 这是 Cineon 标准转换的正确输出——
-  码值 95 是编码域的底，不是显示域的底。画面的黑来自画面自己的暗部内容，它落在片基之上。
-  真实印片也是如此：Kodak 2383 在码值 95 处输出 0.037，同样不是纯黑。
-
-- **印片的暗部比「标准」压得更低。** 那是印片的趾部，是选择它的理由之一，不是故障。
-
-  这一版的渲染结果与旧版不同，已有工程打开后画面会有变化。重跑一次【自动（整卷）】即可。
-
----
-
-## v1.6.0（2026-08-21）
-
-**新增**
-
-- **胶片风格**。在「输出空间」旁边选一张印片（如 Kodak 2383、Fujifilm 3513DI），画面就按那张
-  胶片的反差和色彩渲染。选「无」则和以前一样。
-
-  需要自备 `.cube` 文件，且必须是**以 Cineon log 为输入**的印片 LUT——软件不附带，这类文件
-  由各厂商单独授权。装了 DaVinci Resolve 的话，其安装目录 `LUT/Film Looks/` 下就有。
-
-  想调胶片之前的画面，去【整卷校准】拉 D_max / D_min。
-
-**修复**
-
-- **黑位没有真正落到纯黑**。片基采样得越准，黑位反而浮得越高——采过片基的工程会发现暗部
-  发灰、不够沉。现在采样为黑的位置就是纯黑。
-- **某些源文件的通道值为 0 时，该处颜色不对**。齿孔黑边、扫描件黑边、部分相机 RAW 的填充
-  边会出现本不该有的偏色；现在这些位置正确地渲染为白。
-- **【自动白点】与【自动（整卷）】在同一张片子上可能给出不同的亮端**。两者现在用同一套
-  测量方法。测不到高光时会明确提示，而不是静默保持原值。
-
-**改进**
-
-- **反差对齐 Cineon 标准**。黑白两端之间的密度跨度改为 Cineon 的 95–1032，此前略宽。
-  画面整体反差略降，中间调略提亮。
-
-  这一版的渲染结果与旧版不同，已有工程打开后画面会有变化——主要是暗部更沉。如果对某卷的
-  成品不满意，重跑一次【自动（整卷）】即可。
-
----
-
 **Added**
 
 - **Film look.** Pick a print stock (Kodak 2383, Fujifilm 3513DI, …) beside "output space" and the
-  picture is rendered with that film's contrast and colour. "None" renders exactly as before.
+  picture is rendered with that film's contrast and colour.
 
   You supply the `.cube` yourself, and it must be a print LUT that takes **Cineon log** in — none
   ship with the app, as these are licensed individually by their vendors. If you have DaVinci
   Resolve, look under `LUT/Film Looks/` in its install directory.
 
-  To adjust the picture *before* the film, set D_max / D_min in roll calibration.
+  With no print selected you get "standard display rendering (CST + display rendering)". To adjust
+  the picture *before* the film, set D_max / D_min in roll calibration.
+
+- **Splitting now recognises multi-strip scans.** A flatbed holder takes several strips at once — a
+  6×12 sheet is two columns of six — and every strip is now detected and split on its own. One file
+  can therefore yield several split plans, listed as "filename (1/2)" in the dialog and merged back
+  per file on import. "Skip (don't split)" now means "don't split this strip".
+
+- **The split dialog can now rotate and zoom the preview.** It was fixed at fit-to-window, so a long
+  scan left each frame a few dozen pixels tall and you could not tell whether the gap between frames
+  was really film base. The toolbar now has **↺ / ↻ 90°**, **+ / − zoom** (100%–800%) and **reset**;
+  the wheel zooms and dragging empty space pans.
+
+  These three controls change only how you look, never what gets imported. Frame orientation is
+  still set per frame in the main window.
 
 **Fixed**
 
-- **Blacks never reached true black.** The more accurately you sampled the film base, the
-  higher the black floated — projects with a sampled base looked washed out in the shadows.
-  What you sample as black is now black.
-- **Wrong colour where a source file has a channel at zero.** Sprocket edges, scan borders
-  and the padding some camera RAWs carry showed a colour cast they should not have; these
-  now render as white.
-- **"Auto white point" and "Auto (whole roll)" could disagree** on the same frame. Both now
-  use the same measurement. When no highlight can be found you are told, instead of the
-  value silently staying put.
+- **The picture is no longer dark with clipped highlights.** Calibration now does one thing:
+  **D_min to code 95, D_max to code 1032**, so the picture fills the range without clipping at
+  either end. The neutral-grey reading stays, but it only reports and never writes back — an
+  incorrectly exposed frame is yours to adjust while watching it.
+
+- **A colour cast in the highlights no longer clips one channel.** Sodium light, sunsets and red
+  neon could send one channel past its endpoint; all three endpoints are now scaled together, so
+  the colour balance does not move.
+
+- **Highlights are no longer hard-clipped in "standard".** Code 685 used to reach display white,
+  throwing away the **2.31 stops** between 685 and 1032; switching to a print brought them back and
+  made it look as though the print was darkening the highlights. There is now a shoulder: 685 lands
+  at 0.881, matching the measured Kodak 2383 (0.880), and 1032 rolls to 0.992 instead of clipping.
+  Midtones are unaffected.
+
+- **The film base now renders as true black in "standard".** That is a rendering decision, not an
+  encoding one — the print path still receives the unmodified Cineon signal, so D_min no longer has
+  to drift off the measured film base to suit a print.
+
+- **Fixed white balance and exposure breaking calibration.** They used to run before rendering,
+  where their gain pushed the calibrated film base off code 95; they now all follow display
+  rendering.
+
+- **Fixed blacks never reaching true black.** The more accurately you sampled the film base, the
+  higher the black floated, leaving sampled projects washed out in the shadows. What you sample as
+  black is now black.
+
+- **Fixed wrong colour where a source file has a channel at zero.** Sprocket edges, scan borders and
+  the padding some camera RAWs carry showed a colour cast they should not have; these now render as
+  white.
+
+- **Fixed "Auto white point" and "Auto (whole roll)" disagreeing** on the same frame. Both now use
+  the same measurement, and when no highlight can be found you are told instead of the value
+  silently staying put.
+
+- **Fixed smart white balance pushing the picture into overexposure.**
+
+- **Fixed sync crop turning every pre-split copy into the same photograph.** After a split import,
+  ticking "crop" and applying to the whole roll turned every frame into whichever cell the source
+  frame sat in. The crop is now re-seated into each frame's own cell — "the same crop" always meant
+  "the same crop on each frame's own negative".
+
+- **Fixed the first frame of a split roll losing its pre-crop after reopening the project.**
+  Split-import, save, quit and reopen, and the first cell came back as the whole uncut scan.
+
+- **Fixed the split dialog's yellow dividers spanning the whole preview.** On a two-column scan
+  strip 1's dividers sat on top of strip 2's photograph, and clicking strip 2 could drag strip 1's
+  divider — one that was not even on screen. Both the drawing and the hit-testing are now confined
+  to the current strip.
+
+- **Fixed the crop tool crashing on macOS.** Moving the mouse in crop mode leaked cursor resources
+  until the process gave out. The split dialog's edge-drag hints had the same bug and were fixed
+  with it.
 
 **Improved**
 
-- **Contrast now matches the Cineon standard.** The density span between the two endpoints
-  is Cineon's 95–1032, slightly narrower than before. Overall contrast is a little lower and
-  midtones a little brighter.
+- **More stable roll calibration.** Metering uses the median, so deliberately sacrificed highlights
+  (windows, backlight, sky) no longer pull the reading up and push the subject down — a 30%
+  blown-out area cost 0.73 stop before and now costs nothing.
 
-  This release renders differently from previous ones — existing projects will look
-  different, mainly deeper shadows. If a roll no longer looks right, re-run
-  "Auto (whole roll)".
+- **Contrast now matches the Cineon standard.** The density span between the two endpoints is
+  Cineon's 95–1032, slightly narrower than before.
+
+- **Auto levels is no longer invoked by any automatic flow.** Both rendering paths place their own
+  endpoints, so measuring the result again and stretching it back to 0..1 undoes the rendering you
+  just chose. The button and sliders still work; only the default changed.
+
+- **Frame parameters are rebuilt when you switch film look.** Exposure, white balance and the rest
+  are relative to a particular rendering, so carrying them across looks applies a correction meant
+  for a different picture. They are reset on switch; the roll's parameters go onto the undo stack
+  first, so one Ctrl+Z undoes an accidental switch.
+
+**Removed**
+
+- **Two dye primaries are gone from output space** (Kodak 2383, Kodak Endura Premier). They describe
+  dye encoding primaries rather than a gamut anything can actually show. Old projects naming them
+  migrate to sRGB.
+
+**Known behaviour changes**
+
+- **Every existing project will look different.** Re-run "Auto (whole roll)" or "Auto (single)".
+
+- **"Auto (whole roll)" and "Auto (single)" disagree, by design.** The whole-roll pass picks the
+  **densest single frame** as the calibration for the roll; the single-frame pass looks only at the
+  current frame.
+
+- **The film base renders as pure black in "standard"**, slightly harder than a real print
+  (Kodak 2383 gives 0.037 at code 95). The cost is that the base and anything darker than it
+  (sprockets, masking edges) merge into the same 0 on screen.
 
 ---
 
