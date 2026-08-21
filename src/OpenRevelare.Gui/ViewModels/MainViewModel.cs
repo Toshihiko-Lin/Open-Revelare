@@ -1501,7 +1501,7 @@ public partial class MainViewModel : ViewModelBase
         // stock characterises how a finished positive prints, so feeding it un-inverted film would
         // render a look nobody asked for over an image the user is only here to sample.
         ColorPipeline.ToOutputSpace(disp.Data, CurrentOutputSpace);
-        PreviewImage = BitmapConvert.ToBitmap(disp);
+        PreviewImage = BitmapConvert.ToBitmap(disp, CurrentOutputSpace);
     }
 
     /// <summary>
@@ -1564,7 +1564,7 @@ public partial class MainViewModel : ViewModelBase
         FrameParams p = BuildParams();
         RollFrame.ResetScene(p);   // strip every Stage-2 adjustment
         ImageBuffer pos = Pipeline.ProcessFrame(_previewLinear, ForPreview(p));
-        PreviewImage = BitmapConvert.ToBitmap(pos);
+        PreviewImage = BitmapConvert.ToBitmap(pos, CurrentOutputSpace);
     }
 
     public void ShowAfterEdits()
@@ -4039,7 +4039,7 @@ public partial class MainViewModel : ViewModelBase
         Bitmap bmp = await Task.Run(() =>
         {
             ImageBuffer small = Resample.Box(preview, ThumbMaxEdge);
-            return (Bitmap)BitmapConvert.ToBitmap(Pipeline.ProcessFrame(small, p));
+            return (Bitmap)BitmapConvert.ToBitmap(Pipeline.ProcessFrame(small, p), p.ResolvedOutputSpace);
         }, ct);
         if (ct.IsCancellationRequested) { bmp.Dispose(); return; }
         await Dispatcher.UIThread.InvokeAsync(() => SetThumbnail(f, bmp));
@@ -4052,7 +4052,7 @@ public partial class MainViewModel : ViewModelBase
         // _previewLinear may be a region decode — same rule as RenderPreviewAsync.
         FrameParams p = ForRegion(frame.Params, frame, _previewMargin);
         ImageBuffer prev = Resample.Box(_previewLinear, ThumbMaxEdge);
-        SetThumbnail(frame, BitmapConvert.ToBitmap(Pipeline.ProcessFrame(prev, p)));
+        SetThumbnail(frame, BitmapConvert.ToBitmap(Pipeline.ProcessFrame(prev, p), p.ResolvedOutputSpace));
     }
 
     private void RestartThumbnails()
@@ -4692,8 +4692,13 @@ public partial class MainViewModel : ViewModelBase
     public string OutputSpaceHint => OutputSpaces[_outputSpaceIndex].Name switch
     {
         "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
-        "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
-        "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
+        // The wide-gamut hints say what the PREVIEW can and cannot show. Avalonia renders into an
+        // sRGB surface and offers no way to change that (AvaloniaUI/Avalonia#8450), so colour
+        // outside sRGB is compressed on the way to the screen no matter how good the panel is.
+        // The exported file is unaffected — it carries the real profile — and saying so is the
+        // difference between a known limit and the user mistrusting their own monitor.
+        "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。预览窗口受限于 sRGB，超出 sRGB 的颜色看不到，但导出文件是完整的。"),
+        "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。预览窗口受限于 sRGB，超出 sRGB 的颜色看不到，但导出文件是完整的；在不做色彩管理的软件里打开会偏淡。"),
         // Spaces still resolvable from older projects, so they need a label even though the picker
         // no longer offers them.
         "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
@@ -5367,7 +5372,7 @@ public partial class MainViewModel : ViewModelBase
                     (img, realised) = RegionRender.Render(full, p, roi, negative, negativeWb);
                 }
                 cts.Token.ThrowIfCancellationRequested();
-                return new SharpPatch((Bitmap)BitmapConvert.ToBitmap(img),
+                return new SharpPatch((Bitmap)BitmapConvert.ToBitmap(img, p.ResolvedOutputSpace),
                                       realised.X, realised.Y, realised.W, realised.H);
             }, cts.Token);
 
@@ -5515,7 +5520,7 @@ public partial class MainViewModel : ViewModelBase
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
             Histogram = HistogramData.FromBuffer(outImg.Data);
             ClippingOverlay = ShowClipping ? BuildClippingOverlay(outImg) : null;
-            PreviewImage = BitmapConvert.ToBitmap(outImg);
+            PreviewImage = BitmapConvert.ToBitmap(outImg, CurrentOutputSpace);
         }
         catch (Exception ex) { ReportRenderFailure(ex); }
     }
@@ -5545,8 +5550,8 @@ public partial class MainViewModel : ViewModelBase
             // (main_window.py::_on_process_done → _film_strip.update_thumbnail(result)) rather
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
-            var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge));
-            return ((Bitmap)BitmapConvert.ToBitmap(outImg), h, t, c);
+            var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge), p.ResolvedOutputSpace);
+            return ((Bitmap)BitmapConvert.ToBitmap(outImg, p.ResolvedOutputSpace), h, t, c);
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }

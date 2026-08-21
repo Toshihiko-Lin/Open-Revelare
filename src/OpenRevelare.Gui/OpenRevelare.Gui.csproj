@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -46,6 +46,11 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Pinned to the EXACT version Avalonia.Skia 11.2.3 depends on. The preview draws through
+         SkiaSharp directly (Interop/ColorManagedImage.cs) to get a colour space onto the bitmap,
+         which Avalonia's own bitmap API cannot express; sharing Avalonia's Skia is the whole
+         point, so a version drift here would mean two SkiaSharp natives in one process. -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
     <!-- LaTeX typesetting for the formulae in the bundled documents (MIT, plus OFL-1.1 for the
          bundled math font). The Avalonia port of WpfMath / xaml-math. -->
     <PackageReference Include="AvaloniaMath" Version="2.1.0" />

@@ -32,6 +32,8 @@ public partial class ExportDialog : Window
         "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
         "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
         "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
+        // The export dialog describes the FILE, which really does carry the full gamut — unlike the
+        // preview, whose sRGB ceiling is stated on the picker instead.
         "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
         _ => "",
     };

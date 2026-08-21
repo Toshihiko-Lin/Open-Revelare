@@ -257,6 +257,48 @@ public static class ColorSpaces
         return Mul(to.FromXyz(), m);
     }
 
+    /// <summary>ICC PCS illuminant. Both the profiles we embed and Skia's colour spaces carry
+    /// D50-adapted matrices, so a space's own matrix is adapted before either sees it.</summary>
+    public static readonly (double X, double Y) D50 = (0.34567, 0.35850);
+
+    /// <summary>
+    /// <paramref name="space"/>'s RGB→XYZ matrix, Bradford-adapted to the D50 PCS.
+    ///
+    /// The form every colour-management consumer wants: it is what an ICC 'rXYZ'/'gXYZ'/'bXYZ'
+    /// triple holds and what Skia's SKColorSpaceXyz expects. One implementation so the embedded
+    /// profile and the on-screen preview cannot describe the same space differently.
+    /// </summary>
+    public static double[,] ToXyzD50(ColorSpaceDef space)
+        => Mul(Adaptation(space.White, D50), space.ToXyz());
+
+    /// <summary>
+    /// <paramref name="space"/>'s encoding curve as the ICC 'para' type-4 / Skia seven-parameter
+    /// form, in the ENCODED→LINEAR direction:
+    /// <code>
+    ///   linear = (a·x + b)^g + e   for x >= d
+    ///   linear = c·x + f           for x &lt;  d
+    /// </code>
+    /// Returned as <c>{g, a, b, c, d, e, f}</c>, Skia's field order.
+    ///
+    /// Both curves the pipeline uses are expressible here EXACTLY — sRGB's piecewise TRC included,
+    /// which is the point: approximating it with a 2.2 power is the conflation this codebase has
+    /// already paid for once (see <see cref="TransferFunction"/>).
+    /// </summary>
+    public static double[] TransferParameters(ColorSpaceDef space) => space.Transfer switch
+    {
+        // IEC 61966-2-1, in the encoded→linear direction. The break at 0.04045 and the
+        // 1/1.055 / 0.055/1.055 / 1/12.92 constants are the standard's own.
+        TransferFunction.SrgbPiecewise => new[]
+            { 2.4, 1.0 / 1.055, 0.055 / 1.055, 1.0 / 12.92, 0.04045, 0.0, 0.0 },
+
+        // Scene-linear: the identity.
+        TransferFunction.Linear => new[] { 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
+
+        // A pure power curve. d = 0 puts the whole domain in the power branch, so c and f are
+        // never evaluated.
+        _ => new[] { space.Gamma, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
+    };
+
     // ---- Small matrix helpers -------------------------------------------------
 
     /// <summary>Matrix product a·b, both 3×3.</summary>

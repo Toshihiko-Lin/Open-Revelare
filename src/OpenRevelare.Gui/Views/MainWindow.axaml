@@ -492,7 +492,10 @@
                     <Grid Name="ViewPort" PointerWheelChanged="OnViewportWheel">
                         <Grid Name="ZoomGrid" RenderTransformOrigin="0,0"
                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                            <Image Name="PreviewImg" Source="{Binding PreviewImage}" Stretch="Uniform"
+                            <!-- ctl:ColorManagedImage, not Image: the preview must be drawn through Skia WITH its
+                                 colour space declared, which Avalonia's Image cannot do. See
+                                 Controls/ColorManagedImage.cs. -->
+                            <ctl:ColorManagedImage Name="PreviewImg" Source="{Binding PreviewImage}" Stretch="Uniform"
                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                             <!-- Sharp patch: the visible slice re-rendered from the ORIGINAL
                                  pixels, laid over the (6x downsampled) preview. Positioned in
@@ -508,7 +511,7 @@
                                  came out with neither the ratio nor the position the frame had. -->
                             <Canvas Name="PatchLayer" IsHitTestVisible="False"
                                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                                <Image Name="PatchImg" Stretch="Fill" />
+                                <ctl:ColorManagedImage Name="PatchImg" Stretch="Fill" />
                             </Canvas>
                             <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
                                    IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"

@@ -69,9 +69,10 @@ public static class IccProfiles
         if (space.Name.Equals("AdobeRGB", StringComparison.OrdinalIgnoreCase))
             return Build(ColorSpace.AdobeRgb);
 
-        // The profile's rXYZ/gXYZ/bXYZ are the RGB→XYZ columns adapted to the D50 PCS.
-        double[,] toD50 = ColorSpaces.Mul(
-            ColorSpaces.Adaptation(space.White, D50White), space.ToXyz());
+        // The profile's rXYZ/gXYZ/bXYZ are the RGB→XYZ columns adapted to the D50 PCS. Shared with
+        // the preview's Skia colour space, which needs the same matrix in the same PCS — one
+        // implementation so an export and the preview it was graded against cannot disagree.
+        double[,] toD50 = ColorSpaces.ToXyzD50(space);
 
         // Build() indexes [primary, component]; ToXyz() is [component, primary].
         double[,] rows =
@@ -90,9 +91,6 @@ public static class IccProfiles
 
         return Build($"{space.Name} — OpenRevelare", rows, trc);
     }
-
-    /// <summary>D50 as chromaticity, for adapting a space's primaries into the ICC PCS.</summary>
-    private static readonly (double X, double Y) D50White = (0.34567, 0.35850);
 
     /// <summary>
     /// 'curv' holding a single u8Fixed8 gamma. Gamma 1.0 still goes through here rather than a

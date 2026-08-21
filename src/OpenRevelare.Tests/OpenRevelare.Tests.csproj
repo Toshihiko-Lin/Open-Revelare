@@ -17,4 +17,13 @@
     <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
   </ItemGroup>
 
+  <!-- The preview's colour-space bridge (Gui/Controls/SkiaColorSpace.cs) is checked against
+       Skia's own built-in spaces, so the tests need the same SkiaSharp the GUI pins, plus the
+       native asset for whatever host runs them. -->
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.9" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.9" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+  </ItemGroup>
+
 </Project>

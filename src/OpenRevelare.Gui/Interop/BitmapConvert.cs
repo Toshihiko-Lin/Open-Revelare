@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using OpenRevelare.Core;
+using OpenRevelare.Gui.Controls;
 
 namespace OpenRevelare.Gui.Interop;
 
@@ -12,12 +13,17 @@ namespace OpenRevelare.Gui.Interop;
 /// step-4 conversion and Stage 2 ran inside that space — so there is no colour maths left to do
 /// here. This is pure quantisation to 8-bit BGRA.
 ///
-/// NO DISPLAY MANAGEMENT, deliberately. The bitmap goes to the compositor without a profile and
-/// the panel does whatever it does with those numbers. Doing better means what Photoshop and
-/// Lightroom do: convert through the OS's registered display profile, which is a calibrator's
-/// MEASUREMENT of that individual panel. A dropdown of standard spaces is not that — it is a
-/// guess, and a wrong guess is worse than none, because the user then grades against colours the
-/// screen is not actually showing. Anyone who needs accuracy calibrates their display.
+/// NO DISPLAY MANAGEMENT, deliberately — this class does not try to reach the user's PANEL
+/// correctly. Doing that means what Photoshop and Lightroom do: convert through the OS's
+/// registered display profile, a calibrator's MEASUREMENT of that individual panel. A dropdown of
+/// standard spaces is not that, and a wrong guess is worse than none. Anyone who needs that
+/// calibrates their display and lets the OS convert.
+///
+/// It does, however, DECLARE what space the pixels are in, via <see cref="ToBitmap(ImageBuffer,
+/// ColorSpaceDef)"/>, so the draw path can convert correctly instead of guessing. Handing the
+/// compositor an untagged buffer is what made a Display P3 roll oversaturate on macOS and made
+/// the three platforms disagree with each other and with the export; see
+/// <see cref="ColorManagedImage"/> for the mechanism and for what it still cannot fix.
 ///
 /// Soft proofing also used to live here as a working→target→back round trip, simulating an export
 /// the render itself was not doing. It is gone because it stopped being a simulation of anything:
@@ -25,8 +31,25 @@ namespace OpenRevelare.Gui.Interop;
 /// </summary>
 public static class BitmapConvert
 {
+    /// <summary>
+    /// As <see cref="ToBitmap(ImageBuffer)"/>, additionally DECLARING the space the pixels are
+    /// encoded in so <see cref="ColorManagedImage"/> can convert rather than assume.
+    ///
+    /// Every preview that the user grades against goes through here. The untagged overload stays
+    /// for buffers that are genuinely sRGB by construction (contact sheets, UI patches).
+    /// </summary>
+    public static WriteableBitmap ToBitmap(ImageBuffer img, ColorSpaceDef space)
+    {
+        WriteableBitmap bmp = ToBitmap(img);
+        ColorManagedImage.Declare(bmp, space);
+        return bmp;
+    }
+
     /// <summary>Display-encoded [0,1] interleaved RGB → 8-bit Bgra8888 WriteableBitmap.
-    /// Safe to call off the UI thread (a WriteableBitmap is not a control).</summary>
+    /// Safe to call off the UI thread (a WriteableBitmap is not a control).
+    ///
+    /// Untagged: the result is treated as sRGB when drawn. Correct for an sRGB roll and for the
+    /// sRGB-by-construction UI surfaces; use the overload taking a space for anything else.</summary>
     public static WriteableBitmap ToBitmap(ImageBuffer srgb)
     {
         int w = srgb.Width, h = srgb.Height;
