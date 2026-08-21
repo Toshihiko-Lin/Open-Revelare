@@ -4598,20 +4598,23 @@ public partial class MainViewModel : ViewModelBase
             _printLutPaths.Add(id);
         }
 
-        // The drop-in folder (Settings.LutDir), so a collection of stocks is added once by copying
-        // rather than picked file by file. Listed ahead of the recents because it is a deliberate
-        // library rather than a history, and deduplicated against them: a folder cube that was
-        // also picked through the dialog is one stock and must be one row, or selecting it would
-        // land on whichever row the lookup happened to find first.
+        // The drop-in folder (Settings.LutDir), and nothing else: a deliberate library rather than
+        // a history.
+        //
+        // NO "RECENTLY USED" ROWS. The picker used to append every cube ever chosen through the
+        // file dialog. That made sense when the app shipped no stocks at all, but it now carries
+        // two built-ins and offers a drop-in folder, and the history had become actively
+        // confusing: a cube downloaded to ~/Downloads and picked once sat in the list forever,
+        // labelled by its filename — which for the very stocks we bundle is the SAME text as the
+        // built-in row, so the picker showed what looked like duplicated entries with no way to
+        // tell which was which. A file worth keeping belongs in the LUT folder, which is one copy
+        // away and says so in the menu.
         var paths = new List<string>(PrintLuts.InFolder(Settings.LutDir));
 
-        // A roll can name a cube that is not in this machine's history — a project from another
-        // computer, or a file picked before the list was trimmed. It still belongs in the list,
-        // otherwise the picker would show 无 while the render used a LUT.
-        foreach (string recent in Settings.Current.RecentPrintLuts)
-            if (!paths.Contains(recent, StringComparer.OrdinalIgnoreCase))
-                paths.Add(recent);
-
+        // A roll can still name a cube that is in neither place — a project from another machine,
+        // or a file picked before it was moved. It goes in at the top so the picker shows what the
+        // render is actually using rather than 无, and it is the only path here not from the
+        // folder.
         if (!string.IsNullOrWhiteSpace(active)
             && !PrintLuts.IsBuiltin(active)          // already a fixed row above
             && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))
@@ -4675,12 +4678,9 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var recents = Settings.Current.RecentPrintLuts;
-        recents.RemoveAll(p => p.Equals(path, StringComparison.OrdinalIgnoreCase));
-        recents.Insert(0, path);
-        while (recents.Count > 8) recents.RemoveAt(recents.Count - 1);
-        Settings.Save();
-
+        // Not remembered anywhere: the picker lists the built-ins and the LUT folder, and a
+        // one-off pick is exactly that. The roll itself stores the path it uses, so this cube
+        // stays selected for this roll and reappears when the roll is reopened.
         RebuildPrintLutList(path);
         ApplyPrintLut(path);
     }

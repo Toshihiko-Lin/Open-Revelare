@@ -105,15 +105,12 @@ public static class Settings
         /// </summary>
         public bool SplitStripsOnImport { get; set; }
 
-        /// <summary>
-        /// Print-film cubes the user has picked, most recent first.
-        ///
-        /// Remembered because the app ships none — the stocks people want are licensed by their
-        /// vendors, not redistributable — so every roll would otherwise start with a file dialog
-        /// pointed at wherever Resolve or an ARRI download put them. The roll stores the path it
-        /// uses; this is only the picker's history.
-        /// </summary>
-        public List<string> RecentPrintLuts { get; set; } = new();
+        // RecentPrintLuts was here: a history of every cube ever chosen through the file dialog.
+        // Removed once the app began shipping built-in stocks and a drop-in LUT folder — the
+        // history's rows were labelled by filename, which for a bundled stock is the same text as
+        // its built-in row, so the picker showed apparent duplicates. Anything worth keeping goes
+        // in the LUT folder. Old settings files still carrying the key are harmless: unknown
+        // members are ignored on read, and the key disappears on the next save.
 
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
