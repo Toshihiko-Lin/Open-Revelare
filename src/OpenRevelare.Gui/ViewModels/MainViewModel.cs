@@ -326,7 +326,17 @@ public partial class MainViewModel : ViewModelBase
             // Virtual copies of a WHOLE frame share every pixel and must keep sharing one cache
             // entry; only frames carrying different crops are separate images.
             var crops = group.Select(f => f.Params.CropRect).Distinct().ToList();
-            if (crops.Count > 1) _splitPaths.Add(group.Key);
+            if (crops.Count <= 1) continue;
+            _splitPaths.Add(group.Key);
+            // Backfill the cells for a roll reopened from a project written before they were
+            // recorded — the same test identifies both, since a group with differing crops IS a
+            // split scan. The crop is all such a file has, and for a split frame not since
+            // re-cropped by hand it IS the cell, the equality the import starts from. A frame the
+            // user did crop comes back with its cell set to that crop rather than to the whole
+            // negative, which costs some of the shape on the next broadcast but still keeps every
+            // frame on its own negative; guessing a wider cell would be inventing pixels.
+            foreach (RollFrame f in group)
+                f.Params.SplitCell ??= f.Params.CropRect;
         }
     }
 
@@ -967,6 +977,17 @@ public partial class MainViewModel : ViewModelBase
     private int _quarterTurns;
     private bool _flipH, _flipV;
     private (double X, double Y, double W, double H)? _cropRect;
+
+    /// <summary>The current frame's <see cref="FrameParams.SplitCell"/>, carried alongside
+    /// <see cref="_cropRect"/> so <see cref="BuildParams"/> can put it back.
+    ///
+    /// No control edits this — it is fixed at import and only ever read. It has to be held live
+    /// all the same, because BuildParams rebuilds the whole params object from these fields and
+    /// anything not listed there is DROPPED: leaving it out would erase the current frame's cell
+    /// on the next commit, and the crop broadcast would be back to collapsing the copies for
+    /// whichever frame the user had been looking at.</summary>
+    private (double X, double Y, double W, double H)? _splitCell;
+
     partial void OnRotationChanged(double value) => ScheduleRender();
 
     // ── Orientation, and the crop that has to travel with it ────────────────────
@@ -1428,6 +1449,9 @@ public partial class MainViewModel : ViewModelBase
         FlipV = _flipV,
         // Suppressed while the crop frame is being positioned — see CropEditing.
         CropRect = _cropEditing ? null : _cropRect,
+        // Not suppressed with the crop above: the cell is where this frame's negative sits in the
+        // strip, which does not stop being true while the crop tool is open.
+        SplitCell = _splitCell,
     };
 
     // ── Sampling view: show the NEGATIVE while picking the film base ─────────────
@@ -3094,6 +3118,9 @@ public partial class MainViewModel : ViewModelBase
         _curveHasEndpoints = false;
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
+        // The cell goes with the crop here: a full geometry reset says this frame is the whole
+        // file again, and a cell left behind would claim a negative the frame no longer occupies.
+        _splitCell = null;
         FilmBaseText = "";
         _filmBaseSampled = false;
         ScheduleRender();
@@ -3887,18 +3914,23 @@ public partial class MainViewModel : ViewModelBase
         if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
         {
             var single = new RollFrame(path);
-            if (rects is { Count: 1 }) single.Params.CropRect = rects[0];
+            // A lone rect is a strip cut down to one negative, not a crop the user drew — so it is
+            // this frame's cell as much as any sibling's would be, and SplitCell is set to match.
+            // Harmless when it covers the whole file: the re-anchoring is then the identity.
+            if (rects is { Count: 1 }) { single.Params.CropRect = rects[0]; single.Params.SplitCell = rects[0]; }
             Frames.Add(single);
             return;
         }
 
         var parent = new RollFrame(path);
         parent.Params.CropRect = rects[0];
+        parent.Params.SplitCell = rects[0];
         Frames.Add(parent);
         for (int i = 1; i < rects.Count; i++)
         {
             RollFrame copy = RollFrame.MakeVirtualCopy(parent);
             copy.Params.CropRect = rects[i];
+            copy.Params.SplitCell = rects[i];
             Frames.Add(copy);
         }
     }
@@ -4015,6 +4047,7 @@ public partial class MainViewModel : ViewModelBase
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
+        _splitCell = p.SplitCell;
         FilmBaseText = "";
         _filmBaseSampled = true;
         SyncEndpointViews();            // 亮度/色温/色调/黑场 读数跟上刚载入的六个端点
@@ -4331,7 +4364,26 @@ public partial class MainViewModel : ViewModelBase
         }
         if (Sync.GeomOrientation) { d.QuarterTurns = s.QuarterTurns; d.FlipH = s.FlipH; d.FlipV = s.FlipV; }
         if (Sync.GeomStraighten) d.Rotation = s.Rotation;
-        if (Sync.GeomCrop) d.CropRect = s.CropRect;
+        // Re-anchored onto the target's own negative, not copied verbatim — see RebaseCrop.
+        // Runs AFTER the orientation groups above so it reads the orientation the target will
+        // actually have: the rect is stored in the oriented frame, and syncing a quarter turn in
+        // the same pass would otherwise leave the crop measured against the old axes.
+        if (Sync.GeomCrop) d.CropRect = RebaseCrop(s, d);
+    }
+
+    /// <summary>
+    /// The source frame's crop, expressed against the TARGET frame's own negative.
+    ///
+    /// The algebra is <see cref="CropRebase"/>'s; what this adds is the orientation round trip.
+    /// The cells are FILE-space rects while the crop is stored ORIENTED, so this takes the same
+    /// three steps <see cref="ForRegion"/> does: down to file space, across, back out to the
+    /// TARGET's orientation — which may differ from the source's, and by this point in
+    /// <see cref="CopyGroups"/> is already whatever the sync left it.
+    /// </summary>
+    private static (double X, double Y, double W, double H)? RebaseCrop(FrameParams s, FrameParams d)
+    {
+        if (s.CropRect is not { } rect) return null;   // "no crop" travels as-is
+        return OrientRect(CropRebase.Rebase(UnorientRect(rect, s)!.Value, s.SplitCell, d.SplitCell), d);
     }
 
     // ── Roll structure: add images / virtual copies / remove frame ──────────────
@@ -4754,7 +4806,9 @@ public partial class MainViewModel : ViewModelBase
         CommitLiveParams(CurrentFrame);
         FrameParams template = (CurrentFrame?.Params ?? new FrameParams()).Clone();
         RollFrame.ResetScene(template);
-        template.CropRect = null; template.Rotation = 0;   // geometry is per-scan; don't inherit crop/straighten
+        // Geometry is per-scan; don't inherit crop/straighten. The cell goes with the crop — these
+        // are different files, so the current frame's place in ITS strip says nothing about them.
+        template.CropRect = null; template.SplitCell = null; template.Rotation = 0;
 
         // The batch is sorted, but appended rather than merged into the existing frames: the roll's
         // order is the user's to own once they have dragged anything, and re-sorting the whole

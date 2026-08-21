@@ -256,7 +256,10 @@ public static class Project
             ["curve_has_endpoints"] = p.CurveHasEndpoints,
             // Geometry
             ["crop_rect"] = p.CropRect is { } c ? new JsonArray(c.X, c.Y, c.W, c.H) : null,
-            ["split_rects"] = null,                          // C# build has no split
+            // The frame's cell of a split strip, which its crop overwrites and so cannot imply.
+            // Reopening a roll has to restore it or a broadcast crop would collapse the copies.
+            ["split_cell"] = p.SplitCell is { } sc ? new JsonArray(sc.X, sc.Y, sc.W, sc.H) : null,
+            ["split_rects"] = null,                          // legacy Python key; unused here
             ["rotation"] = p.Rotation,
             ["quarter_turns"] = p.QuarterTurns,
             ["flip_h"] = p.FlipH,
@@ -323,6 +326,9 @@ public static class Project
             // interior points only and must keep ramping into the corners.
             CurveHasEndpoints = Bool(d, "curve_has_endpoints", false),
             CropRect = DesRect(d["crop_rect"]),
+            // Absent in projects written before the cell was recorded; those fall back to the
+            // frame's crop, which for an untouched split import is exactly the cell.
+            SplitCell = DesRect(d["split_cell"]),
             Rotation = Dbl(d, "rotation", 0.0),
             QuarterTurns = (int)Dbl(d, "quarter_turns", 0),
             FlipH = Bool(d, "flip_h", false),
