@@ -2628,6 +2628,11 @@ public partial class MainViewModel : ViewModelBase
             ImageBuffer? anchorRaw = AutoRegion();
             ImageBuffer? anchorVal = AutoRegionStage1();
             if (anchorRaw is null || anchorVal is null) return;
+            // The calibrated highlight endpoint — the roll's, already no-clip rescaled. Read on the
+            // UI thread and cloned, because the observable properties behind it are not safe to
+            // touch from the worker below.
+            double[] calibratedEp = DMaxPerChannel;
+            double? boardCut = AutoBoardCut();
 
             var (wbHigh, converged) = await Task.Run(() =>
             {
@@ -2644,20 +2649,31 @@ public partial class MainViewModel : ViewModelBase
                 // this replaced could only avoid by luck).
                 double[] dHigh = FilmBase.HighlightDensityFromRoll(
                     new[] { anchorRaw }, tBase,
-                    AutoBoardCut(),
+                    boardCut,
                     valueImages: ReferenceEquals(anchorRaw, anchorVal) ? null : new[] { anchorVal });
 
-                // Step 1 — geometric baseline. The measured highlight IS the endpoint that inverts
-                // that point to flat white, so the starting endpoint is simply dHigh itself. (The
-                // multiplier form started at (target-off)/dHigh, whose corresponding endpoint
-                // dHigh/wh is the same triple up to the shared scalar the output range absorbs.)
+                // Step 1 — start from the CALIBRATED endpoint, not from dHigh.
+                //
+                // dHigh is the raw top-tail density of THIS ONE FRAME and nothing else. The
+                // calibrated endpoint is the same co-sited pick pooled across the roll and then
+                // lifted by the uniform no-clip rescale (FilmBase.RescaleToClearChannelMax), so it
+                // sits systematically HIGHER. Seeding from dHigh threw that rescale away, and since
+                // Scale = outRange / (dMax - dMin), a lower endpoint is a steeper slope: white
+                // arrives at a lower density, the whole frame lifts, and the real highlights blow.
+                // That is the reported overexposure, and it was there before the net ran a single
+                // round — every other path in the app (整卷标定, 单张自动高光) writes the calibrated
+                // endpoint, and this was the only one that did not.
+                //
+                // The net decides BALANCE; placement is the calibration's job and stays its job.
                 var ep = new double[3];
-                for (int c = 0; c < 3; c++) ep[c] = Math.Max(dHigh[c], 1e-6);
+                for (int c = 0; c < 3; c++) ep[c] = Math.Max(calibratedEp[c], 1e-6);
+                // dHigh is still measured — it is the divisor that turns the net's log-gains into a
+                // density-slope delta below — but it no longer sets where the picture sits.
                 // Debug, not Console: this is a WinExe with no console attached, so the writes went
                 // nowhere a user could read. Debug.WriteLine reaches the debugger's output window
                 // while developing and compiles out of Release entirely.
                 Debug.WriteLine($"[AIWB] d_highlight={dHigh[0]:F4},{dHigh[1]:F4},{dHigh[2]:F4} " +
-                                $"slope={grade:F3}");
+                                $"start={ep[0]:F4},{ep[1]:F4},{ep[2]:F4} slope={grade:F3}");
 
                 // Step 2 — NN chroma-only iteration.
                 bool conv = false;
@@ -2689,12 +2705,32 @@ public partial class MainViewModel : ViewModelBase
                     double meanRaw = (rawDelta[0] + rawDelta[1] + rawDelta[2]) / 3.0;
 
                     double dev = 0;
+                    // The mean endpoint before the step. Pinning it afterwards is what makes this
+                    // iteration actually chroma-only — see the renormalisation below.
+                    double meanBefore = (ep[0] + ep[1] + ep[2]) / 3.0;
                     for (int c = 0; c < 3; c++)
                     {
                         // Scaled by the channel's own endpoint so the step is the same relative
                         // move the multiplier form made (it added to wh, and ep = dHigh/wh).
                         ep[c] = Math.Max(ep[c] * (1.0 - (rawDelta[c] - meanRaw)), 1e-3);
                         dev = Math.Max(dev, Math.Abs(logGains[c] - meanLog));
+                    }
+
+                    // RENORMALISE so the mean endpoint is exactly where it started.
+                    //
+                    // (rawDelta - meanRaw) sums to zero across channels, which WOULD be chroma-only
+                    // if it were added. It is applied multiplicatively against three unequal ep[c],
+                    // and mean(ep·(1-d)) = mean(ep) - mean(ep·d), where mean(ep·d) is only zero when
+                    // the endpoints happen to be equal. So the "chroma-only" step leaked brightness
+                    // on every round and compounded it over 50 — the endpoint mean drifted and the
+                    // channels diverged with it. One shared factor puts the mean back without
+                    // touching a single ratio between the channels, which is the only thing the net
+                    // is entitled to move here.
+                    double meanAfter = (ep[0] + ep[1] + ep[2]) / 3.0;
+                    if (meanAfter > 1e-9)
+                    {
+                        double renorm = meanBefore / meanAfter;
+                        for (int c = 0; c < 3; c++) ep[c] = Math.Max(ep[c] * renorm, 1e-3);
                     }
 
                     Debug.WriteLine($"[AIWB] iter {it}: range={iterDMax:F4} log_gains=" +
@@ -2704,7 +2740,29 @@ public partial class MainViewModel : ViewModelBase
                     Dispatcher.UIThread.Post(() => StatusText = Loc.F($"智能白平衡 第 {round}/50 轮 · 收敛度 {dev:F4}"));
                     if (dev < 0.01) { conv = true; break; }
                 }
-                return (ep, conv);
+
+                // Step 3 — re-impose the no-clip guarantee the calibration carries.
+                //
+                // The loop moves the channels apart from each other, so a triple that cleared every
+                // channel's extreme on round 1 need not clear it on the round it converges. The
+                // endpoints are per-channel DIVISORS: any channel whose endpoint slips below its own
+                // densest kept pixel clips there, and no Stage-2 control can bring it back. This is
+                // the same uniform lift DetectDMaxPerChannelFromRoll applies to its own answer, from
+                // the same shared helper — one factor for all three, so the balance the net just
+                // solved survives untouched and only the placement moves.
+                // Values off the DECOUPLED buffer and masks off the RAW one — the same split dHigh
+                // is measured with above, and required for the same reason: the endpoint lives in
+                // the decoupled domain, while the sprocket cut and dark valley are calibrated on
+                // raw luma. Comparing an endpoint against maxima drawn from the other domain would
+                // scale by a ratio between two different colour bases.
+                double[] chanMax = FilmBase.MaxChannelDensityFromRoll(
+                    new[] { anchorVal }, tBase,
+                    masks: new[] { anchorRaw }, sprocketThreshold: boardCut);
+                double[] safe = FilmBase.RescaleToClearChannelMax(ep, chanMax);
+                Debug.WriteLine($"[AIWB] final: ep={ep[0]:F4},{ep[1]:F4},{ep[2]:F4} " +
+                                $"chanMax={chanMax[0]:F4},{chanMax[1]:F4},{chanMax[2]:F4} " +
+                                $"safe={safe[0]:F4},{safe[1]:F4},{safe[2]:F4}");
+                return (safe, conv);
             });
 
             // The net's decision, on the field the inversion reads. Writing the three densities

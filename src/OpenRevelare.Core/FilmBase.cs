@@ -504,22 +504,98 @@ public static class FilmBase
         // produced, whose channel ratios are an artefact of which pixel ranked where, baked into
         // the inversion as a cast no Stage-2 control can remove. Scaling all three by the SAME
         // factor leaves every ratio between them untouched, so the balance survives intact and
-        // only the placement moves.
+        // only the placement moves. RescaleToClearChannelMax is that one ratio; 智能白平衡 applies
+        // the same guarantee to the triple its net converges on, which is why it is shared.
         //
-        // The factor is the largest overshoot across the three channels, so the worst offender
-        // lands exactly on its endpoint and the other two stay below theirs. It is never less than
-        // 1: a frame whose channels all sit under the co-sited triplet is left alone.
+        // It returns a fresh array rather than scaling in place — `best` still aliases an entry in
+        // perFrame, and mutating it would leave that list holding a value it never measured.
+        return RescaleToClearChannelMax(best, chanMax);
+    }
+
+    /// <summary>
+    /// The uniform no-clip rescale, on its own: lift a co-sited highlight triple until every
+    /// channel's own densest kept pixel sits at or below its endpoint, moving all three by ONE
+    /// factor so the ratios between them — the colour balance — survive untouched.
+    ///
+    /// Split out of <see cref="DetectDMaxPerChannelFromRoll"/> because 智能白平衡 has to apply the
+    /// same guarantee to the triple its iteration converges on. The net solves the BALANCE; it
+    /// knows nothing about whether the endpoints it lands on still clear the frame's per-channel
+    /// extremes, and an endpoint below a channel's real maximum clips that channel. Two copies of
+    /// this arithmetic would be two things to keep in step, and the one that drifted would clip
+    /// silently — so there is one.
+    ///
+    /// The factor is the largest overshoot across the three channels, so the worst offender lands
+    /// exactly on its endpoint and the other two stay below theirs. It is never less than 1: a
+    /// triple that already clears every channel is returned unchanged.
+    /// </summary>
+    /// <param name="endpoint">Co-sited per-channel highlight densities. Not mutated.</param>
+    /// <param name="channelMax">Per-channel maximum density over the same kept pixels the
+    /// endpoint was measured on — see <see cref="MaxChannelDensityFromRoll"/>.</param>
+    public static double[] RescaleToClearChannelMax(double[] endpoint, double[] channelMax)
+    {
         double scale = 1.0;
         for (int c = 0; c < 3; c++)
         {
-            if (best[c] <= 0 || !double.IsFinite(chanMax[c])) continue;
-            double need = chanMax[c] / best[c];
+            if (endpoint[c] <= 0 || !double.IsFinite(channelMax[c])) continue;
+            double need = channelMax[c] / endpoint[c];
             if (need > scale) scale = need;
         }
-        // Copied rather than scaled in place: `best` still aliases an entry in perFrame, and
-        // mutating it would leave that list holding a value it never measured.
-        var result = new[] { best[0] * scale, best[1] * scale, best[2] * scale };
-        return result;
+        return new[] { endpoint[0] * scale, endpoint[1] * scale, endpoint[2] * scale };
+    }
+
+    /// <summary>
+    /// Per-channel MAXIMUM density over the pixels <see cref="DetectDMaxPerChannelFromRoll"/>
+    /// would keep — same edge inset, same keep mask, same real-density ceiling, same t_base.
+    ///
+    /// This is the second half of what the detector's no-clip rescale needs, and it exists as its
+    /// own entry point so a caller that solved the balance some other way (智能白平衡, via the net)
+    /// can still ask "does this triple clear the frame?" and get an answer measured exactly the
+    /// way the detector measures it. Deliberately NOT co-sited: the whole question is whether any
+    /// single channel anywhere overshoots, so each channel's own extreme is the right statistic —
+    /// which is safe here precisely because the result is only ever used as a uniform scale factor
+    /// (see <see cref="RescaleToClearChannelMax"/>), never as an endpoint triple in its own right.
+    /// </summary>
+    /// <returns>Three maxima, or all-zero when no pixel survived the masks.</returns>
+    public static double[] MaxChannelDensityFromRoll(
+        IReadOnlyList<ImageBuffer> images, double[] tBase,
+        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
+        double edgeInset = 0.05)
+    {
+        var chanMax = new double[3];
+        for (int i = 0; i < images.Count; i++)
+        {
+            ImageBuffer img = images[i];
+            ImageBuffer mask = masks is not null && i < masks.Count ? masks[i] : img;
+
+            if (edgeInset > 0)
+            {
+                int h0 = img.Height, w0 = img.Width;
+                int yi = RoundHalfEven(h0 * edgeInset), xi = RoundHalfEven(w0 * edgeInset);
+                if (w0 - 2 * xi >= 4 && h0 - 2 * yi >= 4)
+                {
+                    bool shared = ReferenceEquals(mask, img);
+                    img = Crop(img, xi, yi, w0 - 2 * xi, h0 - 2 * yi);
+                    mask = shared ? img : Crop(mask, xi, yi, w0 - 2 * xi, h0 - 2 * yi);
+                }
+            }
+
+            bool[] keep = HighDensityKeepMask(mask, sprocketThreshold);
+            int n = img.PixelCount;
+            for (int p = 0; p < n; p++)
+            {
+                if (!keep[p]) continue;
+                double d0 = FrameParams.DensityOf(img.Data[p * 3] / Math.Max(tBase[0], 1e-10));
+                double d1 = FrameParams.DensityOf(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10));
+                double d2 = FrameParams.DensityOf(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10));
+                // Same ceiling test as the detector, on TOTAL density, so an opaque edge pixel is
+                // rejected as one physical sample rather than per channel.
+                if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) continue;
+                if (d0 > chanMax[0]) chanMax[0] = d0;
+                if (d1 > chanMax[1]) chanMax[1] = d1;
+                if (d2 > chanMax[2]) chanMax[2] = d2;
+            }
+        }
+        return chanMax;
     }
 
     /// <summary>
