@@ -30,8 +30,6 @@ public partial class ExportDialog : Window
     private static string HintFor(ColorSpaceDef s) => s.Name switch
     {
         "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
-        "KodakEnduraPremier" or "Kodak2383" =>
-            Loc.T("旧工程指定的染料集基色，已不再提供选择。"),
         "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
         "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
         "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
@@ -108,8 +106,6 @@ public partial class ExportDialog : Window
         "sRGB" => Loc.T("sRGB（通用）"),
         "AdobeRGB" => Loc.T("Adobe RGB（宽色域）"),
         "DisplayP3" => Loc.T("Display P3（宽色域）"),
-        "KodakEnduraPremier" => Loc.T("Kodak Endura Premier（相纸）"),
-        "Kodak2383" => Loc.T("Kodak 2383（拷贝片）"),
         _ => s.Name,
     };
 

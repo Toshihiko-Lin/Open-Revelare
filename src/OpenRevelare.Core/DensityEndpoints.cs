@@ -72,7 +72,7 @@ public readonly struct DensityEndpoints
     /// </code>
     ///
     /// so <c>dMin_c</c> → <c>-outRange</c> (black) and <c>dMax_c</c> → 0 (white), FOR EVERY
-    /// CHANNEL — that identity is what <see cref="BlackFloor"/> relies on. In Cineon terms the
+    /// CHANNEL — that identity is what the Cineon encoding relies on. In Cineon terms the
     /// two ends are codes 95 and 1032, which is what <see cref="FrameParams.OutputRange"/> is
     /// the span of. No grade, no pivot, no wb_high: the slope
     /// IS the endpoint relationship, and the between-channel differences in that slope are the
@@ -121,32 +121,6 @@ public readonly struct DensityEndpoints
     public static DensityEndpoints For(FrameParams cal) =>
         FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel);
 
-    /// <summary>
-    /// The linear value the user's sampled BLACK endpoint maps to — the floor the inversion
-    /// normalises away so that endpoint lands on exactly zero.
-    ///
-    /// <c>10^-OutputRange</c>, a constant, because that is where <see cref="FromMeasured"/> puts
-    /// D_min for EVERY channel: the slope is derived from the span, so
-    /// <c>Scale_c·D_min_c + Offset_c = -OutputRange</c> identically, whatever the two endpoints
-    /// are. In Cineon terms this is code 95 — the black end of the encoding domain, not a
-    /// measurement.
-    ///
-    /// IT USED TO BE <c>10^min(Offset)</c>, and that was wrong. The reasoning was that a shadow
-    /// nudge moves each channel's black endpoint independently, so the darkest offset is the only
-    /// floor that cannot clip a channel sitting below it. But the channels do NOT disagree about
-    /// where black is — span normalisation pins all three to the same <c>-OutputRange</c>, which
-    /// is the very property that makes the two ends independent. So the min was not conservative,
-    /// it was short: with a typical sampled C-41 base (D_min 0.09/0.29/0.54) it yields 0.003328
-    /// against the correct 0.01, leaving the sampled black at linear 0.0067 instead of 0.
-    ///
-    /// The bug only showed once film-base sampling started writing a non-zero D_min — with
-    /// D_min = 0,0,0 the two expressions coincide exactly. So the better the user sampled their
-    /// film base, the higher their black floated.
-    ///
-    /// The legacy pipeline spelled it <c>10^(pivot·(1-grade) - d_max)</c>, which is the same
-    /// number written in terms of parameters that no longer exist.
-    /// </summary>
-    public double BlackFloor => Math.Pow(10.0, -FrameParams.OutputRange);
 
     // Mirrors Inversion's gating predicates exactly — same constants, same comparison.
     private const double Tol = 1e-8;

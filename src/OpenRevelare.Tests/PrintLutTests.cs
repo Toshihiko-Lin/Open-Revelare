@@ -176,40 +176,47 @@ public class PrintLutTests
     // ── Log encoding ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The anchors the whole path is calibrated on. White is Cineon's 90% diffuse white (685),
-    /// NOT the 1032 headroom ceiling — sending the roll's white to 1032 put the entire picture
-    /// inside a print stock's shoulder, and no amount of moving D_max could recover it because
-    /// that shifts the picture without changing its span.
+    /// The anchors the whole path is calibrated on — Cineon's own, read from the one place that
+    /// states them. 95 and 1032 are the ends of the encoding domain and 0.002 is its step; a
+    /// previous revision anchored white at 685 instead, which forced a bespoke 0.00318 step while
+    /// OutputRange went on being computed at 0.002, leaving two scales for one line.
+    ///
+    /// White is ABOVE 1.0 once normalised, because 1032 exceeds the 10-bit full scale of 1023.
+    /// That headroom is real and is why a print-film cube declares a domain wider than [0,1].
     /// </summary>
     [Fact]
     public void Endpoints_land_on_the_Cineon_anchors()
     {
         Assert.Equal(95.0f, LogEncoding.Black * 1023f, 1);
-        Assert.Equal(685.0f, LogEncoding.White * 1023f, 1);
+        Assert.Equal(1032.0f, LogEncoding.White * 1023f, 1);
+        Assert.True(LogEncoding.White > 1.0f, "1032 normalises above full scale");
     }
 
     /// <summary>
-    /// THE BUG THIS FILE EXISTS FOR, ONE OF FOUR. Stage 1 does not emit 10^D_adj: it applies the
-    /// black floor afterwards, so what arrives is (10^D_adj - floor)/(1 - floor), with the sampled
-    /// black at exactly 0. Taking a logarithm of that put the sampled black near code -574, deep
-    /// under a print stock's toe where the whole shadow range collapsed — and the only way to see
-    /// a picture again was to pull D_min down until the blacks cleared the toe, wrecking the
-    /// calibration to compensate for an encoding mistake.
+    /// THE CALIBRATION CONTRACT. Stage 1 emits 10^D_adj with the sampled base at
+    /// 10^-OutputRange and the film's density ceiling at 1 — no black-point normalisation. Those
+    /// two must land on the encoding's two ends.
+    ///
+    /// Stage 1 used to normalise the base to linear ZERO before handing over, so that the
+    /// pass-through path rendered it as pure black. That was Stage 1 deciding, on the display
+    /// rendering's behalf, that a calibrated film base is black; in the Cineon workflow it is a
+    /// grey at code 95, and only a display transform takes it to black.
     /// </summary>
     [Fact]
     public void Sampled_black_encodes_to_code_95_not_below_it()
     {
-        // Stage 1's output for the sampled black IS zero, by the black-floor normalisation.
-        var atBlack = new[] { 0f, 0f, 0f };
+        float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+
+        var atBlack = new[] { floor, floor, floor };
         LogEncoding.ToCineon(atBlack);
         Assert.Equal(95.0f, atBlack[0] * 1023f, 1);
 
-        // The highlight endpoint is 1 and must land on white.
+        // The density ceiling is 10^0 = 1 and must land on the white anchor.
         var atWhite = new[] { 1f, 1f, 1f };
         LogEncoding.ToCineon(atWhite);
-        Assert.Equal(685.0f, atWhite[0] * 1023f, 1);
+        Assert.Equal(1032.0f, atWhite[0] * 1023f, 1);
 
-        // Nothing may encode below the black anchor — that is the dead zone under the toe.
+        // Nothing may encode below the black anchor — T=0 would take the log to -infinity.
         var below = new[] { 0f, -0.5f, float.Epsilon };
         LogEncoding.ToCineon(below);
         foreach (float v in below)
@@ -218,40 +225,183 @@ public class PrintLutTests
 
     /// <summary>
     /// Mid-tones must sit where the density model says, not merely between the endpoints. A
-    /// half-density step below white is exactly half the span in code terms, because the mapping
-    /// is affine in density by construction.
+    /// half-density step below the ceiling is exactly half the span in code terms, because the
+    /// mapping is affine in density by construction.
     /// </summary>
     [Fact]
     public void Encoding_is_affine_in_density()
     {
-        double floor = Math.Pow(10.0, -FrameParams.OutputRange);
-        double span = 1.0 - floor;
-
-        // Three points evenly spaced in D_adj must be evenly spaced in code.
         var codes = new float[3];
         for (int i = 0; i < 3; i++)
         {
             double dAdj = -FrameParams.OutputRange * i / 2.0;
-            double postFloor = (Math.Pow(10.0, dAdj) - floor) / span;
-            var px = new[] { (float)postFloor };
+            var px = new[] { (float)Math.Pow(10.0, dAdj) };
             LogEncoding.ToCineon(px);
             codes[i] = px[0] * 1023f;
         }
-        Assert.Equal(685.0f, codes[0], 1);
-        Assert.Equal(390.0f, codes[1], 1);   // midpoint of 95..685
+        Assert.Equal(1032.0f, codes[0], 1);
+        Assert.Equal(563.5f, codes[1], 1);   // midpoint of 95..1032
         Assert.Equal(95.0f, codes[2], 1);
     }
 
     [Fact]
     public void ToCineon_and_FromCineon_are_inverses()
     {
-        var original = new[] { 0f, 0.01f, 0.05f, 0.18f, 0.5f, 0.9f, 1f };
+        float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+        var original = new[] { floor, 0.02f, 0.05f, 0.18f, 0.5f, 0.9f, 1f };
         var roundTripped = (float[])original.Clone();
         LogEncoding.ToCineon(roundTripped);
         LogEncoding.FromCineon(roundTripped);
 
         for (int i = 0; i < original.Length; i++)
             Assert.Equal(original[i], roundTripped[i], 5);
+    }
+
+    /// <summary>
+    /// THE FILM BASE RENDERS AS BLACK — the rendering normalises code 95 to zero.
+    ///
+    /// This reverses what this test previously asserted. The earlier version pinned the base to a
+    /// lifted grey (0.10–0.25) on the reasoning that normalising shifted the curve away from cubes
+    /// authored against the same encoding. Measured, the opposite holds: normalised, code 250
+    /// renders at 0.172 against 2383's 0.10 and code 328 at 0.259 against 2383's 0.18, where the
+    /// un-normalised curve gave 0.208 and 0.282 — closer to the stock at both points, not further.
+    ///
+    /// The base is pinned to 95 by the roll's calibration, so nothing a picture contains lies
+    /// below it. Rendering it as black is slightly deeper than a real print (2383 gives 0.037),
+    /// which is the accepted trade: the base and anything darker collapse to a common 0.
+    /// </summary>
+    [Fact]
+    public void The_film_base_renders_as_black()
+    {
+        float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+
+        var atBase = new[] { floor, floor, floor };
+        ColorPipeline.ToOutputSpace(atBase, ColorSpaces.Srgb);
+        Assert.All(atBase, v => Assert.Equal(0f, v, 4));
+
+        // The film's density ceiling renders as very nearly display white — NOT exactly white.
+        // It maps to code 1032, and the shoulder rolls the latitude above 685 asymptotically
+        // toward 1 rather than clipping it, so the densest thing on the negative keeps a sliver of
+        // separation from paper white instead of being burned into it.
+        var atCeiling = new[] { 1f, 1f, 1f };
+        ColorPipeline.ToOutputSpace(atCeiling, ColorSpaces.Srgb);
+        Assert.All(atCeiling, v => Assert.InRange(v, 0.98f, 0.999f));
+    }
+
+    /// <summary>
+    /// The transform's two anchors: Cineon's 90% diffuse white at code 685 → 1, and the encoding's
+    /// black end at code 95 → 0. The second is the normalisation this rendering applies; it is a
+    /// LOOK decision belonging to the rendering, not a change to the encoding, which still carries
+    /// 95 untouched for the print-LUT path to consume.
+    /// </summary>
+    [Fact]
+    public void CineonToDisplay_anchors_both_ends()
+    {
+        // The diffuse white is where the SHOULDER starts to bite: without it 685 sat at linear 1,
+        // now it sits at 0.75 and encodes to 0.881 — the point the real 2383 cube puts it at.
+        var white = new[] { 685f / 1023f };
+        ColorPipeline.CineonToDisplay(white);
+        Assert.Equal(0.75f, white[0], 3);
+
+        var black = new[] { 95f / 1023f };
+        ColorPipeline.CineonToDisplay(black);
+        Assert.Equal(0f, black[0], 6);
+
+        // Headroom above the diffuse white is rolled off toward 1 and never reaches it, so the
+        // encoder has nothing left to clamp — that roll-off IS the fix, see Shoulder.
+        var headroom = new[] { 1032f / 1023f };
+        ColorPipeline.CineonToDisplay(headroom);
+        Assert.True(headroom[0] > white[0], $"code 1032 must exceed the diffuse white, got {headroom[0]}");
+        Assert.True(headroom[0] < 1f, $"code 1032 must not reach 1, got {headroom[0]}");
+    }
+
+    /// <summary>
+    /// THE LATITUDE ABOVE THE DIFFUSE WHITE SURVIVES TO THE SCREEN — it used to clip.
+    ///
+    /// The encoding runs to code 1032 while a picture's white sits at 685, so 2.31 stops of
+    /// latitude live above it. Rendering that span as a flat 1.0 discarded it, and made switching
+    /// to a print-film cube look like the cube was darkening the highlights: the cube keeps the
+    /// latitude (2383 puts 685 at 0.880), so detail reappeared where the standard path had shown
+    /// paper white. The shoulder aligns the two.
+    /// </summary>
+    [Fact]
+    public void The_highlight_latitude_rolls_off_instead_of_clipping()
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        static float[] AtCode(double code)
+        {
+            float lin = (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+            return new[] { lin, lin, lin };
+        }
+
+        // The diffuse white lands where the real 2383 cube puts it, 0.880.
+        var white = AtCode(685.0);
+        ColorPipeline.ToOutputSpace(white, ColorSpaces.Srgb);
+        Assert.All(white, v => Assert.InRange(v, 0.86f, 0.90f));
+
+        // Codes above it stay strictly ordered and strictly below 1 — nothing clips.
+        float prev = white[0];
+        foreach (double code in new[] { 800.0, 900.0, 1032.0 })
+        {
+            var px = AtCode(code);
+            ColorPipeline.ToOutputSpace(px, ColorSpaces.Srgb);
+            Assert.True(px[0] > prev, $"code {code} must exceed the previous step, got {px[0]}");
+            Assert.True(px[0] < 1.0f, $"code {code} must not clip, got {px[0]}");
+            prev = px[0];
+        }
+
+        // The mid-tones are untouched by the shoulder: the knee sits at code 596.
+        var mid = AtCode(486.0);
+        ColorPipeline.ToOutputSpace(mid, ColorSpaces.Srgb);
+        Assert.All(mid, v => Assert.InRange(v, 0.48f, 0.51f));
+    }
+
+    /// <summary>
+    /// THE TRANSFORM MATCHES A CUBE IN THE MIDS AND IS ALLOWED TO DIVERGE IN THE SHADOWS.
+    ///
+    /// Both render the same encoding, so a mid grey has to land in the same place — measured
+    /// against the real Kodak 2383 cube, its mid sits at code 486 and this transform's at 474.
+    /// Below that they part company on purpose: a print stock's TOE is precisely what makes it a
+    /// look, and 2383 renders code 250 at 0.10 where the standard transform gives 0.25. Asserting
+    /// agreement down there would be asserting that a film look does nothing.
+    ///
+    /// So the test pins the mid-tone crossing, which is shared, and deliberately says nothing
+    /// about the toe.
+    /// </summary>
+    [Fact]
+    public void The_midtone_crossing_matches_a_Cineon_authored_stock()
+    {
+        int found = 0;
+        for (int code = 95; code <= 1032; code++)
+        {
+            var px = new[] { code / 1023f };
+            ColorPipeline.CineonToDisplay(px);
+            OutputRender.Encode(px, ColorSpaces.Rec709);
+            if (px[0] >= 0.5f) { found = code; break; }
+        }
+
+        // Kodak 2383 crosses 0.5 at code 486.
+        Assert.InRange(found, 455, 515);
+    }
+
+    /// <summary>
+    /// THE DEFECT A FIRST ATTEMPT HERE SHIPPED: decoding the log and handing the result to the
+    /// output space's gamma is the identity in all but name, and renders a flat grey plate with
+    /// none of the contrast a display rendering supplies.
+    ///
+    /// The standard transform folds in Kodak's 0.6 response gamma, and THAT is the contrast. The
+    /// test pins it where the difference is largest and most visible: a mid-grey must not come
+    /// out where a plain decode would leave it.
+    /// </summary>
+    [Fact]
+    public void CineonToDisplay_applies_the_response_gamma_not_just_a_decode()
+    {
+        var mid = new[] { 500f / 1023f };
+        ColorPipeline.CineonToDisplay(mid);
+
+        // A plain decode (10^((v-white)*0.002*1023), renormalised) would leave code 500 far
+        // darker; the response gamma lifts it to roughly a quarter of the range.
+        Assert.InRange(mid[0], 0.20f, 0.28f);
     }
 
     // ── Pipeline routing ─────────────────────────────────────────────────────────
@@ -462,5 +612,136 @@ public class PrintLutTests
             for (int i = 0; i < original.Length; i++)
                 Assert.Equal(original[i], data[i], 4);
         }
+    }
+
+    // ── The output-space round trip ──────────────────────────────────────────────
+
+    /// <summary>
+    /// THE ROLL'S OUTPUT SPACE MUST NOT RE-GRADE A FINISHED RENDER — it used to crush the
+    /// shadows by 87%.
+    ///
+    /// A print-film cube emits a FINISHED display rendering in Rec709: the stock's toe and
+    /// shoulder are already in the numbers. <see cref="ColorPipeline.ToOutputSpaceVia"/> used to
+    /// re-container it for any other roll space by decoding with Rec709's curve and re-encoding
+    /// with the DESTINATION's. Rec709's 2.4 power and sRGB's piecewise curve are genuinely
+    /// different transfer functions, so that conversion legitimately changes the numbers — and
+    /// applying it to a finished render re-interprets the stock's own toe as a container artefact.
+    ///
+    /// Measured on the real Kodak 2383 cube, the film base at Cineon code 95 leaves the cube at
+    /// 3.74% luminance. The old exit delivered it to an sRGB roll at 0.49% — below the 2% mark
+    /// <see cref="ClippingDetect"/> flags — so the base and every shadow the stock had placed
+    /// below 0.0675 lit up blue in an sRGB or Display P3 roll while looking correct in a Rec709
+    /// one. Nothing was under-exposed; the exit was crushing them.
+    ///
+    /// So the assertion is that the roll's output space does not change what the eye receives.
+    /// The cube here is the IDENTITY, so any departure is the exit's doing and nothing else.
+    ///
+    /// LUMINANCE IS MEASURED THROUGH THE CUBE'S OWN CURVE for every destination, because that is
+    /// the curve the data still carries — the exit deliberately does not swap it for the
+    /// destination's. Decoding with the destination's curve instead would be assuming the very
+    /// re-encode this test exists to forbid.
+    /// </summary>
+    [Theory]
+    [InlineData("sRGB")]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void The_roll_output_space_does_not_regrade_a_cube_render(string spaceName)
+    {
+        string path = WriteCube(TempCube("identity-rt"), 33, v => v);
+        try
+        {
+            CubeLut lut = CubeLut.Load(path);
+            ColorSpaceDef target = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+
+            // Scene-linear neutrals spanning the shadows, including the film base at code 95.
+            float baseLin = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+            var probes = new[] { baseLin, 0.02f, 0.05f, 0.18f };
+
+            foreach (float probe in probes)
+            {
+                var viaRec709 = new[] { probe, probe, probe };
+                ColorPipeline.ToOutputSpaceVia(viaRec709, lut, ColorSpaces.Rec709);
+
+                var viaTarget = new[] { probe, probe, probe };
+                ColorPipeline.ToOutputSpaceVia(viaTarget, lut, target);
+
+                // Luminance is the quantity the indicator tests and the quantity the exit must
+                // preserve; a real gamut change may still redistribute it between channels.
+                double lumRec709 = Luma(viaRec709, ColorSpaces.Rec709);
+                double lumTarget = Luma(viaTarget, target);
+
+                Assert.True(Math.Abs(lumTarget - lumRec709) < 0.01,
+                    $"{spaceName} at linear {probe}: luminance moved {lumRec709:F4} → {lumTarget:F4}");
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>
+    /// Relative luminance of a cube's encoded output, weighted by <paramref name="space"/>'s own
+    /// Y row — not sRGB's, which would be wrong for P3.
+    ///
+    /// The TRC undone is always the CUBE's (Rec709), whatever the destination, because the exit
+    /// leaves the cube's curve in place rather than substituting the destination's.
+    /// </summary>
+    private static double Luma(float[] encoded, ColorSpaceDef space)
+    {
+        var lin = (float[])encoded.Clone();
+        OutputRender.Decode(lin, ColorSpaces.Rec709);
+        double[,] toXyz = space.ToXyz();
+        return toXyz[1, 0] * lin[0] + toXyz[1, 1] * lin[1] + toXyz[1, 2] * lin[2];
+    }
+
+    /// <summary>
+    /// Encode and Decode must be inverses for EVERY registered space. This is the property the
+    /// round trip above depends on, stated directly: it held for the power-curve spaces and broke
+    /// silently across a piecewise/power pair, because each half resolved its curve independently.
+    ///
+    /// TOLERANCE. The piecewise spaces apply their TRC through a shared 65536-entry table
+    /// (<see cref="Srgb.ApplyForwardInPlace"/>), so a decode/encode pair quantises twice and the
+    /// round trip is exact only to the table's granularity — measured worst case 6.3e-05, near
+    /// code 0.03 where the curve is steepest. That is a quarter of one 8-bit step and cannot
+    /// reach a pixel. The 1e-4 bound here is therefore the TABLE's precision, not slack for a
+    /// curve mismatch: the bug this guards against moved 0.0301 to 0.0029, four hundred times
+    /// wider, so no tolerance that admits LUT granularity could also admit it.
+    /// </summary>
+    [Fact]
+    public void Encode_and_Decode_are_inverses_for_every_space()
+    {
+        foreach (ColorSpaceDef space in ColorSpaces.All.Values)
+        {
+            var original = new[] { 0.001f, 0.0301f, 0.0386f, 0.1f, 0.5f, 0.9f, 1f };
+            var round = (float[])original.Clone();
+
+            OutputRender.Decode(round, space);
+            OutputRender.Encode(round, space);
+
+            for (int i = 0; i < original.Length; i++)
+                Assert.True(Math.Abs(original[i] - round[i]) < 1e-4,
+                    $"{space.Name}: {original[i]} round-tripped to {round[i]}");
+        }
+    }
+
+    /// <summary>
+    /// Each space carries its OWN declared curve, and the two that share sRGB's piecewise TRC are
+    /// the two that are specified against it. Pinned because the values were previously implied by
+    /// name matching in three separate places (Encode, Decode, IccProfiles) rather than stated once.
+    /// </summary>
+    [Fact]
+    public void Every_space_declares_the_transfer_function_its_standard_specifies()
+    {
+        Assert.Equal(TransferFunction.SrgbPiecewise, ColorSpaces.Srgb.Transfer);
+        Assert.Equal(TransferFunction.SrgbPiecewise, ColorSpaces.DisplayP3.Transfer);
+        Assert.Equal(TransferFunction.Linear, ColorSpaces.AcesCg.Transfer);
+
+        Assert.Equal(TransferFunction.Power, ColorSpaces.Rec709.Transfer);
+        Assert.Equal(2.4, ColorSpaces.Rec709.Gamma, 6);          // BT.1886
+        Assert.Equal(TransferFunction.Power, ColorSpaces.AdobeRgb.Transfer);
+        Assert.Equal(563.0 / 256.0, ColorSpaces.AdobeRgb.Gamma, 6);
+
+        // A piecewise space has no single exponent, and must refuse to invent one.
+        Assert.Throws<InvalidOperationException>(
+            () => OutputRender.EncodingGamma(ColorSpaces.Srgb));
     }
 }

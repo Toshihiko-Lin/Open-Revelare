@@ -326,7 +326,17 @@ public partial class MainViewModel : ViewModelBase
             // Virtual copies of a WHOLE frame share every pixel and must keep sharing one cache
             // entry; only frames carrying different crops are separate images.
             var crops = group.Select(f => f.Params.CropRect).Distinct().ToList();
-            if (crops.Count > 1) _splitPaths.Add(group.Key);
+            if (crops.Count <= 1) continue;
+            _splitPaths.Add(group.Key);
+            // Backfill the cells for a roll reopened from a project written before they were
+            // recorded — the same test identifies both, since a group with differing crops IS a
+            // split scan. The crop is all such a file has, and for a split frame not since
+            // re-cropped by hand it IS the cell, the equality the import starts from. A frame the
+            // user did crop comes back with its cell set to that crop rather than to the whole
+            // negative, which costs some of the shape on the next broadcast but still keeps every
+            // frame on its own negative; guessing a wider cell would be inventing pixels.
+            foreach (RollFrame f in group)
+                f.Params.SplitCell ??= f.Params.CropRect;
         }
     }
 
@@ -967,6 +977,17 @@ public partial class MainViewModel : ViewModelBase
     private int _quarterTurns;
     private bool _flipH, _flipV;
     private (double X, double Y, double W, double H)? _cropRect;
+
+    /// <summary>The current frame's <see cref="FrameParams.SplitCell"/>, carried alongside
+    /// <see cref="_cropRect"/> so <see cref="BuildParams"/> can put it back.
+    ///
+    /// No control edits this — it is fixed at import and only ever read. It has to be held live
+    /// all the same, because BuildParams rebuilds the whole params object from these fields and
+    /// anything not listed there is DROPPED: leaving it out would erase the current frame's cell
+    /// on the next commit, and the crop broadcast would be back to collapsing the copies for
+    /// whichever frame the user had been looking at.</summary>
+    private (double X, double Y, double W, double H)? _splitCell;
+
     partial void OnRotationChanged(double value) => ScheduleRender();
 
     // ── Orientation, and the crop that has to travel with it ────────────────────
@@ -1428,6 +1449,9 @@ public partial class MainViewModel : ViewModelBase
         FlipV = _flipV,
         // Suppressed while the crop frame is being positioned — see CropEditing.
         CropRect = _cropEditing ? null : _cropRect,
+        // Not suppressed with the crop above: the cell is where this frame's negative sits in the
+        // strip, which does not stop being true while the crop tool is open.
+        SplitCell = _splitCell,
     };
 
     // ── Sampling view: show the NEGATIVE while picking the film base ─────────────
@@ -1951,13 +1975,21 @@ public partial class MainViewModel : ViewModelBase
         _suppressRender = true;
         try
         {
-            // Neutral start: stale levels would clip the positive that AutoLevels measures, and
-            // both level sliders are OFFSETS from the untouched endpoints, so neutral is 0 for
-            // each. The highlight endpoint needs no such reset — AutoDetectDMax overwrites all
-            // three channels of it outright.
+            // Neutral start: both level sliders are OFFSETS from the untouched endpoints, so
+            // neutral is 0 for each. The highlight endpoint needs no such reset — AutoDetectDMax
+            // overwrites all three channels of it outright.
+            // LEVELS ARE LEFT NEUTRAL — the display rendering already places both ends.
+            // CineonToDisplay normalises the film base at code 95 to display black and rolls the
+            // latitude above 685 off toward white, so the picture arrives with its endpoints
+            // already set. Measuring percentiles off that render and stretching them to 0..1
+            // re-does the black end (a no-op now — the base reads 0.000, so the black slider
+            // always solved to 0) and OVERRIDES the white end, pushing the highlights the shoulder
+            // just rolled off back up against the clip. Same objection as under a print-film cube,
+            // whose toe and shoulder are its look: a rendering that has placed its own ends should
+            // not then be renormalised. The 自动色阶 button stays available for a scan that really
+            // does need it.
             Black = 0.0; White = 0.0;
             AutoDetectDMax();
-            AutoLevels();
         }
         finally { _suppressRender = false; }
 
@@ -2139,12 +2171,11 @@ public partial class MainViewModel : ViewModelBase
                 // AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
-                // Levels are measured last and on the CURRENT frame's rendered positive, because
-                // they are the only step that reads output rather than negative density. With the
-                // three roll-wide values above already in place, that render is the roll's look,
-                // so the endpoints it yields apply to the roll too.
+                // The detector's endpoints ARE the placement — both the channels' relative spans
+                // (the colour balance) and where the picture sits.
+                // Levels stay neutral — the display rendering has already placed both ends; see
+                // the note in AutoInvertRollAsync's stage 1.
                 Black = 0.0; White = 0.0;
-                AutoLevels();
             }
             finally { _suppressRender = false; }
 
@@ -2264,7 +2295,7 @@ public partial class MainViewModel : ViewModelBase
     ///
     /// A field rather than a return value because <see cref="AutoDetectDMax"/> is also a command
     /// bound straight to a button, and because the caller that needs the answer —
-    /// <see cref="AutoInvertCurrentFrame"/> — reads it several steps later, after AutoLevels has
+    /// <see cref="AutoInvertCurrentFrame"/> — reads it several steps later, after other steps have
     /// rewritten StatusText. Inspecting the status text instead would tie control flow to a
     /// translated string.
     /// </summary>
@@ -2358,7 +2389,7 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels would clip
-            // the positive AutoLevels measures. The highlight endpoint needs no reset —
+            // the positive the meter reads. The highlight endpoint needs no reset —
             // AutoDetectDMax overwrites all three channels of it.
             Black = 0.0; White = 0.0;
             // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
@@ -2369,7 +2400,7 @@ public partial class MainViewModel : ViewModelBase
             // warning with "完成" plus the untouched endpoint, so the failure would reach the user
             // as a success carrying stale numbers.
             highlightMeasured = _lastHighlightMeasured;
-            AutoLevels();
+            // Levels stay neutral here too — see the note in AutoInvertRollAsync's stage 1.
         }
         finally { _suppressRender = false; }
 
@@ -2614,6 +2645,11 @@ public partial class MainViewModel : ViewModelBase
             ImageBuffer? anchorRaw = AutoRegion();
             ImageBuffer? anchorVal = AutoRegionStage1();
             if (anchorRaw is null || anchorVal is null) return;
+            // The calibrated highlight endpoint — the roll's, already no-clip rescaled. Read on the
+            // UI thread and cloned, because the observable properties behind it are not safe to
+            // touch from the worker below.
+            double[] calibratedEp = DMaxPerChannel;
+            double? boardCut = AutoBoardCut();
 
             var (wbHigh, converged) = await Task.Run(() =>
             {
@@ -2630,20 +2666,31 @@ public partial class MainViewModel : ViewModelBase
                 // this replaced could only avoid by luck).
                 double[] dHigh = FilmBase.HighlightDensityFromRoll(
                     new[] { anchorRaw }, tBase,
-                    AutoBoardCut(),
+                    boardCut,
                     valueImages: ReferenceEquals(anchorRaw, anchorVal) ? null : new[] { anchorVal });
 
-                // Step 1 — geometric baseline. The measured highlight IS the endpoint that inverts
-                // that point to flat white, so the starting endpoint is simply dHigh itself. (The
-                // multiplier form started at (target-off)/dHigh, whose corresponding endpoint
-                // dHigh/wh is the same triple up to the shared scalar the output range absorbs.)
+                // Step 1 — start from the CALIBRATED endpoint, not from dHigh.
+                //
+                // dHigh is the raw top-tail density of THIS ONE FRAME and nothing else. The
+                // calibrated endpoint is the same co-sited pick pooled across the roll and then
+                // lifted by the uniform no-clip rescale (FilmBase.RescaleToClearChannelMax), so it
+                // sits systematically HIGHER. Seeding from dHigh threw that rescale away, and since
+                // Scale = outRange / (dMax - dMin), a lower endpoint is a steeper slope: white
+                // arrives at a lower density, the whole frame lifts, and the real highlights blow.
+                // That is the reported overexposure, and it was there before the net ran a single
+                // round — every other path in the app (整卷标定, 单张自动高光) writes the calibrated
+                // endpoint, and this was the only one that did not.
+                //
+                // The net decides BALANCE; placement is the calibration's job and stays its job.
                 var ep = new double[3];
-                for (int c = 0; c < 3; c++) ep[c] = Math.Max(dHigh[c], 1e-6);
+                for (int c = 0; c < 3; c++) ep[c] = Math.Max(calibratedEp[c], 1e-6);
+                // dHigh is still measured — it is the divisor that turns the net's log-gains into a
+                // density-slope delta below — but it no longer sets where the picture sits.
                 // Debug, not Console: this is a WinExe with no console attached, so the writes went
                 // nowhere a user could read. Debug.WriteLine reaches the debugger's output window
                 // while developing and compiles out of Release entirely.
                 Debug.WriteLine($"[AIWB] d_highlight={dHigh[0]:F4},{dHigh[1]:F4},{dHigh[2]:F4} " +
-                                $"slope={grade:F3}");
+                                $"start={ep[0]:F4},{ep[1]:F4},{ep[2]:F4} slope={grade:F3}");
 
                 // Step 2 — NN chroma-only iteration.
                 bool conv = false;
@@ -2675,12 +2722,32 @@ public partial class MainViewModel : ViewModelBase
                     double meanRaw = (rawDelta[0] + rawDelta[1] + rawDelta[2]) / 3.0;
 
                     double dev = 0;
+                    // The mean endpoint before the step. Pinning it afterwards is what makes this
+                    // iteration actually chroma-only — see the renormalisation below.
+                    double meanBefore = (ep[0] + ep[1] + ep[2]) / 3.0;
                     for (int c = 0; c < 3; c++)
                     {
                         // Scaled by the channel's own endpoint so the step is the same relative
                         // move the multiplier form made (it added to wh, and ep = dHigh/wh).
                         ep[c] = Math.Max(ep[c] * (1.0 - (rawDelta[c] - meanRaw)), 1e-3);
                         dev = Math.Max(dev, Math.Abs(logGains[c] - meanLog));
+                    }
+
+                    // RENORMALISE so the mean endpoint is exactly where it started.
+                    //
+                    // (rawDelta - meanRaw) sums to zero across channels, which WOULD be chroma-only
+                    // if it were added. It is applied multiplicatively against three unequal ep[c],
+                    // and mean(ep·(1-d)) = mean(ep) - mean(ep·d), where mean(ep·d) is only zero when
+                    // the endpoints happen to be equal. So the "chroma-only" step leaked brightness
+                    // on every round and compounded it over 50 — the endpoint mean drifted and the
+                    // channels diverged with it. One shared factor puts the mean back without
+                    // touching a single ratio between the channels, which is the only thing the net
+                    // is entitled to move here.
+                    double meanAfter = (ep[0] + ep[1] + ep[2]) / 3.0;
+                    if (meanAfter > 1e-9)
+                    {
+                        double renorm = meanBefore / meanAfter;
+                        for (int c = 0; c < 3; c++) ep[c] = Math.Max(ep[c] * renorm, 1e-3);
                     }
 
                     Debug.WriteLine($"[AIWB] iter {it}: range={iterDMax:F4} log_gains=" +
@@ -2690,7 +2757,29 @@ public partial class MainViewModel : ViewModelBase
                     Dispatcher.UIThread.Post(() => StatusText = Loc.F($"智能白平衡 第 {round}/50 轮 · 收敛度 {dev:F4}"));
                     if (dev < 0.01) { conv = true; break; }
                 }
-                return (ep, conv);
+
+                // Step 3 — re-impose the no-clip guarantee the calibration carries.
+                //
+                // The loop moves the channels apart from each other, so a triple that cleared every
+                // channel's extreme on round 1 need not clear it on the round it converges. The
+                // endpoints are per-channel DIVISORS: any channel whose endpoint slips below its own
+                // densest kept pixel clips there, and no Stage-2 control can bring it back. This is
+                // the same uniform lift DetectDMaxPerChannelFromRoll applies to its own answer, from
+                // the same shared helper — one factor for all three, so the balance the net just
+                // solved survives untouched and only the placement moves.
+                // Values off the DECOUPLED buffer and masks off the RAW one — the same split dHigh
+                // is measured with above, and required for the same reason: the endpoint lives in
+                // the decoupled domain, while the sprocket cut and dark valley are calibrated on
+                // raw luma. Comparing an endpoint against maxima drawn from the other domain would
+                // scale by a ratio between two different colour bases.
+                double[] chanMax = FilmBase.MaxChannelDensityFromRoll(
+                    new[] { anchorVal }, tBase,
+                    masks: new[] { anchorRaw }, sprocketThreshold: boardCut);
+                double[] safe = FilmBase.RescaleToClearChannelMax(ep, chanMax);
+                Debug.WriteLine($"[AIWB] final: ep={ep[0]:F4},{ep[1]:F4},{ep[2]:F4} " +
+                                $"chanMax={chanMax[0]:F4},{chanMax[1]:F4},{chanMax[2]:F4} " +
+                                $"safe={safe[0]:F4},{safe[1]:F4},{safe[2]:F4}");
+                return (safe, conv);
             });
 
             // The net's decision, on the field the inversion reads. Writing the three densities
@@ -2802,6 +2891,17 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>Auto black/white points from the 0.1 / 99.9 percentiles across all channels of the
     /// ungraded positive (port of Python levels.auto_levels) → 黑场 / 白场 sliders.</summary>
+    /// <summary>
+    /// Measure the rendered positive's ends and normalise to them.
+    ///
+    /// RUNS UNDER A PRINT-FILM LUT TOO. It was briefly blocked there, on the reasoning that a
+    /// stock's toe and shoulder ARE its look and stretching them back to 0 and 1 flattens it —
+    /// which is true, and is why it is not automatic on that path (see ApplyPrintLut, which leaves
+    /// levels neutral when a cube is selected). But blocking the BUTTON took the judgement away
+    /// from the user as well, and a scan whose highlight simply does not reach the stock's shoulder
+    /// has a real gap that levels is the right tool for. So the default is neutral and the control
+    /// stays available: not applied behind the user's back, not withheld from them either.
+    /// </summary>
     public void AutoLevels()
     {
         if (_previewLinear is null) return;
@@ -2923,6 +3023,9 @@ public partial class MainViewModel : ViewModelBase
         _curveHasEndpoints = false;
         // Geometry
         Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
+        // The cell goes with the crop here: a full geometry reset says this frame is the whole
+        // file again, and a cell left behind would claim a negative the frame no longer occupies.
+        _splitCell = null;
         FilmBaseText = "";
         _filmBaseSampled = false;
         ScheduleRender();
@@ -2959,7 +3062,7 @@ public partial class MainViewModel : ViewModelBase
         Loc.Changed += RetranslateText;
         // Populate the film-look picker before anything binds to it. It was only ever filled on
         // frame load, so with no roll open the collection was empty, the ComboBox had no row to
-        // select, and it rendered blank instead of 无（直通） — which is what an empty PrintLut
+        // select, and it rendered blank instead of the standard entry — which is what an empty PrintLut
         // actually means and what the pipeline is doing.
         RebuildPrintLutList("");
     }
@@ -3439,17 +3542,38 @@ public partial class MainViewModel : ViewModelBase
 
         // Rebuild the roll (caches already cleared above, before calibration warmed them).
         _prevFrame = null;
+        // Same guard LoadRollAsync raises, and for the same reason: rebuilding Frames pushes the
+        // strip's two-way SelectedItem binding back into CurrentFrame, re-entering
+        // OnCurrentFrameChanged while the controls still hold the OUTGOING roll's state. Clearing
+        // _prevFrame is not enough — the binding's own null-then-reselect sets it again, and the
+        // reselect's fold then stamps the incoming frame 1 with the old roll's _cropRect (null on
+        // an ordinary roll). On a reopened SPLIT scan that is frame 1's pre-crop, erased before it
+        // is ever applied. This flag is the half of the guard that covers it (see CommitLiveParams).
+        _paramsLoaded = false;
         _pendingSprocketPrompt = false;
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
-        Frames.Clear();
-        foreach (Project.Frame pf in data.Frames)
+        // Rebuild under the reorder guard, so the strip's binding cannot start a switch MID-build.
+        // Frames.Clear() pushes null through SelectedItem and the first Frames.Add makes the
+        // ListBox auto-select it and push it straight back — a switch that would decode frame 1
+        // while _splitPaths still describes the OUTGOING roll, i.e. without the region path, and
+        // that the deliberate assignment below could not supersede: CurrentFrame would already
+        // hold that very frame, so [ObservableProperty]'s equality check makes the write a no-op
+        // and OnCurrentFrameChanged never fires again. Frame 1 kept the whole scan, un-split.
+        _reordering = true;
+        try
         {
-            FrameParams fp = pf.Params;
-            fp.DecoupleMatrix = dm; fp.DecoupleMode = DecoupleMode.Linear; fp.DecoupleChromaMatrix = cm;
-            fp.LccFlatField = lcc;   // roll-uniform (matches import); global toggle gates it
-            Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
+            Frames.Clear();
+            foreach (Project.Frame pf in data.Frames)
+            {
+                FrameParams fp = pf.Params;
+                fp.DecoupleMatrix = dm; fp.DecoupleMode = DecoupleMode.Linear; fp.DecoupleChromaMatrix = cm;
+                fp.LccFlatField = lcc;   // roll-uniform (matches import); global toggle gates it
+                Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
+            }
+            CurrentFrame = null;   // so the assignment below is a real change, not a no-op
         }
+        finally { _reordering = false; }
         LccEnabled = lcc is not null;
         RefreshSplitPaths();        // reopened split rolls get the sharp region previews too
         IsBusy = false;
@@ -3716,18 +3840,23 @@ public partial class MainViewModel : ViewModelBase
         if (!_splitPlans.TryGetValue(path, out var rects) || rects.Count <= 1)
         {
             var single = new RollFrame(path);
-            if (rects is { Count: 1 }) single.Params.CropRect = rects[0];
+            // A lone rect is a strip cut down to one negative, not a crop the user drew — so it is
+            // this frame's cell as much as any sibling's would be, and SplitCell is set to match.
+            // Harmless when it covers the whole file: the re-anchoring is then the identity.
+            if (rects is { Count: 1 }) { single.Params.CropRect = rects[0]; single.Params.SplitCell = rects[0]; }
             Frames.Add(single);
             return;
         }
 
         var parent = new RollFrame(path);
         parent.Params.CropRect = rects[0];
+        parent.Params.SplitCell = rects[0];
         Frames.Add(parent);
         for (int i = 1; i < rects.Count; i++)
         {
             RollFrame copy = RollFrame.MakeVirtualCopy(parent);
             copy.Params.CropRect = rects[i];
+            copy.Params.SplitCell = rects[i];
             Frames.Add(copy);
         }
     }
@@ -3844,6 +3973,7 @@ public partial class MainViewModel : ViewModelBase
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
+        _splitCell = p.SplitCell;
         FilmBaseText = "";
         _filmBaseSampled = true;
         SyncEndpointViews();            // 亮度/色温/色调/黑场 读数跟上刚载入的六个端点
@@ -4160,7 +4290,26 @@ public partial class MainViewModel : ViewModelBase
         }
         if (Sync.GeomOrientation) { d.QuarterTurns = s.QuarterTurns; d.FlipH = s.FlipH; d.FlipV = s.FlipV; }
         if (Sync.GeomStraighten) d.Rotation = s.Rotation;
-        if (Sync.GeomCrop) d.CropRect = s.CropRect;
+        // Re-anchored onto the target's own negative, not copied verbatim — see RebaseCrop.
+        // Runs AFTER the orientation groups above so it reads the orientation the target will
+        // actually have: the rect is stored in the oriented frame, and syncing a quarter turn in
+        // the same pass would otherwise leave the crop measured against the old axes.
+        if (Sync.GeomCrop) d.CropRect = RebaseCrop(s, d);
+    }
+
+    /// <summary>
+    /// The source frame's crop, expressed against the TARGET frame's own negative.
+    ///
+    /// The algebra is <see cref="CropRebase"/>'s; what this adds is the orientation round trip.
+    /// The cells are FILE-space rects while the crop is stored ORIENTED, so this takes the same
+    /// three steps <see cref="ForRegion"/> does: down to file space, across, back out to the
+    /// TARGET's orientation — which may differ from the source's, and by this point in
+    /// <see cref="CopyGroups"/> is already whatever the sync left it.
+    /// </summary>
+    private static (double X, double Y, double W, double H)? RebaseCrop(FrameParams s, FrameParams d)
+    {
+        if (s.CropRect is not { } rect) return null;   // "no crop" travels as-is
+        return OrientRect(CropRebase.Rebase(UnorientRect(rect, s)!.Value, s.SplitCell, d.SplitCell), d);
     }
 
     // ── Roll structure: add images / virtual copies / remove frame ──────────────
@@ -4269,8 +4418,20 @@ public partial class MainViewModel : ViewModelBase
     // 本软件不附带任何 LUT 文件。这些印片表征由各厂商自行授权，随附即是再分发；界面上出现的
     // 厂商名一律来自用户自己文件里的 TITLE，不是我们的声明。
 
-    /// <summary>Cubes the picker offers, in order: 无 → 最近用过的 → 选择文件…</summary>
+    /// <summary>Cubes the picker offers, in order: 标准渲染 → 最近用过的 → 选择文件…</summary>
     public ObservableCollection<string> PrintLutNames { get; } = new();
+
+    /// <summary>How many rows at the head of the picker are renderings rather than cube files —
+    /// just the standard display rendering. Everything from here to the trailing "choose a file"
+    /// verb is a path.
+    ///
+    /// A pure CST (Cineon log decoded, no rendering) briefly sat at row 1. It is gone from the
+    /// pipeline too, not merely hidden here — an unrendered log plate is a step in someone else's
+    /// grading pipeline rather than a look a roll picks, and it had no users. A roll naming the
+    /// old <c>:cineon-log</c> sentinel now falls through to the standard rendering, which is what
+    /// <see cref="ColorPipeline.ToOutputSpaceFor"/> does with any value that is not a resolvable
+    /// cube.</summary>
+    private const int FixedRows = 1;
 
     /// <summary>Full paths parallel to <see cref="PrintLutNames"/>; "" for 无.</summary>
     private readonly List<string> _printLutPaths = new();
@@ -4307,15 +4468,82 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>What the selected entry is, shown under the picker.</summary>
-    public string PrintLutHint => _printLutIndex == 0
-        ? Loc.T("直通：反相结果直接转到输出空间。")
-        : Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。");
+    ///
+    /// Entry 0 is NOT "no transform" — it is a display RENDERING, doing analytically the job a
+    /// cube does (see ColorPipeline.CineonToDisplay). It used to be labelled 无（直通）, which read
+    /// as "nothing happens here", and then 标准（Cineon → 输出空间）, which claimed to be a plain
+    /// standard conversion. Neither was true: it folds in a response gamma and normalises the film
+    /// base to black, which is a look, not a container change.
+    ///
+    /// It does not name Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
+    /// says — naming a fixed space here would contradict the control beside it.
+    ///
+    /// Row 1 was the pure CST and is now the first cube; the switch below therefore has no
+    /// special case left between the standard rendering and the stocks.
+    public string PrintLutHint => _printLutIndex switch
+    {
+        0 => Loc.T("标准显示渲染：解 Cineon 编码并套用显示渲染（响应 gamma 0.6，片基归零）。想直接看片子就用它。"),
+        _ => Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。"),
+    };
 
-    /// <summary>Writes the chosen cube to every frame and re-renders the roll.</summary>
+    /// <summary>
+    /// Writes the chosen cube to every frame, rebases each frame's Stage-2 adjustments for the new
+    /// rendering, and re-renders the roll.
+    ///
+    /// WHY THE SCENE IS NOT CARRIED OVER. Stage 2 runs AFTER the display rendering, on top of
+    /// whatever the standard conversion or the cube produced, so its numbers are relative to THAT
+    /// render's zero. Carrying them across a look change applies a correction fitted to a picture
+    /// that is no longer on screen: the controls keep their values while silently changing
+    /// meaning, which is the worst of both.
+    ///
+    /// WHY NO PATH GETS AUTO-LEVELS. Every rendering places its own ends, so measuring the result
+    /// and stretching it back to 0..1 overrides the very thing the user selected:
+    ///
+    ///   • The standard rendering normalises code 95 to display black and rolls the latitude above
+    ///     685 off toward white. Its black end is already 0, so the black slider always solved to
+    ///     0 and only the white slider moved — pushing the highlights the shoulder had just rolled
+    ///     off back up against the clip.
+    ///   • A print stock's ends are its OWN and deliberately not 0 and 1 — measured on Kodak 2383,
+    ///     code 685 renders at 0.880 and code 95 at 0.037. That toe and shoulder ARE the film
+    ///     look; at a 99.9th percentile of 0.70 a levels stretch is a 1.43× gain that flattens it.
+    ///   • The pure CST renders no look at all, which is its entire point; normalising it would be
+    ///     a display decision smuggled into the one path defined by making none.
+    ///
+    /// So levels stay neutral everywhere. The CONTROLS stay available — the 自动色阶 button and
+    /// the sliders both work — because a scan whose highlight never reaches the shoulder has a
+    /// real gap that levels is the right tool to close. What this decides is only the DEFAULT.
+    ///
+    /// Everything the user dialled in by eye — exposure, contrast, hi/sh, curves, saturation, WB —
+    /// returns to neutral on both paths, because there is nothing to re-derive it from.
+    ///
+    /// The calibration is untouched throughout: it describes the NEGATIVE (t_base, D_min, D_max)
+    /// and is independent of which stock renders it.
+    ///
+    /// Undo covers the whole thing: the roll's params are snapshotted before the rebase, so an
+    /// accidental switch is one Ctrl+Z away rather than a lost grade.
+    /// </summary>
     private void ApplyPrintLut(string path)
     {
-        foreach (RollFrame f in Frames) f.Params.PrintLut = path;
+        CommitLiveParams(CurrentFrame);   // fold the live sliders in before they are discarded
+        CommitUndo();                     // the rebase below is destructive; make it undoable
+
+        foreach (RollFrame f in Frames)
+        {
+            f.Params.PrintLut = path;
+            RollFrame.ResetScene(f.Params);
+        }
         if (Frames.Count > 0) MarkRollDirty();
+
+        // Push the neutralised params into the sliders before re-measuring: AutoLevels renders
+        // through BuildParams(), so the controls must already describe the new look or it would
+        // measure the outgoing one.
+        if (CurrentFrame is { } cur) LoadParams(cur.Params);
+
+        // NO auto-levels on any path. Every rendering here places its own ends — the standard
+        // one normalises code 95 to black and rolls off above 685, a cube has its own toe and
+        // shoulder, the pure CST deliberately renders none — so measuring the result and
+        // stretching it back to 0..1 overrides whichever one the user just chose. ResetScene has
+        // already left levels neutral; they stay that way until the user asks otherwise.
 
         OnPropertyChanged(nameof(PrintLutIndex));
         OnPropertyChanged(nameof(PrintLutHint));
@@ -4334,9 +4562,12 @@ public partial class MainViewModel : ViewModelBase
         // box — so rebuilding on every frame load blanked the picker even though the roll's LUT
         // was unchanged and still rendering. Frame switches are the common case and they never
         // change the list, only which row is current.
+        // ONE fixed row heads the list — the standard display rendering — so a lookup starts at
+        // FixedRows, and the trailing "choose a file" verb is excluded as before.
+        //
         int existing = _printLutPaths.Count == 0 ? -1
             : string.IsNullOrWhiteSpace(active) ? 0
-            : _printLutPaths.FindIndex(1, Math.Max(_printLutPaths.Count - 2, 0),
+            : _printLutPaths.FindIndex(FixedRows, Math.Max(_printLutPaths.Count - FixedRows - 1, 0),
                                        p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0)
         {
@@ -4352,7 +4583,7 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Clear();
         _printLutPaths.Clear();
 
-        PrintLutNames.Add(Loc.T("无（直通）"));
+        PrintLutNames.Add(Loc.T("标准显示渲染（CST + 显示渲染）"));
         _printLutPaths.Add("");
 
         // A roll can name a cube that is not in this machine's history — a project from another
@@ -4378,7 +4609,7 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Add(Loc.T("选择 .cube 文件…"));
         _printLutPaths.Add("");
 
-        int i = _printLutPaths.FindIndex(1, _printLutPaths.Count - 2,
+        int i = _printLutPaths.FindIndex(FixedRows, _printLutPaths.Count - FixedRows - 1,
                                          p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0 : (i < 0 ? 0 : i);
 
@@ -4443,8 +4674,6 @@ public partial class MainViewModel : ViewModelBase
         // Spaces still resolvable from older projects, so they need a label even though the picker
         // no longer offers them.
         "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
-        "KodakEnduraPremier" or "Kodak2383" =>
-            Loc.T("旧工程指定的染料集基色。已不再提供选择——它描述的是染料编码基色，而非相纸/拷贝片实际能呈现的色域。"),
         _ => "",
     };
 
@@ -4452,8 +4681,8 @@ public partial class MainViewModel : ViewModelBase
     /// Adopt a saved output space into the picker. Called when a frame or roll is loaded — this is
     /// loading, not choosing, so it does not mark the roll dirty on its own.
     ///
-    /// A roll naming a space the picker no longer offers (the two Kodak dye-set spaces, or Rec709)
-    /// is MIGRATED to sRGB and the frames are rewritten to say so. Leaving the name in place while
+    /// A roll naming a space the picker no longer offers (Rec709, or the two Kodak dye-set spaces
+    /// that older versions registered) is MIGRATED to sRGB and the frames are rewritten to say so. Leaving the name in place while
     /// the picker showed index 0 would be the worst outcome: the label would read sRGB while the
     /// render still used the old space, and the next edit would silently rewrite it anyway. The
     /// migration is stated in the status bar rather than done behind the user's back.
@@ -4503,7 +4732,9 @@ public partial class MainViewModel : ViewModelBase
         CommitLiveParams(CurrentFrame);
         FrameParams template = (CurrentFrame?.Params ?? new FrameParams()).Clone();
         RollFrame.ResetScene(template);
-        template.CropRect = null; template.Rotation = 0;   // geometry is per-scan; don't inherit crop/straighten
+        // Geometry is per-scan; don't inherit crop/straighten. The cell goes with the crop — these
+        // are different files, so the current frame's place in ITS strip says nothing about them.
+        template.CropRect = null; template.SplitCell = null; template.Rotation = 0;
 
         // The batch is sorted, but appended rather than merged into the existing frames: the roll's
         // order is the user's to own once they have dragged anything, and re-sorting the whole

@@ -20,6 +20,12 @@ public sealed class CurveCanvas : Control
 {
     private const double Pad = 14, HitRadius = 9, CurveSamples = 256;
 
+    // Built once and shared. Only reassigned when the hovered point actually changes, so this
+    // was never the per-event leak the crop overlay had — but a Cursor still wraps a platform
+    // resource freed only by its finalizer, and there is no reason to make new ones.
+    private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
+    private static readonly Cursor ArrowCursor = new(StandardCursorType.Arrow);
+
     private static readonly IBrush COuter = new SolidColorBrush(Color.FromRgb(21, 23, 26));
     private static readonly IBrush CPlot = new SolidColorBrush(Color.FromRgb(35, 38, 42));
     private static readonly IPen PBorder = new Pen(new SolidColorBrush(Color.FromRgb(52, 55, 60)), 1);
@@ -257,7 +263,7 @@ public sealed class CurveCanvas : Control
             if (hit != _hoverIdx)
             {
                 _hoverIdx = hit;
-                Cursor = new Cursor(hit is not null ? StandardCursorType.Hand : StandardCursorType.Arrow);
+                Cursor = hit is not null ? HandCursor : ArrowCursor;
                 InvalidateVisual();
             }
         }

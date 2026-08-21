@@ -1,6 +1,56 @@
 namespace OpenRevelare.Core;
 
 /// <summary>
+/// A colour space's ENCODING TRANSFER FUNCTION — the curve that takes linear light to the
+/// encoded values a file or a display carries, and back.
+///
+/// WHY THIS IS A PROPERTY OF THE SPACE RATHER THAN A LOOKUP BY NAME. It used to be neither: the
+/// power-curve spaces were resolved through a <c>switch</c> on <see cref="ColorSpaceDef.Name"/>
+/// in <c>OutputRender.EncodingGamma</c>, while sRGB and Display P3 were intercepted by an
+/// <c>if</c> at the top of Encode/Decode and sent to the piecewise curve instead. Two places
+/// each held a partial answer to "what curve does this space use", and they disagreed: the
+/// switch's <c>_ => 2.2</c> fallback claimed 2.2 for Display P3, which the interception meant it
+/// could never actually receive.
+///
+/// The disagreement was not academic. <see cref="ColorPipeline.ToOutputSpaceVia"/> re-containers
+/// a print-film cube's Rec709 output by decoding with the SOURCE space's curve and encoding with
+/// the DESTINATION's, on the stated assumption that the pair round-trips. With Rec709 decoding
+/// through a pure 2.4 power and sRGB encoding through the piecewise curve, it did not: the two
+/// agree only at 0 and 1, and the piecewise curve's linear toe makes it far brighter in the
+/// shadows. A film base that the Kodak 2383 cube correctly rendered at 3.74% luminance left the
+/// round trip at 0.50% — an 87% crush — and tripped the ≤2% under-exposure indicator, along with
+/// every shadow the cube had placed below 0.0675. Display P3 was hit identically, and could not
+/// be rescued by skipping the round trip on matching primaries the way sRGB could, because P3's
+/// matrix is genuinely not the identity.
+///
+/// Stating the curve on the space makes Encode and Decode read the SAME field, so they are
+/// inverses by construction and there is no second place for a partial answer to live.
+/// </summary>
+public enum TransferFunction
+{
+    /// <summary>
+    /// A pure power curve, <c>encoded = linear^(1/gamma)</c>, with the exponent in
+    /// <see cref="ColorSpaceDef.Gamma"/>. What BT.1886 (Rec709/Rec2020, gamma 2.4) and Adobe RGB
+    /// (563/256) declare.
+    /// </summary>
+    Power,
+
+    /// <summary>
+    /// The IEC 61966-2-1 piecewise curve — a short linear segment near black joined to a
+    /// 1.055·x^(1/2.4) − 0.055 power segment. Shared by sRGB and Display P3, which differ only
+    /// in primaries. NOT interchangeable with <see cref="Power"/> at gamma 2.4: the linear toe
+    /// makes it markedly brighter below ~10% encoded, which is exactly where the round-trip bug
+    /// above did its damage.
+    /// </summary>
+    SrgbPiecewise,
+
+    /// <summary>
+    /// No encoding curve at all — the space is scene-linear. ACEScg is the only such space here.
+    /// </summary>
+    Linear,
+}
+
+/// <summary>
 /// An RGB colour space, defined the only way that makes it convertible: chromaticity
 /// coordinates for the three primaries plus a white point. Everything else — the
 /// RGB↔XYZ matrices, the conversion between any two spaces — is derived from these.
@@ -17,12 +67,18 @@ namespace OpenRevelare.Core;
 /// <param name="Green">CIE xy of the green primary.</param>
 /// <param name="Blue">CIE xy of the blue primary.</param>
 /// <param name="White">CIE xy of the white point.</param>
+/// <param name="Transfer">The encoding curve this space carries; see <see cref="TransferFunction"/>.
+/// Defaults to <see cref="TransferFunction.Power"/> at <paramref name="Gamma"/>.</param>
+/// <param name="Gamma">Exponent for <see cref="TransferFunction.Power"/>. Ignored by the other
+/// two. Defaults to 2.2, the value the old name-keyed lookup fell back to.</param>
 public readonly record struct ColorSpaceDef(
     string Name,
     (double X, double Y) Red,
     (double X, double Y) Green,
     (double X, double Y) Blue,
-    (double X, double Y) White)
+    (double X, double Y) White,
+    TransferFunction Transfer = TransferFunction.Power,
+    double Gamma = 2.2)
 {
     /// <summary>
     /// The RGB→XYZ matrix (row-major, [row, col]), built by the standard construction:
@@ -93,59 +149,50 @@ public static class ColorSpaces
 {
     /// <summary>IEC 61966-2-1. D65.</summary>
     public static readonly ColorSpaceDef Srgb = new(
-        "sRGB", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290));
+        "sRGB", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290),
+        TransferFunction.SrgbPiecewise);
 
     /// <summary>Adobe RGB (1998). D65.</summary>
     public static readonly ColorSpaceDef AdobeRgb = new(
-        "AdobeRGB", (0.6400, 0.3300), (0.2100, 0.7100), (0.1500, 0.0600), (0.3127, 0.3290));
+        "AdobeRGB", (0.6400, 0.3300), (0.2100, 0.7100), (0.1500, 0.0600), (0.3127, 0.3290),
+        TransferFunction.Power, 563.0 / 256.0);
 
     /// <summary>
-    /// ITU-R BT.709. Shares sRGB's primaries and D65 white exactly — the two differ only in
-    /// transfer function (2.4 pure power here, sRGB's piecewise curve there), which is why this
-    /// needs its own entry rather than aliasing sRGB: <see cref="OutputRender.EncodingGamma"/>
-    /// keys off the name.
+    /// ITU-R BT.709. Shares sRGB's primaries and D65 white EXACTLY — the two differ only in
+    /// transfer function: BT.1886's pure 2.4 power here, IEC 61966-2-1's piecewise curve there.
     ///
-    /// This is the space step 4 of the Cineon workflow names, so it belongs in the picker even
-    /// though its gamut is identical to sRGB's.
+    /// That difference is the entire content of this entry, and stating it as
+    /// <see cref="TransferFunction"/> on the space is what keeps Encode and Decode inverses. It
+    /// used to be inferred from the NAME in two separate places that disagreed; see the remarks
+    /// on <see cref="TransferFunction"/> for the shadow crush that produced.
+    ///
+    /// This is the space step 4 of the Cineon workflow names, and the space every print-film cube
+    /// renders into, so it belongs in the picker even though its gamut is identical to sRGB's.
     /// </summary>
     public static readonly ColorSpaceDef Rec709 = new(
-        "Rec709", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290));
+        "Rec709", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290),
+        TransferFunction.Power, 2.4);
 
-    /// <summary>Display P3 — DCI-P3 primaries on a D65 white. </summary>
+    /// <summary>
+    /// Display P3 — DCI-P3 primaries on a D65 white, carrying sRGB's piecewise TRC. That curve is
+    /// the space's definition, not a convenience: Apple's Display P3 is specified as sRGB's
+    /// transfer function over wider primaries.
+    /// </summary>
     public static readonly ColorSpaceDef DisplayP3 = new(
-        "DisplayP3", (0.6800, 0.3200), (0.2650, 0.6900), (0.1500, 0.0600), (0.3127, 0.3290));
+        "DisplayP3", (0.6800, 0.3200), (0.2650, 0.6900), (0.1500, 0.0600), (0.3127, 0.3290),
+        TransferFunction.SrgbPiecewise);
 
     /// <summary>
     /// ACEScg (AP1). ACES white (~D60). The default working space: its gamut encloses
     /// every space we might render into, so no intermediate step clips information.
     /// </summary>
     public static readonly ColorSpaceDef AcesCg = new(
-        "ACEScg", (0.7130, 0.2930), (0.1650, 0.8300), (0.1280, 0.0440), (0.32168, 0.33767));
-
-    /// <summary>
-    /// Kodak Endura Premier colour paper. This is the space the DiVERE ColorChecker
-    /// datasets are expressed in — rendering into it is what reproduces the look of a
-    /// darkroom print, and is the honest replacement for what chroma_grade was
-    /// approximating with a scalar.
-    /// </summary>
-    public static readonly ColorSpaceDef KodakEnduraPremier = new(
-        "KodakEnduraPremier",
-        (0.6635212396720807, 0.32411816662609266),
-        (0.2592092094845883, 0.6664046572656293),
-        (0.15456877810311515, 0.049802203945821064),
-        (0.32168, 0.33767));
-
-    /// <summary>Kodak Vision 2383 print film — the projection-print look.</summary>
-    public static readonly ColorSpaceDef Kodak2383 = new(
-        "Kodak2383",
-        (0.6793722285220385, 0.3144251767600739),
-        (0.25249108689540845, 0.6898080814131717),
-        (0.15168387801166677, 0.03670767619874616),
-        (0.32168, 0.33767));
+        "ACEScg", (0.7130, 0.2930), (0.1650, 0.8300), (0.1280, 0.0440), (0.32168, 0.33767),
+        TransferFunction.Linear);
 
     /// <summary>Every registered space, keyed by <see cref="ColorSpaceDef.Name"/>.</summary>
     public static readonly IReadOnlyDictionary<string, ColorSpaceDef> All =
-        new[] { Srgb, Rec709, AdobeRgb, DisplayP3, AcesCg, KodakEnduraPremier, Kodak2383 }
+        new[] { Srgb, Rec709, AdobeRgb, DisplayP3, AcesCg }
             .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

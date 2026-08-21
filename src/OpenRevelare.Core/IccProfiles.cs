@@ -81,8 +81,11 @@ public static class IccProfiles
             { toD50[0, 2], toD50[1, 2], toD50[2, 2] },
         };
 
-        byte[] trc = space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase)
-            ? SrgbTrcTag()                                   // P3 shares sRGB's piecewise curve
+        // Keyed off the space's DECLARED curve, not its name: the profile has to describe the
+        // same TRC OutputRender.Encode actually applied, and a name check is a second copy of
+        // that knowledge waiting to drift from it.
+        byte[] trc = space.Transfer == TransferFunction.SrgbPiecewise
+            ? SrgbTrcTag()
             : GammaTrcTag(OutputRender.EncodingGamma(space));
 
         return Build($"{space.Name} — OpenRevelare", rows, trc);

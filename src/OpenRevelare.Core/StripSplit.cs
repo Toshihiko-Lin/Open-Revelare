@@ -2,7 +2,8 @@ namespace OpenRevelare.Core;
 
 /// <summary>
 /// Splits a scan holding several negatives into one rect per frame — the import-time
-/// pre-pass for scanner TIFFs, where a single file is a whole strip rather than one photo.
+/// pre-pass for scanner TIFFs, where a single file is a whole strip, or several strips laid
+/// side by side in a flatbed holder, rather than one photo.
 ///
 /// Detection is scanner-agnostic: it reads the film's own structure and uses no holder
 /// catalogue, no assumed scan extent and no DPI. That is deliberate. The X5-Crop route was
@@ -32,28 +33,55 @@ public static class StripSplit
     public readonly record struct Rect(double X, double Y, double W, double H);
 
     /// <summary>
-    /// Locate the frames in <paramref name="image"/>.
+    /// Locate the frames in <paramref name="image"/>, for every strip it holds.
     ///
-    /// Returns an empty list when the image holds no recognisable strip; a single rect when
-    /// the scan is one frame. Callers should treat a count of 0 or 1 as "nothing to split"
-    /// rather than as an error.
+    /// Returns one list per strip, in the order the strips run across the scan. Empty when the
+    /// image holds no recognisable film; a single list of one rect when the scan is one frame.
+    /// Callers should treat 0 or 1 total frames as "nothing to split" rather than as an error.
     /// </summary>
     /// <param name="image">Decoded scan, any resolution. A downsampled preview is expected
     /// and sufficient — the rects are normalised, so they apply unchanged at full size.</param>
     /// <param name="minFrameFraction">Spans shorter than this fraction of the strip are
     /// discarded as sprocket gaps or leader rather than kept as frames.</param>
-    public static IReadOnlyList<Rect> Detect(ImageBuffer image, double minFrameFraction = 0.05)
+    public static IReadOnlyList<IReadOnlyList<Rect>> DetectStrips(
+        ImageBuffer image, double minFrameFraction = 0.05)
     {
-        // Work with the strip running down the rows, whatever way round it was scanned;
+        // Work with the strips running down the rows, whatever way round they were scanned;
         // the mapping back to source axes happens at the end.
         bool vertical = image.Height >= image.Width;
-        int length = vertical ? image.Height : image.Width;   // along the strip
+        int length = vertical ? image.Height : image.Width;   // along each strip
         int across = vertical ? image.Width : image.Height;
-        if (length < 16 || across < 8) return Array.Empty<Rect>();
+        if (length < 16 || across < 8) return Array.Empty<IReadOnlyList<Rect>>();
 
         float[] luma = Luma(image, vertical, length, across);
 
-        var (c0, c1) = StripBounds(luma, length, across);
+        var strips = new List<IReadOnlyList<Rect>>();
+        foreach (var (c0, c1) in StripBands(luma, length, across))
+        {
+            var rects = DetectInBand(luma, length, across, c0, c1, vertical, minFrameFraction);
+            if (rects.Count > 0) strips.Add(rects);
+        }
+        return strips;
+    }
+
+    /// <summary>
+    /// Backwards-compatible single-strip entry point: the frames of the widest strip only.
+    ///
+    /// Kept for callers that cannot express more than one strip. Prefer
+    /// <see cref="DetectStrips"/>, which does not silently drop the other columns of a
+    /// multi-column scan.
+    /// </summary>
+    public static IReadOnlyList<Rect> Detect(ImageBuffer image, double minFrameFraction = 0.05)
+    {
+        var strips = DetectStrips(image, minFrameFraction);
+        return strips.Count == 0 ? Array.Empty<Rect>() : strips[0];
+    }
+
+    /// <summary>Frames within one strip's column band [c0, c1), in source axes.</summary>
+    private static IReadOnlyList<Rect> DetectInBand(float[] luma, int length, int across,
+                                                    int c0, int c1, bool vertical,
+                                                    double minFrameFraction)
+    {
         if (c1 - c0 < 8) return Array.Empty<Rect>();
 
         // Central half of the strip only: sprocket holes and the ragged film edges are flat
@@ -101,15 +129,25 @@ public static class StripSplit
     }
 
     /// <summary>
-    /// The columns spanned by the film, discarding the black surround.
+    /// The column bands spanned by film, discarding the black surround — one band per strip.
     ///
     /// The cut is placed low — a fraction of the way from the dark end to the median — and
     /// NOT midway between min and max. A sprocket hole is bare light source and far brighter
     /// than the film (0.75 against ≈0.36 on one sample); a min/max midpoint therefore lands
     /// above the film itself and selects only the sprockets, 30 columns out of 486.
-    /// The widest run above the cut is the film, which also ignores specks in the surround.
+    ///
+    /// EVERY sufficiently wide run above the cut is returned, not just the widest one. Flatbed
+    /// scans routinely lay several strips side by side in the holder — a 6×12 sheet is two
+    /// columns of six — and taking the widest run alone silently discarded every frame outside
+    /// the first column: on a two-column sample it reported 6 frames where there were 12.
+    ///
+    /// Runs narrower than a fraction of the widest are rejected rather than kept as more
+    /// strips. Strips on one scan are cut from the same film and so are the same width to
+    /// within the holder's tolerance; anything much narrower is a sliver of leader, a strip of
+    /// carrier caught by the light, or a bright edge artefact, and admitting it would put a
+    /// spurious column of "frames" into the split dialog.
     /// </summary>
-    private static (int Lo, int Hi) StripBounds(float[] luma, int length, int across)
+    private static IReadOnlyList<(int Lo, int Hi)> StripBands(float[] luma, int length, int across)
     {
         var col = new float[across];
         for (int c = 0; c < across; c++)
@@ -123,20 +161,60 @@ public static class StripSplit
         double mid = NumpyStats.Median(col);
         double cut = dark + 0.45 * (mid - dark);
 
-        int bestLo = 0, bestHi = 0, curLo = -1;
+        var runs = new List<(int Lo, int Hi)>();
+        int curLo = -1;
         for (int c = 0; c < across; c++)
         {
             bool lit = col[c] > cut;
             if (lit && curLo < 0) curLo = c;
-            else if (!lit && curLo >= 0)
-            {
-                if (c - curLo > bestHi - bestLo) { bestLo = curLo; bestHi = c; }
-                curLo = -1;
-            }
+            else if (!lit && curLo >= 0) { runs.Add((curLo, c)); curLo = -1; }
         }
-        if (curLo >= 0 && across - curLo > bestHi - bestLo) { bestLo = curLo; bestHi = across; }
-        return (bestLo, bestHi);
+        if (curLo >= 0) runs.Add((curLo, across));
+        if (runs.Count == 0) return runs;
+
+        int widest = runs.Max(r => r.Hi - r.Lo);
+        var wide = runs.Where(r => r.Hi - r.Lo >= SiblingStripWidth * widest).ToList();
+        if (wide.Count <= 1) return wide;
+
+        // Extra bands are admitted only when what separates them is genuine SURROUND, judged
+        // against the FILM'S OWN LEVEL rather than against the cut.
+        //
+        // The cut is not usable for this. It sits close to the film by construction — a fraction
+        // of the way from the dark end to the median — so an already-cropped single frame, which
+        // has no base, no surround and nothing but picture, still produces several runs wherever
+        // a broad dark passage in the photograph crosses it, and those gaps dip just under the
+        // cut like a real one. Measured on two samples the cut cannot tell them apart (gap 0.365
+        // vs cut 0.389 for the picture; 0.049 vs 0.183 for real black) but the ratio to the film
+        // level is not close: 0.86 for the picture against 0.03 for the surround. The surround is
+        // the scanner lid, essentially unlit, while a photograph's darkest column still carries
+        // most of the base density through it.
+        var inside = new List<double>();
+        foreach (var (lo, hi) in wide)
+            for (int c = lo; c < hi; c++) inside.Add(col[c]);
+        double film = NumpyStats.Median(inside.Select(v => (float)v).ToArray());
+        double surround = SurroundOfFilm * film;
+
+        var kept = new List<(int Lo, int Hi)> { wide[0] };
+        for (int i = 1; i < wide.Count; i++)
+        {
+            double deepest = double.MaxValue;
+            for (int c = kept[^1].Hi; c < wide[i].Lo; c++) deepest = Math.Min(deepest, col[c]);
+            // Not surround: the two runs are one piece of film with a dark band across it, so
+            // rejoin them rather than dropping the second and losing that part of the strip.
+            if (deepest > surround) kept[^1] = (kept[^1].Lo, wide[i].Hi);
+            else kept.Add(wide[i]);
+        }
+        return kept;
     }
+
+    /// <summary>How narrow a second strip may be, relative to the widest, and still count as
+    /// film rather than as an artefact of the surround.</summary>
+    private const double SiblingStripWidth = 0.6;
+
+    /// <summary>How dark, as a fraction of the film's own column level, the gap between two
+    /// candidate strips must go before it counts as surround rather than as picture content.
+    /// Measured 0.03 for real surround and 0.86 for a dark passage in a photograph.</summary>
+    private const double SurroundOfFilm = 0.35;
 
     /// <summary>Per-row standard deviation and mean over the band [lo, hi).</summary>
     private static (double[] Sd, double[] Mean) RowStats(float[] luma, int length, int across,

@@ -288,10 +288,10 @@ public static class Stage2
      || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The two-stage chain: linear-light operations, then step 4, then the perceptual operations
-    /// in the output space.
+    /// The display-referred chain: step 4 first, then the light-scaling ops around a linear
+    /// round trip, then the perceptual operations — all after the render.
     ///
-    /// WHY THE SPLIT. Each Stage-2 operation is one of two kinds, and the old chain ran both
+    /// WHY THE SPLIT. Each Stage-2 operation is one of two kinds, and an older chain ran both
     /// kinds in linear light:
     ///
     ///   • White balance and exposure SCALE LIGHT. A gain of 2 means twice the photons, which is
@@ -299,28 +299,83 @@ public static class Stage2
     ///     encodes to 0.735, whereas doubling the encoded value clips to 1.0 outright.
     ///   • Levels, contrast, highlights/shadows, curves and saturation are PERCEPTUAL. Contrast
     ///     pivots on 0.5 meaning mid-grey; in linear light 0.5 is 73.5% display brightness, so
-    ///     the old chain rotated about a point well above mid-grey and crushed the shadows.
+    ///     that chain rotated about a point well above mid-grey and crushed the shadows.
     ///
-    /// Encoding once, in the middle, also removes the private gamma the curve step used to apply
-    /// and undo around itself — the data is already in the right space when the curve sees it,
-    /// so the curve simply samples it. That private round trip existed only because the encoding
+    /// Encoding once, up front, also removes the private gamma the curve step used to apply and
+    /// undo around itself — the data is already in the right space when the curve sees it, so the
+    /// curve simply samples it. That private round trip existed only because the encoding
     /// happened too late.
     ///
-    /// The middle step is the Cineon workflow's step 4: it converts PRIMARIES as well as applying
-    /// the transfer curve. That is what makes the output space a real choice — the perceptual ops
-    /// below run in whatever space the roll targets, so the on-screen result and the exported file
-    /// are the same render rather than one being a simulation of the other.
+    /// STEP 4 COMES FIRST, ahead of every Stage-2 op including the light-scaling pair. Stage 2 is
+    /// display-referred by definition, so it belongs after the print-film LUT or the standard
+    /// Cineon conversion, never before it. Running white balance and exposure ahead of the render
+    /// used to defeat the rendering's black normalisation — a gain lifted the calibrated film base
+    /// off code 95 before the encoding could take it to display black — and, more seriously,
+    /// rescaled a calibrated signal whose endpoints are measurements. See the body.
+    ///
+    /// The light-scaling pair keeps its linear semantics by decoding and re-encoding around
+    /// itself rather than by running earlier. That is the one op group that pays for a round trip;
+    /// everything perceptual is defined in the encoded space and needs no such thing.
+    ///
+    /// Step 4 converts PRIMARIES as well as applying the transfer curve. That is what makes the
+    /// output space a real choice — the ops below run in whatever space the roll targets, so the
+    /// on-screen result and the exported file are the same render rather than one being a
+    /// simulation of the other.
     /// </summary>
     private static void ApplyDisplayReferred(float[] d, FrameParams cal, ColorSpaceDef output,
                                              bool encodeExit)
     {
         static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
 
-        // ── Stage A: linear light ────────────────────────────────────────────────
+        // ── STEP 4: scene-linear working space → output space, primaries AND gamma ────
+        // This is the Cineon step 4 proper, and it comes FIRST because everything after it is
+        // DEFINED in the output space. Applied unconditionally, not only when encodeExit is set:
+        // the perceptual ops NEED the encoded domain to mean what they say. Under
+        // OutputIntent.None the caller never reaches Stage 2 at all, so this cannot encode
+        // linear output.
+        //
+        // Note this converts primaries as well as applying the curve — an earlier version only
+        // did the curve, because working and output were the same space by assumption.
+        //
+        // With a print-film emulation selected, the cube performs the display rendering instead:
+        // same entry (scene-linear working space), same exit (display-encoded output space), a
+        // stock's response in between. Everything below is unaffected — the perceptual ops need
+        // display-encoded data in the output space, and both routes deliver exactly that, which
+        // is why this feature adds no Stage-2 controls of its own.
+        //
+        // WHY THIS MOVED ABOVE WHITE BALANCE AND EXPOSURE. It used to run after them, and that
+        // ordering silently defeated the display rendering's black normalisation. The rendering
+        // takes code 95 — where calibration pins the film base — to display black, but a gain
+        // applied BEFORE the encoding lifts the base off 95 first (LogEncoding.ToCineon clamps at
+        // 95, so only gains above 1 show it), and the normalisation then returns a non-zero value.
+        // Measured: a neutral frame rendered the base at 0.000, the same frame at +0.5 EV at
+        // 0.090, at +1 EV at 0.167. Worse than the cosmetics, a linear-domain gain rescales a
+        // CALIBRATED signal — D_min and D_max are measurements pinned to codes 95 and 1032, and
+        // multiplying through them makes the calibration mean less than it says.
+        //
+        // Stage 2 is display-referred by definition: it belongs after the LUT or the standard
+        // conversion, not before it.
+        ColorPipeline.ToOutputSpaceFor(d, cal);
+
+        // ── Stage A: light-scaling ops, in linear, around the encoded render ──────
+        //
+        // White balance and exposure SCALE LIGHT: a gain of 2 means twice the photons, which is a
+        // multiply in linear and nothing so simple once encoded. Measured, linear 0.25×2 encodes
+        // to 0.735, whereas doubling the ENCODED value clips to 1.0 outright — and a mid grey
+        // (0.18) goes to 0.923 encoded against 0.634 done properly. So they cannot simply move
+        // into the encoded domain along with step 4.
+        //
+        // They round-trip instead: decode to linear, scale, re-encode. Same round trip
+        // ToOutputSpaceVia performs after a cube, for the same reason — the render is finished,
+        // but this particular operation is only meaningful in linear light. The cost is one
+        // decode/encode pair; the alternative was running the gain before the render, which is
+        // what broke the black normalisation above.
         bool doWb = !AllOne(cal.WbGains);
         bool doExposure = cal.ExposureEv != 0.0;
         if (doWb || doExposure)
         {
+            OutputRender.Decode(d, output);
+
             float wb0 = (float)cal.WbGains[0], wb1 = (float)cal.WbGains[1], wb2 = (float)cal.WbGains[2];
             float gain = (float)Math.Pow(2.0, cal.ExposureEv);
             Parallel.For(0, d.Length / 3, p =>
@@ -333,23 +388,9 @@ public static class Stage2
                 d[b + 1] = g < 0f ? 0f : g;
                 d[b + 2] = bl < 0f ? 0f : bl;
             });
-        }
 
-        // ── STEP 4: scene-linear working space → output space, primaries AND gamma ────
-        // This is the Cineon step 4 proper, and it sits here because everything below is DEFINED
-        // in the output space. Applied unconditionally, not only when encodeExit is set: the
-        // perceptual ops NEED the encoded domain to mean what they say. Under OutputIntent.None
-        // the caller never reaches Stage 2 at all, so this cannot encode linear output.
-        //
-        // Note this converts primaries as well as applying the curve — the earlier version only
-        // did the curve, because working and output were the same space by assumption.
-        //
-        // With a print-film emulation selected, the cube performs the display rendering instead:
-        // same entry (scene-linear working space), same exit (display-encoded output space), a
-        // stock's response in between. Everything below is unaffected — the perceptual ops need
-        // display-encoded data in the output space, and both routes deliver exactly that, which
-        // is why this feature adds no Stage-2 controls of its own.
-        ColorPipeline.ToOutputSpaceFor(d, cal);
+            OutputRender.Encode(d, output);
+        }
 
         // ── Stage B: output space ────────────────────────────────────────────────
         var perceptual = cal.Clone();

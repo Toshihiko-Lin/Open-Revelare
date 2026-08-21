@@ -69,13 +69,13 @@ public sealed class FrameParams
     public const double OutputRange = (CineonWhiteCode - CineonBlackCode) * CineonDensityPerCode;
 
     /// <summary>Cineon 10-bit 每码步进的密度——该编码的定义常量。</summary>
-    private const double CineonDensityPerCode = 0.002;
+    public const double CineonDensityPerCode = 0.002;
 
     /// <summary>Cineon 黑端码值：用户框选为黑的位置。</summary>
-    private const double CineonBlackCode = 95.0;
+    public const double CineonBlackCode = 95.0;
 
     /// <summary>Cineon 白端码值：用户框选为白的位置。</summary>
-    private const double CineonWhiteCode = 1032.0;
+    public const double CineonWhiteCode = 1032.0;
 
     /// <summary>
     /// 密度编码域的上限——Cineon 的 1032，**不是标定点**。
@@ -226,6 +226,7 @@ public sealed class FrameParams
     /// </summary>
     public string PrintLut { get; set; } = "";
 
+
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
@@ -360,6 +361,24 @@ public sealed class FrameParams
     // ── Geometry (export path: orientation → rotation → crop) ──────────────────
     /// <summary>Normalised crop rect (x,y,w,h) in [0,1]; null = no crop.</summary>
     public (double X, double Y, double W, double H)? CropRect { get; set; }
+
+    /// <summary>
+    /// The share of the source file this frame was cut from at import — its cell of a split
+    /// strip — or null when the frame owns the whole file.
+    ///
+    /// Recorded because <see cref="CropRect"/> cannot carry it: a split frame starts with the two
+    /// equal, and the first crop the user draws OVERWRITES the rect, at which point nothing is
+    /// left to say which negative of the strip this frame is. That is only a problem for the one
+    /// operation that has to compare frames — broadcasting a crop across the roll. A crop is
+    /// stored against the whole FILE, so on a split strip the source frame's rect names a patch
+    /// of ITS negative; handing that same rect to the siblings points them all at that one patch
+    /// and the copies collapse into a single repeated image. The fix needs each frame's own cell
+    /// to re-anchor against, and this is it.
+    ///
+    /// Null for ordinary frames, where the cell IS the file and the verbatim copy was always
+    /// right. Also null for virtual copies of a whole frame — they genuinely share every pixel.
+    /// </summary>
+    public (double X, double Y, double W, double H)? SplitCell { get; set; }
     /// <summary>Straighten rotation in degrees (clockwise). 0 = none.</summary>
     public double Rotation { get; set; } = 0.0;
     /// <summary>Discrete 90° clockwise turns (0–3), applied before straighten + crop.</summary>
@@ -409,6 +428,7 @@ public sealed class FrameParams
         CurvePreserveHue = CurvePreserveHue,
         CurveHasEndpoints = CurveHasEndpoints,
         CropRect = CropRect,
+        SplitCell = SplitCell,
         Rotation = Rotation,
         QuarterTurns = QuarterTurns,
         FlipH = FlipH,
