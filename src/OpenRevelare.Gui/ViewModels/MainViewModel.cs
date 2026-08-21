@@ -1951,13 +1951,21 @@ public partial class MainViewModel : ViewModelBase
         _suppressRender = true;
         try
         {
-            // Neutral start: stale levels would clip the positive that AutoLevels measures, and
-            // both level sliders are OFFSETS from the untouched endpoints, so neutral is 0 for
-            // each. The highlight endpoint needs no such reset — AutoDetectDMax overwrites all
-            // three channels of it outright.
+            // Neutral start: both level sliders are OFFSETS from the untouched endpoints, so
+            // neutral is 0 for each. The highlight endpoint needs no such reset — AutoDetectDMax
+            // overwrites all three channels of it outright.
+            // LEVELS ARE LEFT NEUTRAL — the display rendering already places both ends.
+            // CineonToDisplay normalises the film base at code 95 to display black and rolls the
+            // latitude above 685 off toward white, so the picture arrives with its endpoints
+            // already set. Measuring percentiles off that render and stretching them to 0..1
+            // re-does the black end (a no-op now — the base reads 0.000, so the black slider
+            // always solved to 0) and OVERRIDES the white end, pushing the highlights the shoulder
+            // just rolled off back up against the clip. Same objection as under a print-film cube,
+            // whose toe and shoulder are its look: a rendering that has placed its own ends should
+            // not then be renormalised. The 自动色阶 button stays available for a scan that really
+            // does need it.
             Black = 0.0; White = 0.0;
             AutoDetectDMax();
-            AutoLevels();
         }
         finally { _suppressRender = false; }
 
@@ -2139,16 +2147,13 @@ public partial class MainViewModel : ViewModelBase
                 // AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
-                // The detector fixed the three channels' relative spans; this fixes where the
-                // picture sits. Metered across the whole roll so the roll keeps its own internal
-                // exposure differences.
-                PlaceExposure(values);
-                // Levels are measured last and on the CURRENT frame's rendered positive, because
-                // they are the only step that reads output rather than negative density. With the
-                // three roll-wide values above already in place, that render is the roll's look,
-                // so the endpoints it yields apply to the roll too.
+                // The detector's endpoints ARE the placement — both the channels' relative spans
+                // (the colour balance) and where the picture sits. The meter below only reports;
+                // it used to re-solve D_max here and that is what darkened every LUT render.
+                MeterExposure(values);
+                // Levels stay neutral — the display rendering has already placed both ends; see
+                // the note in AutoInvertRollAsync's stage 1.
                 Black = 0.0; White = 0.0;
-                AutoLevels();
             }
             finally { _suppressRender = false; }
 
@@ -2268,7 +2273,7 @@ public partial class MainViewModel : ViewModelBase
     ///
     /// A field rather than a return value because <see cref="AutoDetectDMax"/> is also a command
     /// bound straight to a button, and because the caller that needs the answer —
-    /// <see cref="AutoInvertCurrentFrame"/> — reads it several steps later, after AutoLevels has
+    /// <see cref="AutoInvertCurrentFrame"/> — reads it several steps later, after other steps have
     /// rewritten StatusText. Inspecting the status text instead would tie control flow to a
     /// translated string.
     /// </summary>
@@ -2331,11 +2336,10 @@ public partial class MainViewModel : ViewModelBase
         if (highlight is not null) DMaxPerChannel = highlight;
         _lastHighlightMeasured = highlight is not null;
 
-        // Same two-part answer as the roll pass: the detector sets the channels' relative spans,
-        // the meter sets where the picture sits. Metered on this frame alone, which is what
-        // 单张 means.
+        // Same as the roll pass: the detector's endpoints stand, and the meter only reports where
+        // this frame landed. Metered on this frame alone, which is what 单张 means.
         if (highlight is not null && _previewLinear is not null)
-            PlaceExposure(new[] { _previewLinear });
+            MeterExposure(new[] { _previewLinear });
 
         StatusText = highlight is not null
             ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
@@ -2368,7 +2372,7 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels would clip
-            // the positive AutoLevels measures. The highlight endpoint needs no reset —
+            // the positive the meter reads. The highlight endpoint needs no reset —
             // AutoDetectDMax overwrites all three channels of it.
             Black = 0.0; White = 0.0;
             // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
@@ -2379,7 +2383,7 @@ public partial class MainViewModel : ViewModelBase
             // warning with "完成" plus the untouched endpoint, so the failure would reach the user
             // as a success carrying stale numbers.
             highlightMeasured = _lastHighlightMeasured;
-            AutoLevels();
+            // Levels stay neutral here too — see the note in AutoInvertRollAsync's stage 1.
         }
         finally { _suppressRender = false; }
 
@@ -2813,23 +2817,32 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Auto black/white points from the 0.1 / 99.9 percentiles across all channels of the
     /// ungraded positive (port of Python levels.auto_levels) → 黑场 / 白场 sliders.</summary>
     /// <summary>
-    /// Places the roll's exposure: meter the average tone and re-solve D_max so it lands on
-    /// Cineon's mid-grey reference (code ~336).
+    /// Meters the roll's tone and REPORTS it. It writes nothing.
     ///
-    /// WHY THIS RUNS AFTER THE HIGHLIGHT DETECTOR RATHER THAN INSTEAD OF IT. The detector
-    /// establishes the three channels' RELATIVE spans, which is the roll's colour balance and is
-    /// a real measurement of the film. What it cannot establish is where the picture sits, because
-    /// it reads the 99.9th percentile — a specular highlight, whose distance above the diffuse
-    /// white is a property of the scene rather than of the film. So the detector's answer is kept
-    /// for its colour and rescaled for its placement; <see cref="ExposureMeter.SolveDMaxForAverage"/>
-    /// applies one ratio to all three spans, which moves the exposure without touching the balance.
+    /// THE MID-GREY READING IS AN INSTRUMENT, NOT A CONTROLLER. It used to re-solve D_max so the
+    /// metered tone landed on Cineon's mid-grey reference (code ~336), overwriting the endpoint
+    /// the highlight detector had just measured — and that overwrite is what stopped the
+    /// calibration doing its one job.
+    ///
+    /// THE CALIBRATION'S JOB IS THE TWO ENDS. D_min maps to code 95 and D_max to code 1032, so a
+    /// correctly calibrated frame fills the encoding with nothing clipped at either end. Solving
+    /// D_max from the metered tone instead pins the MIDDLE and lets the top fall where it may:
+    /// the picture's brightest content stopped reaching 1032, the upper part of the histogram sat
+    /// empty, and a print-film cube's shoulder — which lives exactly there — was never reached.
+    ///
+    /// So the endpoints are measured and kept, and the meter tells the user where this frame's
+    /// tone landed inside them. A frame that reads far off mid-grey is a frame the photographer
+    /// exposed that way, and moving it is the user's decision, made with the exposure control and
+    /// this reading in front of them — not something the calibration does silently.
+    ///
+    /// <see cref="ExposureMeter.SolveDMaxForAverage"/> still exists and is still correct for a
+    /// caller that genuinely wants "place this tone at this code"; nothing in the auto chain wants
+    /// that any more.
     ///
     /// <paramref name="frames"/> is the whole roll for 自动（整卷）and the current frame alone for
-    /// 自动（单张）. Averaging the metered codes across the roll — rather than solving each frame
-    /// to its own grey — is what keeps a roll looking like one roll: a deliberately dark frame
-    /// stays dark relative to its neighbours instead of being pushed up to match them.
+    /// 自动（单张）.
     /// </summary>
-    private void PlaceExposure(IReadOnlyList<ImageBuffer> frames)
+    private void MeterExposure(IReadOnlyList<ImageBuffer> frames)
     {
         if (frames.Count == 0) return;
 
@@ -2846,9 +2859,31 @@ public partial class MainViewModel : ViewModelBase
         }
         if (codes.Count == 0) return;
 
-        double mean = codes.Average();
-        DMaxPerChannel = ExposureMeter.SolveDMaxForAverage(mean, DMaxPerChannel, DMinPerChannel);
-        MeteredStops = (mean - ExposureMeter.ReferenceCode) / 150.51499783199056;
+        // MEDIAN ACROSS THE ROLL, for the same reason ExposureMeter.Measure takes one across the
+        // pixels: a few frames that are genuinely different — a handful shot indoors, a couple
+        // badly underexposed, the odd blank — should not drag the placement the whole roll gets.
+        // Measured on a roll where two of eight frames were two stops down, the mean sat 39 codes
+        // (0.26 stops) below the median, and every correctly exposed frame paid for it.
+        //
+        // A MODE WAS CONSIDERED AND NOT USED. It only diverges from the median when the roll is
+        // genuinely BIMODAL with the two halves near equal — half indoors, half outdoors — where
+        // it picks the larger cluster and the median falls in the empty middle. But that roll has
+        // no single right answer: whichever cluster wins, the other half is a stop off, and the
+        // fix a user actually wants there is per-frame placement (自动（单张）), not a cleverer
+        // roll-wide statistic. On every other shape measured — a consistent roll, a few outliers,
+        // a continuous drift, a minority second cluster — the two agree to within 0.01 stops, so a
+        // mode would add a binning parameter and a failure mode for no gain in the cases that
+        // occur. The median is what the roll pass uses.
+        double code0 = MedianOf(codes);
+        MeteredStops = (code0 - ExposureMeter.ReferenceCode) / 150.51499783199056;
+    }
+
+    /// <summary>Median of <paramref name="values"/>, computed in place.</summary>
+    private static double MedianOf(List<double> values)
+    {
+        values.Sort();
+        int n = values.Count;
+        return (n & 1) == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
     }
 
     /// <summary>How far the last metered average sat from the grey reference, in stops. Reported
@@ -2869,6 +2904,17 @@ public partial class MainViewModel : ViewModelBase
         ? Loc.T("测光 ±0.0 挡（对齐中灰）")
         : Loc.F($"测光 {MeteredStops:+0.0;-0.0} 挡（相对中灰 336）");
 
+    /// <summary>
+    /// Measure the rendered positive's ends and normalise to them.
+    ///
+    /// RUNS UNDER A PRINT-FILM LUT TOO. It was briefly blocked there, on the reasoning that a
+    /// stock's toe and shoulder ARE its look and stretching them back to 0 and 1 flattens it —
+    /// which is true, and is why it is not automatic on that path (see ApplyPrintLut, which leaves
+    /// levels neutral when a cube is selected). But blocking the BUTTON took the judgement away
+    /// from the user as well, and a scan whose highlight simply does not reach the stock's shoulder
+    /// has a real gap that levels is the right tool for. So the default is neutral and the control
+    /// stays available: not applied behind the user's back, not withheld from them either.
+    /// </summary>
     public void AutoLevels()
     {
         if (_previewLinear is null) return;
@@ -4336,8 +4382,13 @@ public partial class MainViewModel : ViewModelBase
     // 本软件不附带任何 LUT 文件。这些印片表征由各厂商自行授权，随附即是再分发；界面上出现的
     // 厂商名一律来自用户自己文件里的 TITLE，不是我们的声明。
 
-    /// <summary>Cubes the picker offers, in order: 无 → 最近用过的 → 选择文件…</summary>
+    /// <summary>Cubes the picker offers, in order: 标准渲染 → 纯 CST → 最近用过的 → 选择文件…</summary>
     public ObservableCollection<string> PrintLutNames { get; } = new();
+
+    /// <summary>How many rows at the head of the picker are renderings rather than cube files —
+    /// the standard display rendering and the pure CST. Everything from here to the trailing
+    /// "choose a file" verb is a path.</summary>
+    private const int FixedRows = 2;
 
     /// <summary>Full paths parallel to <see cref="PrintLutNames"/>; "" for 无.</summary>
     private readonly List<string> _printLutPaths = new();
@@ -4375,22 +4426,81 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>What the selected entry is, shown under the picker.</summary>
     ///
-    /// Entry 0 is NOT "no transform" — it is the standard Cineon display rendering, the analytic
-    /// equivalent of a Cineon→Rec709 conversion LUT (see ColorPipeline.CineonToDisplay). It used
-    /// to be labelled 无（直通）, which read as "nothing happens here" and left the film base's
-    /// rendering looking like a defect rather than the standard's own placement of code 95.
+    /// Entry 0 is NOT "no transform" — it is a display RENDERING, doing analytically the job a
+    /// cube does (see ColorPipeline.CineonToDisplay). It used to be labelled 无（直通）, which read
+    /// as "nothing happens here", and then 标准（Cineon → 输出空间）, which claimed to be a plain
+    /// standard conversion. Neither was true: it folds in a response gamma and normalises the film
+    /// base to black, which is a look, not a container change. Entry 1 is the plain conversion —
+    /// naming both makes the difference visible instead of hiding a rendering behind the word
+    /// "standard".
     ///
-    /// It does not name Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
+    /// Neither names Rec709, because the conversion lands in whatever the OUTPUT SPACE picker
     /// says — naming a fixed space here would contradict the control beside it.
-    public string PrintLutHint => _printLutIndex == 0
-        ? Loc.T("标准转换：Cineon 编码按标准解到输出空间，不加印片风格。")
-        : Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。");
+    public string PrintLutHint => _printLutIndex switch
+    {
+        0 => Loc.T("标准显示渲染：解 Cineon 编码并套用显示渲染（响应 gamma 0.6，片基归零）。想直接看片子就用它。"),
+        1 => Loc.T("纯 CST：只解编码，不做任何渲染——18% 中灰出来是 0.180、90% 白是 0.900，标定原样保留。画面平且发灰是 log 本来的样子，观感请交给 LUT 或后期调色。"),
+        _ => Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。"),
+    };
 
-    /// <summary>Writes the chosen cube to every frame and re-renders the roll.</summary>
+    /// <summary>
+    /// Writes the chosen cube to every frame, rebases each frame's Stage-2 adjustments for the new
+    /// rendering, and re-renders the roll.
+    ///
+    /// WHY THE SCENE IS NOT CARRIED OVER. Stage 2 runs AFTER the display rendering, on top of
+    /// whatever the standard conversion or the cube produced, so its numbers are relative to THAT
+    /// render's zero. Carrying them across a look change applies a correction fitted to a picture
+    /// that is no longer on screen: the controls keep their values while silently changing
+    /// meaning, which is the worst of both.
+    ///
+    /// WHY NO PATH GETS AUTO-LEVELS. Every rendering places its own ends, so measuring the result
+    /// and stretching it back to 0..1 overrides the very thing the user selected:
+    ///
+    ///   • The standard rendering normalises code 95 to display black and rolls the latitude above
+    ///     685 off toward white. Its black end is already 0, so the black slider always solved to
+    ///     0 and only the white slider moved — pushing the highlights the shoulder had just rolled
+    ///     off back up against the clip.
+    ///   • A print stock's ends are its OWN and deliberately not 0 and 1 — measured on Kodak 2383,
+    ///     code 685 renders at 0.880 and code 95 at 0.037. That toe and shoulder ARE the film
+    ///     look; at a 99.9th percentile of 0.70 a levels stretch is a 1.43× gain that flattens it.
+    ///   • The pure CST renders no look at all, which is its entire point; normalising it would be
+    ///     a display decision smuggled into the one path defined by making none.
+    ///
+    /// So levels stay neutral everywhere. The CONTROLS stay available — the 自动色阶 button and
+    /// the sliders both work — because a scan whose highlight never reaches the shoulder has a
+    /// real gap that levels is the right tool to close. What this decides is only the DEFAULT.
+    ///
+    /// Everything the user dialled in by eye — exposure, contrast, hi/sh, curves, saturation, WB —
+    /// returns to neutral on both paths, because there is nothing to re-derive it from.
+    ///
+    /// The calibration is untouched throughout: it describes the NEGATIVE (t_base, D_min, D_max)
+    /// and is independent of which stock renders it.
+    ///
+    /// Undo covers the whole thing: the roll's params are snapshotted before the rebase, so an
+    /// accidental switch is one Ctrl+Z away rather than a lost grade.
+    /// </summary>
     private void ApplyPrintLut(string path)
     {
-        foreach (RollFrame f in Frames) f.Params.PrintLut = path;
+        CommitLiveParams(CurrentFrame);   // fold the live sliders in before they are discarded
+        CommitUndo();                     // the rebase below is destructive; make it undoable
+
+        foreach (RollFrame f in Frames)
+        {
+            f.Params.PrintLut = path;
+            RollFrame.ResetScene(f.Params);
+        }
         if (Frames.Count > 0) MarkRollDirty();
+
+        // Push the neutralised params into the sliders before re-measuring: AutoLevels renders
+        // through BuildParams(), so the controls must already describe the new look or it would
+        // measure the outgoing one.
+        if (CurrentFrame is { } cur) LoadParams(cur.Params);
+
+        // NO auto-levels on any path. Every rendering here places its own ends — the standard
+        // one normalises code 95 to black and rolls off above 685, a cube has its own toe and
+        // shoulder, the pure CST deliberately renders none — so measuring the result and
+        // stretching it back to 0..1 overrides whichever one the user just chose. ResetScene has
+        // already left levels neutral; they stay that way until the user asks otherwise.
 
         OnPropertyChanged(nameof(PrintLutIndex));
         OnPropertyChanged(nameof(PrintLutHint));
@@ -4409,9 +4519,12 @@ public partial class MainViewModel : ViewModelBase
         // box — so rebuilding on every frame load blanked the picker even though the roll's LUT
         // was unchanged and still rendering. Frame switches are the common case and they never
         // change the list, only which row is current.
+        // Two FIXED rows head the list — the standard display rendering and the pure CST — so a
+        // lookup starts at FixedRows, and the trailing "choose a file" verb is excluded as before.
         int existing = _printLutPaths.Count == 0 ? -1
             : string.IsNullOrWhiteSpace(active) ? 0
-            : _printLutPaths.FindIndex(1, Math.Max(_printLutPaths.Count - 2, 0),
+            : active == ColorPipeline.PureCstSentinel ? 1
+            : _printLutPaths.FindIndex(FixedRows, Math.Max(_printLutPaths.Count - FixedRows - 1, 0),
                                        p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0)
         {
@@ -4427,14 +4540,17 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Clear();
         _printLutPaths.Clear();
 
-        PrintLutNames.Add(Loc.T("标准（Cineon → 输出空间）"));
+        PrintLutNames.Add(Loc.T("标准显示渲染（CST + 显示渲染）"));
         _printLutPaths.Add("");
+        PrintLutNames.Add(Loc.T("Cineon log（纯 CST，未渲染）"));
+        _printLutPaths.Add(ColorPipeline.PureCstSentinel);
 
         // A roll can name a cube that is not in this machine's history — a project from another
         // computer, or a file picked before the list was trimmed. It still belongs in the list,
         // otherwise the picker would show 无 while the render used a LUT.
         var paths = new List<string>(Settings.Current.RecentPrintLuts);
         if (!string.IsNullOrWhiteSpace(active)
+            && active != ColorPipeline.PureCstSentinel     // a rendering, not a file to list
             && !paths.Contains(active, StringComparer.OrdinalIgnoreCase))
             paths.Insert(0, active);
 
@@ -4453,9 +4569,11 @@ public partial class MainViewModel : ViewModelBase
         PrintLutNames.Add(Loc.T("选择 .cube 文件…"));
         _printLutPaths.Add("");
 
-        int i = _printLutPaths.FindIndex(1, _printLutPaths.Count - 2,
+        int i = _printLutPaths.FindIndex(FixedRows, _printLutPaths.Count - FixedRows - 1,
                                          p => p.Equals(active, StringComparison.OrdinalIgnoreCase));
-        _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0 : (i < 0 ? 0 : i);
+        _printLutIndex = string.IsNullOrWhiteSpace(active) ? 0
+            : active == ColorPipeline.PureCstSentinel ? 1
+            : (i < 0 ? 0 : i);
 
         // Posted rather than raised inline. The collection change above reaches the ComboBox
         // first and resets its selection to -1; a notification raised in the same turn is

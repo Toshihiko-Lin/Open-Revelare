@@ -49,8 +49,26 @@ public static class ExposureMeter
     public const double DiffuseWhiteCode = 685.0;
 
     /// <summary>
-    /// The frame's average tone as a Cineon code, and how far that is from
+    /// The frame's representative tone as a Cineon code, and how far that is from
     /// <see cref="ReferenceCode"/> in stops.
+    ///
+    /// THE STATISTIC IS THE MEDIAN, NOT THE MEAN, and the difference is the difference between a
+    /// usable reading and a wrong one on any frame with a deliberately sacrificed highlight.
+    ///
+    /// A photograph often blows part of itself ON PURPOSE — a window behind the subject, a bright
+    /// overcast sky, a backlit rim — to keep the subject correctly exposed. Those pixels are not
+    /// the picture the exposure is about, but a mean counts them at full weight: measured on a
+    /// synthetic frame with the subject at code 336, a blown region covering 30% of the frame
+    /// pulled the mean to code 445 (+0.73 stops), and D_max solved from that darkened the SUBJECT
+    /// by three quarters of a stop to bring the average back down. Half the frame blown cost 1.21
+    /// stops. That is the meter obeying the part of the frame the photographer chose to give up.
+    ///
+    /// The median is immune to it as long as the sacrificed region is a minority: the same 30%
+    /// case reads +0.00. It breaks down past 50%, which is unavoidable — a frame that is more sky
+    /// than subject has no exposure that is right for both, and no statistic invents one.
+    ///
+    /// On an ordinary frame with no extremes the two agree closely, so this is not a change of
+    /// intent. It changes the answer exactly where the mean was answering the wrong question.
     /// </summary>
     /// <param name="linearPositive">Stage 1's output: the linear positive 10^D_adj, interleaved
     /// RGB. NOT display-encoded — this must run before any rendering.</param>
@@ -83,8 +101,11 @@ public static class ExposureMeter
         // describe has not moved. The log-domain mean is the geometric mean of the luminances,
         // which is the standard definition of a scene's average tone and what a reflected-light
         // meter approximates.
-        double sum = 0.0;
-        long n = 0;
+        // Collected rather than accumulated, because a median needs the samples. At 3 doubles per
+        // pixel this is the one place the meter pays for memory — a 1.7 MP preview is ~14 MB,
+        // which is small beside the frame buffers already in flight, and Measure runs on the
+        // PREVIEW rather than the export buffer.
+        var logs = new List<double>(linearPositive.Length / 3);
 
         for (int p = 0; p < linearPositive.Length; p += 3)
         {
@@ -96,15 +117,14 @@ public static class ExposureMeter
             // Bare base and anything below it (sprocket cores, opaque rebate, RAW padding) is
             // not picture — see the cut above.
             if (y <= cut) continue;
-            sum += Math.Log10(y);
-            n++;
+            logs.Add(Math.Log10(y));
         }
 
         // Every pixel was base or below: an unexposed frame, or a scan that is all border. There
         // is no picture to meter, so say so rather than reporting the base as if it were one.
-        if (n == 0) return (FrameParams.CineonBlackCode, double.NaN);
+        if (logs.Count == 0) return (FrameParams.CineonBlackCode, double.NaN);
 
-        double meanLog = sum / n;
+        double meanLog = Median(logs);
         // The same affine map LogEncoding applies, in code units: D_adj = meanLog, and
         // code = 1032 + D_adj / 0.002.
         double code = FrameParams.CineonWhiteCode + meanLog / FrameParams.CineonDensityPerCode;
@@ -116,19 +136,24 @@ public static class ExposureMeter
     /// holding D_min and the channels' relative balance fixed.
     ///
     /// WHY D_MAX FOLLOWS THE METER RATHER THAN BEING MEASURED. The highlight detector reads the
-    /// 99.9th density percentile — the densest thousandth of the frame, which is a SPECULAR
-    /// highlight, not a diffuse white. How far that overshoots the diffuse white is a property of
-    /// the scene (a window, a chrome bumper, an overcast sky) and varies frame to frame, so
-    /// pinning it to a fixed code makes the picture's placement depend on whether the photograph
-    /// happened to contain a light source. That is what put well-exposed frames a stop or more
-    /// off, and what no amount of moving the endpoints could fix, because moving them moves the
-    /// specular highlight too.
+    /// densest 0.1% tail — the brightest thousandth of the frame, which is a SPECULAR highlight,
+    /// not a diffuse white. How far that overshoots the diffuse white is a property of the scene
+    /// (a window, a chrome bumper, an overcast sky) and varies frame to frame, so pinning it to a
+    /// fixed code makes the picture's placement depend on whether the photograph happened to
+    /// contain a light source.
     ///
-    /// Metering the AVERAGE instead measures the picture rather than its brightest accident. So
-    /// the exposure is what gets pinned, and D_max is solved from it: whatever ceiling places
-    /// this frame's average on the grey reference is the ceiling this frame has. The specular
-    /// highlight then lands wherever the scene actually put it — above the diffuse white, in the
-    /// headroom between 685 and 1032, which is what that headroom is for.
+    /// THIS WAS REMOVED ONCE AND PUT BACK. The removal was prompted by 自动白点 — which sets the
+    /// detector's endpoint and stops — looking better than the full chain. It does, but only
+    /// because it moves one endpoint inside a calibration the meter had already placed. With the
+    /// meter gone from the chain entirely, nothing constrains the placement: pinning the brightest
+    /// 0.1% to code 1032 leaves a normal frame's average around code 350–700 against a target of
+    /// 336, and the picture blows out. Metering is what makes the placement defensible.
+    ///
+    /// Metering the TONE instead measures the picture rather than its brightest accident. So the
+    /// exposure is what gets pinned, and D_max is solved from it: whatever ceiling places this
+    /// frame's tone on the grey reference is the ceiling this frame has. The specular highlight
+    /// then lands wherever the scene actually put it — above the diffuse white, in the headroom
+    /// between 685 and 1032, which is what that headroom is for.
     ///
     /// THE SOLVE IS CLOSED FORM. The endpoint map is affine in density, so shifting the average
     /// by <c>Δ</c> codes needs the span scaled by exactly the ratio that moves it there:
@@ -168,5 +193,23 @@ public static class ExposureMeter
             solved[c] = dMin[c] + span * ratio;
         }
         return solved;
+    }
+
+    /// <summary>
+    /// The median of <paramref name="values"/>, computed in place.
+    ///
+    /// Sorts rather than using a selection algorithm: the caller hands over a per-pixel list that
+    /// is already built, the sort is O(n log n) on a preview-sized array and runs once per frame,
+    /// and a quickselect would trade readable code for a saving that does not show up beside the
+    /// decode and render either side of it.
+    ///
+    /// An even count averages the two middle samples, which matters less here than it would on a
+    /// small sample but keeps the statistic well defined.
+    /// </summary>
+    private static double Median(List<double> values)
+    {
+        values.Sort();
+        int n = values.Count;
+        return (n & 1) == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
     }
 }

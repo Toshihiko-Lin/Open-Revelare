@@ -364,6 +364,15 @@ public static class FilmBase
         double edgeInset = 0.05)
     {
         var perFrame = new List<double[]>();
+        // The per-channel MAXIMUM over the same kept pixels, pooled across frames. The co-sited
+        // triplet below is measured on pixels ranked by TOTAL density, which is what keeps the
+        // three endpoints on one physical highlight and therefore keeps the colour balance
+        // honest — but it says nothing about any single channel. A strongly tinted highlight (a
+        // sodium lamp, a sunset, red neon) can be dense in ONE channel while its total ranks
+        // below the tail, so that channel's own density exceeds the endpoint it will be divided
+        // by, and it clips. These maxima are what the uniform rescale after the reduction uses to
+        // guarantee it cannot.
+        var chanMax = new double[3];
         for (int i = 0; i < images.Count; i++)
         {
             ImageBuffer img = images[i];
@@ -406,6 +415,9 @@ public static class FilmBase
                 double d2 = FrameParams.DensityOf(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10));
                 if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) continue;
                 dens[0][k] = d0; dens[1][k] = d1; dens[2][k] = d2;
+                if (d0 > chanMax[0]) chanMax[0] = d0;
+                if (d1 > chanMax[1]) chanMax[1] = d1;
+                if (d2 > chanMax[2]) chanMax[2] = d2;
                 k++;
             }
             if (k == 0) continue;
@@ -477,7 +489,37 @@ public static class FilmBase
             double t = cand[0] + cand[1] + cand[2];
             if (t > bestTotal) { bestTotal = t; best = cand; }
         }
-        return best;
+
+        // UNIFORM RESCALE SO NO CHANNEL CLIPS.
+        //
+        // The triplet above is co-sited and therefore correctly BALANCED, but it is the density of
+        // one highlight — nothing guarantees that every other pixel's red, green and blue each sit
+        // below their own channel's entry. A tinted highlight whose total density ranked below the
+        // tail can still be denser in one channel than that channel's endpoint, and since the
+        // endpoints are per-channel divisors, that channel clips.
+        //
+        // The fix is one ratio applied to all three, not three independent per-channel maxima.
+        // Taking the maxima directly would let R, G and B come from three different pixels, which
+        // is exactly the error the co-siting above exists to prevent — a triplet no negative ever
+        // produced, whose channel ratios are an artefact of which pixel ranked where, baked into
+        // the inversion as a cast no Stage-2 control can remove. Scaling all three by the SAME
+        // factor leaves every ratio between them untouched, so the balance survives intact and
+        // only the placement moves.
+        //
+        // The factor is the largest overshoot across the three channels, so the worst offender
+        // lands exactly on its endpoint and the other two stay below theirs. It is never less than
+        // 1: a frame whose channels all sit under the co-sited triplet is left alone.
+        double scale = 1.0;
+        for (int c = 0; c < 3; c++)
+        {
+            if (best[c] <= 0 || !double.IsFinite(chanMax[c])) continue;
+            double need = chanMax[c] / best[c];
+            if (need > scale) scale = need;
+        }
+        // Copied rather than scaled in place: `best` still aliases an entry in perFrame, and
+        // mutating it would leave that list holding a value it never measured.
+        var result = new[] { best[0] * scale, best[1] * scale, best[2] * scale };
+        return result;
     }
 
     /// <summary>

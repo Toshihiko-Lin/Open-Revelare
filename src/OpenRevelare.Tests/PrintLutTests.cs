@@ -258,52 +258,153 @@ public class PrintLutTests
     }
 
     /// <summary>
-    /// THE FILM BASE RENDERS AS A GREY, NOT AS BLACK, and that is the standard rather than a
-    /// defect. Code 95 is the bottom of the CODE domain, not the bottom of a display: measured on
-    /// the real Kodak 2383 cube it renders at 0.037, and the analytic transform puts it near 0.15.
+    /// THE FILM BASE RENDERS AS BLACK — the rendering normalises code 95 to zero.
     ///
-    /// An earlier revision forced it to zero by subtracting the value at 95 and renormalising,
-    /// which shifted this curve away from every cube authored against the same encoding — the
-    /// mid-tones still matched while the shadows diverged badly. A picture's black comes from its
-    /// own dark content, which sits above the base.
+    /// This reverses what this test previously asserted. The earlier version pinned the base to a
+    /// lifted grey (0.10–0.25) on the reasoning that normalising shifted the curve away from cubes
+    /// authored against the same encoding. Measured, the opposite holds: normalised, code 250
+    /// renders at 0.172 against 2383's 0.10 and code 328 at 0.259 against 2383's 0.18, where the
+    /// un-normalised curve gave 0.208 and 0.282 — closer to the stock at both points, not further.
+    ///
+    /// The base is pinned to 95 by the roll's calibration, so nothing a picture contains lies
+    /// below it. Rendering it as black is slightly deeper than a real print (2383 gives 0.037),
+    /// which is the accepted trade: the base and anything darker collapse to a common 0.
     /// </summary>
     [Fact]
-    public void The_film_base_renders_as_a_grey_not_as_black()
+    public void The_film_base_renders_as_black()
     {
         float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
 
         var atBase = new[] { floor, floor, floor };
         ColorPipeline.ToOutputSpace(atBase, ColorSpaces.Srgb);
-        Assert.All(atBase, v => Assert.InRange(v, 0.10f, 0.25f));
+        Assert.All(atBase, v => Assert.Equal(0f, v, 4));
 
-        // The film's density ceiling still renders as display white: it maps to code 1032, well
-        // above the transform's 685 reference, so it clips at the encoder.
+        // The film's density ceiling renders as very nearly display white — NOT exactly white.
+        // It maps to code 1032, and the shoulder rolls the latitude above 685 asymptotically
+        // toward 1 rather than clipping it, so the densest thing on the negative keeps a sliver of
+        // separation from paper white instead of being burned into it.
         var atCeiling = new[] { 1f, 1f, 1f };
         ColorPipeline.ToOutputSpace(atCeiling, ColorSpaces.Srgb);
-        Assert.All(atCeiling, v => Assert.Equal(1f, v, 4));
+        Assert.All(atCeiling, v => Assert.InRange(v, 0.98f, 0.999f));
     }
 
     /// <summary>
-    /// The transform's one anchor is Cineon's 90% diffuse white: code 685 → linear 1. Code 95 is
-    /// NOT an anchor — it renders wherever the curve puts it, which is a grey.
+    /// The transform's two anchors: Cineon's 90% diffuse white at code 685 → 1, and the encoding's
+    /// black end at code 95 → 0. The second is the normalisation this rendering applies; it is a
+    /// LOOK decision belonging to the rendering, not a change to the encoding, which still carries
+    /// 95 untouched for the print-LUT path to consume.
     /// </summary>
     [Fact]
-    public void CineonToDisplay_anchors_the_diffuse_white()
+    public void CineonToDisplay_anchors_both_ends()
     {
+        // The diffuse white is where the SHOULDER starts to bite: without it 685 sat at linear 1,
+        // now it sits at 0.75 and encodes to 0.881 — the point the real 2383 cube puts it at.
         var white = new[] { 685f / 1023f };
         ColorPipeline.CineonToDisplay(white);
-        Assert.Equal(1f, white[0], 4);
+        Assert.Equal(0.75f, white[0], 3);
 
-        // The encoding's black end is a real, non-zero value — the standard does not clamp it.
         var black = new[] { 95f / 1023f };
         ColorPipeline.CineonToDisplay(black);
-        Assert.InRange(black[0], 0.005f, 0.02f);
+        Assert.Equal(0f, black[0], 6);
 
-        // Headroom above the diffuse white overshoots rather than clipping here; the output
-        // space's encoder is what bounds it.
+        // Headroom above the diffuse white is rolled off toward 1 and never reaches it, so the
+        // encoder has nothing left to clamp — that roll-off IS the fix, see Shoulder.
         var headroom = new[] { 1032f / 1023f };
         ColorPipeline.CineonToDisplay(headroom);
-        Assert.True(headroom[0] > 1f, $"code 1032 should exceed 1, got {headroom[0]}");
+        Assert.True(headroom[0] > white[0], $"code 1032 must exceed the diffuse white, got {headroom[0]}");
+        Assert.True(headroom[0] < 1f, $"code 1032 must not reach 1, got {headroom[0]}");
+    }
+
+    /// <summary>
+    /// THE LATITUDE ABOVE THE DIFFUSE WHITE SURVIVES TO THE SCREEN — it used to clip.
+    ///
+    /// The encoding runs to code 1032 while a picture's white sits at 685, so 2.31 stops of
+    /// latitude live above it. Rendering that span as a flat 1.0 discarded it, and made switching
+    /// to a print-film cube look like the cube was darkening the highlights: the cube keeps the
+    /// latitude (2383 puts 685 at 0.880), so detail reappeared where the standard path had shown
+    /// paper white. The shoulder aligns the two.
+    /// </summary>
+    [Fact]
+    public void The_highlight_latitude_rolls_off_instead_of_clipping()
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        static float[] AtCode(double code)
+        {
+            float lin = (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+            return new[] { lin, lin, lin };
+        }
+
+        // The diffuse white lands where the real 2383 cube puts it, 0.880.
+        var white = AtCode(685.0);
+        ColorPipeline.ToOutputSpace(white, ColorSpaces.Srgb);
+        Assert.All(white, v => Assert.InRange(v, 0.86f, 0.90f));
+
+        // Codes above it stay strictly ordered and strictly below 1 — nothing clips.
+        float prev = white[0];
+        foreach (double code in new[] { 800.0, 900.0, 1032.0 })
+        {
+            var px = AtCode(code);
+            ColorPipeline.ToOutputSpace(px, ColorSpaces.Srgb);
+            Assert.True(px[0] > prev, $"code {code} must exceed the previous step, got {px[0]}");
+            Assert.True(px[0] < 1.0f, $"code {code} must not clip, got {px[0]}");
+            prev = px[0];
+        }
+
+        // The mid-tones are untouched by the shoulder: the knee sits at code 596.
+        var mid = AtCode(486.0);
+        ColorPipeline.ToOutputSpace(mid, ColorSpaces.Srgb);
+        Assert.All(mid, v => Assert.InRange(v, 0.48f, 0.51f));
+    }
+
+    /// <summary>
+    /// THE PURE CST HANDS THE CALIBRATION BACK UNCHANGED, which is the entire reason it exists.
+    ///
+    /// The roll's calibration and the exposure meter are stated in two scene-linear quantities: an
+    /// 18% mid grey and Cineon's 90% diffuse white. A transform that only decodes the encoding must
+    /// return exactly those, or every metered frame is quietly rescaled. The 0.90 factor in
+    /// ToOutputSpacePureCst is what makes this hold — decoding code 685 to 1.0 instead would put
+    /// the grey at 0.200.
+    /// </summary>
+    [Fact]
+    public void The_pure_CST_preserves_the_calibration_anchors()
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        double greyCode = 685.0 - Math.Log10(0.90 / 0.18) / dpc;
+
+        static float[] AtCode(double code)
+        {
+            float lin = (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+            return new[] { lin, lin, lin };
+        }
+
+        // Into ACEScg, which is scene-linear, so what comes back is the decoded value itself.
+        var grey = AtCode(greyCode);
+        ColorPipeline.ToOutputSpacePureCst(grey, ColorSpaces.AcesCg);
+        Assert.All(grey, v => Assert.Equal(0.18f, v, 3));
+
+        var white = AtCode(685.0);
+        ColorPipeline.ToOutputSpacePureCst(white, ColorSpaces.AcesCg);
+        Assert.All(white, v => Assert.Equal(0.90f, v, 3));
+    }
+
+    /// <summary>
+    /// THE PURE CST APPLIES NO DISPLAY RENDERING, and the film base is where that shows. The
+    /// standard rendering normalises code 95 to black; the CST leaves it a light grey, because
+    /// taking it to black is a look decision and this transform makes none.
+    /// </summary>
+    [Fact]
+    public void The_pure_CST_does_not_normalise_the_film_base()
+    {
+        float floor = (float)Math.Pow(10.0, -FrameParams.OutputRange);
+
+        var cst = new[] { floor, floor, floor };
+        ColorPipeline.ToOutputSpacePureCst(cst, ColorSpaces.Srgb);
+        Assert.All(cst, v => Assert.InRange(v, 0.20f, 0.35f));
+
+        // The standard rendering, on the same input, takes it to black.
+        var std = new[] { floor, floor, floor };
+        ColorPipeline.ToOutputSpace(std, ColorSpaces.Srgb);
+        Assert.All(std, v => Assert.Equal(0f, v, 4));
     }
 
     /// <summary>

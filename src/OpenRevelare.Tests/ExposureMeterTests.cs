@@ -10,6 +10,72 @@ namespace OpenRevelare.Tests;
 public class ExposureMeterTests
 {
     /// <summary>
+    /// A DELIBERATELY BLOWN MINORITY MUST NOT DARKEN THE SUBJECT — the reason the meter takes a
+    /// median rather than a mean.
+    ///
+    /// A photograph routinely sacrifices part of itself to expose the subject: a window, a bright
+    /// sky, a backlit edge. A mean counts those pixels at full weight, so the meter reads high and
+    /// D_max is solved to bring the average back down, darkening the SUBJECT. Measured on this
+    /// frame shape, the mean read +0.73 stops at 30% blown and +1.21 at 50%; the median reads zero
+    /// while the blown region stays a minority.
+    /// </summary>
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.1)]
+    [InlineData(0.3)]
+    [InlineData(0.45)]
+    public void A_blown_minority_does_not_move_the_reading(double blownFraction)
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        static float LinAtCode(double code) =>
+            (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+
+        // Subject sits exactly on the meter's reference; the blown region is far above it.
+        float subject = LinAtCode(ExposureMeter.ReferenceCode);
+        float blown = LinAtCode(700.0);
+
+        const int n = 2000;
+        int blownCount = (int)(n * blownFraction);
+        var data = new float[n * 3];
+        for (int i = 0; i < n; i++)
+        {
+            float v = i < blownCount ? blown : subject;
+            data[i * 3] = v; data[i * 3 + 1] = v; data[i * 3 + 2] = v;
+        }
+
+        var (_, stops) = ExposureMeter.Measure(data);
+        Assert.InRange(stops, -0.05, 0.05);
+    }
+
+    /// <summary>
+    /// The counterpart: once the blown region is the MAJORITY the median follows it, and that is
+    /// correct rather than a failure. A frame that is mostly sky has no exposure that serves both
+    /// halves, and no statistic can invent one — the test pins the honest behaviour so nobody
+    /// "fixes" it into a hidden highlight bias later.
+    /// </summary>
+    [Fact]
+    public void A_blown_majority_does_move_the_reading()
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        static float LinAtCode(double code) =>
+            (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+
+        float subject = LinAtCode(ExposureMeter.ReferenceCode);
+        float blown = LinAtCode(700.0);
+
+        const int n = 2000;
+        var data = new float[n * 3];
+        for (int i = 0; i < n; i++)
+        {
+            float v = i < n * 0.7 ? blown : subject;
+            data[i * 3] = v; data[i * 3 + 1] = v; data[i * 3 + 2] = v;
+        }
+
+        var (_, stops) = ExposureMeter.Measure(data);
+        Assert.True(stops > 1.0, $"a 70% blown frame should read high, got {stops:F2}");
+    }
+
+    /// <summary>
     /// THE REFERENCE IS THE MID GREY, NOT THE DIFFUSE WHITE, and the distance between them is the
     /// standard's. Metering against 685 would read −2.32 stops on a correctly exposed frame and
     /// over-expose every roll by that much when the reading was chased back to zero.

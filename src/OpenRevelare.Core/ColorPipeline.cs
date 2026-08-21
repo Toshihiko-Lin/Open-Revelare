@@ -110,8 +110,8 @@ public static class ColorPipeline
     }
 
     /// <summary>
-    /// The pass-through path's display rendering: the standard Cineon log → display transform,
-    /// the analytic equivalent of a Cineon→Rec709 conversion LUT.
+    /// The pass-through path's display rendering: the Cineon log → display transform, the
+    /// analytic equivalent of a Cineon→Rec709 conversion LUT followed by a normalisation.
     ///
     /// THIS IS THE STEP THE PASS-THROUGH PATH WAS MISSING, and its absence is what made the two
     /// exits disagree. A print-film cube IS a display rendering — it takes code 95 to its own toe
@@ -123,79 +123,210 @@ public static class ColorPipeline
     /// A DECODE ALONE IS NOT THIS TRANSFORM. Undoing the log and handing the result to the output
     /// space's gamma is the identity in all but name: the picture arrives display-encoded but with
     /// none of the contrast a display rendering supplies, which reads on screen as a flat, grey,
-    /// log-looking plate. The standard transform is a decode with a RESPONSE GAMMA folded in —
-    /// Kodak's 0.6 — and that gamma is the contrast.
+    /// log-looking plate. The transform is a decode with a RESPONSE GAMMA folded in, and that
+    /// gamma is the contrast. A plain Colour Space Transform — decode without the gamma — is
+    /// FLATTER still, not sharper: it renders the base near 0.29 against this transform's 0.
     ///
-    ///   linear = 10^((code − 685) · 0.002 / 0.6)
+    ///   linear = (10^((code − 685) · 0.002 / 0.6) − k) / (1 − k),   k = the value at code 95
     ///
-    /// CODE 95 DOES NOT MAP TO DISPLAY BLACK, and forcing it to was a real defect. An earlier
-    /// revision subtracted the value at 95 and renormalised, so that the film base came out pure
-    /// black. That is not the standard, and it is not what any Cineon LUT does: measured on the
-    /// real Kodak 2383 cube, code 95 renders at 0.037 and code 685 at 0.880 — the stock's own
-    /// black and white, neither of them clamped. Subtracting shifted this curve away from every
-    /// cube authored against the same encoding, and the shift showed up exactly where the two were
-    /// compared: the mid-tones still agreed (2383's mid at code 486 against this transform's 474)
-    /// while the shadows diverged badly (2383 reaches 0.18 at code 328, the subtracting version at
-    /// 214). Two renderings of one encoding must not disagree about the shadows.
+    /// CODE 95 MAPS TO DISPLAY BLACK, via that normalisation. This reverses an earlier judgement
+    /// recorded here, and the reversal is worth stating because the earlier reasoning was checked
+    /// and found wrong rather than merely re-weighed. The claim was that subtracting at 95 shifted
+    /// the curve AWAY from cubes authored against the same encoding — "2383 reaches 0.18 at code
+    /// 328, the subtracting version at 214". Measured, the normalised curve renders code 328 at
+    /// 0.259 against 2383's 0.18, and code 250 at 0.172 against 2383's 0.10: it is CLOSER to the
+    /// stock at both points than the un-normalised version (0.282 and 0.208) was. The old note had
+    /// the direction of the error backwards. The mid-tone crossing, which is the one place the two
+    /// renderings must agree, barely moves — 486 goes from 0.503 to 0.494.
     ///
-    /// So 95 renders as a grey here, near 0.15. That is correct and it is what the encoding means:
-    /// 95 is the bottom of the CODE domain, not the bottom of a display. A picture's black comes
-    /// from its own dark content, which sits above the base — not from the film base, which is
-    /// merely the least dense thing on the negative.
+    /// The film base therefore renders as black rather than as a grey. That is a deliberate
+    /// departure from a literal reading of the standard, where 95 is merely the bottom of the CODE
+    /// domain and renders around 0.10: the roll's calibration has already pinned the base to 95,
+    /// so nothing a picture contains lies below it, and leaving it as a lifted grey read as a
+    /// defect next to every print-stock cube. Real stocks do not go to zero either (2383 gives
+    /// 0.037), so this is slightly deeper than a print — the trade is that the base and anything
+    /// darker than it (sprocket cores, mask edges) collapse to a common 0.
     ///
     /// WHERE TO CHANGE THE LOOK, IF THE LOOK NEEDS CHANGING. This function is the log→display
     /// rendering, and it is the ONLY place a tonal decision belongs. The encoding upstream of it
     /// is calibration output: it says where the negative's two ends landed, and subtracting,
-    /// clamping or renormalising anything there corrupts a measurement to buy an appearance. That
-    /// is what the earlier black subtraction did, and the cost was that this curve no longer
-    /// agreed with cubes authored against the same encoding.
+    /// clamping or renormalising THERE corrupts a measurement to buy an appearance. Note the
+    /// distinction the earlier note lost: the prohibition covers <see cref="LogEncoding"/> and the
+    /// endpoints, NOT this function. Normalising the rendering is a look decision, which is what
+    /// this function is for; normalising the encoding would destroy the measurement both exits
+    /// depend on.
     ///
-    /// So if the pass-through picture wants different contrast or a different black, adjust THIS
-    /// transform — its reference white, its response gamma, or replace it outright with a
-    /// conversion LUT. Do not reach back into <see cref="LogEncoding"/> or the endpoints. The two
-    /// exits stay comparable only as long as both consume the same untouched Cineon signal and
-    /// differ solely in what they do with it.
+    /// So if the pass-through picture wants different contrast, adjust THIS transform — its
+    /// response gamma above all, which is empirical and documented as such at its declaration.
+    /// Do not reach back into <see cref="LogEncoding"/> or the endpoints. The two exits stay
+    /// comparable only as long as both consume the same untouched Cineon signal and differ solely
+    /// in what they do with it.
     ///
     /// WHY 685 IS THE WHITE HERE BUT 1032 IS THE WHITE IN THE ENCODING. They answer different
     /// questions. <see cref="FrameParams.DMaxPerChannel"/> is the film's density ceiling and maps
     /// to 1032, the top of the encoding domain — a statement about the negative. 685 is where a
     /// PICTURE's white sits under the standard placement, with everything above it latitude. The
-    /// encoding carries the whole negative; the rendering shows the picture. Codes above 685
-    /// exceed 1 and clip when the output space encodes, which is what a conversion LUT does with
-    /// them too.
+    /// encoding carries the whole negative; the rendering shows the picture.
+    ///
+    /// That latitude is ROLLED OFF rather than clipped — see <see cref="Shoulder"/>. It used to
+    /// clip, which silently discarded the 2.31 stops between 685 and 1032 and made every switch to
+    /// a print-film cube look like the cube had darkened the highlights, when in fact the cube was
+    /// the only one of the two keeping them.
     /// </summary>
     public static void CineonToDisplay(float[] data)
     {
         const double refWhite = 685.0;
-        // Kodak's display response gamma for the Cineon transform. Not the output space's
-        // encoding gamma — that is applied afterwards, by OutputRender.Encode.
+        // The response gamma folded into the transform, and the source of its contrast. Not the
+        // output space's encoding gamma — that is applied afterwards, by OutputRender.Encode.
+        //
+        // 0.6 is the average gamma of a print stock's D-logE curve: a negative's density
+        // difference ΔD prints onto positive stock as roughly 0.6·ΔD, so dividing by it asks
+        // "how bright would this negative density be once printed". It is an EMPIRICAL typical
+        // value, not a defined constant of the encoding the way 685 and 0.002 are — real stocks
+        // and processes vary around it. It is therefore the legitimate knob for overall contrast,
+        // and lowering it (0.5 lands the shadows nearly on 2383's measured points) is a look
+        // decision rather than a departure from the standard.
         const double responseGamma = 0.6;
         const double codeFullScale = 1023.0;
 
         float scale = (float)(codeFullScale * FrameParams.CineonDensityPerCode / responseGamma);
         float white = (float)(refWhite / codeFullScale);
 
+        // The black end, in the linear domain this function outputs. Code 685 is 1 by
+        // construction (it is the exponent's zero); code 95 is where the calibrated film base
+        // lands, and normalising by it is what takes the base to display black.
+        float blackNorm = (float)(FrameParams.CineonBlackCode / codeFullScale);
+        float blackLin = MathF.Pow(10.0f, (blackNorm - white) * scale);
+        float span = 1.0f - blackLin;
+
         Parallel.For(0, data.Length, i =>
-            data[i] = MathF.Pow(10.0f, (data[i] - white) * scale));
+        {
+            float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
+            data[i] = Shoulder(MathF.Max((lin - blackLin) / span, 0.0f));
+        });
     }
 
     /// <summary>
-    /// Step 4 as the roll has configured it — with its print-film emulation if it names one,
-    /// plain otherwise.
+    /// The knee where the shoulder starts, in the normalised linear domain
+    /// <see cref="CineonToDisplay"/> works in. Below it the transform is untouched.
     ///
-    /// The single entry point for every caller that renders a finished scene-linear positive for
-    /// display or export. Callers used to reach for <see cref="ToOutputSpace"/> directly from
-    /// four places (the region renderer, two preview paths, Stage 2); with a second route through
-    /// step 4 that would be four places to remember the fork, and the preview would silently
-    /// disagree with the export the first time one was missed.
+    /// 0.5 is not a free choice: it is what lands code 685 on 0.881 once the output space encodes,
+    /// against the 0.880 measured on the real Kodak 2383 cube. Raising it to 0.6 gives 0.906 and
+    /// lowering it to 0.4 gives 0.854, so this is the value that makes the two renderings agree at
+    /// the diffuse white. In code terms the knee sits at 596, so everything from the film base up
+    /// through the mid-tones passes through unchanged.
+    /// </summary>
+    private const float ShoulderKnee = 0.5f;
+
+    /// <summary>
+    /// Rolls the highlights off instead of letting them clip, so that codes above Cineon's diffuse
+    /// white survive to the screen.
+    ///
+    /// WHAT THIS FIXES. The encoding carries the whole negative: <see cref="FrameParams.DMaxPerChannel"/>
+    /// maps to code 1032, while 685 is only where a PICTURE's white sits, leaving 347 codes — 2.31
+    /// stops — of latitude above it. Without a shoulder that entire span rendered as 1.0 and the
+    /// output space's encoder clamped it away, so the standard rendering was discarding two and a
+    /// third stops of measured data. It showed up on every switch to a print-film cube: the cube
+    /// keeps that latitude (2383 puts 685 at 0.880 and spreads the rest between there and white),
+    /// so a region that had been flat paper-white suddenly acquired detail and read as "the LUT
+    /// darkened my highlights". Nothing was darkened — the standard path had been burning them.
+    ///
+    /// A Reinhard roll-off: everything below <see cref="ShoulderKnee"/> is identity, and above it
+    /// the remaining range is compressed asymptotically toward 1 so nothing ever reaches it. That
+    /// keeps two properties worth having — the mid-tones are bit-identical to what they were
+    /// (code 486 stays at 0.494), and no input, however dense, can clip.
+    ///
+    /// The curve is C¹ at the knee, so there is no visible seam where it engages.
+    /// </summary>
+    private static float Shoulder(float v)
+    {
+        if (v <= ShoulderKnee) return v;
+        const float headroom = 1.0f - ShoulderKnee;
+        float d = v - ShoulderKnee;
+        return ShoulderKnee + headroom * d / (d + headroom);
+    }
+
+    /// <summary>
+    /// The sentinel <see cref="FrameParams.PrintLut"/> value selecting the PURE Colour Space
+    /// Transform — Cineon log decoded to scene-linear with no display rendering at all.
+    ///
+    /// A sentinel rather than a path because the field is a path everywhere else, and rather than
+    /// an enum because every other value IS a path (see FrameParams.PrintLut's remarks on why
+    /// stocks are not enumerated). It begins with a character no file path starts with, so it
+    /// cannot collide with a cube the user owns, and PrintLuts.Resolve returns null for it just as
+    /// it does for "" — the fork lives here, where the two renderings are chosen between.
+    /// </summary>
+    public const string PureCstSentinel = ":cineon-log";
+
+    /// <summary>
+    /// Step 4 as the roll has configured it — its print-film emulation if it names one, the pure
+    /// CST if it asks for that, and the standard display rendering otherwise.
+    ///
+    /// THE THREE ARE NOT VARIATIONS OF ONE THING. They differ in who performs the display
+    /// rendering:
+    ///
+    ///   • A CUBE performs it, fitted to a real stock. Its toe and shoulder are the look.
+    ///   • The STANDARD path performs it analytically — <see cref="CineonToDisplay"/>, a decode
+    ///     with Kodak's response gamma folded in and the film base normalised to display black.
+    ///     This is a display rendering, not a bare conversion: it is doing the job a cube would.
+    ///   • The PURE CST performs NONE. It decodes the encoding and stops, which is what a Colour
+    ///     Space Transform means in the Cineon workflow — the picture arrives flat and log-looking
+    ///     because that is what log IS, and the look is expected to come from a LUT or a grade
+    ///     downstream. Its value is that the calibration's anchors survive it exactly: an 18% grey
+    ///     leaves at 0.180 scene-linear and a 90% diffuse white at 0.900.
+    ///
+    /// The default is the standard rendering, because a roll that names nothing should show a
+    /// picture rather than a log plate.
     /// </summary>
     public static void ToOutputSpaceFor(float[] data, FrameParams cal)
     {
         ColorSpaceDef output = cal.ResolvedOutputSpace;
         if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
             ToOutputSpaceVia(data, lut, output);
+        else if (cal.PrintLut == PureCstSentinel)
+            ToOutputSpacePureCst(data, output);
         else
             ToOutputSpace(data, output);
+    }
+
+    /// <summary>
+    /// Step 4 with NO display rendering: Cineon log → scene-linear → the output space's container.
+    ///
+    /// This is the Colour Space Transform proper, the thing DaVinci's CST node does when its tone
+    /// mapping is set to None. The decode is the encoding's own inverse about its own anchor:
+    ///
+    ///   linear = 0.90 · 10^((code − 685) · 0.002)
+    ///
+    /// The 0.90 is what makes the anchors come out right rather than merely proportional. Code 685
+    /// is Cineon's 90% DIFFUSE WHITE, so it must leave as 0.900 scene-linear, not as 1.0; with
+    /// that scaling an 18% grey — which the encoding places log10(0.90/0.18) below the white, at
+    /// code 335.5 — leaves at exactly 0.180. Those are the two numbers the roll's calibration and
+    /// the exposure meter are stated in, so this transform hands them back unchanged. Decoding
+    /// 685 to 1.0 instead would put the grey at 0.200 and quietly rescale every metered frame.
+    ///
+    /// NOTHING IS NORMALISED AND NOTHING IS CLAMPED ON THE WAY IN. The film base at code 95 leaves
+    /// at 0.060 linear and renders as a light grey, not as black — correct here, where the whole
+    /// point is that no look has been applied yet. Codes above 685 exceed 1.0 (1032 reaches 4.45)
+    /// and are bounded by the output space's encoder, which is the only clamp in the path.
+    /// </summary>
+    public static void ToOutputSpacePureCst(float[] data, ColorSpaceDef output)
+    {
+        LogEncoding.ToCineon(data);
+
+        const double codeFullScale = 1023.0;
+        const double refWhite = 685.0;
+        // Cineon's 90% diffuse white, as a scene-linear value. See the remarks: this is what keeps
+        // the metered grey at 0.180 rather than 0.200.
+        const double diffuseWhite = 0.90;
+
+        float scale = (float)(codeFullScale * FrameParams.CineonDensityPerCode);
+        float white = (float)(refWhite / codeFullScale);
+
+        Parallel.For(0, data.Length, i =>
+            data[i] = (float)diffuseWhite * MathF.Pow(10.0f, (data[i] - white) * scale));
+
+        OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
+        OutputRender.Encode(data, output);
     }
 
     /// <summary>
