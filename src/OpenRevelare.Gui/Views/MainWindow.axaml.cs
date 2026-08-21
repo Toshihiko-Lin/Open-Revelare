@@ -436,6 +436,36 @@ public partial class MainWindow : Window
         _ => StandardCursorType.Cross,
     };
 
+    /// <summary>Cursors for the crop overlay, built once each.
+    ///
+    /// The hover branch of <see cref="OnOverlayMoved"/> runs on EVERY pointer-move, and a
+    /// <c>new Cursor(...)</c> there allocated a platform cursor per event — hundreds per second
+    /// of mouse travel. Each one wraps a platform cursor object whose native handle is released
+    /// only when the finalizer eventually runs, and the GC — seeing a few managed bytes per
+    /// instance — is in no hurry. They accumulate for as long as the tool is open, which is the
+    /// shape of the macOS report: the crash comes from moving the mouse in crop mode, not from
+    /// any particular click. Same reason <see cref="GrabCursor"/> is cached; this path just
+    /// never got the same treatment.
+    ///
+    /// Six entries, so a dictionary earns nothing over a switch that the JIT turns into a jump
+    /// table. They are shared, never disposed, and live for the process: that is the point.</summary>
+    private static readonly Cursor CropCornerTlBr = new(StandardCursorType.TopLeftCorner);
+    private static readonly Cursor CropCornerTrBl = new(StandardCursorType.TopRightCorner);
+    private static readonly Cursor CropSizeNs = new(StandardCursorType.SizeNorthSouth);
+    private static readonly Cursor CropSizeWe = new(StandardCursorType.SizeWestEast);
+    private static readonly Cursor CropSizeAll = new(StandardCursorType.SizeAll);
+    private static readonly Cursor CropCross = new(StandardCursorType.Cross);
+
+    private static Cursor CropCursorFor(string? h) => CursorForHandle(h) switch
+    {
+        StandardCursorType.TopLeftCorner => CropCornerTlBr,
+        StandardCursorType.TopRightCorner => CropCornerTrBl,
+        StandardCursorType.SizeNorthSouth => CropSizeNs,
+        StandardCursorType.SizeWestEast => CropSizeWe,
+        StandardCursorType.SizeAll => CropSizeAll,
+        _ => CropCross,
+    };
+
     /// <summary>Update the draft from the active handle drag — port of _crop_apply_drag.</summary>
     private void ApplyCropDrag(Point m)
     {
@@ -762,7 +792,7 @@ public partial class MainWindow : Window
         if (_negativeShown) { Vm?.ShowPositiveView(); _negativeShown = false; }
         _mode = mode;
         if (leavingCrop) DiscardCropDraft();   // after _mode, so the frame actually hides
-        Overlay.Cursor = new Cursor(StandardCursorType.Cross);
+        Overlay.Cursor = CropCross;
         BannerText.Text = banner;
 
         bool crop = mode == SampleMode.Crop;
