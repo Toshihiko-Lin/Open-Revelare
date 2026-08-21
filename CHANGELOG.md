@@ -6,8 +6,8 @@
 
 **新增**
 
-- **新增【胶片风格】**。可以在【输出空间】旁边选一张印片（如 Kodak 2383、Fujifilm 3513DI），或导入自定义filmprint lut
-  
+- **新增【胶片风格】**。可以在【输出空间】旁边选一张印片，或导入自定义 film print LUT。
+  内置 Kodak 2383 与 Fujifilm 3513DI，装好即用。
 
 - **扫描件分格现在可以识别双列**。平板扫描仪的片夹一次能放好几条片——6×12 的一版就是两列各六格——现在每一条都会被识别并各自独立分格。
 
@@ -43,8 +43,8 @@ new, along with a batch of related fixes.
 
 **Added**
 
-- **New: film look.** Pick a print stock (Kodak 2383, Fujifilm 3513DI) beside "output space", or
-  import your own film print LUT.
+- **New: film look.** Pick a print stock beside "output space", or import your own film print
+  LUT. Kodak 2383 and Fujifilm 3513DI are built in and ready to use.
 
 - **Scan splitting now recognises two-column scans.** A flatbed holder takes several strips at
   once — a 6×12 sheet is two columns of six — and every strip is now detected and split on its own.
