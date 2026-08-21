@@ -1488,7 +1488,10 @@ public partial class MainWindow : Window
             Point pc = e.GetPosition(Overlay);
             if (!_dragging || _cropHandle is null)
             {
-                Overlay.Cursor = new Cursor(CursorForHandle(CropHitHandle(pc)));
+                // Reference-compared before assigning, exactly as UpdatePanCursor does: setting
+                // the property re-runs Avalonia's cursor plumbing even when nothing changed.
+                Cursor want = CropCursorFor(CropHitHandle(pc));
+                if (!ReferenceEquals(Overlay.Cursor, want)) Overlay.Cursor = want;
                 return;
             }
             if (NormFromOverlay(pc) is { } nm) { ApplyCropDrag(nm); RenderCropFrame(); }
@@ -1693,16 +1696,19 @@ public partial class MainWindow : Window
         if (scans.Count == 0) { Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>()); return true; }
 
         Vm.StatusText = Loc.T("正在识别底片分割 …");
+        // Flat, not grouped by file: one scan can hold several strips side by side, and each
+        // becomes its own plan with its own dividers. They share the file's one preview.
         List<(Models.StripPlan Plan, OpenRevelare.Core.ImageBuffer Preview)> detected;
         try
         {
-            detected = await Task.Run(() => scans.Select(p =>
+            detected = await Task.Run(() => scans.SelectMany(p =>
             {
                 // Detection reads the same downsampled preview the dialog shows, so what the
                 // user sees and what was measured cannot drift apart. The rects are normalised,
                 // so they still apply at full resolution.
                 var (preview, _, _) = Services.ImageIo.LoadPreview(p, 1200);
-                return (Models.StripPlan.Detect(p, preview), preview);
+                return Models.StripPlan.Detect(p, preview)
+                                       .Select(plan => (Plan: plan, Preview: preview));
             }).ToList());
         }
         catch (Exception ex)
@@ -1716,8 +1722,10 @@ public partial class MainWindow : Window
         Vm.StatusText = "";
         var plans = detected.Select(d => d.Plan).ToList();
 
-        // Nothing to decide when every scan holds a single frame.
-        if (plans.All(p => p.FrameCount <= 1))
+        // Nothing to decide when every scan holds a single frame. Counted per FILE, not per
+        // plan: a sheet holding two strips of one frame each has a FrameCount of 1 in both
+        // plans, and per-plan the dialog would be skipped and the two frames imported as one.
+        if (plans.GroupBy(p => p.Path).All(g => g.Sum(p => p.FrameCount) <= 1))
         {
             Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>());
             return true;
@@ -1745,7 +1753,13 @@ public partial class MainWindow : Window
         // Before SetSplitPlans, so the first decode of the roll already uses the chosen margin
         // rather than decoding at the default and re-decoding everything a moment later.
         Vm.SplitMargin = dlg.SplitMargin;
-        Vm.SetSplitPlans((dlg.Result ?? plans).Select(p => (p.Path, p.ToCropRects())));
+        // Grouped back by file: a scan's frames are the frames of ALL its strips, in strip
+        // order. Keyed per plan instead, the second strip would overwrite the first and half
+        // the roll would vanish.
+        Vm.SetSplitPlans((dlg.Result ?? plans)
+            .GroupBy(p => p.Path)
+            .Select(g => (g.Key, (IReadOnlyList<(double, double, double, double)>)
+                                 g.SelectMany(p => p.ToCropRects()).ToList())));
         return true;
     }
 

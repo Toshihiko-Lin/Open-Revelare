@@ -32,6 +32,17 @@ public partial class SplitDialog : Window
 {
     private const double HitTolerance = 6.0;   // px, for grabbing a divider
 
+    /// <summary>The three cursors this dialog shows, built once each.
+    ///
+    /// <see cref="OnStageMoved"/>'s hover branch fires on every pointer-move, and building a
+    /// cursor there accumulated one platform cursor per event — the same defect fixed in the main
+    /// window's crop overlay, which was crashing on macOS. Three shared instances,
+    /// reference-compared before assignment.</summary>
+    private static readonly Cursor ArrowCursor = new(StandardCursorType.Arrow);
+    private static readonly Cursor SizeNsCursor = new(StandardCursorType.SizeNorthSouth);
+    private static readonly Cursor SizeWeCursor = new(StandardCursorType.SizeWestEast);
+    private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
+
     public ObservableCollection<StripPlan> Plans { get; } = new();
 
     /// <summary>Confirmed plans; null while the dialog is open or if it was cancelled.</summary>
@@ -56,6 +67,35 @@ public partial class SplitDialog : Window
 
     private StripPlan? _current;
     private Rect _imageRect;    // where the preview is drawn inside the stage
+
+    // ── view state ────────────────────────────────────────────────────────────────
+    //
+    // Viewing only. The dividers, the strip's extent and every rect this dialog produces stay in
+    // the SOURCE image's own axes, exactly as they were: rotating the preview to read it more
+    // easily must not silently re-orient what gets imported, which is the main window's business
+    // and is stored per frame. So the transform lives here and nowhere else — Redraw applies it
+    // when placing the canvas, and pointer input is mapped back through its inverse before any
+    // existing hit-testing sees it. That inverse is the whole trick: everything downstream of
+    // ToStage/FromStage keeps working in unrotated, unzoomed coordinates and needed no changes.
+
+    /// <summary>Quarter-turns applied to the PREVIEW for viewing, 0–3 clockwise.</summary>
+    private int _quarterTurns;
+
+    /// <summary>Zoom factor on top of the fit-to-stage scale. 1 = fit.</summary>
+    private double _zoom = 1.0;
+
+    /// <summary>Pan offset in stage pixels, applied after zoom.</summary>
+    private Point _pan;
+
+    /// <summary>True while the user is dragging the picture around rather than an edge.</summary>
+    private bool _panning;
+    private Point _panFrom;
+
+    private const double MinZoom = 1.0, MaxZoom = 8.0;
+
+    /// <summary>True when the preview is shown turned a quarter or three-quarters, so the stage's
+    /// width corresponds to the image's height.</summary>
+    private bool Swapped => (_quarterTurns & 1) != 0;
 
     /// <summary>
     /// What a drag is moving. The strip's four outer edges are grabbable as well as the interior
@@ -132,7 +172,11 @@ public partial class SplitDialog : Window
     private void OnStagePressed(object? sender, PointerPressedEventArgs e)
     {
         if (_current is null || _current.Skipped || _imageRect.Width <= 0) return;
-        Point pt = e.GetPosition(Stage);
+        // Straight into layout space, once. Everything below — hit-testing, the normalised
+        // conversions, the divider maths — is written against unrotated, unzoomed coordinates and
+        // stays correct without knowing the view has been turned.
+        Point raw = e.GetPosition(Stage);
+        Point pt = FromStage(raw);
         double pos = ToNormalised(pt);
 
         if (e.ClickCount >= 2)
@@ -151,25 +195,53 @@ public partial class SplitDialog : Window
         }
 
         (_grab, _dragIndex) = HitTest(pt);
+
+        // Nothing under the pointer and the picture is bigger than the stage: drag to pan. Only
+        // when zoomed in — at fit there is nothing off-screen to reach, and swallowing the drag
+        // would just make the canvas feel loose.
+        if (_grab == Grab.None && _zoom > MinZoom + 1e-9)
+        {
+            _panning = true;
+            _panFrom = raw;
+            if (!ReferenceEquals(Cursor, HandCursor)) Cursor = HandCursor;
+        }
     }
 
     private void OnStageMoved(object? sender, PointerEventArgs e)
     {
         if (_current is null) return;
-        Point pt = e.GetPosition(Stage);
+        Point raw = e.GetPosition(Stage);
+
+        if (_panning)
+        {
+            // Pan is in stage pixels and is applied after the turn, so the picture follows the
+            // pointer directly whatever the rotation.
+            _pan = new Point(_pan.X + (raw.X - _panFrom.X), _pan.Y + (raw.Y - _panFrom.Y));
+            ClampPan();
+            _panFrom = raw;
+            Redraw();
+            return;
+        }
+
+        Point pt = FromStage(raw);
 
         if (_grab == Grab.None)
         {
             // Cursor feedback so the (thin) edges are discoverable — including the outer ones,
             // which look like a static frame outline and would otherwise never invite a drag.
             var (what, _) = HitTest(pt);
-            Cursor = new Cursor(what switch
+            // The edge moves along the image's axis, but the cursor has to describe the direction
+            // it moves ON SCREEN. A quarter turn swaps those, so the arrow must swap with it —
+            // otherwise a turned view offers a north-south cursor for an edge that now slides
+            // east-west, which reads as the wrong handle entirely.
+            bool alongScreenY = _current.Vertical ^ Swapped;
+            Cursor want = what switch
             {
-                Grab.None => StandardCursorType.Arrow,
-                Grab.SideLo or Grab.SideHi =>
-                    _current.Vertical ? StandardCursorType.SizeWestEast : StandardCursorType.SizeNorthSouth,
-                _ => _current.Vertical ? StandardCursorType.SizeNorthSouth : StandardCursorType.SizeWestEast,
-            });
+                Grab.None => _zoom > MinZoom + 1e-9 ? HandCursor : ArrowCursor,
+                Grab.SideLo or Grab.SideHi => alongScreenY ? SizeWeCursor : SizeNsCursor,
+                _ => alongScreenY ? SizeNsCursor : SizeWeCursor,
+            };
+            if (!ReferenceEquals(Cursor, want)) Cursor = want;
             return;
         }
 
@@ -186,6 +258,12 @@ public partial class SplitDialog : Window
 
     private void OnStageReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_panning)
+        {
+            _panning = false;
+            if (!ReferenceEquals(Cursor, ArrowCursor)) Cursor = ArrowCursor;
+            return;
+        }
         if (_grab == Grab.None) return;
         _grab = Grab.None;
         _dragIndex = -1;
@@ -263,6 +341,18 @@ public partial class SplitDialog : Window
         distancePx = double.MaxValue;
         if (_current is null || _imageRect.Width <= 0) return 0;
 
+        // Only within the strip, plus the tolerance as slack at each side. Distance is measured
+        // along the strip alone, so without this a divider is grabbable anywhere on its row of
+        // the preview — on a multi-strip scan that means clicking a photograph on strip 2 drags
+        // strip 1's divider, which is invisible at the time and corrupts a frame the user was
+        // not even looking at. It also matches what DrawDividers now draws.
+        double cross = _current.Vertical ? pt.X : pt.Y;
+        double cOrigin = _current.Vertical ? _imageRect.X : _imageRect.Y;
+        double cExtent = _current.Vertical ? _imageRect.Width : _imageRect.Height;
+        double cLo = cOrigin + _current.CrossLo * cExtent - HitTolerance;
+        double cHi = cOrigin + _current.CrossHi * cExtent + HitTolerance;
+        if (cross < cLo || cross > cHi) return 0;
+
         double along = _current.Vertical ? pt.Y : pt.X;
         double origin = _current.Vertical ? _imageRect.Y : _imageRect.X;
         double extent = _current.Vertical ? _imageRect.Height : _imageRect.Width;
@@ -277,11 +367,138 @@ public partial class SplitDialog : Window
         return best;
     }
 
+    // ── view transform ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Centre of the drawn picture on the stage. Rotation turns about this point, so a quarter
+    /// turn keeps whatever the user was looking at in the middle instead of swinging it off the
+    /// canvas.
+    /// </summary>
+    private Point StageCentre => new(Stage.Bounds.Width / 2 + _pan.X, Stage.Bounds.Height / 2 + _pan.Y);
+
+    /// <summary>
+    /// Map a point from unrotated image-layout space (the space <see cref="_imageRect"/> and every
+    /// overlay is computed in) to where it actually lands on the stage.
+    /// </summary>
+    private Point ToStage(Point p)
+    {
+        // Offset from the unrotated layout's centre, scaled, turned, then re-centred.
+        double cx = Stage.Bounds.Width / 2, cy = Stage.Bounds.Height / 2;
+        double dx = (p.X - cx) * _zoom, dy = (p.Y - cy) * _zoom;
+        var (rx, ry) = Turn(dx, dy, _quarterTurns);
+        return new Point(StageCentre.X + rx, StageCentre.Y + ry);
+    }
+
+    /// <summary>Inverse of <see cref="ToStage"/>: stage pixels back to layout space, which is what
+    /// all the hit-testing and the normalised conversions expect.</summary>
+    private Point FromStage(Point p)
+    {
+        double dx = p.X - StageCentre.X, dy = p.Y - StageCentre.Y;
+        // Undo the turn by turning the rest of the way round.
+        var (rx, ry) = Turn(dx, dy, (4 - (_quarterTurns & 3)) & 3);
+        double cx = Stage.Bounds.Width / 2, cy = Stage.Bounds.Height / 2;
+        return new Point(cx + rx / _zoom, cy + ry / _zoom);
+    }
+
+    /// <summary>Rotate an offset by <paramref name="turns"/> quarter-turns clockwise.</summary>
+    private static (double X, double Y) Turn(double x, double y, int turns) => (turns & 3) switch
+    {
+        1 => (-y, x),
+        2 => (-x, -y),
+        3 => (y, -x),
+        _ => (x, y),
+    };
+
+    // ── view controls ─────────────────────────────────────────────────────────────
+
+    private void OnRotateLeftClick(object? sender, RoutedEventArgs e) => Rotate(-1);
+    private void OnRotateRightClick(object? sender, RoutedEventArgs e) => Rotate(+1);
+
+    private void Rotate(int delta)
+    {
+        _quarterTurns = (_quarterTurns + delta + 4) & 3;
+        // Pan is in stage pixels and means nothing once the picture turns under it; recentring is
+        // both simpler to reason about and what the user expects from a rotate button.
+        _pan = default;
+        Redraw();
+    }
+
+    private void OnZoomInClick(object? sender, RoutedEventArgs e) => SetZoom(_zoom * 1.25, null);
+    private void OnZoomOutClick(object? sender, RoutedEventArgs e) => SetZoom(_zoom / 1.25, null);
+
+    /// <summary>Back to fit-and-unrotated — the state the dialog opens in.</summary>
+    private void OnZoomResetClick(object? sender, RoutedEventArgs e)
+    {
+        _zoom = 1.0;
+        _pan = default;
+        _quarterTurns = 0;
+        Redraw();
+    }
+
+    /// <summary>
+    /// Change zoom, optionally keeping <paramref name="anchor"/> (a stage point) over the same
+    /// part of the picture — what makes wheel-zoom feel like it is zooming where you point rather
+    /// than always at the middle.
+    /// </summary>
+    private void SetZoom(double target, Point? anchor)
+    {
+        double next = Math.Clamp(target, MinZoom, MaxZoom);
+        if (Math.Abs(next - _zoom) < 1e-9) return;
+
+        if (anchor is { } a)
+        {
+            // Keep the layout point under the anchor fixed: solve for the pan that maps it back
+            // to the same stage position at the new zoom.
+            Point before = FromStage(a);
+            _zoom = next;
+            Point after = ToStage(before);
+            _pan = new Point(_pan.X + (a.X - after.X), _pan.Y + (a.Y - after.Y));
+        }
+        else _zoom = next;
+
+        if (_zoom <= MinZoom + 1e-9) _pan = default;   // fit again: nothing to pan to
+        else ClampPan();
+        Redraw();
+        UpdateZoomLabel();
+    }
+
+    /// <summary>
+    /// Keep the picture over the viewer.
+    ///
+    /// Pan is otherwise unbounded, so the strip can be dragged clean off the grey area and left
+    /// as an empty canvas with no way back except 复位. The picture is allowed to move only as
+    /// far as its own overhang — the part currently outside the stage — so at fit it cannot move
+    /// at all and at 8× it can reach every corner, but never past them.
+    /// </summary>
+    private void ClampPan()
+    {
+        if (_imageRect.Width <= 0) return;
+
+        // The drawn picture's half-size on each stage axis, after zoom and any quarter turn.
+        double halfW = _imageRect.Width * _zoom / 2, halfH = _imageRect.Height * _zoom / 2;
+        if (Swapped) (halfW, halfH) = (halfH, halfW);
+
+        // Slack = how far the picture sticks out past the stage on each side. Negative (picture
+        // smaller than the stage) means it should stay centred.
+        double slackX = Math.Max(0, halfW - Stage.Bounds.Width / 2);
+        double slackY = Math.Max(0, halfH - Stage.Bounds.Height / 2);
+        _pan = new Point(Math.Clamp(_pan.X, -slackX, slackX), Math.Clamp(_pan.Y, -slackY, slackY));
+    }
+
+    private void OnStageWheel(object? sender, PointerWheelEventArgs e)
+    {
+        if (_current is null) return;
+        SetZoom(_zoom * (e.Delta.Y > 0 ? 1.15 : 1 / 1.15), e.GetPosition(Stage));
+        e.Handled = true;
+    }
+
+    private void UpdateZoomLabel() => ZoomLbl.Text = $"{_zoom * 100:F0}%";
+
     // ── drawing ───────────────────────────────────────────────────────────────────
 
     private void Redraw()
     {
-        Stage.Children.Clear();
+        Scene.Children.Clear();
         if (_current is null) { UpdateCountLabel(); return; }
 
         Bitmap? bmp = _current.Preview;
@@ -289,14 +506,40 @@ public partial class SplitDialog : Window
         if (bmp is null || stageW <= 1 || stageH <= 1) { UpdateCountLabel(); return; }
 
         // Letterbox the preview into the stage, preserving aspect.
-        double scale = Math.Min(stageW / bmp.PixelSize.Width, stageH / bmp.PixelSize.Height);
+        //
+        // Fitted against the stage's axes as the ROTATED picture will use them: a quarter turn
+        // swaps which stage dimension bounds which image dimension, and fitting against the
+        // unswapped pair would size a turned strip to the wrong axis and let it run off the
+        // canvas. Everything after this stays in unrotated layout space — the turn itself is a
+        // RenderTransform applied below, so no overlay has to know about it.
+        double fitW = Swapped ? stageH : stageW, fitH = Swapped ? stageW : stageH;
+        double scale = Math.Min(fitW / bmp.PixelSize.Width, fitH / bmp.PixelSize.Height);
         double w = bmp.PixelSize.Width * scale, h = bmp.PixelSize.Height * scale;
         _imageRect = new Rect((stageW - w) / 2, (stageH - h) / 2, w, h);
+
+        // One transform for the whole overlay stack, about the stage's centre, so the dividers and
+        // boxes stay locked to the picture without any of them computing a rotation themselves.
+        // On Scene, never on Stage: Stage is what clips, and a control's RenderTransform applies
+        // after its own clip, so transforming it would let the zoomed picture spill outside the
+        // grey viewer. Scene is sized to Stage so that centring the transform on Scene's own
+        // bounds means centring it on the visible area.
+        Scene.Width = stageW;
+        Scene.Height = stageH;
+        Scene.RenderTransform = new TransformGroup
+        {
+            Children =
+            {
+                new ScaleTransform(_zoom, _zoom),
+                new RotateTransform(_quarterTurns * 90),
+                new TranslateTransform(_pan.X, _pan.Y),
+            },
+        };
+        Scene.RenderTransformOrigin = RelativePoint.Center;
 
         var img = new Image { Source = bmp, Width = w, Height = h };
         Canvas.SetLeft(img, _imageRect.X);
         Canvas.SetTop(img, _imageRect.Y);
-        Stage.Children.Add(img);
+        Scene.Children.Add(img);
 
         if (_current.Skipped)
         {
@@ -345,7 +588,7 @@ public partial class SplitDialog : Window
             };
             Canvas.SetLeft(box, r.X + 1);
             Canvas.SetTop(box, r.Y + 1);
-            Stage.Children.Add(box);
+            Scene.Children.Add(box);
         }
     }
 
@@ -388,7 +631,7 @@ public partial class SplitDialog : Window
             double y = _current.Vertical ? alongPx : crossPx;
             Canvas.SetLeft(bar, x - (horizontalBar ? len : thick) / 2);
             Canvas.SetTop(bar, y - (horizontalBar ? thick : len) / 2);
-            Stage.Children.Add(bar);
+            Scene.Children.Add(bar);
         }
 
         Tick(aOrigin + _current.Edges[0] * aExtent, cMid, acrossStrip: true);
@@ -397,24 +640,42 @@ public partial class SplitDialog : Window
         Tick(aMid, cOrigin + _current.CrossHi * cExtent, acrossStrip: false);
     }
 
-    /// <summary>The draggable interior dividers, drawn over the boxes.</summary>
+    /// <summary>How far a divider sticks out past each side of its strip, in pixels. Enough to
+    /// read as a handle that spans the strip rather than as an edge flush with it, and not so
+    /// much that it reaches a neighbouring strip on a multi-strip scan.</summary>
+    private const double DividerOverhang = 4;
+
+    /// <summary>
+    /// The draggable interior dividers, drawn over the boxes.
+    ///
+    /// Spans the STRIP, not the whole preview — a divider belongs to one piece of film and says
+    /// nothing about what is beside it. Drawn full-width it ran clean across the OTHER strips of
+    /// a multi-strip scan, laying strip 1's frame boundaries over strip 2's photographs, where
+    /// they are both wrong and impossible to attribute to the strip that owns them.
+    /// </summary>
     private void DrawDividers()
     {
         if (_current is null) return;
         var brush = new SolidColorBrush(Color.FromRgb(0xFF, 0xC1, 0x07));
+
+        double cOrigin = _current.Vertical ? _imageRect.X : _imageRect.Y;
+        double cExtent = _current.Vertical ? _imageRect.Width : _imageRect.Height;
+        double cLo = cOrigin + _current.CrossLo * cExtent - DividerOverhang;
+        double cLen = (_current.CrossHi - _current.CrossLo) * cExtent + DividerOverhang * 2;
+
         for (int i = 1; i < _current.Edges.Count - 1; i++)
         {
             double t = _current.Edges[i];
             var bar = new Border
             {
                 Background = brush,
-                Width = _current.Vertical ? _imageRect.Width : 3,
-                Height = _current.Vertical ? 3 : _imageRect.Height,
+                Width = _current.Vertical ? cLen : 3,
+                Height = _current.Vertical ? 3 : cLen,
                 IsHitTestVisible = false,
             };
-            Canvas.SetLeft(bar, _current.Vertical ? _imageRect.X : _imageRect.X + t * _imageRect.Width - 1.5);
-            Canvas.SetTop(bar, _current.Vertical ? _imageRect.Y + t * _imageRect.Height - 1.5 : _imageRect.Y);
-            Stage.Children.Add(bar);
+            Canvas.SetLeft(bar, _current.Vertical ? cLo : _imageRect.X + t * _imageRect.Width - 1.5);
+            Canvas.SetTop(bar, _current.Vertical ? _imageRect.Y + t * _imageRect.Height - 1.5 : cLo);
+            Scene.Children.Add(bar);
         }
     }
 
@@ -487,7 +748,7 @@ public partial class SplitDialog : Window
             };
             Canvas.SetLeft(box, r.X);
             Canvas.SetTop(box, r.Y);
-            Stage.Children.Add(box);
+            Scene.Children.Add(box);
         }
     }
 

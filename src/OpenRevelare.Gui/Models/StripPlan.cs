@@ -24,7 +24,19 @@ public sealed partial class StripPlan : ObservableObject
     /// <summary>Source scan this plan belongs to.</summary>
     public string Path { get; }
 
-    public string FileName => System.IO.Path.GetFileName(Path);
+    /// <summary>Which strip of the scan this is, 0-based; 0 when the scan holds only one.</summary>
+    public int Index { get; private init; }
+
+    /// <summary>How many strips the scan was found to hold.</summary>
+    public int StripCount { get; private init; } = 1;
+
+    /// <summary>Label for the dialog's file list. A multi-strip scan produces several plans
+    /// from the one file, so the bare filename would name all of them identically and give the
+    /// user no way to tell which row is which; the strip's ordinal is appended in that case
+    /// only, leaving the ordinary one-strip scan reading exactly as it did.</summary>
+    public string FileName => StripCount > 1
+        ? $"{System.IO.Path.GetFileName(Path)} ({Index + 1}/{StripCount})"
+        : System.IO.Path.GetFileName(Path);
 
     /// <summary>Strip's extent across its short axis, normalised — the frames' fixed side edges.</summary>
     public double CrossLo { get; set; }
@@ -53,7 +65,7 @@ public sealed partial class StripPlan : ObservableObject
     public string Summary => Skipped ? "—" : FrameCount.ToString();
 
     /// <summary>True when detection found nothing and the edges are a fallback guess.</summary>
-    public bool IsFallback { get; private set; }
+    public bool IsFallback { get; private init; }
 
     private StripPlan(string path, bool vertical)
     {
@@ -62,28 +74,52 @@ public sealed partial class StripPlan : ObservableObject
     }
 
     /// <summary>
-    /// Build a plan from the detector's output for <paramref name="image"/>.
+    /// Build the plans for <paramref name="image"/> — one per strip the detector found.
     ///
-    /// When detection returns nothing the strip is still given evenly spaced edges rather than
-    /// an empty plan: a dialog with no dividers gives the user nothing to grab, and an even
-    /// split is a far better starting point than making them place every edge by hand. Such a
-    /// plan is marked <see cref="IsFallback"/> so the UI can say the numbers are a guess.
+    /// A flatbed scan often holds several strips side by side, and each is cut independently:
+    /// they are separate pieces of film, so their frame boundaries do not line up and one
+    /// shared divider list could not describe both. Each strip therefore gets its own plan,
+    /// with its own dividers and its own side edges, and the dialog lists them separately.
+    ///
+    /// When detection returns nothing the scan is still given one plan with evenly spaced
+    /// edges rather than no plan at all: a dialog with no dividers gives the user nothing to
+    /// grab, and an even split is a far better starting point than making them place every
+    /// edge by hand. Such a plan is marked <see cref="IsFallback"/> so the UI can say the
+    /// numbers are a guess.
     /// </summary>
-    public static StripPlan Detect(string path, ImageBuffer image)
+    public static IReadOnlyList<StripPlan> Detect(string path, ImageBuffer image)
     {
-        var rects = StripSplit.Detect(image);
+        var strips = StripSplit.DetectStrips(image);
         bool vertical = image.Height >= image.Width;
-        var plan = new StripPlan(path, vertical);
 
-        if (rects.Count == 0)
+        if (strips.Count == 0)
         {
-            plan.IsFallback = true;
-            plan.CrossLo = 0.0;
-            plan.CrossHi = 1.0;
-            plan.Edges.Add(0.0);
-            plan.Edges.Add(1.0);
-            return plan;
+            var fallback = new StripPlan(path, vertical)
+            {
+                IsFallback = true,
+                CrossLo = 0.0,
+                CrossHi = 1.0,
+            };
+            fallback.Edges.Add(0.0);
+            fallback.Edges.Add(1.0);
+            return new[] { fallback };
         }
+
+        var plans = new List<StripPlan>(strips.Count);
+        for (int s = 0; s < strips.Count; s++)
+            plans.Add(FromRects(path, vertical, strips[s], s, strips.Count));
+        return plans;
+    }
+
+    /// <summary>One strip's plan, from that strip's rects.</summary>
+    private static StripPlan FromRects(string path, bool vertical, IReadOnlyList<StripSplit.Rect> rects,
+                                       int index, int total)
+    {
+        var plan = new StripPlan(path, vertical)
+        {
+            Index = index,
+            StripCount = total,
+        };
 
         plan.CrossLo = vertical ? rects[0].X : rects[0].Y;
         plan.CrossHi = plan.CrossLo + (vertical ? rects[0].W : rects[0].H);
@@ -190,11 +226,25 @@ public sealed partial class StripPlan : ObservableObject
         Notify();
     }
 
-    /// <summary>The crop rects this plan yields, in source-image coordinates.</summary>
+    /// <summary>
+    /// The crop rects this plan yields, in source-image coordinates.
+    ///
+    /// Skipping means "do not cut this strip", which for a lone strip is the whole file. Where
+    /// the scan holds several, it is the strip's own box instead: the file also holds the other
+    /// strips, so handing back the whole file would import their frames a second time inside
+    /// one oversized frame, and the sibling plans would still contribute theirs.
+    /// </summary>
     public IReadOnlyList<(double X, double Y, double W, double H)> ToCropRects()
     {
         if (Skipped || Edges.Count < 2)
-            return new[] { (0.0, 0.0, 1.0, 1.0) };
+        {
+            if (StripCount <= 1 || Edges.Count < 2)
+                return new[] { (0.0, 0.0, 1.0, 1.0) };
+            double a = Edges[0], span = Edges[^1] - Edges[0];
+            return new[] { Vertical
+                ? (CrossLo, a, CrossHi - CrossLo, span)
+                : (a, CrossLo, span, CrossHi - CrossLo) };
+        }
 
         var rects = new List<(double, double, double, double)>(Edges.Count - 1);
         for (int i = 0; i < Edges.Count - 1; i++)

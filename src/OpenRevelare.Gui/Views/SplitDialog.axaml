@@ -65,11 +65,55 @@
                 <TextBlock DockPanel.Dock="Bottom" Name="HintLbl" Margin="0,8,0,0" TextWrapping="Wrap"
                            Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
 
+                <!-- View controls: they change how the strip is LOOKED at and nothing else.
+                     No rotation or zoom here reaches the imported frames — orientation is the
+                     main window's business, per frame. This is here so a strip that was scanned
+                     sideways, or whose gutters are too small to judge at fit, can still be cut
+                     accurately. -->
+                <!-- Glyph buttons carry Classes="icon", the house style for exactly this: square,
+                     chrome-less, Padding=0. The plain Button style sets Padding="12,6", so pinning
+                     a 32px width instead left 8px of content box and clipped the glyph. The hint
+                     text is allowed to ellipsize rather than force the row wider than the panel —
+                     the buttons keep their size and the sentence gives way, not the other way
+                     round. -->
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"
+                      Margin="0,0,0,6">
+                    <Button Grid.Column="0" Classes="icon" Content="↺" Click="OnRotateLeftClick"
+                            ToolTip.Tip="{i18n:T '逆时针旋转 90°（仅影响预览）'}" />
+                    <Button Grid.Column="1" Classes="icon" Content="↻" Click="OnRotateRightClick"
+                            Margin="2,0,0,0"
+                            ToolTip.Tip="{i18n:T '顺时针旋转 90°（仅影响预览）'}" />
+                    <Button Grid.Column="2" Classes="icon" Content="−" Click="OnZoomOutClick"
+                            Margin="12,0,0,0" ToolTip.Tip="{i18n:T '缩小'}" />
+                    <TextBlock Grid.Column="3" Name="ZoomLbl" VerticalAlignment="Center" MinWidth="52"
+                               TextAlignment="Center" Text="100%"
+                               FontFamily="JetBrains Mono, Consolas, monospace" />
+                    <Button Grid.Column="4" Classes="icon" Content="+" Click="OnZoomInClick"
+                            ToolTip.Tip="{i18n:T '放大'}" />
+                    <Button Grid.Column="5" Content="{i18n:T '复位'}" Click="OnZoomResetClick"
+                            Margin="12,0,0,0" Padding="10,4" MinHeight="30"
+                            ToolTip.Tip="{i18n:T '回到适应窗口、未旋转'}" />
+                    <TextBlock Grid.Column="7" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"
+                               Foreground="{DynamicResource TextMuteBrush}"
+                               TextTrimming="CharacterEllipsis"
+                               Text="{i18n:T '滚轮缩放，放大后拖动空白处平移'}" />
+                </Grid>
+
+                <!-- Two canvases, deliberately. Stage is the CLIP and the input surface; Scene
+                     inside it carries the zoom/rotate transform and holds the picture and every
+                     overlay. They cannot be the same control: a control's own RenderTransform is
+                     applied AFTER its own clip, so transforming the clipping canvas let the
+                     zoomed preview escape the grey viewer and spill over the panel around it.
+                     Stage also needs a Background to receive pointer events on empty areas —
+                     a transparent Canvas is not hit-testable, which is what pans the picture. -->
                 <Border Background="{DynamicResource ViewerBrush}" Padding="6" CornerRadius="4">
-                    <Canvas Name="Stage" ClipToBounds="True"
+                    <Canvas Name="Stage" ClipToBounds="True" Background="Transparent"
                             PointerPressed="OnStagePressed"
                             PointerMoved="OnStageMoved"
-                            PointerReleased="OnStageReleased" />
+                            PointerReleased="OnStageReleased"
+                            PointerWheelChanged="OnStageWheel">
+                        <Canvas Name="Scene" />
+                    </Canvas>
                 </Border>
             </DockPanel>
         </Grid>
