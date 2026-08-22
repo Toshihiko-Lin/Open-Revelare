@@ -4,17 +4,13 @@
 
 **改进**
 
-- **优化了【标准显示渲染】的暗部**。此前暗部偏亮发灰、缺少密度，看着像被提亮过——原因是把片基归零的那一步在片基附近把层次压扁了，屏幕上多出来的那点「细节」其实是运算残差被放大的结果，并不是底片记录的东西。现在暗部按底片本身的层次呈现，黑场仍然是纯黑。
-
-  中间调、高光和白点都没有变，挂【胶片风格】的效果也不受影响。
+- **优化了【标准显示渲染】的暗部**。此前暗部发灰、像被提亮过；现在黑更沉、阴影层次更分明。中间调与高光不变。
 
 ---
 
 **Improved**
 
-- **Better shadows in the standard display rendering.** Shadows used to read as lifted and grey with no density, as though the picture had been brightened. The cause was the step that takes the film base to black: it flattened the tonal relationships near the base, and what looked like extra shadow detail on screen was that arithmetic being amplified rather than anything the negative recorded. Shadows now render with the separation the negative actually has, and black is still black.
-
-  Mid-tones, highlights and the white point are unchanged, and film styles are unaffected.
+- **Better shadows in the standard display rendering.** Shadows used to read as grey and lifted; blacks are deeper now and shadow detail separates more clearly. Mid-tones and highlights are unchanged.
 
 ---
 
