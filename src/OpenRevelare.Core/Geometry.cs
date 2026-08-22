@@ -17,7 +17,7 @@ public static class Geometry
         for (int i = 0; i < k; i++) outImg = Rotate90Cw(outImg);
         if (flipH) outImg = FlipHorizontal(outImg);
         if (flipV) outImg = FlipVertical(outImg);
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 
     private static ImageBuffer Rotate90Cw(ImageBuffer img)
@@ -34,7 +34,7 @@ public static class Geometry
                 int dstd = (dr * h + dc) * 3;
                 dst[dstd] = src[s]; dst[dstd + 1] = src[s + 1]; dst[dstd + 2] = src[s + 2];
             }
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 
     private static ImageBuffer FlipHorizontal(ImageBuffer img)
@@ -49,7 +49,7 @@ public static class Geometry
                 int d = (y * w + (w - 1 - x)) * 3;
                 dst[d] = src[s]; dst[d + 1] = src[s + 1]; dst[d + 2] = src[s + 2];
             }
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 
     private static ImageBuffer FlipVertical(ImageBuffer img)
@@ -59,7 +59,7 @@ public static class Geometry
         float[] src = img.Data, dst = outImg.Data;
         for (int y = 0; y < h; y++)
             Array.Copy(src, y * w * 3, dst, (h - 1 - y) * w * 3, w * 3);
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 
     /// <summary>Crop to a normalised rect (x,y,w,h) in [0,1], origin top-left.</summary>
@@ -78,7 +78,7 @@ public static class Geometry
         float[] src = img.Data, dst = outImg.Data;
         for (int y = 0; y < ch; y++)
             Array.Copy(src, ((y0 + y) * w + x0) * 3, dst, y * cw * 3, cw * 3);
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 
     /// <summary>Rotate clockwise by <paramref name="degrees"/>, same shape, white-filled corners.</summary>
@@ -134,6 +134,6 @@ public static class Geometry
                 }
             }
         });
-        return outImg;
+        return outImg.InheritSourceFrom(img);
     }
 }

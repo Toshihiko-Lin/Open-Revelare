@@ -63,6 +63,8 @@ public static class Resample
                 d[di] = r * inv; d[di + 1] = g * inv; d[di + 2] = b * inv;
             }
         });
-        return dst;
+        // The SOURCE lattice, not the averaged one: box-averaging factor² samples moves the values
+        // onto a finer grid without recovering any information the file did not have.
+        return dst.InheritSourceFrom(src);
     }
 }

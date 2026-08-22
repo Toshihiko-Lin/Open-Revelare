@@ -2651,7 +2651,7 @@ public partial class MainViewModel : ViewModelBase
             double[] calibratedEp = DMaxPerChannel;
             double? boardCut = AutoBoardCut();
 
-            var (wbHigh, converged) = await Task.Run(() =>
+            var (wbHigh, converged, stops) = await Task.Run(() =>
             {
                 OpenRevelare.DeepWb.Onnx.OnnxDeepWbCorrector corr = GetDeepWb();
 
@@ -2758,28 +2758,102 @@ public partial class MainViewModel : ViewModelBase
                     if (dev < 0.01) { conv = true; break; }
                 }
 
-                // Step 3 — re-impose the no-clip guarantee the calibration carries.
+                // Step 3 — PIN THE PLACEMENT BACK TO THE CALIBRATION.
                 //
-                // The loop moves the channels apart from each other, so a triple that cleared every
-                // channel's extreme on round 1 need not clear it on the round it converges. The
-                // endpoints are per-channel DIVISORS: any channel whose endpoint slips below its own
-                // densest kept pixel clips there, and no Stage-2 control can bring it back. This is
-                // the same uniform lift DetectDMaxPerChannelFromRoll applies to its own answer, from
-                // the same shared helper — one factor for all three, so the balance the net just
-                // solved survives untouched and only the placement moves.
-                // Values off the DECOUPLED buffer and masks off the RAW one — the same split dHigh
-                // is measured with above, and required for the same reason: the endpoint lives in
-                // the decoupled domain, while the sprocket cut and dark valley are calibrated on
-                // raw luma. Comparing an endpoint against maxima drawn from the other domain would
-                // scale by a ratio between two different colour bases.
+                // D_MAX IS THE CALIBRATION'S, NOT THE NET'S. The net is a white-balance tool: it is
+                // entitled to the RATIOS between the three endpoints and to nothing else. Where the
+                // triple sits as a whole is exposure — Scale_c = outRange / (dMax_c - dMin_c), so
+                // the endpoints' magnitude IS the brightness — and that was decided by 整卷标定
+                // against the roll's own densest frame. A white-balance click must not relitigate it.
+                //
+                // WHAT THIS REPLACES, and why the old version could not hold the line.
+                // This used to call FilmBase.RescaleToClearChannelMax, whose factor is clamped to
+                // >= 1 (it exists to LIFT an endpoint off a channel that would clip). The loop above
+                // pins the endpoint MEAN every round, so it hands over a correctly-placed triple —
+                // and then this step could only ever push that triple UP, i.e. darker, by however
+                // far the net had spread the channels. The brightness drift the loop's
+                // renormalisation was written to stop was simply being re-applied one step later,
+                // outside the loop where that renormalisation could not see it.
+                //
+                // The fix is ONE shared factor, chosen so the rendered BRIGHTNESS comes back to the
+                // calibration's. A single factor leaves every ratio between the channels untouched,
+                // which is exactly the part the net solved, so the balance survives intact and only
+                // the placement moves. Unlike the old call this is two-directional — it scales down
+                // as readily as up, because "back to calibrated" is a target, not a floor.
+                //
+                // THE INVARIANT IS mean(1/ep), NOT mean(ep). Brightness is carried by the SLOPE,
+                // Scale_c = outRange / (dMax_c - dMin_c), which is reciprocal in the endpoint. Those
+                // are not the same constraint and pinning the wrong one leaks exposure by Jensen's
+                // inequality: hold mean(ep) fixed and mean(1/ep) still RISES as the net spreads the
+                // channels apart, because 1/x is convex. Modelled on a strong cast that is +0.25
+                // stop of brightening — smaller than the old code's error and in the other
+                // direction, but the same class of bug, and it grows with exactly the thing this
+                // button is for. Solving on the reciprocal mean makes the factor exact for any
+                // spread the net produces.
+                //
+                //   mean(1/(k·ep)) = mean(1/ep)/k = target   ⇒   k = mean(1/ep) / target
+                //
+                // EXACT when dMin is all-zero, which is the normal case (the film base is
+                // normalised to zero density). With a per-channel dMin the factor scales ep but not
+                // the dMin subtracted from it, so one step lands slightly short; measured residual
+                // is 0.05% on a light cast and under 1% (0.014 stop) on a strong one, i.e. two
+                // orders of magnitude below anything visible and far below the drift this replaces.
+                // Left as a single step rather than iterated: a loop here would buy invisible
+                // precision at the cost of a second convergence story in a method that already has
+                // one.
+                double SlopeMean(double[] endpoint)
+                {
+                    double acc = 0;
+                    for (int c = 0; c < 3; c++)
+                        acc += 1.0 / Math.Max(endpoint[c] - wbOffset[c], 1e-6);
+                    return acc / 3.0;
+                }
+                double targetSlope = SlopeMean(calibratedEp);
+                double solvedSlope = SlopeMean(ep);
+                var safe = new double[3];
+                double pin = targetSlope > 1e-9 ? solvedSlope / targetSlope : 1.0;
+                for (int c = 0; c < 3; c++) safe[c] = Math.Max(ep[c] * pin, 1e-6);
+
+                // NO-CLIP IS THE HARD CONSTRAINT; brightness yields to it.
+                //
+                // Holding D_max fixed and clearing every channel's extreme are not jointly
+                // satisfiable once the net has spread the channels: the only cure for a channel
+                // whose endpoint fell below its own densest pixel is to lift the triple, and that
+                // is a brightness change. Between the two, NOT CLIPPING WINS — a clipped channel is
+                // information destroyed at the white end, which no Stage-2 control can bring back,
+                // whereas an exposure shift is both visible and recoverable. That is the same
+                // ordering the rest of the pipeline follows (D_min→95, D_max→1032: fill the range,
+                // never cut it).
+                //
+                // So the pin above is a TARGET, applied only as far as the no-clip floor allows:
+                // the shared factor is raised to whatever clears every channel, and any residual
+                // brightness change is REPORTED rather than hidden. In the common case the net's
+                // spread is small, the floor is inactive, and the placement lands exactly on the
+                // calibration. Measured the same split way as before: values off the DECOUPLED
+                // buffer, masks off the RAW one, because the endpoint lives in the decoupled domain
+                // while the sprocket cut and dark valley are calibrated on raw luma.
                 double[] chanMax = FilmBase.MaxChannelDensityFromRoll(
                     new[] { anchorVal }, tBase,
                     masks: new[] { anchorRaw }, sprocketThreshold: boardCut);
-                double[] safe = FilmBase.RescaleToClearChannelMax(ep, chanMax);
+                double clipOvershoot = 1.0;
+                for (int c = 0; c < 3; c++)
+                {
+                    if (safe[c] <= 0 || !double.IsFinite(chanMax[c])) continue;
+                    clipOvershoot = Math.Max(clipOvershoot, chanMax[c] / safe[c]);
+                }
+                // Lift onto the no-clip floor when the pinned placement would clip. One shared
+                // factor again, so the net's balance is still untouched; only the placement gives.
+                if (clipOvershoot > 1.0)
+                    for (int c = 0; c < 3; c++) safe[c] *= clipOvershoot;
+                // What the user actually paid, in stops, after the floor had its say. Reported
+                // because the brightness promise is the one being bent here.
+                double brightnessStops = Math.Log2(SlopeMean(safe) / targetSlope);
                 Debug.WriteLine($"[AIWB] final: ep={ep[0]:F4},{ep[1]:F4},{ep[2]:F4} " +
+                                $"pin={pin:F4} (slope {solvedSlope:F4} -> {targetSlope:F4}) " +
                                 $"chanMax={chanMax[0]:F4},{chanMax[1]:F4},{chanMax[2]:F4} " +
-                                $"safe={safe[0]:F4},{safe[1]:F4},{safe[2]:F4}");
-                return (safe, conv);
+                                $"safe={safe[0]:F4},{safe[1]:F4},{safe[2]:F4} " +
+                                $"clipOvershoot={clipOvershoot:F4} stops={brightnessStops:+0.000;-0.000}");
+                return (safe, conv, brightnessStops);
             });
 
             // The net's decision, on the field the inversion reads. Writing the three densities
@@ -2787,7 +2861,13 @@ public partial class MainViewModel : ViewModelBase
             // land on the net's answer too — the user sees WHAT it decided in the same units they
             // would have dialled by hand, and can carry on adjusting from there.
             DMaxPerChannel = wbHigh;
-            StatusText = Loc.F($"智能白平衡{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 亮端 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}");
+            // The brightness note appears only when the no-clip floor actually moved the placement
+            // off the calibration. 0.02 stop is far below visible and is just the dMin residual of
+            // the single-step pin, so it is not worth saying anything about.
+            string clipNote = Math.Abs(stops) > 0.02
+                ? Loc.F($"（为避免通道截断，亮度偏离标定 {stops:+0.00;-0.00} 档）")
+                : "";
+            StatusText = Loc.F($"智能白平衡{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 亮端 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}") + clipNote;
         }
         catch (Exception ex) { StatusText = Loc.T("智能白平衡失败：") + ex.Message; }
         finally { IsBusy = false; }

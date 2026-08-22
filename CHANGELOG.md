@@ -6,11 +6,31 @@
 
 - **优化了【标准显示渲染】的暗部**。现在黑更沉、阴影层次更分明。中间调与高光不变，画面更加通透。
 
+**修复**
+
+- **修复了 8 位扫描件颜色不对的问题**。不带 ICC 的 8 位 TIFF 此前被当成线性光读入，橙色片基被压平，自动标定据此反相就会溢出偏色，预览负片也和看图软件对不上。现在按通行约定当作 sRGB 解码。16 位文件不受影响。
+
+- **修复了暗部被压死的扫描件亮端标定过高的问题**。某个通道被扫描器压到接近纯黑时，最低几档的数值几乎全是量化噪声，却总是算出最高的密度，把亮端整体抬高、画面偏色。现在这些数值不再参与亮端测量。
+
+  这只能防止噪声被当成测量值，找不回文件里已经没有的信息——暗部严重压死的片子仍建议以 16 位重扫。
+
+- **修复了智能白平衡改变画面亮度的问题**。它现在只调整色彩平衡，亮端沿用标定值。若某个通道因此会被截断，程序会优先保证不截断，并在状态栏说明亮度偏离了多少档。
+
 ---
 
 **Improved**
 
 - **Better shadows in the standard display rendering.** Blacks are deeper and shadow detail separates more clearly. Mid-tones and highlights are unchanged, and the picture reads cleaner for it.
+
+**Fixed**
+
+- **8-bit scans no longer come out with the wrong colour.** An 8-bit TIFF without an ICC profile was read as linear light, which flattened the orange film base — auto calibration then inverted against it and spilled colour, and the negative preview disagreed with what image viewers showed. Such files are now decoded as sRGB, per the usual convention. 16-bit files are unaffected.
+
+- **Fixed the highlight end reading too high on scans with crushed shadows.** Where a scanner has pushed a channel to near-black, its lowest few levels are mostly quantisation noise, yet they always report the highest density — lifting the highlight end and casting the picture. Those values no longer take part in the measurement.
+
+  This only stops noise being read as a measurement; it cannot recover what the file no longer holds, so a badly crushed scan is still worth re-scanning at 16-bit.
+
+- **Smart white balance no longer changes brightness.** It now adjusts colour balance only and keeps the calibrated highlight end. Where that would clip a channel, not clipping wins, and the status line says how far the brightness had to move.
 
 ---
 

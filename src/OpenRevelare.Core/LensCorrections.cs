@@ -63,7 +63,7 @@ public static class LensCorrections
         double norm = Math.Min(cx, cy);
         if (norm <= 0) return img;
 
-        var outImg = new ImageBuffer(w, h);
+        var outImg = new ImageBuffer(w, h).InheritSourceFrom(img);
         float[] src = img.Data, dst = outImg.Data;
 
         // Source coordinates are computed in FLOAT32, not double, to mirror distortion.py:

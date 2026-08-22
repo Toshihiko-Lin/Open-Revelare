@@ -35,7 +35,8 @@ public static class Pipeline
                       || cal.VignetteAmount != 0.0 || cal.DecoupleMatrix != null;
         if (preOps)
         {
-            src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone());
+            src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone())
+                      .InheritSourceFrom(img);
             if (cal.DistortionK1 != 0.0)
                 src = LensCorrections.ApplyDistortion(src, cal.DistortionK1);
             if (cal.LccFlatField != null)

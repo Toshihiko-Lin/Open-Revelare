@@ -8,8 +8,10 @@ namespace OpenRevelare.Core;
 /// encoder silently downgrades to 8-bit). Phase-1 stand-in for tifffile.
 ///
 /// Load: 8/16-bit, chunky (CONTIG) RGB or grey TIFF -&gt; linear-light f32 image.
-/// <paramref name="inputIsSrgb"/> linearises a display-gamma scan; otherwise
-/// samples are treated as already linear.
+/// <paramref name="inputIsSrgb"/> linearises a display-gamma scan; otherwise the
+/// encoding comes from the embedded ICC profile, and failing that from the bit
+/// depth (see <c>UntaggedTransform</c>): 8-bit untagged is sRGB by convention,
+/// 16-bit untagged is treated as already linear.
 /// Export: f32 image -&gt; 16-bit RGB TIFF (Deflate-compressed). The pipeline hands
 /// us data already in the target encoding (sRGB for BASIC, linear for NONE).
 /// </summary>
@@ -117,12 +119,15 @@ public static class TiffIO
     /// Resolve the ICC transform for a file. <paramref name="inputIsSrgb"/> forces the
     /// plain sRGB inverse and bypasses the profile entirely, preserving the old
     /// caller contract; otherwise the profile's own curves and matrix are used.
+    ///
+    /// <paramref name="bps"/> decides the UNTAGGED case, where nothing in the file says what its
+    /// numbers mean — see <see cref="UntaggedTransform"/>.
     /// </summary>
-    private static IccTransform ResolveIcc(Tiff tif, bool inputIsSrgb, string path)
+    private static IccTransform ResolveIcc(Tiff tif, bool inputIsSrgb, string path, int bps)
     {
         if (inputIsSrgb) return default;
         byte[]? icc = ReadIccBytes(tif);
-        if (icc is null) return FlextightTransform(path);
+        if (icc is null) return UntaggedTransform(path, bps);
 
         // Step 1 — per-channel TRC. Skipped when every channel is already identity,
         // so a genuinely linear scan keeps its exact sample values.
@@ -131,6 +136,35 @@ public static class TiffIO
 
         // Step 2 — device→working-space primaries. Null (skipped) on LUT-only profiles.
         return new IccTransform { Luts = luts, Matrix = IccRead.ReadMatrix(icc) };
+    }
+
+    /// <summary>
+    /// The UNTAGGED case: no embedded ICC, so nothing in the file states what its numbers mean and
+    /// the encoding has to be inferred from the one thing that is always present — the bit depth.
+    ///
+    /// A Flextight declaration wins when there is one: it is an actual statement by the scanner,
+    /// not an inference. Only when that comes back empty does the bit-depth rule apply.
+    ///
+    /// EIGHT BITS IS NEVER LINEAR IN PRACTICE. Linear light quantised to 256 steps puts roughly
+    /// half of them above 18% grey and leaves the shadows in single digits, which is unusable for
+    /// a negative — the density range this pipeline exists to invert lives precisely where 8-bit
+    /// linear has no codes left. That is why the sRGB convention exists for untagged 8-bit files,
+    /// and why every photo viewer applies it. Reading such a file as linear does not merely
+    /// darken it: it COMPRESSES CHANNEL RATIOS toward neutral (a measured orange film base moved
+    /// from a true R/B of 7.5 to 2.5), so the Stage-1 film-base and D_max estimators see a mask
+    /// far weaker and flatter than the real one, invert against it, and throw the residual out as
+    /// a colour cast. Manual sampling could absorb that error by eye; the automatic path cannot.
+    ///
+    /// SIXTEEN BITS IS LEFT ALONE. There the linear assumption is at least arguable — it is the
+    /// depth real linear scans are written at — and silently regamma-ing existing 16-bit rolls
+    /// would move calibrations that are currently correct. An untagged 16-bit sRGB file does
+    /// exist, but it needs an explicit declaration to resolve, not a guess made here.
+    /// </summary>
+    private static IccTransform UntaggedTransform(string path, int bps)
+    {
+        IccTransform flextight = FlextightTransform(path);
+        if (!flextight.IsIdentity) return flextight;
+        return bps == 8 ? new IccTransform { Luts = Srgb.BuildDecodeLuts() } : default;
     }
 
     /// <summary>
@@ -178,6 +212,40 @@ public static class TiffIO
     private static int Lut16Index(float v)
         => (int)(Math.Clamp(v, 0.0f, 1.0f) * 65535.0f + 0.5f);
 
+    /// <summary>
+    /// One code step of the source file expressed in the LINEAR units the buffer actually holds —
+    /// measured at the shadow end, which is the only place it matters.
+    ///
+    /// <paramref name="codeStep"/> (1/255 or 1/65535) is the step in the ENCODED domain. The
+    /// buffer stores linearised values, so stamping the encoded step would overstate the shadow
+    /// lattice by the slope of the transfer curve — on sRGB that is ~13x at the bottom of the
+    /// range, which turns a guard against quantisation noise into one that discards ordinary
+    /// samples (measured: it pulled a perfectly healthy red endpoint from 1.96 down to 1.56).
+    ///
+    /// Evaluated as the gap between the two lowest codes because that is where the density
+    /// uncertainty is decided; both sRGB and a pure-power TRC have their finest linear spacing
+    /// there, so this is also the conservative end. Under sRGB's linear toe the spacing is
+    /// genuinely constant across the low codes, which is exactly the region the endpoint guard
+    /// judges.
+    ///
+    /// Falls back to the encoded step when no transform applies — a genuinely linear file already
+    /// stores what it encoded.
+    /// </summary>
+    private static double ShadowStep(float codeStep, in IccTransform icc, bool inputIsSrgb)
+    {
+        if (inputIsSrgb) return Srgb.SrgbToLinear(codeStep) - Srgb.SrgbToLinear(0f);
+        if (icc.Luts is { } luts)
+        {
+            // The TRC LUTs are indexed over the ENCODED range; sample the first two source codes.
+            float[] lut = luts[1];   // green: the channel the luma-ish statistics lean on
+            double lo = lut[Lut16Index(0f)];
+            double hi = lut[Lut16Index(codeStep)];
+            double gap = hi - lo;
+            if (gap > 0) return gap;
+        }
+        return codeStep;
+    }
+
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
     {
@@ -199,7 +267,7 @@ public static class TiffIO
         if (spp < 1)
             throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
 
-        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path);
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path, bps);
 
         var data = new float[w * h * 3];
         int scanlineSize = tif.ScanlineSize();
@@ -243,7 +311,9 @@ public static class TiffIO
             }
         }
 
-        return new ImageBuffer(w, h, data);
+        // Stamp the source lattice while the bit depth is still in scope; see
+        // ImageBuffer.SourceQuantisationStep for why this cannot be recovered downstream.
+        return new ImageBuffer(w, h, data) { SourceQuantisationStep = ShadowStep(inv, icc, inputIsSrgb) };
     }
 
     /// <summary>Pixel dimensions from the header alone — no image data is decoded.</summary>
@@ -304,7 +374,7 @@ public static class TiffIO
             while (Math.Max(cw, ch) / (factor + 1) >= maxEdge) factor++;
         int outW = Math.Max(1, cw / factor), outH = Math.Max(1, ch / factor);
 
-        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path);
+        IccTransform icc = ResolveIcc(tif, inputIsSrgb, path, bps);
 
         var acc = new float[outW * outH * 3];
         var counts = new int[outW * outH];
@@ -360,7 +430,10 @@ public static class TiffIO
             int j = p * 3;
             acc[j] /= n; acc[j + 1] /= n; acc[j + 2] /= n;
         }
-        return new ImageBuffer(outW, outH, acc);
+        // The SOURCE step, not the averaged one — the region loader box-averages internally, and
+        // averaging changes the lattice without recovering information. See
+        // ImageBuffer.SourceQuantisationStep.
+        return new ImageBuffer(outW, outH, acc) { SourceQuantisationStep = ShadowStep(inv, icc, inputIsSrgb) };
     }
 
     /// <summary>Compression choice for 16-bit TIFF export.</summary>

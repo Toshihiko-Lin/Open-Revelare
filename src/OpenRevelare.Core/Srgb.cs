@@ -59,6 +59,20 @@ public static class Srgb
     /// <summary>Shared inverse LUT: index i (= round(v*65535)) -&gt; linear(i/65535). READ ONLY.</summary>
     public static float[] InverseLut => InverseLutLazy.Value;
 
+    /// <summary>
+    /// The shared inverse LUT presented as a three-channel table, for the per-channel TRC slot in
+    /// <c>TiffIO.IccTransform</c> (an untagged 8-bit TIFF, which is sRGB-encoded by convention).
+    ///
+    /// All three entries are the SAME array — sRGB declares one curve for every channel, and the
+    /// consumer only reads. That also keeps this allocation-free beyond the three-slot jagged
+    /// array: the 256 KB table itself is the process-wide cached one.
+    /// </summary>
+    public static float[][] BuildDecodeLuts()
+    {
+        float[] lut = InverseLut;
+        return new[] { lut, lut, lut };
+    }
+
     private static float[] BuildForwardLut()
     {
         var lut = new float[LutSize];

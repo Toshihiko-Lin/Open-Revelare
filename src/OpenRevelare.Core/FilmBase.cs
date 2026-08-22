@@ -403,17 +403,32 @@ public static class FilmBase
             // actually rejects it.
             // Applied on TOTAL density so a pixel is judged as one physical sample, not per
             // channel; dropping channels independently would bias the endpoints against each
-            // other, which is the very thing they are supposed to measure.
+            // other, which is the very thing they are supposed to measure. A channel PINNED AT
+            // THE CLAMP is the separate case IsEndpointSample also covers — see there.
+            // One quantisation step, in each channel's t_base-normalised units — the scale
+            // IsResolved compares its uncertainty against.
+            double step = SourceStep(img);
+            var stepN = new double[3];
+            for (int c = 0; c < 3; c++) stepN[c] = step / Math.Max(tBase[c], 1e-10);
+
             var dens = new double[3][];
             for (int c = 0; c < 3; c++) dens[c] = new double[n];
             int k = 0;
             for (int p = 0; p < n; p++)
             {
                 if (!keep[p]) continue;
-                double d0 = FrameParams.DensityOf(img.Data[p * 3] / Math.Max(tBase[0], 1e-10));
-                double d1 = FrameParams.DensityOf(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10));
-                double d2 = FrameParams.DensityOf(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10));
-                if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) continue;
+                double t0 = img.Data[p * 3] / Math.Max(tBase[0], 1e-10);
+                double t1 = img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10);
+                double t2 = img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10);
+                // Unresolved in ANY channel disqualifies the whole pixel: the endpoints are read
+                // co-sited off one physical sample, so a pixel is either a usable sample or it is
+                // not — dropping channels independently would bias them against each other.
+                if (step > 0 && !(IsResolved(t0, stepN[0]) && IsResolved(t1, stepN[1])
+                                  && IsResolved(t2, stepN[2]))) continue;
+                double d0 = FrameParams.DensityOf(t0);
+                double d1 = FrameParams.DensityOf(t1);
+                double d2 = FrameParams.DensityOf(t2);
+                if (!IsEndpointSample(d0, d1, d2)) continue;
                 dens[0][k] = d0; dens[1][k] = d1; dens[2][k] = d2;
                 if (d0 > chanMax[0]) chanMax[0] = d0;
                 if (d1 > chanMax[1]) chanMax[1] = d1;
@@ -581,15 +596,29 @@ public static class FilmBase
 
             bool[] keep = HighDensityKeepMask(mask, sprocketThreshold);
             int n = img.PixelCount;
+            // Same resolution test as the detector, and it MUST stay the same — see the ceiling
+            // note below for why this maximum and that endpoint have to be drawn from one and the
+            // same population.
+            double step = SourceStep(img);
+            var stepN = new double[3];
+            for (int c = 0; c < 3; c++) stepN[c] = step / Math.Max(tBase[c], 1e-10);
             for (int p = 0; p < n; p++)
             {
                 if (!keep[p]) continue;
-                double d0 = FrameParams.DensityOf(img.Data[p * 3] / Math.Max(tBase[0], 1e-10));
-                double d1 = FrameParams.DensityOf(img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10));
-                double d2 = FrameParams.DensityOf(img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10));
-                // Same ceiling test as the detector, on TOTAL density, so an opaque edge pixel is
-                // rejected as one physical sample rather than per channel.
-                if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) continue;
+                double t0 = img.Data[p * 3] / Math.Max(tBase[0], 1e-10);
+                double t1 = img.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10);
+                double t2 = img.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10);
+                if (step > 0 && !(IsResolved(t0, stepN[0]) && IsResolved(t1, stepN[1])
+                                  && IsResolved(t2, stepN[2]))) continue;
+                double d0 = FrameParams.DensityOf(t0);
+                double d1 = FrameParams.DensityOf(t1);
+                double d2 = FrameParams.DensityOf(t2);
+                // Same test as the detector, and it MUST stay the same: this maximum is what the
+                // no-clip rescale compares the detector's endpoint against, so a pixel counted
+                // here but rejected there would demand headroom for a sample the endpoint was
+                // never allowed to see — which is precisely how a clamped blue channel dragged the
+                // whole triple up by 1.75x.
+                if (!IsEndpointSample(d0, d1, d2)) continue;
                 if (d0 > chanMax[0]) chanMax[0] = d0;
                 if (d1 > chanMax[1]) chanMax[1] = d1;
                 if (d2 > chanMax[2]) chanMax[2] = d2;
@@ -621,6 +650,114 @@ public static class FilmBase
     /// <param name="sprocketThreshold">Bright board cut, or null to auto-estimate it from the
     /// frame. Passing null is what lets a caller with no dialog-supplied threshold still get the
     /// board excluded; <see cref="Sprocket.NoBoard"/> maps back to "no bright cut".</param>
+    /// <summary>
+    /// Is this pixel usable for measuring an ENDPOINT?
+    ///
+    /// Two independent rejections, because there are two different ways a sample can carry no
+    /// endpoint information and each is invisible to the other's test:
+    ///
+    /// TOTAL density at or above <see cref="FrameParams.RealDensityCeiling"/> — an opaque sprocket
+    /// hole, a mask card, a film-frame edge. The whole pixel is light-blocking, so it is rejected
+    /// as ONE physical sample rather than per channel; dropping channels independently here would
+    /// bias the endpoints against each other, which is the very thing they are supposed to measure.
+    ///
+    /// ANY SINGLE CHANNEL pinned at <see cref="FrameParams.DensityCeiling"/> — that channel
+    /// underflowed to zero transmittance and <see cref="FrameParams.DensityOf"/> clamped it. The
+    /// clamp value is a FLOOR ARTEFACT, not a measurement: the real density is unknown and merely
+    /// at-least-this. Averaging it into an endpoint states a density the film never had.
+    ///
+    /// WHY THE TOTAL TEST DOES NOT CATCH THAT. A pixel whose blue underflowed while red and green
+    /// are ordinary picture tones scores (1.9 + 1.7 + 4.0)/3 = 2.5, comfortably under the 3.0
+    /// ceiling, and is kept — carrying a fabricated 4.0 into the blue endpoint. On a scan whose
+    /// blue channel was crushed to code 0 over 11.66% of the frame, the co-sited top tail is made
+    /// almost entirely of such pixels, and the blue endpoint came out at 6.8 — a transmittance of
+    /// 1/6,800,000, where the file's own bit depth cannot express more than about 2.4. The
+    /// no-clip rescale then lifted all three endpoints ~1.75x to clear it, crushing the blue slope
+    /// to two thirds of its correct value and throwing the frame yellow.
+    ///
+    /// The underflow itself is a property of the FILE and cannot be undone here — this only stops
+    /// it from being read as a measurement.
+    /// </summary>
+    private static bool IsEndpointSample(double d0, double d1, double d2)
+    {
+        if ((d0 + d1 + d2) / 3.0 >= FrameParams.RealDensityCeiling) return false;
+        return d0 < FrameParams.DensityCeiling
+            && d1 < FrameParams.DensityCeiling
+            && d2 < FrameParams.DensityCeiling;
+    }
+
+    /// <summary>
+    /// The largest density uncertainty an endpoint sample may carry, in density units.
+    ///
+    /// A sample's density is only as trustworthy as the quantisation step it sits on, and near
+    /// black that step is enormous: on 8-bit, code 1 to 2 is 0.301 D and code 2 to 3 is 0.176.
+    /// Samples whose neighbouring code is further away than this in density are not measurements,
+    /// they are quantisation — and they always err toward TOO DENSE, because the lowest code maps
+    /// to the highest density.
+    ///
+    /// AN EMPIRICAL VALUE, and worth reading as one. It was swept against a hand-graded reference:
+    /// on the scan this was written for (a blue channel crushed to code 0 over 11.6% of the frame)
+    /// the detector's blue endpoint lands at B/G slope 0.511 against the user's by-eye 0.493,
+    /// where the untreated estimate was 0.333. Tightening from here keeps improving that one
+    /// number, so the value is chosen on the conservative side of the best fit rather than at it:
+    /// over-rejecting costs a little endpoint accuracy, under-rejecting lets fabricated densities
+    /// into the answer.
+    ///
+    /// IT IS A SAFETY NET, NOT A GENERAL IMPROVEMENT, and the distinction matters for anyone
+    /// tuning it. On synthetic negatives at ordinary densities (D_max ~1.9) the darkest sample
+    /// still sits around code 3, clear of the cliff, and the threshold changes nothing at any
+    /// setting — it only engages once the picture runs into the file's own bit depth. Nor can it
+    /// repair one that has: with the blue channel crushed eight codes deep the error is identical
+    /// with and without it. What it prevents is quantisation being READ as measurement.
+    ///
+    /// The R and G endpoints on the reference scan are unchanged across the whole swept range, so
+    /// tightening this is safe for healthy channels; it is the crushed one that moves.
+    /// </summary>
+    private const double MaxDensityUncertainty = 0.10;
+
+    /// <summary>
+    /// Is this sample's density RESOLVED, or is it mostly quantisation?
+    ///
+    /// The uncertainty of a density read off a quantised file is the gap to the adjacent code:
+    ///
+    ///   ΔD = -log10(L/t_base) + log10((L+step)/t_base) = log10((L+step)/L)
+    ///
+    /// T_BASE CANCELS. The uncertainty is a property of the CODE ALONE — not of the channel, not
+    /// of the film base, not of the exposure — which is what makes one shared threshold the right
+    /// shape for this test. The same reasoning says a per-channel density CAP would be the wrong
+    /// shape: it states one physical fact (quantisation) as three different numbers derived from
+    /// three film-base values, and the three would then have to be kept in step forever.
+    ///
+    /// WHY THIS MATTERS AT THE ENDPOINT. On 8-bit the step near black is brutal — code 1 to 2 is
+    /// 0.301 D, code 2 to 3 is 0.176 — so a channel crushed toward zero reports densities that are
+    /// pure quantisation and systematically TOO HIGH (the lowest code always maps to the highest
+    /// density). The endpoint is the top tail of exactly that region, so those samples dominate it:
+    /// on the scan this was written for, the blue channel's endpoint came out at 5.2 where the
+    /// file's own bit depth can express at most 3.0, and the no-clip rescale then dragged all three
+    /// endpoints up to clear it, crushing blue's slope and throwing the frame yellow.
+    ///
+    /// SIXTEEN-BIT IS UNAFFECTED, and that is the point of testing the step rather than the code.
+    /// A 16-bit file's step is 1/65535, so even its lowest codes resolve density far finer than
+    /// this threshold and every sample passes — the test disappears exactly where it should.
+    /// </summary>
+    /// <param name="tNorm">Transmittance already normalised by t_base (what DensityOf takes).</param>
+    /// <param name="stepNorm">One quantisation step in the same normalised units.</param>
+    private static bool IsResolved(double tNorm, double stepNorm)
+        => tNorm > 0 && Math.Log10((tNorm + stepNorm) / tNorm) <= MaxDensityUncertainty;
+
+    /// <summary>
+    /// The source file's quantisation step for this buffer, in its own linear units.
+    ///
+    /// READ, NOT MEASURED. It is stamped at decode by <see cref="TiffIO"/> and carried through
+    /// every geometric transform — see <see cref="ImageBuffer.SourceQuantisationStep"/> for why
+    /// measuring it off the pixels is wrong (a box-downsampled preview lands on a finer lattice
+    /// and reports float noise, silently disabling every test built on it).
+    ///
+    /// 0 means unknown or continuous, which makes <see cref="IsResolved"/> admit everything — the
+    /// correct no-op for data whose coarseness cannot be established.
+    /// </summary>
+    private static double SourceStep(ImageBuffer img) => img.SourceQuantisationStep;
+
     public static bool[] HighDensityKeepMask(ImageBuffer maskFrame, double? sprocketThreshold)
     {
         int w = maskFrame.Width, h = maskFrame.Height, n = w * h;
@@ -1189,17 +1326,37 @@ public static class FilmBase
             var totalD = new double[keptCount];
             float[] vd = insetVal.Data;
             int k = 0;
+            // One quantisation step in each channel's normalised units, as in the detector.
+            double step = SourceStep(insetVal);
+            var stepN = new double[3];
+            for (int c = 0; c < 3; c++) stepN[c] = step / tb[c];
+
             for (int p = 0; p < n; p++)
             {
                 if (!keep[p]) continue;
                 double sum = 0;
+                bool clamped = false;
                 for (int c = 0; c < 3; c++)
                 {
-                    double dc = FrameParams.DensityOf(vd[p * 3 + c] / tb[c]);
+                    double tc = vd[p * 3 + c] / tb[c];
+                    double dc = FrameParams.DensityOf(tc);
+                    // A channel pinned at the clamp underflowed to zero transmittance: the value
+                    // is a floor artefact, not a density, and this method's whole output is a
+                    // per-channel MEAN over the top tail, so one fabricated 4.0 lands directly in
+                    // the answer. Marked here rather than tested after the fact because the
+                    // rejection below ranks on TOTAL density, which a single clamped channel does
+                    // not lift past the ceiling — see IsEndpointSample.
+                    if (dc >= FrameParams.DensityCeiling) clamped = true;
+                    // And a channel too coarsely quantised to resolve its own density is the same
+                    // kind of non-measurement one step short of the clamp — see IsResolved.
+                    if (step > 0 && !IsResolved(tc, stepN[c])) clamped = true;
                     dens[k * 3 + c] = dc;
                     sum += dc;
                 }
-                totalD[k] = sum / 3.0;
+                // Route it into the existing rejection rather than adding a second pass: that
+                // filter already drops everything at or above RealDensityCeiling, so pushing the
+                // total to the clamp marks this sample without duplicating the compaction below.
+                totalD[k] = clamped ? FrameParams.DensityCeiling : sum / 3.0;
                 k++;
             }
 
@@ -1261,7 +1418,7 @@ public static class FilmBase
         float[] s = src.Data, o = outImg.Data;
         for (int y = 0; y < ch; y++)
             Array.Copy(s, ((y0 + y) * src.Width + x0) * 3, o, y * cw * 3, cw * 3);
-        return outImg;
+        return outImg.InheritSourceFrom(src);
     }
 
     /// <summary>
