@@ -4,13 +4,13 @@
 
 **改进**
 
-- **优化了【标准显示渲染】的暗部**。此前暗部发灰、像被提亮过；现在黑更沉、阴影层次更分明。中间调与高光不变。
+- **优化了【标准显示渲染】的暗部**。现在黑更沉、阴影层次更分明。中间调与高光不变，画面更加通透。
 
 ---
 
 **Improved**
 
-- **Better shadows in the standard display rendering.** Shadows used to read as grey and lifted; blacks are deeper now and shadow detail separates more clearly. Mid-tones and highlights are unchanged.
+- **Better shadows in the standard display rendering.** Blacks are deeper and shadow detail separates more clearly. Mid-tones and highlights are unchanged, and the picture reads cleaner for it.
 
 ---
 
