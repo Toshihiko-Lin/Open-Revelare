@@ -861,4 +861,52 @@ public class PrintLutTests
         Assert.Throws<InvalidOperationException>(
             () => OutputRender.EncodingGamma(ColorSpaces.Srgb));
     }
+
+    /// <summary>
+    /// THE TOE DEEPENS THE SHADOWS WITHOUT MOVING ANYTHING ABOVE THEM.
+    ///
+    /// The film-base normalisation is a subtraction, so it flattens ratios near the base and the
+    /// output TRC then amplifies that residue into tens of visible levels — lifted, muddy shadows
+    /// carrying separation the negative never recorded. Out of the base the bare transform climbed
+    /// at 9.1× the slope measured on Kodak 2383; the toe brings that to 5.2×, still the more open
+    /// of the two as a neutral rendering should be.
+    ///
+    /// The contract that makes it safe is that it is LOCAL. The midtones and highlights are placed
+    /// by the decode and the response gamma, and this test pins that the toe leaves them alone —
+    /// which is what lets the standard path keep agreeing with a print stock from mid-grey up.
+    /// </summary>
+    [Fact]
+    public void The_toe_deepens_the_shadows_and_leaves_the_midtones_alone()
+    {
+        const double dpc = FrameParams.CineonDensityPerCode;
+        static float Render(double code)
+        {
+            float lin = (float)Math.Pow(10.0, (code - FrameParams.CineonWhiteCode) * dpc);
+            var px = new[] { lin, lin, lin };
+            ColorPipeline.ToOutputSpace(px, ColorSpaces.Srgb);
+            return px[0];
+        }
+
+        // The base is still black — the toe is pinned at 0, so normalising to black survives it.
+        Assert.Equal(0f, Render(FrameParams.CineonBlackCode), 4);
+
+        // Untouched above the knee: 18% grey, the mid-tones and diffuse white keep the placement
+        // the decode gave them. These are the values the standard path shares with a print stock.
+        Assert.InRange(Render(336.0), 0.25f, 0.29f);   // ≈68/255
+        Assert.InRange(Render(486.0), 0.47f, 0.52f);   // ≈126/255, within 0.1 of 2383
+        Assert.InRange(Render(685.0), 0.86f, 0.90f);   // ≈225/255
+
+        // Deepened below it: code 150 sat at 17.3/255 bare, and the toe brings it to about 9.9 —
+        // compressed toward the stock's 9.6 rather than crushed away.
+        Assert.InRange(Render(150.0), 0.02f, 0.055f);
+
+        // Monotone throughout: a toe that folded back on itself would posterise the shadows.
+        float prev = -1f;
+        foreach (double code in new[] { 95.0, 120, 150, 200, 250, 336, 486, 685, 1032 })
+        {
+            float v = Render(code);
+            Assert.True(v > prev, $"code {code} must exceed the previous step, got {v}");
+            prev = v;
+        }
+    }
 }

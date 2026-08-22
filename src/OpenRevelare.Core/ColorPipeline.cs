@@ -172,6 +172,13 @@ public static class ColorPipeline
     /// clip, which silently discarded the 2.31 stops between 685 and 1032 and made every switch to
     /// a print-film cube look like the cube had darkened the highlights, when in fact the cube was
     /// the only one of the two keeping them.
+    ///
+    /// THE OTHER END IS CORRECTED TOO — see <see cref="Toe"/>. The base normalisation a few lines
+    /// below is a subtraction, and a subtraction flattens ratios near the point it subtracts, so
+    /// the shadows arrived carrying separation that was the arithmetic's rather than the
+    /// negative's. Both corrections are LOCAL, and deliberately so: the toe ends at 0.05 and the
+    /// shoulder starts at 0.5, which leaves mid-grey, the mid-tone crossing and diffuse white set
+    /// by the decode and the response gamma alone.
     /// </summary>
     public static void CineonToDisplay(float[] data)
     {
@@ -202,8 +209,60 @@ public static class ColorPipeline
         Parallel.For(0, data.Length, i =>
         {
             float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-            data[i] = Shoulder(MathF.Max((lin - blackLin) / span, 0.0f));
+            data[i] = Shoulder(Toe(MathF.Max((lin - blackLin) / span, 0.0f)));
         });
+    }
+
+    /// <summary>
+    /// Where the toe ends, in the normalised linear domain. Above it the transform is untouched.
+    ///
+    /// 0.05 sits just below 18% mid-grey, which lands at 0.0585. That is the binding constraint
+    /// rather than a rounded preference: mid-grey, the mid-tone crossing and the diffuse white are
+    /// all set by the decode and the response gamma, and a toe reaching past 0.0585 would start
+    /// moving them. Everything from mid-grey up passes through unchanged.
+    /// </summary>
+    private const float ToeKnee = 0.05f;
+
+    /// <summary>
+    /// The exponent applied below <see cref="ToeKnee"/>. 1.0 would be no toe at all.
+    ///
+    /// 1.3 is measured against the shadow launch rather than fitted to a stock. Out of the film
+    /// base the bare transform climbs at 31.4 output levels per 100 code — 9.1× the 3.45 measured
+    /// on Kodak 2383 — because the base normalisation is a subtraction and a subtraction flattens
+    /// ratios near the point it subtracts. At 1.3 the launch is 5.2× the stock's, which is still
+    /// clearly more open than a print (correct for a rendering meant to be neutral) while no
+    /// longer manufacturing separation the negative does not contain. It also lands code 150 at
+    /// 9.9 against the stock's 9.6, which is the corroboration rather than the target.
+    /// </summary>
+    private const float ToeGamma = 1.3f;
+
+    /// <summary>
+    /// Restores the shadow ratios the film-base normalisation flattens.
+    ///
+    /// WHAT THIS FIXES. Taking the base to black is a SUBTRACTION, <c>(lin − base)/(1 − base)</c>,
+    /// and a subtraction destroys ratios near the point it subtracts. Two shadow values a few per
+    /// cent apart in the negative arrive within a few thousandths of each other, and the output
+    /// TRC — whose near-black segment is steep by design — magnifies that residue into tens of
+    /// visible levels. The result reads as lifted, muddy shadows with no density: the separation
+    /// on screen is not detail the negative recorded, it is the normalisation's own arithmetic
+    /// being amplified.
+    ///
+    /// The toe undoes exactly that amplification and nothing else. It is a power curve below the
+    /// knee, pinned at both ends — 0 stays 0 and the knee is the identity — so the film base still
+    /// renders as black and no tone from mid-grey up moves at all. It is the shadow counterpart of
+    /// <see cref="Shoulder"/>, and for the same reason: a correction aimed at one end of the range
+    /// has to be local to that end, or it drags the placements the rest of the transform exists to
+    /// establish.
+    ///
+    /// NOT C¹ AT THE KNEE, unlike <see cref="Shoulder"/>. The slope steps from
+    /// <see cref="ToeGamma"/>× to 1× there. It is invisible in practice because the knee sits at
+    /// 0.05, where the output TRC is already compressing hard, and buying continuity would mean a
+    /// curve with a free parameter to fit rather than one number with a measured justification.
+    /// </summary>
+    private static float Toe(float v)
+    {
+        if (v >= ToeKnee) return v;
+        return ToeKnee * MathF.Pow(v / ToeKnee, ToeGamma);
     }
 
     /// <summary>
