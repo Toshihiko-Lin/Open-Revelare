@@ -512,6 +512,7 @@
   "自动找到画面最亮点，把它当作纯白来解出亮端三个密度": "Finds the brightest point automatically and treats it as pure white to solve the three highlight densities",
   "色偏在【整卷校准 → D_max / D_min】展开的三个通道里调，那里是反相的两端。": "Colour cast is adjusted in the per-channel components under Roll calibration → D_max / D_min, which are the inversion's two ends.",
   "这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。": "This roll was calibrated with the old model, so it no longer looks as it did when saved. Press \"Auto (whole roll)\" below to re-measure.",
+  "（当前画面已裁切，片基可能已被裁掉——如找不到请先取消裁切。）": " (This frame is cropped, so the film base may have been cropped away \u2014 if you cannot find it, cancel the crop first.)",
   "片基采样：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。": "Sampling the film base: the preview has switched to the negative. Drag a box over the BRIGHTEST ORANGE BASE (the unexposed margin or gap between frames) and let go. Esc cancels.",
   "高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。": "Sampling the highlight: the preview has switched to the negative. Drag a box over the DENSEST part of the negative (the scene's highlights) and let go. Esc cancels.",
   "高光采样 → 亮端 {0:F3}（逐通道 {1:F3} / {2:F3} / {3:F3}）": "Highlight sampled → D_max {0:F3} (per channel {1:F3} / {2:F3} / {3:F3})",

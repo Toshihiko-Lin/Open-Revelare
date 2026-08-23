@@ -13,6 +13,12 @@ namespace OpenRevelare.Core;
 /// One place, called by both the whole-frame view and the sharp patch that blits over it, because
 /// those two are the same picture at two resolutions: any difference between them shows up as the
 /// patch flashing a different colour the moment the user zooms in.
+///
+/// GEOMETRY IS NOT HERE, and is not skipped either. The view runs the frame through the SAME
+/// orientation → straighten → crop chain as the positive it toggles with, so the two are the same
+/// rectangle of the same frame and only the photometry differs. That belongs to the render paths
+/// (<c>MainViewModel.GeometryForNegative</c> and <see cref="RegionRender"/>'s shared geometry map),
+/// not to this file, which only ever touches pixel VALUES.
 /// </summary>
 public static class NegativeView
 {

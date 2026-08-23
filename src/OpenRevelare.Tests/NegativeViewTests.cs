@@ -143,6 +143,161 @@ public class NegativeViewTests
         Assert.Equal(before, frame.Data);
     }
 
+    // ── Framing: the negative and the positive are the same rectangle ───────────
+    //
+    // The negative view used to apply ORIENTATION ONLY — no straighten, no crop — so toggling it
+    // moved the picture under a zoom and pan that stayed put: a straightened frame went crooked
+    // again, a cropped one snapped out to the whole strip. The tests below pin the fix at the
+    // level it has to hold: whatever the geometry, the two renders cover the same area of the
+    // same frame, and only the pixel VALUES differ.
+
+    /// <summary>
+    /// A crop must move the negative with it. Before the fix this was the loudest case — the
+    /// negative kept showing the whole scan while the positive showed the kept picture, so the
+    /// toggle looked like a zoom-out.
+    /// </summary>
+    [Fact]
+    public void The_negative_patch_follows_the_crop()
+    {
+        var frame = Ramp(64, 64);
+        var roi = new RegionRender.Roi(0, 0, 1, 1);
+
+        var uncropped = RegionRender.Render(frame, new FrameParams(), roi, negative: true);
+        var cropped = RegionRender.Render(
+            frame, new FrameParams { CropRect = (0.25, 0.25, 0.5, 0.5) }, roi, negative: true);
+
+        // A half-by-half crop of a 64² frame is 32², not 64² — the picture is genuinely reframed
+        // rather than merely re-sampled.
+        Assert.Equal(64, uncropped.Image.Width);
+        Assert.Equal(32, cropped.Image.Width);
+        Assert.Equal(32, cropped.Image.Height);
+    }
+
+    /// <summary>The straighten angle must reach the negative too — the same rotation, about the
+    /// same centre, that the positive is drawn through.</summary>
+    [Fact]
+    public void The_negative_patch_follows_the_straighten()
+    {
+        var frame = Ramp(64, 64);
+        var roi = new RegionRender.Roi(0, 0, 1, 1);
+
+        var straight = RegionRender.Render(frame, new FrameParams(), roi, negative: true);
+        var turned = RegionRender.Render(frame, new FrameParams { Rotation = 5.0 }, roi,
+                                         negative: true);
+
+        // Rotation preserves the buffer's size and changes its content — a same-size, same-pixels
+        // result is the old orientation-only shortcut coming back.
+        Assert.Equal(straight.Image.Width, turned.Image.Width);
+        Assert.Equal(straight.Image.Height, turned.Image.Height);
+        Assert.NotEqual(straight.Image.Data, turned.Image.Data);
+    }
+
+    /// <summary>
+    /// THE INVARIANT THE WHOLE CHANGE IS FOR: under any geometry, the negative and the positive
+    /// come out the same shape and report the same realised rectangle. The user keeps one zoom and
+    /// one pan across the toggle, so a disagreement here IS the picture jumping on screen.
+    /// </summary>
+    [Theory]
+    [InlineData(0, false, false, 0.0, false)]
+    [InlineData(1, false, false, 0.0, false)]     // quarter turn — axes swap
+    [InlineData(0, true, false, 0.0, false)]      // mirror
+    [InlineData(0, false, false, 5.0, false)]     // straighten
+    [InlineData(0, false, false, 0.0, true)]      // crop
+    [InlineData(1, true, true, -3.5, true)]       // all of it at once
+    public void The_two_views_are_framed_identically(int turns, bool flipH, bool flipV,
+                                                     double rotation, bool crop)
+    {
+        var frame = Ramp(48, 64);   // deliberately NOT square, so a swapped axis shows up
+        var roi = new RegionRender.Roi(0.1, 0.2, 0.5, 0.5);
+        var cal = new FrameParams
+        {
+            QuarterTurns = turns,
+            FlipH = flipH,
+            FlipV = flipV,
+            Rotation = rotation,
+            CropRect = crop ? (0.2, 0.1, 0.6, 0.7) : null,
+        };
+
+        var positive = RegionRender.Render(frame, cal, roi, negative: false);
+        var negative = RegionRender.Render(frame, cal, roi, negative: true);
+
+        Assert.Equal(positive.Image.Width, negative.Image.Width);
+        Assert.Equal(positive.Image.Height, negative.Image.Height);
+        Assert.Equal(positive.Realised.X, negative.Realised.X, 12);
+        Assert.Equal(positive.Realised.Y, negative.Realised.Y, 12);
+        Assert.Equal(positive.Realised.W, negative.Realised.W, 12);
+        Assert.Equal(positive.Realised.H, negative.Realised.H, 12);
+        // Same frame, same rectangle — and still two different pictures, which is the point of
+        // having the view at all.
+        Assert.NotEqual(positive.Image.Data, negative.Image.Data);
+    }
+
+    /// <summary>
+    /// The bounds a caller reserves for a negative patch are the bounds the negative patch reads.
+    /// These were once genuinely different functions, and a region decode sized by the wrong one
+    /// hands back the wrong part of the file — silently, as a patch of somewhere else.
+    /// </summary>
+    [Fact]
+    public void The_negative_reserves_the_same_source_bounds_as_the_positive()
+    {
+        var cal = new FrameParams
+        {
+            QuarterTurns = 1, FlipH = true, Rotation = 4.0, CropRect = (0.15, 0.2, 0.6, 0.6),
+        };
+        var roi = new RegionRender.Roi(0.3, 0.3, 0.4, 0.4);
+
+        Assert.Equal(RegionRender.RequiredSourceBounds(48, 64, cal, roi),
+                     RegionRender.RequiredSourceBoundsNegative(48, 64, cal, roi));
+    }
+
+    /// <summary>
+    /// The whole-frame negative view and the sharp patch that blits over it are the SAME picture
+    /// at two resolutions, so they must agree pixel for pixel — a difference is a visible flash
+    /// the moment the user zooms past the patch threshold. The two are written independently (the
+    /// view composes Geometry's operators in <c>MainViewModel.GeometryForNegative</c>; the patch
+    /// runs <see cref="RegionRender"/>'s composed inverse map), which is exactly why this needs a
+    /// test rather than an argument.
+    ///
+    /// Reproduces the view's chain here because it lives in the GUI assembly. Straighten is left
+    /// out of the cases on purpose: the two paths interpolate the same taps with the same weights,
+    /// but the view rotates ONCE over the whole buffer while the patch composes the rotation into
+    /// its map, so they agree to bilinear rounding rather than exactly. The framing tests above
+    /// already pin the rotation's geometry.
+    /// </summary>
+    [Theory]
+    [InlineData(0, false, false, false)]
+    [InlineData(1, false, false, false)]     // quarter turn
+    [InlineData(0, true, true, true)]        // both mirrors + crop
+    [InlineData(2, false, true, true)]       // half turn + mirror + crop
+    public void The_view_and_the_patch_are_the_same_picture(int turns, bool flipH, bool flipV,
+                                                            bool crop)
+    {
+        var frame = Ramp(48, 64);
+        var cal = new FrameParams
+        {
+            QuarterTurns = turns,
+            FlipH = flipH,
+            FlipV = flipV,
+            CropRect = crop ? (0.25, 0.125, 0.5, 0.75) : null,
+        };
+
+        // The VIEW's chain, as GeometryForNegative composes it.
+        var view = new ImageBuffer(frame.Width, frame.Height, (float[])frame.Data.Clone());
+        if (turns % 4 != 0 || flipH || flipV)
+            view = Geometry.ApplyOrientation(view, turns, flipH, flipV);
+        if (cal.CropRect is { } c) view = Geometry.ApplyCrop(view, c);
+        ColorPipeline.ToOutputSpace(view.Data, cal.ResolvedOutputSpace);
+
+        // The PATCH, asked for over the whole displayed frame.
+        var patch = RegionRender.Render(frame, cal, new RegionRender.Roi(0, 0, 1, 1),
+                                        negative: true);
+
+        Assert.Equal(view.Width, patch.Image.Width);
+        Assert.Equal(view.Height, patch.Image.Height);
+        for (int i = 0; i < view.Data.Length; i++)
+            Assert.Equal(view.Data[i], patch.Image.Data[i], 4);
+    }
+
     /// <summary>A frame with a value in every channel, so a per-channel gain cannot be masked by
     /// a flat or symmetric picture.</summary>
     private static ImageBuffer Ramp(int w, int h)

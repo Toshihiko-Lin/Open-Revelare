@@ -6,11 +6,19 @@
 
 - **优化了智能白平衡的行为**。它现在只做一件事：调整色彩平衡，画面亮度保持在标定值上不动。
 
+**修复**
+
+- **修复了查看负片时画面跳动的问题**。
+
 ---
 
 **Improved**
 
 - **Smart white balance behaves better.** It now does one thing only: adjust the colour balance, leaving the brightness where calibration put it.
+
+**Fixed**
+
+- **Fixed the picture jumping when you view the negative.** 
 
 ---
 

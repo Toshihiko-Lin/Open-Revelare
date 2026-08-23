@@ -86,22 +86,18 @@ public static class RegionRender
     }
 
     /// <summary>
-    /// <see cref="RequiredSourceBounds"/> for the NEGATIVE patch: the ROI un-oriented onto the raw
-    /// frame, because that view applies ORIENTATION ONLY — no straighten, no crop (see
-    /// <see cref="RenderNegative"/>). Callers that decode a region must use this one when asking
-    /// for a negative, or they will reserve the rectangle the fully-geometried frame would need
-    /// and hand back the wrong pixels.
+    /// <see cref="RequiredSourceBounds"/> for the NEGATIVE patch.
+    ///
+    /// IDENTICAL to the positive one, and deliberately so: the negative view now goes through the
+    /// SAME geometry chain (orientation → straighten → crop) as the picture it replaces, so the
+    /// two are the same rectangle of the same frame and a patch reserves the same source pixels.
+    /// Kept as a named entry point because the call site reads better for it, and because the two
+    /// were once genuinely different — a caller that still asks for "the negative bounds" gets
+    /// the right answer rather than a stale orientation-only box.
     /// </summary>
     public static (int X0, int Y0, int X1, int Y1) RequiredSourceBoundsNegative(
         int srcW, int srcH, FrameParams cal, Roi roi)
-    {
-        Roi raw = UnorientRoi(roi, cal);
-        int x0 = Math.Clamp((int)Math.Floor(raw.X * srcW), 0, srcW - 1);
-        int y0 = Math.Clamp((int)Math.Floor(raw.Y * srcH), 0, srcH - 1);
-        int x1 = Math.Clamp((int)Math.Ceiling((raw.X + raw.W) * srcW), x0 + 1, srcW);
-        int y1 = Math.Clamp((int)Math.Ceiling((raw.Y + raw.H) * srcH), y0 + 1, srcH);
-        return (x0, y0, x1, y1);
-    }
+        => RequiredSourceBounds(srcW, srcH, cal, roi);
 
     /// <summary>
     /// Render the patch. Returns the image plus the REALISED rectangle — the request is rounded
@@ -113,10 +109,7 @@ public static class RegionRender
                                                           bool negative = false,
                                                           double[]? negativeWb = null)
     {
-        // The negative path reads the frame in its own coordinates, so hand it the whole buffer
-        // rather than the geometry-derived slice RequiredSourceBounds computes for the positive.
-        if (negative) return RenderNegative(full, 0, 0, full.Width, full.Height, cal, roi, negativeWb);
-
+        // No negative special case: both paths share the geometry, so both want the same slice.
         var b = RequiredSourceBounds(full.Width, full.Height, cal, roi);
         int sw = b.X1 - b.X0, sh = b.Y1 - b.Y0;
         var slice = new ImageBuffer(sw, sh);
@@ -137,8 +130,9 @@ public static class RegionRender
     /// <param name="frameH">Full frame height.</param>
     /// <param name="negative">
     /// Render the UN-INVERTED negative instead of the finished positive — what the film-base
-    /// sampling view shows. Hands off to <see cref="RenderNegative"/>, which applies the step-4
-    /// conversion and nothing else; see there for why not even geometry runs.
+    /// sampling view shows. Takes the SAME geometry (orientation → straighten → crop) as the
+    /// positive, so the two are the same rectangle of the same frame; only the photometry differs,
+    /// dropping everything from lens corrections through Stage 2 and keeping the step-4 encode.
     /// </param>
     /// <param name="negativeWb">
     /// Green-normalised display white balance for the negative path (<see cref="RawDecode.CameraWhiteBalance"/>),
@@ -149,9 +143,6 @@ public static class RegionRender
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
         FrameParams cal, Roi roi, bool negative = false, double[]? negativeWb = null)
     {
-        if (negative)
-            return RenderNegative(source, sourceX0, sourceY0, frameW, frameH, cal, roi, negativeWb);
-
         var (rect, realised) = Realise(frameW, frameH, cal, roi);
         var b = SourceBounds(frameW, frameH, cal, rect);
 
@@ -164,6 +155,33 @@ public static class RegionRender
             int sy = b.Y0 + y - sourceY0;
             int sx = b.X0 - sourceX0;
             Array.Copy(source.Data, (sy * source.Width + sx) * 3, slice.Data, y * sw * 3, sw * 3);
+        }
+
+        // ── The NEGATIVE view: geometry only, no photometry ──────────────────────
+        // Everything from here to Stage 2 is what turns film into a picture — lens corrections,
+        // the input transform, decouple, the inversion itself. The film-base view exists to show
+        // the frame BEFORE any of that, so it skips straight to the geometry map and the step-4
+        // encode. What it does NOT skip any more is the geometry: this patch has to land on a
+        // preview that is now framed exactly like the positive, and a shortcut here is a patch
+        // that jumps when the user zooms in.
+        if (negative)
+        {
+            ImageBuffer negOut = MapGeometry(slice, b.X0, b.Y0, frameW, frameH, cal, rect);
+            // The camera's own white balance, for VIEWING ONLY — same gains, same place in the
+            // chain (scene-linear, before the encode) as ShowNegativeView. Without it a UniWB
+            // negative reads green and the orange film base this view exists to point at does not
+            // look orange. The samplers are unaffected: they read the UniWB preview buffer, never
+            // these pixels.
+            NegativeView.ApplyWhiteBalance(negOut.Data, negativeWb);
+            // PLAIN step 4 — never the roll's print-film emulation, even when one is selected.
+            // This patch is un-inverted film, and a print stock characterises how a finished
+            // POSITIVE prints; running the negative through it renders a look over the very pixels
+            // the user opened this view to sample. It must also match ShowNegativeView, which
+            // composes the whole-frame version of this picture the same plain way — the patch and
+            // the preview underneath it are the same image at two resolutions, so a difference
+            // here shows up as the patch flashing a different colour wherever the user zooms.
+            ColorPipeline.ToOutputSpace(negOut.Data, cal.ResolvedOutputSpace);
+            return (negOut, realised);
         }
 
         var region = new FrameRegion(b.X0, b.Y0, frameW, frameH);
@@ -200,98 +218,6 @@ public static class RegionRender
         if (cal.OutputIntent == OutputIntent.Basic)
             Stage2.ApplyChain(outImg.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return (outImg, realised);
-    }
-
-    /// <summary>
-    /// A displayed-space (oriented) ROI expressed against the RAW frame's axes.
-    ///
-    /// The negative view applies orientation and nothing else, so this is the whole of the inverse
-    /// map: undo the flips, then the quarter turns — the reverse of the forward order, which runs
-    /// turns first and flips after. A quarter turn also swaps which normalised axis is which,
-    /// hence the W/H exchange on each step.
-    /// </summary>
-    public static Roi UnorientRoi(Roi roi, FrameParams cal)
-    {
-        if (cal.FlipV) roi = roi with { Y = 1.0 - roi.Y - roi.H };
-        if (cal.FlipH) roi = roi with { X = 1.0 - roi.X - roi.W };
-        for (int i = 0; i < (((cal.QuarterTurns % 4) + 4) % 4); i++)
-            roi = new Roi(roi.Y, 1.0 - roi.X - roi.W, roi.H, roi.W);   // undo one CW turn
-        return roi;
-    }
-
-    /// <summary>The inverse of <see cref="UnorientRoi"/>: a raw-frame ROI forward into the
-    /// displayed (oriented) space the caller blits against. One CW turn maps (u,v) → (1-v, u),
-    /// matching <see cref="Geometry.ApplyOrientation"/>'s pixel remap.</summary>
-    private static Roi OrientRoi(Roi roi, FrameParams cal)
-    {
-        for (int i = 0; i < (((cal.QuarterTurns % 4) + 4) % 4); i++)
-            roi = new Roi(1.0 - roi.Y - roi.H, roi.X, roi.H, roi.W);   // one turn CW
-        if (cal.FlipH) roi = roi with { X = 1.0 - roi.X - roi.W };
-        if (cal.FlipV) roi = roi with { Y = 1.0 - roi.Y - roi.H };
-        return roi;
-    }
-
-    /// <summary>
-    /// The patch for the FILM-BASE SAMPLING view: a slice of the raw negative, oriented to match
-    /// the view, converted to the output space, and nothing more.
-    ///
-    /// Deliberately shares none of the positive path's machinery, because it has to match a view
-    /// that shares none of the pipeline. <c>ShowNegativeView</c> takes the PREVIEW BUFFER — the
-    /// bare decode — turns it by the frame's orientation and runs it through
-    /// <see cref="ColorPipeline.ToOutputSpace"/>. Everything else (distortion, LCC, vignette,
-    /// input transform, decouple, inversion, straighten, crop, Stage 2) lives inside
-    /// <see cref="Pipeline.ProcessFrame"/> and has therefore not run.
-    ///
-    /// ORIENTATION is the one piece of geometry that DOES apply, so the ROI arrives in displayed
-    /// coordinates like every other patch and is mapped back with <see cref="UnorientRoi"/> to
-    /// find the raw pixels. It cannot go through <see cref="Realise"/>, though: that also applies
-    /// the straighten rotation and the crop, neither of which the picture underneath has been
-    /// through.
-    /// </summary>
-    private static (ImageBuffer Image, Roi Realised) RenderNegative(
-        ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
-        FrameParams cal, Roi roi, double[]? negativeWb = null)
-    {
-        Roi raw = UnorientRoi(roi, cal);
-        int x0 = Math.Clamp((int)Math.Floor(raw.X * frameW), 0, frameW - 1);
-        int y0 = Math.Clamp((int)Math.Floor(raw.Y * frameH), 0, frameH - 1);
-        int x1 = Math.Clamp((int)Math.Ceiling((raw.X + raw.W) * frameW), x0 + 1, frameW);
-        int y1 = Math.Clamp((int)Math.Ceiling((raw.Y + raw.H) * frameH), y0 + 1, frameH);
-
-        // Clamp to what the caller's slice actually covers — a region decode is only guaranteed
-        // to hold the bounds that were asked for, and reading past it would walk off the buffer.
-        x0 = Math.Max(x0, sourceX0);
-        y0 = Math.Max(y0, sourceY0);
-        x1 = Math.Min(x1, sourceX0 + source.Width);
-        y1 = Math.Min(y1, sourceY0 + source.Height);
-        if (x1 <= x0 || y1 <= y0) return (new ImageBuffer(1, 1), new Roi(0, 0, 1, 1));
-
-        int w = x1 - x0, h = y1 - y0;
-        var outImg = new ImageBuffer(w, h);
-        for (int y = 0; y < h; y++)
-            Array.Copy(source.Data, ((y0 + y - sourceY0) * source.Width + (x0 - sourceX0)) * 3,
-                       outImg.Data, y * w * 3, w * 3);
-
-        // Turn the patch the same way the view was turned, and report the realised rectangle in
-        // the displayed space the caller blits into. Rounding to whole RAW pixels above and
-        // mapping the result forward keeps the two consistent — reporting the requested ROI
-        // instead would land the patch fractionally off and shimmer against the preview.
-        outImg = Geometry.ApplyOrientation(outImg, cal.QuarterTurns, cal.FlipH, cal.FlipV);
-        // The camera's own white balance, for VIEWING ONLY — same gains, same place in the chain
-        // (scene-linear, before the encode) as ShowNegativeView. Without it a UniWB negative reads
-        // green and the orange film base this view exists to point at does not look orange. The
-        // samplers are unaffected: they read the UniWB preview buffer, never these pixels.
-        NegativeView.ApplyWhiteBalance(outImg.Data, negativeWb);
-        // PLAIN step 4 — never the roll's print-film emulation, even when one is selected. This
-        // patch is un-inverted film, and a print stock characterises how a finished POSITIVE
-        // prints; running the negative through it renders a look over the very pixels the user
-        // opened this view to sample. It must also match ShowNegativeView, which composes the
-        // whole-frame version of this picture the same plain way — the patch and the preview
-        // underneath it are the same image at two resolutions, so a difference here shows up as
-        // the patch flashing a different colour wherever the user zooms.
-        ColorPipeline.ToOutputSpace(outImg.Data, cal.ResolvedOutputSpace);
-        return (outImg, OrientRoi(new Roi((double)x0 / frameW, (double)y0 / frameH,
-                                          (double)w / frameW, (double)h / frameH), cal));
     }
 
     // ── request → whole displayed pixels ─────────────────────────────────────────

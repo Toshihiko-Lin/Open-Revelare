@@ -802,7 +802,18 @@ public partial class MainWindow : Window
         // place 回车/Esc are stated. ApplyBannerVisibility owns the buttons.
         _bannerHintDismissed = false;
         ApplyBannerVisibility(crop);
-        if (useNegative) { Vm?.ShowNegativeView(); _negativeShown = true; }
+        if (useNegative)
+        {
+            Vm?.ShowNegativeView();
+            _negativeShown = true;
+            // The negative is now framed exactly like the positive, crop included — which is what
+            // makes the toggle stop jumping, and which also means a crop has taken the film base
+            // out of the picture, since removing the margins is what cropping IS. The banner just
+            // told the user to aim at the frame's edges, so say where they went rather than
+            // leaving them hunting for film base that is no longer on screen.
+            if (Vm?.CurrentCrop is not null)
+                BannerText.Text += Loc.T("（当前画面已裁切，片基可能已被裁掉——如找不到请先取消裁切。）");
+        }
         if (crop)
         {
             // Show the whole frame while the crop is being placed, and start from the crop

@@ -1311,6 +1311,11 @@ public partial class MainViewModel : ViewModelBase
     /// and inverted — over the negative it was meant to be sampled from. The patch now renders in
     /// the same un-inverted form as the view around it (RegionRender's negative mode), so
     /// pixel-peeping a film-base sample shows real grain instead of the wrong picture.
+    ///
+    /// The two views differ ONLY in photometry. Framing — orientation, straighten, crop — is
+    /// shared, so the toggle changes what the pixels mean and never where they are; the zoom and
+    /// pan ride on one transform over the whole preview stack and stay put across it. See
+    /// <see cref="GeometryForNegative"/> for the chain and what it costs.
     /// </summary>
     private bool _showingNegative;
 
@@ -1482,12 +1487,13 @@ public partial class MainViewModel : ViewModelBase
         // space, which is the space BitmapConvert is expecting — applying a bare sRGB gamma here
         // would encode the right curve onto the wrong primaries.
         var disp = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
-        // ORIENTED to match the positive that was just on screen. Everything else in the pipeline
-        // is deliberately skipped here (that is the point of the view), but orientation is not a
-        // photometric step — it is which way up the picture is, and the user has already answered
-        // that. Leaving it off meant turning a sideways scan upright and then having the negative
-        // flop back onto its side the moment the film-base tool was armed.
-        disp = OrientForNegative(disp);
+        // FRAMED exactly like the positive that was just on screen. Everything PHOTOMETRIC in the
+        // pipeline is deliberately skipped here (that is the point of the view), but geometry is
+        // not photometry — it is which part of the scan the user is looking at, and they have
+        // already answered that. Skipping it meant the picture jumped on every toggle: a rotated
+        // scan flopped back onto its side, a straightened one went crooked again, and a cropped
+        // one snapped out to the whole strip, all under a zoom and pan that stayed put.
+        disp = GeometryForNegative(disp);
         // The camera's own white balance, applied for VIEWING ONLY. The buffer underneath stays
         // UniWB — every Stage-1 sampler reads _previewLinear, not this copy — but a UniWB negative
         // shown raw reads GREEN, because a Bayer sensor's green channel has about twice the
@@ -1505,27 +1511,55 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// The orientation half of the geometry chain, applied to a negative-view buffer.
+    /// The WHOLE geometry chain — orientation → straighten → crop — applied to a negative-view
+    /// buffer, in the order and with the operators <see cref="Pipeline.ProcessFrame"/> uses.
     ///
-    /// Quarter turns and flips only — NOT straighten, and NOT crop. The straighten angle would
-    /// bring in fill corners and a crop would hide the very film base being sampled (it lives in
-    /// the frame's margins), and neither is needed to answer "which way up is this". Keeping the
-    /// buffer's content complete is also what lets <see cref="UnorientNegativeSampleRect"/> be a pure
-    /// coordinate map: the pixels are permuted, never resampled or dropped.
+    /// The point is that the negative and the positive are the same rectangle of the same frame:
+    /// toggling between them changes what the pixels MEAN, never where they are. The view keeps
+    /// the zoom and pan across the toggle (they live on one transform over the whole preview
+    /// stack), so any framing difference reads as the picture jumping under a stationary viewport.
+    ///
+    /// The crop comes from <see cref="ForPreview"/>-shaped params rather than <c>_cropRect</c>
+    /// directly, for the reason that method exists: on a split scan <c>_previewLinear</c> is
+    /// already the margin box, so the stored rect is measured against the wrong buffer. While the
+    /// crop tool is open the rect is suppressed there, which is what puts the slack back on screen
+    /// — and that suppression has to reach this view too, or arming a sampler mid-crop would show
+    /// a tighter negative than the positive behind it.
+    ///
+    /// COST OF DOING THIS: on a cropped frame the film base is gone from the picture, because
+    /// cropping is the step that removes it. Sampling it means taking the crop off first. That is
+    /// the deliberate trade for the two views agreeing — a negative framed differently from the
+    /// positive is wrong every time it is on screen, while the film base is sampled once per roll
+    /// and normally before any crop exists.
     /// </summary>
-    private ImageBuffer OrientForNegative(ImageBuffer img)
-        => _quarterTurns % 4 == 0 && !_flipH && !_flipV
-               ? img
-               : Geometry.ApplyOrientation(img, _quarterTurns, _flipH, _flipV);
+    private ImageBuffer GeometryForNegative(ImageBuffer img)
+    {
+        FrameParams p = ForPreview(BuildParams());
+        if (p.QuarterTurns % 4 != 0 || p.FlipH || p.FlipV)
+            img = Geometry.ApplyOrientation(img, p.QuarterTurns, p.FlipH, p.FlipV);
+        if (p.Rotation != 0.0)
+            img = Geometry.ApplyRotation(img, p.Rotation);
+        if (p.CropRect is { } c)
+            img = Geometry.ApplyCrop(img, c);
+        return img;
+    }
 
     /// <summary>
-    /// A rect drawn on the ORIENTED negative view, mapped back into the raw preview buffer's own
-    /// axes — which is where every Stage-1 sampler reads.
+    /// A rect drawn on the negative view, mapped back into the raw preview buffer's own axes —
+    /// which is where every Stage-1 sampler reads.
     ///
-    /// <see cref="ShowNegativeView"/> turns the pixels on screen; the samplers do not turn with
-    /// them, because <see cref="Stage1Source"/> works on <see cref="_previewLinear"/> as decoded.
-    /// So the selection has to come back the other way, or picking the orange base in the corner
-    /// of an upright scan would average a rectangle from the opposite corner of the strip.
+    /// <see cref="ShowNegativeView"/> puts the frame on screen through the WHOLE geometry chain
+    /// (see <see cref="GeometryForNegative"/>); the samplers do not follow it, because
+    /// <see cref="Stage1Source"/> works on <see cref="_previewLinear"/> as decoded. So the
+    /// selection has to come back the other way — undo the crop, then the straighten, then the
+    /// orientation, the reverse of the forward order — or picking the orange base in the corner of
+    /// an upright scan would average a rectangle from the opposite corner of the strip.
+    ///
+    /// The straighten step maps a rect to a rotated QUAD, and what comes back is that quad's
+    /// axis-aligned bounding box. Exact would need the samplers to take a polygon; the error is a
+    /// thin wedge at the corners, which on the small uniform patches these tools ask for (bare
+    /// film base, the darkest highlight) moves a mean by nothing measurable. Straighten angles are
+    /// clamped to ±<see cref="StraightenLimit"/>° anyway, so the wedge stays small.
     ///
     /// CALLED FROM THE VIEW, at pointer-release, and deliberately NOT from inside each sampler:
     /// the release handler runs <c>ExitMode</c> — which restores the positive view and clears
@@ -1533,17 +1567,61 @@ public partial class MainViewModel : ViewModelBase
     /// inside the sampler always sees false and skips the turn. The question "was this drawn on
     /// the negative?" can only be asked while that view is still up.
     ///
-    /// A no-op in the positive view: those rects are normalised against the displayed frame the
-    /// pipeline itself produced, so they need no correction.
+    /// A no-op in the positive view: those rects are already corrected on that path.
     /// </summary>
     public (double X, double Y, double W, double H) UnorientNegativeSampleRect(
         (double X, double Y, double W, double H) rect)
     {
         if (!_showingNegative) return rect;
-        if (_flipV) rect = FlipCropV(rect);
-        if (_flipH) rect = FlipCropH(rect);
-        for (int i = 0; i < (((_quarterTurns % 4) + 4) % 4); i++) rect = RotateCropCcw(rect);
+        FrameParams p = ForPreview(BuildParams());
+
+        // ── undo the crop: the rect is normalised against the CROPPED picture ────
+        if (p.CropRect is { } c)
+            rect = (c.X + rect.X * c.W, c.Y + rect.Y * c.H, rect.W * c.W, rect.H * c.H);
+
+        // ── undo the straighten, about the ORIENTED frame's centre ──────────────
+        if (p.Rotation != 0.0 && CropFrameSize is { } size)
+            rect = UnrotateRect(rect, p.Rotation, size.W, size.H);
+
+        // ── undo the orientation ────────────────────────────────────────────────
+        if (p.FlipV) rect = FlipCropV(rect);
+        if (p.FlipH) rect = FlipCropH(rect);
+        for (int i = 0; i < (((p.QuarterTurns % 4) + 4) % 4); i++) rect = RotateCropCcw(rect);
         return rect;
+    }
+
+    /// <summary>
+    /// A normalised rect on the STRAIGHTENED frame, back onto the frame before straightening —
+    /// the bounding box of the rotated quad, clamped to [0,1].
+    ///
+    /// Uses <see cref="Geometry.ApplyRotation"/>'s own output→input map, sign flip and all (it
+    /// rotates in the (row, col) plane, not (x, y) — see the trap noted there), so this and the
+    /// pixels agree. Aspect enters through <paramref name="w"/>/<paramref name="h"/>: normalised
+    /// coordinates are anisotropic, and rotating in them without de-normalising first skews the
+    /// rect on any frame that is not square.
+    /// </summary>
+    private static (double X, double Y, double W, double H) UnrotateRect(
+        (double X, double Y, double W, double H) r, double degrees, int w, int h)
+    {
+        double cx = (w - 1) / 2.0, cy = (h - 1) / 2.0;
+        double th = degrees * Math.PI / 180.0;
+        double cos = Math.Cos(th), sin = Math.Sin(th);
+
+        double minX = double.MaxValue, minY = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue;
+        foreach (var (u, v) in new[] { (r.X, r.Y), (r.X + r.W, r.Y),
+                                       (r.X, r.Y + r.H), (r.X + r.W, r.Y + r.H) })
+        {
+            double dx = u * w - cx, dy = v * h - cy;
+            double xi = cx + dx * cos + dy * sin;
+            double yi = cy - dx * sin + dy * cos;
+            if (xi < minX) minX = xi; if (xi > maxX) maxX = xi;
+            if (yi < minY) minY = yi; if (yi > maxY) maxY = yi;
+        }
+
+        double x0 = Math.Clamp(minX / w, 0.0, 1.0), y0 = Math.Clamp(minY / h, 0.0, 1.0);
+        double x1 = Math.Clamp(maxX / w, 0.0, 1.0), y1 = Math.Clamp(maxY / h, 0.0, 1.0);
+        return (x0, y0, Math.Max(x1 - x0, 1e-6), Math.Max(y1 - y0, 1e-6));
     }
 
     public void ShowPositiveView()
@@ -5399,9 +5477,10 @@ public partial class MainViewModel : ViewModelBase
             var result = await Task.Run(() =>
             {
                 ImageBuffer img; RegionRender.Roi realised;
-                // Orientation-only bounds for the negative — that view applies no straighten and
-                // no crop, so the fully-geometried rectangle would reserve (and return) the wrong
-                // part of the file.
+                // Same bounds either way — the two views now share a geometry chain, so they
+                // read the same rectangle of the same file. Kept as the named call because it
+                // states which view is being asked for, and because getting this wrong is silent:
+                // a region decode sized off the other view hands back a patch of somewhere else.
                 var need = negative
                     ? RegionRender.RequiredSourceBoundsNegative(frameW, frameH, p, roi)
                     : RegionRender.RequiredSourceBounds(frameW, frameH, p, roi);
@@ -5527,9 +5606,9 @@ public partial class MainViewModel : ViewModelBase
         if (!_restoring) MarkEdit();   // a real, user-driven param change → undo-committable
         // The negative view owns the screen while it is up, so a render must not push a positive
         // into it — rotating mid-sampling did exactly that, replacing the negative being sampled
-        // with the finished picture. Orientation is the one parameter the view does follow, so it
-        // is re-derived here rather than skipped; everything else the view ignores anyway, which
-        // makes this cheap and correct for both.
+        // with the finished picture. It is re-derived rather than skipped because the view follows
+        // the whole GEOMETRY chain: a turn, a straighten or a crop applied while it is up has to
+        // move the negative with it, or the two views stop agreeing the moment one is toggled.
         if (_showingNegative) { RefreshNegativeView(); return; }
         if (_interacting) { RenderInteractive(); return; }
         _renderCts?.Cancel();
