@@ -46,10 +46,12 @@ public static class WhiteBalance
         var outImg = new ImageBuffer(image.Width, image.Height);
         float g0 = (float)gains[0], g1 = (float)gains[1], g2 = (float)gains[2];
         float[] s = image.Data, o = outImg.Data;
-        Parallel.For(0, image.PixelCount, p =>
+        ParallelSweep.OverPixels(image.PixelCount, (from, to) =>
         {
-            int i = p * 3;
-            o[i] = s[i] * g0; o[i + 1] = s[i + 1] * g1; o[i + 2] = s[i + 2] * g2;
+            for (int i = from; i < to; i += 3)
+            {
+                o[i] = s[i] * g0; o[i + 1] = s[i + 1] * g1; o[i + 2] = s[i + 2] * g2;
+            }
         });
         return outImg;
     }

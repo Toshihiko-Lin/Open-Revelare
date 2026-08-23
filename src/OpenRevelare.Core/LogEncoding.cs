@@ -107,12 +107,15 @@ public static class LogEncoding
         const float whiteNorm = (float)(WhiteCode / CodeFullScale);
         const float blackNorm = (float)(BlackCode / CodeFullScale);
 
-        Parallel.For(0, data.Length, i =>
+        ParallelSweep.Over(data.Length, (from, to) =>
         {
-            float v = data[i];
-            data[i] = v > 0.0f
-                ? MathF.Max(whiteNorm + MathF.Log10(v) * invDensityPerCode, blackNorm)
-                : blackNorm;
+            for (int i = from; i < to; i++)
+            {
+                float v = data[i];
+                data[i] = v > 0.0f
+                    ? MathF.Max(whiteNorm + MathF.Log10(v) * invDensityPerCode, blackNorm)
+                    : blackNorm;
+            }
         });
     }
 
@@ -130,7 +133,10 @@ public static class LogEncoding
         const float densityPerCodeScaled = (float)(DensityPerCode * CodeFullScale);
         const float whiteNorm = (float)(WhiteCode / CodeFullScale);
 
-        Parallel.For(0, data.Length, i =>
-            data[i] = MathF.Pow(10.0f, (data[i] - whiteNorm) * densityPerCodeScaled));
+        ParallelSweep.Over(data.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++)
+                data[i] = MathF.Pow(10.0f, (data[i] - whiteNorm) * densityPerCodeScaled);
+        });
     }
 }

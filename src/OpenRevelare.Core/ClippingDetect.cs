@@ -15,12 +15,15 @@ public static class ClippingDetect
         var sh = new bool[pixelCount];
         var hi = new bool[pixelCount];
 
-        Parallel.For(0, pixelCount, i =>
+        ParallelSweep.Over(pixelCount, (from, to) =>
         {
-            int p = i * 3;
-            float luma = 0.2126f * data[p] + 0.7152f * data[p + 1] + 0.0722f * data[p + 2];
-            if (luma <= shadowThreshold) sh[i] = true;
-            else if (luma >= highlightThreshold) hi[i] = true;
+            for (int i = from; i < to; i++)
+            {
+                int p = i * 3;
+                float luma = 0.2126f * data[p] + 0.7152f * data[p + 1] + 0.0722f * data[p + 2];
+                if (luma <= shadowThreshold) sh[i] = true;
+                else if (luma >= highlightThreshold) hi[i] = true;
+            }
         });
 
         shadows = sh;

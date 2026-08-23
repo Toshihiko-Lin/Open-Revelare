@@ -206,10 +206,13 @@ public static class ColorPipeline
         float blackLin = MathF.Pow(10.0f, (blackNorm - white) * scale);
         float span = 1.0f - blackLin;
 
-        Parallel.For(0, data.Length, i =>
+        ParallelSweep.Over(data.Length, (from, to) =>
         {
-            float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-            data[i] = Shoulder(Toe(MathF.Max((lin - blackLin) / span, 0.0f)));
+            for (int i = from; i < to; i++)
+            {
+                float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
+                data[i] = Shoulder(Toe(MathF.Max((lin - blackLin) / span, 0.0f)));
+            }
         });
     }
 

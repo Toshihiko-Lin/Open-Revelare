@@ -40,9 +40,10 @@ public static class Decouple
         double m20 = m[2, 0], m21 = m[2, 1], m22 = m[2, 2];
 
         int n = data.Length / 3;
-        Parallel.For(0, n, p =>
+        ParallelSweep.OverPixels(n, (from, to) =>
         {
-            int i = p * 3;
+          for (int i = from; i < to; i += 3)
+          {
             double o0 = data[i], o1 = data[i + 1], o2 = data[i + 2];   // t_orig
             double t0 = m00 * o0 + m01 * o1 + m02 * o2;                 // t_dec = t_orig @ Mᵀ
             double t1 = m10 * o0 + m11 * o1 + m12 * o2;
@@ -61,6 +62,7 @@ public static class Decouple
             }
 
             data[i] = (float)t0; data[i + 1] = (float)t1; data[i + 2] = (float)t2;
+          }
         });
     }
 
@@ -86,9 +88,10 @@ public static class Decouple
         double tb1 = Math.Max(Percentile99(data, 1, n), 1e-6);
         double tb2 = Math.Max(Percentile99(data, 2, n), 1e-6);
 
-        Parallel.For(0, n, p =>
+        ParallelSweep.OverPixels(n, (from, to) =>
         {
-            int i = p * 3;
+          for (int i = from; i < to; i += 3)
+          {
             double d0 = FrameParams.DensityOf(data[i]     / tb0);
             double d1 = FrameParams.DensityOf(data[i + 1] / tb1);
             double d2 = FrameParams.DensityOf(data[i + 2] / tb2);
@@ -105,6 +108,7 @@ public static class Decouple
             data[i]     = (float)(Math.Pow(10.0, -(dMean + n0)) * tb0);
             data[i + 1] = (float)(Math.Pow(10.0, -(dMean + n1)) * tb1);
             data[i + 2] = (float)(Math.Pow(10.0, -(dMean + n2)) * tb2);
+          }
         });
     }
 

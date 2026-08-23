@@ -26,7 +26,12 @@ public static class Geometry
         var outImg = new ImageBuffer(h, w); // dims swap
         float[] src = img.Data, dst = outImg.Data;
         // dst[c][h-1-r] = src[r][c]  → dst dims: width=h, height=w
-        for (int r = 0; r < h; r++)
+        // Row-parallel over the SOURCE: each source row scatters into its own destination column,
+        // so no two workers touch the same output element and the result is identical to the
+        // serial walk. Worth doing — a quarter turn on a 24 MP frame is 72 M scattered writes,
+        // and this was the one geometry op still running on a single core.
+        Parallel.For(0, h, r =>
+        {
             for (int c = 0; c < w; c++)
             {
                 int s = (r * w + c) * 3;
@@ -34,6 +39,7 @@ public static class Geometry
                 int dstd = (dr * h + dc) * 3;
                 dst[dstd] = src[s]; dst[dstd + 1] = src[s + 1]; dst[dstd + 2] = src[s + 2];
             }
+        });
         return outImg.InheritSourceFrom(img);
     }
 
@@ -42,13 +48,15 @@ public static class Geometry
         int w = img.Width, h = img.Height;
         var outImg = new ImageBuffer(w, h);
         float[] src = img.Data, dst = outImg.Data;
-        for (int y = 0; y < h; y++)
+        Parallel.For(0, h, y =>
+        {
             for (int x = 0; x < w; x++)
             {
                 int s = (y * w + x) * 3;
                 int d = (y * w + (w - 1 - x)) * 3;
                 dst[d] = src[s]; dst[d + 1] = src[s + 1]; dst[d + 2] = src[s + 2];
             }
+        });
         return outImg.InheritSourceFrom(img);
     }
 

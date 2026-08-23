@@ -157,122 +157,124 @@ public static class Stage2
         bool lutExit = encodeExit && UsesSrgbCurve(output);
         float[]? srgbLut = lutExit ? Srgb.ForwardLut : null;
 
-        Parallel.For(0, d.Length / 3, p =>
+        ParallelSweep.OverPixels(d.Length / 3, (from, to) =>
         {
-            int b = p * 3;
-            float r = d[b], g = d[b + 1], bl = d[b + 2];
-
-            // 1 — white balance gains
-            if (doWb) { r *= wb0; g *= wb1; bl *= wb2; }
-
-            // 2 — exposure (clamps negatives, as the standalone op did)
-            if (doExposure)
+            for (int b = from; b < to; b += 3)
             {
-                r *= expGain; g *= expGain; bl *= expGain;
-                if (r < 0.0f) r = 0.0f;
-                if (g < 0.0f) g = 0.0f;
-                if (bl < 0.0f) bl = 0.0f;
-            }
+                float r = d[b], g = d[b + 1], bl = d[b + 2];
 
-            // 3 — levels
-            if (doLevels)
-            {
-                r = (r - black) * lvlScale;
-                g = (g - black) * lvlScale;
-                bl = (bl - black) * lvlScale;
-            }
+                // 1 — white balance gains
+                if (doWb) { r *= wb0; g *= wb1; bl *= wb2; }
 
-            // 4 — contrast about 0.5
-            if (doContrast)
-            {
-                r = (r - 0.5f) * contrastGain + 0.5f;
-                g = (g - 0.5f) * contrastGain + 0.5f;
-                bl = (bl - 0.5f) * contrastGain + 0.5f;
-            }
-
-            // 5 — highlights / shadows (luma-driven, hue preserving)
-            if (doHs)
-            {
-                float lum = luma.Of(r, g, bl);
-                float lumaC = lum < 0.0f ? 0.0f : (lum > 1.0f ? 1.0f : lum);
-                float outv = lumaC;
-                if (sh != 0.0f)
+                // 2 — exposure (clamps negatives, as the standalone op did)
+                if (doExposure)
                 {
-                    float c = Math.Clamp(outv, 0.0f, 1.0f);
-                    outv = (1.0f - shAmt) * outv + shAmt * (float)Math.Pow(c, shGamma);
+                    r *= expGain; g *= expGain; bl *= expGain;
+                    if (r < 0.0f) r = 0.0f;
+                    if (g < 0.0f) g = 0.0f;
+                    if (bl < 0.0f) bl = 0.0f;
                 }
-                if (hi != 0.0f)
+
+                // 3 — levels
+                if (doLevels)
                 {
-                    float c = Math.Clamp(outv, 0.0f, 1.0f);
-                    outv = (1.0f - hiAmt) * outv + hiAmt * (1.0f - (float)Math.Pow(1.0f - c, hiGamma));
+                    r = (r - black) * lvlScale;
+                    g = (g - black) * lvlScale;
+                    bl = (bl - black) * lvlScale;
                 }
-                float scale = lumaC > 1e-6f ? outv / Math.Max(lumaC, 1e-6f) : 1.0f;
-                r *= scale; g *= scale; bl *= scale;
-            }
 
-            // 6 — tone curves, in gamma-2.2 encoded space.
-            //
-            // Values outside [0,1] are carried THROUGH rather than truncated. The curve is only
-            // defined on [0,1], so out-of-range samples keep their original value and rejoin
-            // afterwards; clamping them here (as this did) destroyed exactly the headroom a
-            // wider working space exists to provide — an ACEScg red lands at 1.23 in sRGB terms,
-            // and truncating it before the curve throws that away permanently.
-            //
-            // Negatives are still floored: Pow of a negative base is NaN, and a negative here
-            // means the colour left the gamut entirely, which the output stage handles.
-            if (doCurves)
-            {
-                float kr = r > 1.0f ? r : 0.0f, kg = g > 1.0f ? g : 0.0f, kb = bl > 1.0f ? bl : 0.0f;
-                float cr = (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
-                float cg = (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
-                float cb = (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
-
-                if (lutM != null)
+                // 4 — contrast about 0.5
+                if (doContrast)
                 {
-                    if (preserveHue)
+                    r = (r - 0.5f) * contrastGain + 0.5f;
+                    g = (g - 0.5f) * contrastGain + 0.5f;
+                    bl = (bl - 0.5f) * contrastGain + 0.5f;
+                }
+
+                // 5 — highlights / shadows (luma-driven, hue preserving)
+                if (doHs)
+                {
+                    float lum = luma.Of(r, g, bl);
+                    float lumaC = lum < 0.0f ? 0.0f : (lum > 1.0f ? 1.0f : lum);
+                    float outv = lumaC;
+                    if (sh != 0.0f)
                     {
-                        float lum = luma.Of(cr, cg, cb);
-                        float lumaOut = SampleLut(lutM, lum);
-                        float scale = lum > 1e-6f ? lumaOut / Math.Max(lum, 1e-6f) : 1.0f;
-                        cr = Math.Clamp(cr * scale, 0.0f, 1.0f);
-                        cg = Math.Clamp(cg * scale, 0.0f, 1.0f);
-                        cb = Math.Clamp(cb * scale, 0.0f, 1.0f);
+                        float c = Math.Clamp(outv, 0.0f, 1.0f);
+                        outv = (1.0f - shAmt) * outv + shAmt * (float)Math.Pow(c, shGamma);
                     }
-                    else
+                    if (hi != 0.0f)
                     {
-                        cr = SampleLut(lutM, cr); cg = SampleLut(lutM, cg); cb = SampleLut(lutM, cb);
+                        float c = Math.Clamp(outv, 0.0f, 1.0f);
+                        outv = (1.0f - hiAmt) * outv + hiAmt * (1.0f - (float)Math.Pow(1.0f - c, hiGamma));
                     }
+                    float scale = lumaC > 1e-6f ? outv / Math.Max(lumaC, 1e-6f) : 1.0f;
+                    r *= scale; g *= scale; bl *= scale;
                 }
-                if (lutR != null) cr = SampleLut(lutR, cr);
-                if (lutG != null) cg = SampleLut(lutG, cg);
-                if (lutB != null) cb = SampleLut(lutB, cb);
 
-                // Restore anything that was above 1.0 on the way in: the curve had nothing to
-                // say about it, so it passes through untouched rather than being flattened.
-                r = kr > 0.0f ? kr : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
-                g = kg > 0.0f ? kg : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
-                bl = kb > 0.0f ? kb : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
+                // 6 — tone curves, in gamma-2.2 encoded space.
+                //
+                // Values outside [0,1] are carried THROUGH rather than truncated. The curve is only
+                // defined on [0,1], so out-of-range samples keep their original value and rejoin
+                // afterwards; clamping them here (as this did) destroyed exactly the headroom a
+                // wider working space exists to provide — an ACEScg red lands at 1.23 in sRGB terms,
+                // and truncating it before the curve throws that away permanently.
+                //
+                // Negatives are still floored: Pow of a negative base is NaN, and a negative here
+                // means the colour left the gamut entirely, which the output stage handles.
+                if (doCurves)
+                {
+                    float kr = r > 1.0f ? r : 0.0f, kg = g > 1.0f ? g : 0.0f, kb = bl > 1.0f ? bl : 0.0f;
+                    float cr = (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
+                    float cg = (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
+                    float cb = (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
+
+                    if (lutM != null)
+                    {
+                        if (preserveHue)
+                        {
+                            float lum = luma.Of(cr, cg, cb);
+                            float lumaOut = SampleLut(lutM, lum);
+                            float scale = lum > 1e-6f ? lumaOut / Math.Max(lum, 1e-6f) : 1.0f;
+                            cr = Math.Clamp(cr * scale, 0.0f, 1.0f);
+                            cg = Math.Clamp(cg * scale, 0.0f, 1.0f);
+                            cb = Math.Clamp(cb * scale, 0.0f, 1.0f);
+                        }
+                        else
+                        {
+                            cr = SampleLut(lutM, cr); cg = SampleLut(lutM, cg); cb = SampleLut(lutM, cb);
+                        }
+                    }
+                    if (lutR != null) cr = SampleLut(lutR, cr);
+                    if (lutG != null) cg = SampleLut(lutG, cg);
+                    if (lutB != null) cb = SampleLut(lutB, cb);
+
+                    // Restore anything that was above 1.0 on the way in: the curve had nothing to
+                    // say about it, so it passes through untouched rather than being flattened.
+                    r = kr > 0.0f ? kr : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
+                    g = kg > 0.0f ? kg : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
+                    bl = kb > 0.0f ? kb : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
+                }
+
+                // 7 — saturation
+                if (doSaturation)
+                {
+                    float lum = luma.Of(r, g, bl);
+                    r = lum + (r - lum) * satFactor;
+                    g = lum + (g - lum) * satFactor;
+                    bl = lum + (bl - lum) * satFactor;
+                }
+
+                // 8 — output TRC (same shared table Srgb.ApplyForwardInPlace uses), when the
+                // destination is one of the piecewise-curve spaces. Others fall to the sweep below.
+                if (srgbLut != null)
+                {
+                    r = srgbLut[Srgb.LutIndex(r)];
+                    g = srgbLut[Srgb.LutIndex(g)];
+                    bl = srgbLut[Srgb.LutIndex(bl)];
+                }
+
+                d[b] = r; d[b + 1] = g; d[b + 2] = bl;
             }
-
-            // 7 — saturation
-            if (doSaturation)
-            {
-                float lum = luma.Of(r, g, bl);
-                r = lum + (r - lum) * satFactor;
-                g = lum + (g - lum) * satFactor;
-                bl = lum + (bl - lum) * satFactor;
-            }
-
-            // 8 — output TRC (same shared table Srgb.ApplyForwardInPlace uses), when the
-            // destination is one of the piecewise-curve spaces. Others fall to the sweep below.
-            if (srgbLut != null)
-            {
-                r = srgbLut[Srgb.LutIndex(r)];
-                g = srgbLut[Srgb.LutIndex(g)];
-                bl = srgbLut[Srgb.LutIndex(bl)];
-            }
-
-            d[b] = r; d[b + 1] = g; d[b + 2] = bl;
         });
 
         // Power-curve spaces: the exit TRC could not ride along in the fused loop, so it runs here.
@@ -378,15 +380,17 @@ public static class Stage2
 
             float wb0 = (float)cal.WbGains[0], wb1 = (float)cal.WbGains[1], wb2 = (float)cal.WbGains[2];
             float gain = (float)Math.Pow(2.0, cal.ExposureEv);
-            Parallel.For(0, d.Length / 3, p =>
+            ParallelSweep.OverPixels(d.Length / 3, (from, to) =>
             {
-                int b = p * 3;
-                float r = d[b], g = d[b + 1], bl = d[b + 2];
-                if (doWb) { r *= wb0; g *= wb1; bl *= wb2; }
-                if (doExposure) { r *= gain; g *= gain; bl *= gain; }
-                d[b] = r < 0f ? 0f : r;
-                d[b + 1] = g < 0f ? 0f : g;
-                d[b + 2] = bl < 0f ? 0f : bl;
+                for (int b = from; b < to; b += 3)
+                {
+                    float r = d[b], g = d[b + 1], bl = d[b + 2];
+                    if (doWb) { r *= wb0; g *= wb1; bl *= wb2; }
+                    if (doExposure) { r *= gain; g *= gain; bl *= gain; }
+                    d[b] = r < 0f ? 0f : r;
+                    d[b + 1] = g < 0f ? 0f : g;
+                    d[b + 2] = bl < 0f ? 0f : bl;
+                }
             });
 
             OutputRender.Encode(d, output);
@@ -405,7 +409,11 @@ public static class Stage2
         // 0.2 setting, because rotating about mid-grey lifts highlights above white by design.
         // Display-encoded values have no meaning outside [0,1], so this is the correct place to
         // resolve it rather than letting it reach the exporter.
-        Parallel.For(0, d.Length, i => d[i] = d[i] < 0f ? 0f : (d[i] > 1f ? 1f : d[i]));
+        ParallelSweep.Over(d.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++)
+                d[i] = d[i] < 0f ? 0f : (d[i] > 1f ? 1f : d[i]);
+        });
     }
 
     private static float SampleLut(float[] lut, float x)

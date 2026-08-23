@@ -66,21 +66,25 @@ public static class OutputRender
         double[,] toXyz = destination.ToXyz();
         float ly = (float)toXyz[1, 0], lg = (float)toXyz[1, 1], lb = (float)toXyz[1, 2];
 
-        Parallel.For(0, data.Length / 3, i =>
+        bool desaturate = mapping == GamutMapping.Desaturate;
+
+        ParallelSweep.OverPixels(data.Length / 3, (from, to) =>
         {
-            int p = i * 3;
-            float r = data[p], g = data[p + 1], b = data[p + 2];
+            for (int p = from; p < to; p += 3)
+            {
+                float r = data[p], g = data[p + 1], b = data[p + 2];
 
-            float nr = m00 * r + m01 * g + m02 * b;
-            float ng = m10 * r + m11 * g + m12 * b;
-            float nb = m20 * r + m21 * g + m22 * b;
+                float nr = m00 * r + m01 * g + m02 * b;
+                float ng = m10 * r + m11 * g + m12 * b;
+                float nb = m20 * r + m21 * g + m22 * b;
 
-            if (mapping == GamutMapping.Desaturate)
-                Desaturate(ref nr, ref ng, ref nb, ly, lg, lb);
+                if (desaturate)
+                    Desaturate(ref nr, ref ng, ref nb, ly, lg, lb);
 
-            data[p] = Math.Clamp(nr, 0.0f, 1.0f);
-            data[p + 1] = Math.Clamp(ng, 0.0f, 1.0f);
-            data[p + 2] = Math.Clamp(nb, 0.0f, 1.0f);
+                data[p] = Math.Clamp(nr, 0.0f, 1.0f);
+                data[p + 1] = Math.Clamp(ng, 0.0f, 1.0f);
+                data[p + 2] = Math.Clamp(nb, 0.0f, 1.0f);
+            }
         });
     }
 
@@ -167,8 +171,11 @@ public static class OutputRender
 
             default:
                 float g = 1.0f / (float)space.Gamma;
-                Parallel.For(0, data.Length,
-                             i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+                ParallelSweep.Over(data.Length, (from, to) =>
+                {
+                    for (int i = from; i < to; i++)
+                        data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g);
+                });
                 return;
         }
     }
@@ -193,8 +200,11 @@ public static class OutputRender
 
             default:
                 float g = (float)space.Gamma;
-                Parallel.For(0, data.Length,
-                             i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g));
+                ParallelSweep.Over(data.Length, (from, to) =>
+                {
+                    for (int i = from; i < to; i++)
+                        data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), g);
+                });
                 return;
         }
     }

@@ -235,10 +235,10 @@ public sealed class CubeLut
         // Red varies fastest, per the .cube spec.
         int strideG = n * 3, strideB = n * n * 3;
 
-        Parallel.For(0, data.Length / 3, i =>
+        ParallelSweep.OverPixels(data.Length / 3, (from, to) =>
         {
-            int p = i * 3;
-
+          for (int p = from; p < to; p += 3)
+          {
             float fr = Math.Clamp(data[p] * sr + br, 0f, last);
             float fg = Math.Clamp(data[p + 1] * sg + bg, 0f, last);
             float fb = Math.Clamp(data[p + 2] * sb + bb, 0f, last);
@@ -307,6 +307,7 @@ public sealed class CubeLut
             data[p] = w0 * lut[c000] + wA * lut[cA] + wB * lut[cB] + w1 * lut[c111];
             data[p + 1] = w0 * lut[c000 + 1] + wA * lut[cA + 1] + wB * lut[cB + 1] + w1 * lut[c111 + 1];
             data[p + 2] = w0 * lut[c000 + 2] + wA * lut[cA + 2] + wB * lut[cB + 2] + w1 * lut[c111 + 2];
+          }
         });
     }
 }

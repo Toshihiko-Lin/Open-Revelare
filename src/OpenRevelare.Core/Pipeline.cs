@@ -28,17 +28,41 @@ public static class Pipeline
     public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal)
     {
         // ── Pre-inversion linear-domain corrections (distortion → vignette) ───────
-        // Applied to a working copy so the caller's buffer is untouched. Order
-        // mirrors pipeline.py: (lensfun) → distortion → (lcc) → vignette → (decouple).
+        // Order mirrors pipeline.py: (lensfun) → distortion → (lcc) → vignette → (decouple).
+        //
+        // THE CALLER'S BUFFER IS NEVER WRITTEN. Every op here except distortion is in-place and
+        // so needs a private copy; distortion is not, and that distinction is what decides
+        // whether a copy is made at all.
+        //
+        // It used to clone unconditionally, up front, before asking which ops were active. When
+        // distortion was one of them the clone was pure waste: ApplyDistortion resamples OUT OF
+        // PLACE — it has to, since a distortion reads source pixels a corrected pixel has already
+        // overwritten — so it allocates its own output and the freshly cloned input is read once
+        // and dropped. On a 24 MP frame that is a 288 MB allocation plus a full memcpy, thrown
+        // away microseconds later, and the export path pays it per frame.
+        //
+        // So: run distortion FIRST, off the caller's buffer, and let its output be the working
+        // copy the in-place ops then need. Clone only when distortion is inactive and an
+        // in-place op still has to write somewhere private.
         ImageBuffer src = img;
-        bool preOps = cal.DistortionK1 != 0.0 || cal.LccFlatField != null
-                      || cal.VignetteAmount != 0.0 || cal.DecoupleMatrix != null;
-        if (preOps)
-        {
+
+        if (cal.DistortionK1 != 0.0)
+            src = LensCorrections.ApplyDistortion(src, cal.DistortionK1);
+
+        // Every remaining pre-inversion op writes src.Data IN PLACE, so all of them have to be
+        // counted here — including the input-primaries transform further below, which is applied
+        // to the same buffer. It is null on every roll today (nothing sets it) but a project file
+        // can carry one, and leaving it out of this set would let it write through to the
+        // caller's buffer on the one configuration that reaches it.
+        double[,]? inputMatrix = InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint);
+        bool inPlaceOps = cal.LccFlatField != null || cal.VignetteAmount != 0.0
+                          || cal.DecoupleMatrix != null || inputMatrix != null;
+        if (inPlaceOps && ReferenceEquals(src, img))
             src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone())
                       .InheritSourceFrom(img);
-            if (cal.DistortionK1 != 0.0)
-                src = LensCorrections.ApplyDistortion(src, cal.DistortionK1);
+
+        if (inPlaceOps)
+        {
             if (cal.LccFlatField != null)
                 Lcc.Apply(src.Data, src.Width, src.Height, cal.LccFlatField);
             if (cal.VignetteAmount != 0.0)
@@ -61,8 +85,8 @@ public static class Pipeline
         // IccRead.ReadMatrix at load; RAW and unprofiled TIFF are not, and are treated as
         // working-space data without being converted. That gap does not affect the density
         // inversion (which is self-referential through t_base) but it does affect step 4.
-        if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
-            InputTransform.Apply(src.Data, inputM);
+        if (inputMatrix != null)
+            InputTransform.Apply(src.Data, inputMatrix);
 
         // ── Path A: RGB-light decoupling (linear domain, after vignette) ──────────
         if (cal.DecoupleMatrix != null)

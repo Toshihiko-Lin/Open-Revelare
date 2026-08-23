@@ -4,21 +4,28 @@
 
 **改进**
 
+- **出图更快了，占用内存也更少**。整条渲染管线的并行方式重写
 - **优化了智能白平衡的行为**。它现在只做一件事：调整色彩平衡，画面亮度保持在标定值上不动。
 
 **修复**
 
 - **修复了查看负片时画面跳动的问题**。
 
+- **修复了工程文件带输入色彩空间时、反复渲染同一帧画面会逐渐偏移的问题**。
+
 ---
 
 **Improved**
+
+- **Faster renders, and less memory to make them.** The whole pipeline's parallelism was rewritten
 
 - **Smart white balance behaves better.** It now does one thing only: adjust the colour balance, leaving the brightness where calibration put it.
 
 **Fixed**
 
-- **Fixed the picture jumping when you view the negative.** 
+- **Fixed the picture jumping when you view the negative.**
+
+- **Fixed the picture drifting over repeated renders of one frame** when the project declares an input colour space.
 
 ---
 

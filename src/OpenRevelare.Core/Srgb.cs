@@ -99,14 +99,20 @@ public static class Srgb
     public static void ApplyForwardInPlace(float[] data)
     {
         float[] lut = ForwardLut;
-        Parallel.For(0, data.Length, i => data[i] = lut[LutIndex(data[i])]);
+        ParallelSweep.Over(data.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++) data[i] = lut[LutIndex(data[i])];
+        });
     }
 
     /// <summary>Apply the inverse TRC to a whole interleaved buffer in place (parallel, LUT).</summary>
     public static void ApplyInverseInPlace(float[] data)
     {
         float[] lut = InverseLut;
-        Parallel.For(0, data.Length, i => data[i] = lut[LutIndex(data[i])]);
+        ParallelSweep.Over(data.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++) data[i] = lut[LutIndex(data[i])];
+        });
     }
 
     /// <summary>LUT index for a value: clip to [0,1] then round — mirrors _srgb.py's
@@ -129,6 +135,10 @@ public static class Srgb
     public static void ApplyAdobeRgbInPlace(float[] data)
     {
         const float G = 256.0f / 563.0f;
-        Parallel.For(0, data.Length, i => data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), G));
+        ParallelSweep.Over(data.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++)
+                data[i] = MathF.Pow(Math.Clamp(data[i], 0.0f, 1.0f), G);
+        });
     }
 }

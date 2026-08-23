@@ -176,11 +176,14 @@ public static class Sprocket
     public static bool[] MakeMask(float[] data, int pixelCount, float threshold)
     {
         var mask = new bool[pixelCount];
-        Parallel.For(0, pixelCount, p =>
+        ParallelSweep.Over(pixelCount, (from, to) =>
         {
-            int b = p * 3;
-            float luma = (data[b] + data[b + 1] + data[b + 2]) / 3.0f;
-            mask[p] = luma > threshold;
+            for (int p = from; p < to; p++)
+            {
+                int b = p * 3;
+                float luma = (data[b] + data[b + 1] + data[b + 2]) / 3.0f;
+                mask[p] = luma > threshold;
+            }
         });
         return mask;
     }
@@ -188,10 +191,11 @@ public static class Sprocket
     /// <summary>Fill masked pixels with 1.0 (white in the positive), in place.</summary>
     public static void ApplyMask(float[] data, bool[] mask)
     {
-        Parallel.For(0, mask.Length, p =>
+        ParallelSweep.Over(mask.Length, (from, to) =>
         {
-            if (mask[p])
+            for (int p = from; p < to; p++)
             {
+                if (!mask[p]) continue;
                 int b = p * 3;
                 data[b] = 1.0f; data[b + 1] = 1.0f; data[b + 2] = 1.0f;
             }
