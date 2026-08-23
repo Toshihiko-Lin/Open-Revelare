@@ -860,7 +860,7 @@
                                                 ToolTip.Tip="{i18n:T 'Deep-WB 神经网络推断白平衡（不需画面中有中性物）。建议先裁掉齿孔/片边。'}">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <ctl:Icon Data="{StaticResource IcoWand}" />
-                                                <TextBlock Text="{i18n:T '智能白平衡（Beta·请先裁切）'}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{i18n:T '智能白平衡（Beta）'}" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </Button>
                                         <Expander Header="{i18n:T '逐通道'}" Margin="0,2,0,0">

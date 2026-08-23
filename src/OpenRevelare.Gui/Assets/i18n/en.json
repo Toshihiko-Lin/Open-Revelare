@@ -332,7 +332,7 @@
   "框选片基": "Sample the film base",
   "偏移": "Offset",
   "Deep-WB 神经网络推断白平衡（不需画面中有中性物）。建议先裁掉齿孔/片边。": "A neural network infers the white balance (nothing neutral has to be in the picture). Crop the sprockets and film edge away first.",
-  "智能白平衡（Beta·请先裁切）": "Deep white balance (beta · crop first)",
+  "智能白平衡（Beta）": "Deep white balance (beta)",
   "（端点已失效，请重采 D-max）": " (endpoints invalidated — sample D-max again)",
   "反差": "Contrast",
   "齿孔遮罩": "Sprocket mask",
