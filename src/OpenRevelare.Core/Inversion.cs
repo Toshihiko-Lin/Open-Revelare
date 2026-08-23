@@ -22,7 +22,6 @@ namespace OpenRevelare.Core;
 public static class Inversion
 {
     private const double Ln10 = 2.302585092994046;
-    private const double Log10_2 = 0.3010299956639812;
     private const double Tol = 1e-8;
     private const int LutSize = 65536; // one entry per distinct 16-bit input level
 

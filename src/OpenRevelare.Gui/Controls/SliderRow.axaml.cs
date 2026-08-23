@@ -1,10 +1,8 @@
-using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
-using static Avalonia.Input.InputElement;
 
 namespace OpenRevelare.Gui.Controls;
 

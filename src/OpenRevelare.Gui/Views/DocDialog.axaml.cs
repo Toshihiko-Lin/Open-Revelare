@@ -1,9 +1,6 @@
-using System;
-using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
-using Avalonia.Media;
 using Avalonia.Platform;
 
 namespace OpenRevelare.Gui.Views;

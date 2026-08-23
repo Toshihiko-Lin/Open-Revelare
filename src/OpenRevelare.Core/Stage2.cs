@@ -64,20 +64,6 @@ public static class Stage2
     private const float Gamma = 2.2f, InvGamma = 1.0f / 2.2f;
     private const int CurveLutSize = 256;
 
-    /// <summary>True when any Stage-2 op would alter the image (beyond the sRGB exit).</summary>
-    public static bool IsActive(FrameParams c)
-    {
-        static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
-        return !AllOne(c.WbGains)
-            || c.ExposureEv != 0.0
-            || c.BlackPoint != 0.0 || c.WhitePoint != 1.0
-            || c.Contrast != 0.0
-            || c.Highlights != 0.0 || c.Shadows != 0.0
-            || c.Saturation != 0.0
-            || c.CurvePointsM.Count > 0 || c.CurvePointsR.Count > 0
-            || c.CurvePointsG.Count > 0 || c.CurvePointsB.Count > 0;
-    }
-
     /// <summary>
     /// Run the whole Stage-2 chain over <paramref name="d"/> in one pass.
     ///
@@ -99,7 +85,7 @@ public static class Stage2
         // perceptual in the encoded space where its definitions actually hold.
         if (cal.DisplayReferredStage2)
         {
-            ApplyDisplayReferred(d, cal, output, encodeExit);
+            ApplyDisplayReferred(d, cal, output);
             return;
         }
 
@@ -324,15 +310,14 @@ public static class Stage2
     /// on-screen result and the exported file are the same render rather than one being a
     /// simulation of the other.
     /// </summary>
-    private static void ApplyDisplayReferred(float[] d, FrameParams cal, ColorSpaceDef output,
-                                             bool encodeExit)
+    private static void ApplyDisplayReferred(float[] d, FrameParams cal, ColorSpaceDef output)
     {
         static bool AllOne(double[] v) => v.All(x => Math.Abs(x - 1.0) <= 1e-8 + 1e-5);
 
         // ── STEP 4: scene-linear working space → output space, primaries AND gamma ────
         // This is the Cineon step 4 proper, and it comes FIRST because everything after it is
-        // DEFINED in the output space. Applied unconditionally, not only when encodeExit is set:
-        // the perceptual ops NEED the encoded domain to mean what they say. Under
+        // DEFINED in the output space. Applied unconditionally, not only when the caller's
+        // encodeExit is set: the perceptual ops NEED the encoded domain to mean what they say. Under
         // OutputIntent.None the caller never reaches Stage 2 at all, so this cannot encode
         // linear output.
         //

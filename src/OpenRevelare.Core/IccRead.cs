@@ -226,43 +226,6 @@ public static class IccRead
         return Mul3(MD50ToWorking, devToD50);
     }
 
-    /// <summary>Human-readable profile description from 'desc' (v2) or 'dscm' (v4), or null.</summary>
-    public static string? Description(byte[] icc)
-    {
-        var tags = ParseTags(icc);
-        foreach (string sig in new[] { "desc", "dscm" })
-        {
-            if (!tags.TryGetValue(sig, out var t) || t.Size < 12) continue;
-            try
-            {
-                string type = System.Text.Encoding.Latin1.GetString(icc, t.Offset, 4);
-                if (type == "desc")
-                {
-                    // ICCv2 textDescriptionType: u32 ASCII length at +8.
-                    int n = (int)U32(icc, t.Offset + 8);
-                    if (n <= 0 || t.Offset + 12 + n > icc.Length) continue;
-                    string s = System.Text.Encoding.Latin1
-                        .GetString(icc, t.Offset + 12, n).Split('\0')[0].Trim();
-                    if (s.Length > 0) return s;
-                }
-                else if (type == "mluc")
-                {
-                    // ICCv4 multiLocalizedUnicodeType: first record, UTF-16BE.
-                    int nRec = (int)U32(icc, t.Offset + 8);
-                    if (nRec < 1 || t.Offset + 28 > icc.Length) continue;
-                    int recLen = (int)U32(icc, t.Offset + 20);
-                    int recOff = (int)U32(icc, t.Offset + 24);
-                    if (recLen <= 0 || t.Offset + recOff + recLen > icc.Length) continue;
-                    string s = System.Text.Encoding.BigEndianUnicode
-                        .GetString(icc, t.Offset + recOff, recLen).Trim('\0', ' ');
-                    if (s.Length > 0) return s;
-                }
-            }
-            catch (Exception) { /* unreadable description is not fatal */ }
-        }
-        return null;
-    }
-
     // ── numeric helpers ──────────────────────────────────────────────────────
 
     private static uint U32(byte[] b, int i)

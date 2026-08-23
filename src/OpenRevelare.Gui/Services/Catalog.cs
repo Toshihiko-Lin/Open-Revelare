@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 
 namespace OpenRevelare.Gui.Services;
@@ -110,11 +106,6 @@ public static class Catalog
     {
         lock (Gate)
             return Current.Rolls.OrderByDescending(r => r.LastOpenedAt).Take(max).ToList();
-    }
-
-    public static Roll? ById(string id)
-    {
-        lock (Gate) return Current.Rolls.FirstOrDefault(r => r.Id == id);
     }
 
     public static Roll? ByProjectPath(string projectPath)

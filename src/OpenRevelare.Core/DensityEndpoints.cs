@@ -121,19 +121,6 @@ public readonly struct DensityEndpoints
     public static DensityEndpoints For(FrameParams cal) =>
         FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel);
 
-
-    // Mirrors Inversion's gating predicates exactly — same constants, same comparison.
-    private const double Tol = 1e-8;
-    private const double Log10_2 = 0.3010299956639812;
-
-    private static bool ApproxAll(double[] v, double target)
-    {
-        double atol = Tol + 1e-5 * Math.Abs(target);
-        foreach (double x in v)
-            if (Math.Abs(x - target) > atol) return false;
-        return true;
-    }
-
     /// <summary>
     /// Inverse of <see cref="Apply"/>: recovers the pre-step-5 density from an adjusted one.
     /// The Deep-WB solve needs this to reason backwards from a rendered positive

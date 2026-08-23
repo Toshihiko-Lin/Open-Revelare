@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace OpenRevelare.Gui.Models;
 
 /// <summary>Result of the import dialog — port of Python ImportDialog.ImportResult.</summary>

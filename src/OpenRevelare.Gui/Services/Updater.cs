@@ -1,8 +1,5 @@
-using System;
-using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace OpenRevelare.Gui.Services;
 

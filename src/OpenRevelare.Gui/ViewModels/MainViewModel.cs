@@ -1,12 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Runtime;
-using System.Threading;
-using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -44,12 +38,6 @@ public partial class MainViewModel : ViewModelBase
     /// want the same file at the same instant (the roll warms from the current frame outward, and
     /// that is exactly the frame being switched to); without this they would each decode it.</summary>
     private readonly Dictionary<string, Task<PreviewCache.Entry>> _decoding = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>The preview for <paramref name="path"/> — cached, already being decoded by someone
-    /// else, or decoded now. Deliberately NOT cancellable: if the switch that asked for it is
-    /// superseded, the warm-up still wants the result, and throwing it away would mean decoding
-    /// the same file again a moment later.</summary>
-    private Task<PreviewCache.Entry> PreviewAsync(string path) => PreviewAsync(path, null);
 
     /// <summary>
     /// How much slack the region decode leaves around a split frame, as a fraction of the frame's
@@ -108,10 +96,6 @@ public partial class MainViewModel : ViewModelBase
     /// is normalised against the WHOLE scan, and the buffer on hand is a small window onto it.
     /// </summary>
     private (double X, double Y, double W, double H)? _previewFrameRect;
-
-    /// <summary>True when <see cref="_previewLinear"/> is a region decode rather than the whole
-    /// file, so the stored crop rect does not describe it.</summary>
-    private bool _previewPreCropped => _previewMargin is not null;
 
     /// <summary>
     /// Expand a frame's rect by <see cref="SplitMargin"/> on each side, clamped to the file.
@@ -2525,25 +2509,6 @@ public partial class MainViewModel : ViewModelBase
         return (x0, y0, x1, y1);
     }
 
-    /// <summary>Per-channel mean over a normalised rect of <paramref name="img"/>.</summary>
-    private static double[] RectMean(ImageBuffer img, (double X, double Y, double W, double H) rect)
-    {
-        var (x0, y0, x1, y1) = PixelBounds(img, rect);
-        int w = img.Width;
-        float[] d = img.Data;
-        var s = new double[3];
-        long n = 0;
-        for (int y = y0; y < y1; y++)
-            for (int x = x0; x < x1; x++)
-            { int i = (y * w + x) * 3; s[0] += d[i]; s[1] += d[i + 1]; s[2] += d[i + 2]; n++; }
-        return new[] { s[0] / n, s[1] / n, s[2] / n };
-    }
-
-    /// <summary>Mean linear transmittance of a rect on the (un-inverted) negative, in the pipeline's
-    /// Stage-1 sampling domain (decoupled under Path A) so scan_ev density matches the render.</summary>
-    private double[]? MeanOfNegative((double X, double Y, double W, double H) rect)
-        => Stage1Source(_previewLinear) is { } neg ? RectMean(neg, rect) : null;
-
     // Stage-2 grey-point WB is gone along with the 色偏修正 group it fed. Colour balance is the
     // inversion's white end — one place, in 整卷校准 → 亮端 — and a second set of temp/tint on
     // top of the rendered positive could only mask what the endpoint already said.
@@ -3158,9 +3123,6 @@ public partial class MainViewModel : ViewModelBase
         _filmBaseSampled = false;
         ScheduleRender();
     }
-
-    // ── Import (roll = one or more frames) ──────────────────────────────────────
-    public Task LoadAsync(string path) => LoadRollAsync(new[] { path });
 
     // ══ Catalog: the open roll's index entry + debounced autosave ═══════════════
     //

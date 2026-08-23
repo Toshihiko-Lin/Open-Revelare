@@ -136,18 +136,6 @@ public static class DecoupleCalibration
     }
 
     /// <summary>
-    /// Pooled scalar chroma amplification std(post)/std(pre) over all density-chroma
-    /// elements, clamped to [1, 4]. Degenerate → 1.0.
-    /// </summary>
-    public static double ChromaAmplification(ImageBuffer pre, ImageBuffer post, bool[]? mask = null)
-    {
-        double p = DensityChromaStdPooled(pre, mask);
-        double q = DensityChromaStdPooled(post, mask);
-        if (p <= 1e-6 || double.IsNaN(p) || double.IsNaN(q)) return 1.0;
-        return Math.Clamp(q / p, 1.0, 4.0);
-    }
-
-    /// <summary>
     /// 3×3 density-chroma compensation matrix undoing the decouple matrix's anisotropic
     /// boost along the yellow-blue and red-green axes: C = B·diag(1/amp)·Bᵀ. Symmetric,
     /// maps into the sum=0 plane (no luminance leak). Degenerate → identity. This is
@@ -519,19 +507,6 @@ public static class DecoupleCalibration
             res[c] = PopStd(chroma[c], sum / n);
         }
         return res;
-    }
-
-    private static double DensityChromaStdPooled(ImageBuffer img, bool[]? mask)
-    {
-        double[][] chroma = DensityChroma(img, mask, out int n);
-        if (n == 0) return double.NaN;
-        // std over all 3N elements pooled (matches chroma.std()).
-        double sum = 0;
-        for (int c = 0; c < 3; c++) for (int k = 0; k < n; k++) sum += chroma[c][k];
-        double mean = sum / (3.0 * n);
-        double acc = 0;
-        for (int c = 0; c < 3; c++) for (int k = 0; k < n; k++) { double e = chroma[c][k] - mean; acc += e * e; }
-        return Math.Sqrt(acc / (3.0 * n));
     }
 
     // Returns density-domain chroma as 3 arrays of length n (kept pixels), matching

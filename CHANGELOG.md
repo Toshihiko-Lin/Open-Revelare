@@ -13,6 +13,10 @@
 
 - **修复了工程文件带输入色彩空间时、反复渲染同一帧画面会逐渐偏移的问题**。
 
+**内部**
+
+- **清理了不再被调用的代码**。
+
 ---
 
 **Improved**
@@ -26,6 +30,10 @@
 - **Fixed the picture jumping when you view the negative.**
 
 - **Fixed the picture drifting over repeated renders of one frame** when the project declares an input colour space.
+
+**Internal**
+
+- **Removed code that nothing called.**
 
 ---
 

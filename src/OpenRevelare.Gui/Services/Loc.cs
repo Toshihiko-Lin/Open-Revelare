@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
-using Avalonia;
 using Avalonia.Platform;
 
 namespace OpenRevelare.Gui.Services;

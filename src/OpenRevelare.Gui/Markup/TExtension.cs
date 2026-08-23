@@ -1,9 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using Avalonia.Data;
 using Avalonia.Markup.Xaml;
-using OpenRevelare.Gui.Services;
 
 namespace OpenRevelare.Gui.Markup;
 

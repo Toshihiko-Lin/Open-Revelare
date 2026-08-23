@@ -1,10 +1,8 @@
-using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
-using System.Linq;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Services;
 

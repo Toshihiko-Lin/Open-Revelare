@@ -21,8 +21,6 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public partial class ExportDialog : Window
 {
-    private readonly bool _rollMode;
-
     /// <summary>The roll's output space — reported, not chosen.</summary>
     private readonly ColorSpaceDef _space;
 
@@ -49,7 +47,6 @@ public partial class ExportDialog : Window
     /// <param name="space">The roll's output space, for the summary and the hint.</param>
     public ExportDialog(bool rollMode, ColorSpaceDef space)
     {
-        _rollMode = rollMode;
         _space = space;
         InitializeComponent();
 

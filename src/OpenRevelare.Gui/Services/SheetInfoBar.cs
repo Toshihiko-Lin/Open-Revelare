@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
-using OpenRevelare.Core;
 using OpenRevelare.Gui.Models;
 
 namespace OpenRevelare.Gui.Services;

@@ -1,7 +1,4 @@
-using System;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 
 namespace OpenRevelare.Gui.Services;
 
@@ -55,9 +52,6 @@ internal static class DngCache
         if (!string.IsNullOrWhiteSpace(overrideDir)) return Path.Combine(overrideDir, RootName);
         return Path.Combine(Path.GetDirectoryName(sourcePath) ?? Path.GetTempPath(), RootName);
     }
-
-    private static string SessionDirFor(string sourcePath)
-        => Path.Combine(RootFor(sourcePath), SessionTag);
 
     /// <summary>
     /// The cached linear DNG for <paramref name="sourcePath"/>, converting it if absent.
@@ -133,19 +127,6 @@ internal static class DngCache
             }
         }
         return total;
-    }
-
-    /// <summary>Where the cache is going right now, for the preferences readout: the user's
-    /// override, or a description of the follow-the-source default.</summary>
-    public static string LocationDescription()
-    {
-        string? o = Settings.Current.CacheDirectory;
-        if (!string.IsNullOrWhiteSpace(o)) return Path.Combine(o, RootName);
-        lock (Gate)
-        {
-            if (_roots.Count > 0) return string.Join("、", _roots);
-        }
-        return Loc.F($"跟随源文件：<素材目录>\\{RootName}\\");
     }
 
     /// <summary>Drop least-recently-used entries until the session fits its budget.</summary>

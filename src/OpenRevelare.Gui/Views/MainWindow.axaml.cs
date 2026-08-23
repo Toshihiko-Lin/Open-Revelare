@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -195,7 +192,6 @@ public partial class MainWindow : Window
     private (double X, double Y, double W, double H) _cropDragStartRect;
     private const double HandleScreenSize = 10.0;
     private const double HandleGrabTol = 12.0;   // screen px, as in the source
-    private static readonly string[] HandleIds = { "tl", "t", "tr", "r", "br", "b", "bl", "l" };
     private readonly Rectangle[] _cropHandleShapes = new Rectangle[8];
 
     // ── Zoom / pan (visual transform on the whole preview stack; sampling math is

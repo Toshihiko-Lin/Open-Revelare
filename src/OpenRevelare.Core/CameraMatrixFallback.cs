@@ -1349,8 +1349,4 @@ public static class CameraMatrixFallback
         return ColorSpaces.Mul(ColorSpaces.Invert3(ColorSpaces.Srgb.ToXyz()),
                                ColorSpaces.Invert3(xyzToCam));
     }
-
-    /// <summary>True when a fallback exists for this body.</summary>
-    public static bool Has(string? make, string? model) =>
-        ColorMatrix2.ContainsKey($"{make} {model}".Trim());
 }
