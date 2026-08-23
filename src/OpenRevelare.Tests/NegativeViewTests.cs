@@ -15,24 +15,182 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public class NegativeViewTests
 {
-    /// <summary>Gains are a per-channel multiply and nothing else — no clamp, no normalisation
-    /// of the caller's numbers, applied in the scene-linear domain where that is the whole
-    /// definition of a white balance.</summary>
+    /// <summary>Gains are a per-channel multiply applied in the scene-linear domain, where that is
+    /// the whole definition of a white balance — no clamp, and no cross-channel mixing.</summary>
     [Fact]
     public void Gains_multiply_each_channel_independently()
     {
         var data = new float[] { 0.25f, 0.5f, 0.75f, 1.5f, 2.0f, 0.1f };
         NegativeView.ApplyWhiteBalance(data, new[] { 2.0, 1.0, 0.5 });
 
-        Assert.Equal(0.5f, data[0], 6);
-        Assert.Equal(0.5f, data[1], 6);
-        Assert.Equal(0.375f, data[2], 6);
+        // The vector is renormalised onto constant luminance first (see the tests below), so the
+        // gain that lands is g/luma(g), not g. Asserted against the same weights the method
+        // derives — ACEScg's, the space the buffer is in when this runs.
+        double lum = Luma(2.0, 1.0, 0.5);
+        float gr = (float)(2.0 / lum), gg = (float)(1.0 / lum), gb = (float)(0.5 / lum);
+
+        Assert.Equal(0.25f * gr, data[0], 6);
+        Assert.Equal(0.5f * gg, data[1], 6);
+        Assert.Equal(0.75f * gb, data[2], 6);
         // Above 1.0 is left above 1.0: the encode deals with highlights, the same way the
         // positive path treats them. A clamp here would flatten the film base's brightest edge —
         // the very thing the film-base sampler is aimed at.
-        Assert.Equal(3.0f, data[3], 6);
-        Assert.Equal(2.0f, data[4], 6);
-        Assert.Equal(0.05f, data[5], 6);
+        Assert.Equal(1.5f * gr, data[3], 6);
+        Assert.Equal(2.0f * gg, data[4], 6);
+        Assert.Equal(0.1f * gb, data[5], 6);
+        // And the ratios between the channels are EXACTLY the caller's, which is the part of the
+        // vector a white balance is entitled to. Renormalising must not disturb them.
+        Assert.Equal((0.25f * 2.0) / (0.5f * 1.0), data[0] / data[1], 5);
+        Assert.Equal((0.75f * 0.5) / (0.5f * 1.0), data[2] / data[1], 5);
+    }
+
+    // ── The display transform: a VIEWER, not the pipeline's display rendering ──
+    //
+    // The negative view used to encode through ColorPipeline.ToOutputSpace — step 4, which carries
+    // the Cineon encode and CineonToDisplay. Both describe a CALIBRATED POSITIVE: ToCineon puts
+    // linear 1.0 at code 1032 (the density ceiling, which only inversion puts there) and
+    // CineonToDisplay renders against code 685, 347 codes lower. An un-inverted frame has had none
+    // of that done to it, so the encode ran wherever the raw exposure sat and the picture blew
+    // out — scene-linear 0.2 rendered 224/255, and 0.4 upwards pinned near white.
+
+    /// <summary>
+    /// The negative view is a plain viewer transform: the primaries conversion and the output
+    /// space's encoding curve, and nothing else — bit for bit what any image viewer does with the
+    /// file. That equivalence IS the specification, since the view exists to be compared against
+    /// what the user already knows the scan looks like.
+    /// </summary>
+    [Fact]
+    public void The_negative_display_transform_is_a_plain_viewer_transform()
+    {
+        var mine = new float[] { 0.30f, 0.18f, 0.09f, 0.02f, 0.55f, 0.80f };
+        var viewer = (float[])mine.Clone();
+
+        NegativeView.ToDisplay(mine, ColorSpaces.Srgb);
+        OutputRender.Convert(viewer, ColorPipeline.Working, ColorSpaces.Srgb);
+        OutputRender.Encode(viewer, ColorSpaces.Srgb);
+
+        Assert.Equal(viewer, mine);
+    }
+
+    /// <summary>
+    /// THE REGRESSION, at the value that showed it worst. Step 4 rendered scene-linear 0.2 at
+    /// 224/255 and everything from 0.4 up between 246 and 253 — the top of the range crushed flat,
+    /// which is what "too bright" looked like. A viewer transform keeps that range separated.
+    /// </summary>
+    [Fact]
+    public void Mid_and_high_negative_values_are_not_crushed_against_white()
+    {
+        var d = new float[] { 0.2f, 0.2f, 0.2f, 0.4f, 0.4f, 0.4f, 0.8f, 0.8f, 0.8f };
+        NegativeView.ToDisplay(d, ColorSpaces.Srgb);
+
+        // 0.2 is a mid tone, not a near-white: the old path put it at 0.878.
+        Assert.InRange(d[0], 0.40, 0.56);
+        // 0.4 and 0.8 stay clearly apart — the old path had them 0.964 vs 0.989, four levels of
+        // 255 between them, which is a flat white where there should be two stops of separation.
+        Assert.True(d[6] - d[3] > 0.15,
+                    $"0.4 and 0.8 must stay separated; got {d[3]:F3} and {d[6]:F3}");
+    }
+
+    /// <summary>
+    /// And the negative view must NOT be the pipeline's step 4 — stated directly, because the bug
+    /// was a call to the wrong one of two functions with compatible signatures.
+    /// </summary>
+    [Fact]
+    public void The_negative_display_transform_is_not_step_four()
+    {
+        var viewer = new float[] { 0.2f, 0.2f, 0.2f };
+        var stepFour = (float[])viewer.Clone();
+
+        NegativeView.ToDisplay(viewer, ColorSpaces.Srgb);
+        ColorPipeline.ToOutputSpace(stepFour, ColorSpaces.Srgb);
+
+        Assert.True(stepFour[0] - viewer[0] > 0.3,
+                    "step 4 renders an un-inverted frame far hotter; if these have converged, " +
+                    "the negative view has been put back on the display rendering");
+    }
+
+    // ── Brightness: a viewing white balance must not double as an exposure ──────
+    //
+    // The gains arrive green-normalised from RawDecode.CameraWhiteBalance, and that was once
+    // mistaken for a brightness safeguard. It is not: pinning GREEN at 1.0 leaves red and blue
+    // free to rise, and as-shot coefficients run about 2.2 / 1.0 / 1.5 under daylight, so a raw
+    // negative came up roughly a third of a stop hot the moment the view was opened. Green
+    // carries 0.67 of the luminance in ACEScg, not all of it. The tests below pin the level.
+
+    /// <summary>
+    /// THE FIX: a neutral pixel keeps its luminance exactly. This is the invariant that separates
+    /// "white balance" from "white balance plus an exposure nobody asked for" — the view has no
+    /// exposure control, so any level change it makes is unaccountable.
+    /// </summary>
+    [Theory]
+    [InlineData(2.19, 1.0, 1.53)]      // a typical daylight as-shot record
+    [InlineData(1.45, 1.0, 2.40)]      // tungsten — the cast leans the other way
+    [InlineData(3.10, 1.0, 1.20)]      // a strong cast, where the old error was largest
+    [InlineData(0.40, 1.0, 0.80)]      // sub-unit gains, i.e. the darkening direction
+    public void A_neutral_pixel_keeps_its_luminance(double r, double g, double b)
+    {
+        var data = new float[] { 0.4f, 0.4f, 0.4f };
+        NegativeView.ApplyWhiteBalance(data, new[] { r, g, b });
+
+        Assert.Equal(Luma(0.4, 0.4, 0.4), Luma(data[0], data[1], data[2]), 5);
+    }
+
+    /// <summary>
+    /// The specific regression, stated as the user saw it: opening the negative view on a raw
+    /// frame made the picture brighter. Green-normalised camera gains are the input that did it.
+    /// </summary>
+    [Fact]
+    public void Camera_gains_do_not_brighten_the_picture()
+    {
+        var frame = Ramp(16, 16);
+        var data = (float[])frame.Data.Clone();
+        double before = MeanLuma(data);
+
+        NegativeView.ApplyWhiteBalance(data, new[] { 2.19, 1.0, 1.53 });
+
+        // Bounded in STOPS, because that is the unit the complaint was made in. The old
+        // green-normalised multiply put this at +0.37 EV — clearly visible. A ramp gives each
+        // channel a different value, so a per-channel gain still perturbs the frame MEAN a little
+        // even when it is exactly luminance-neutral per pixel (that exactness is pinned on neutral
+        // pixels above); what must not survive is a systematic lift. 0.01 EV is a hundredth of a
+        // stop, far below anything visible and ~37x smaller than the bug.
+        double ev = Math.Log2(MeanLuma(data) / before);
+        Assert.True(Math.Abs(ev) < 0.01, $"negative view moved the level by {ev:F4} EV");
+    }
+
+    /// <summary>
+    /// A gain vector with no meaningful level — all zero, or negative enough that the weighted sum
+    /// cancels — cannot be renormalised, so it is dropped rather than divided by. Inventing a
+    /// scale here would put an arbitrary exposure under a tool for judging colour by eye, which is
+    /// the same "unknown, not unit gain" rule the probe itself applies.
+    /// </summary>
+    [Theory]
+    [InlineData(new double[] { 0.0, 0.0, 0.0 })]
+    [InlineData(new double[] { -1.0, -1.0, -1.0 })]
+    public void Gains_with_no_usable_level_are_ignored(double[] gains)
+    {
+        var data = new float[] { 0.25f, 0.5f, 0.75f };
+        var before = (float[])data.Clone();
+        NegativeView.ApplyWhiteBalance(data, gains);
+        Assert.Equal(before, data);
+    }
+
+    /// <summary>ACEScg's luminance weights — the Y row of its RGB→XYZ matrix, derived here the
+    /// same way the code derives them rather than copied as literals, so the two cannot drift.
+    /// </summary>
+    private static double Luma(double r, double g, double b)
+    {
+        double[,] m = ColorPipeline.Working.ToXyz();
+        return m[1, 0] * r + m[1, 1] * g + m[1, 2] * b;
+    }
+
+    private static double MeanLuma(float[] data)
+    {
+        double sum = 0;
+        int n = 0;
+        for (int i = 0; i + 2 < data.Length; i += 3, n++)
+            sum += Luma(data[i], data[i + 1], data[i + 2]);
+        return sum / n;
     }
 
     /// <summary>
@@ -286,7 +444,7 @@ public class NegativeViewTests
         if (turns % 4 != 0 || flipH || flipV)
             view = Geometry.ApplyOrientation(view, turns, flipH, flipV);
         if (cal.CropRect is { } c) view = Geometry.ApplyCrop(view, c);
-        ColorPipeline.ToOutputSpace(view.Data, cal.ResolvedOutputSpace);
+        NegativeView.ToDisplay(view.Data, cal.ResolvedOutputSpace);
 
         // The PATCH, asked for over the whole displayed frame.
         var patch = RegionRender.Render(frame, cal, new RegionRender.Roi(0, 0, 1, 1),

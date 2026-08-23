@@ -1487,10 +1487,15 @@ public partial class MainViewModel : ViewModelBase
         // Null for a scanner TIFF or a camera with no as-shot record, in which case this is a
         // no-op and the view is what it always was.
         NegativeView.ApplyWhiteBalance(disp.Data, CurrentNegativeWb());
-        // Plain step 4, never the roll's print-film emulation: this buffer is a NEGATIVE. A print
-        // stock characterises how a finished positive prints, so feeding it un-inverted film would
-        // render a look nobody asked for over an image the user is only here to sample.
-        ColorPipeline.ToOutputSpace(disp.Data, CurrentOutputSpace);
+        // A VIEWER transform — primaries + encoding curve only. NOT step 4: that carries the
+        // Cineon encode and its display rendering, which describe a calibrated positive, while
+        // this buffer is raw scene-linear film that nothing has inverted or calibrated. Running it
+        // through step 4 encoded the frame wherever its exposure happened to sit and blew the
+        // picture out; see NegativeView.ToDisplay. The negative now reads the way it does in any
+        // image viewer, which is what it is being compared against.
+        //
+        // Never the roll's print-film emulation either: a print stock renders positives.
+        NegativeView.ToDisplay(disp.Data, CurrentOutputSpace);
         PreviewImage = BitmapConvert.ToBitmap(disp, CurrentOutputSpace);
     }
 

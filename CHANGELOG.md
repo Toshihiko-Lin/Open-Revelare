@@ -5,11 +5,15 @@
 **改进**
 
 - **出图更快了，占用内存也更少**。整条渲染管线的并行方式重写
-- **优化了智能白平衡的行为**。它现在只做一件事：调整色彩平衡，画面亮度保持在标定值上不动。
+- **优化了智能白平衡的行为**。调整色彩平衡，画面亮度保持在标定值上不动。
 
 **修复**
 
 - **修复了查看负片时画面跳动的问题**。
+
+- **修复了 raw 文件点开负片视图严重偏亮的问题**。
+
+- **修复了负片视图白平衡带偏亮度的问题**。
 
 - **修复了工程文件带输入色彩空间时、反复渲染同一帧画面会逐渐偏移的问题**。
 
@@ -29,6 +33,9 @@
 
 - **Fixed the picture jumping when you view the negative.**
 
+- **Fixed raw files rendering far too bright in the negative view.** 
+
+- **Fixed the negative view's white balance shifting the brightness.** 
 - **Fixed the picture drifting over repeated renders of one frame** when the project declares an input colour space.
 
 **Internal**

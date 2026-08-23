@@ -352,11 +352,16 @@ public static class RawDecode
     /// the negative on the light table, while every number Stage 1 measures still comes off the
     /// UniWB buffer underneath.
     ///
-    /// GREEN-NORMALISED rather than raw cam_mul because the absolute level is not ours to set:
-    /// the negative view is a look-at-it view with no exposure control, and cam_mul's own scale
-    /// (green is typically 1.0 already, but not guaranteed — some bodies report 256-based
-    /// integers) would otherwise brighten or darken the picture as a side effect of white
-    /// balancing it.
+    /// GREEN-NORMALISED rather than raw cam_mul so the vector has a defined scale at all: cam_mul's
+    /// own is not dependable (green is typically 1.0 already, but some bodies report 256-based
+    /// integers), and a consumer should not have to guess which convention it was handed.
+    ///
+    /// THIS DIVISION IS NOT WHAT HOLDS THE BRIGHTNESS, and was once mistaken for it. Pinning green
+    /// at unit gain leaves red and blue free to rise — as-shot coefficients run roughly 2.2 / 1.0
+    /// / 1.5 under daylight — which lifts the picture by about a third of a stop. The absolute
+    /// level genuinely is not ours to set, and <see cref="NegativeView.ApplyWhiteBalance"/> is
+    /// where that is enforced: it renormalises this vector onto constant luminance before it
+    /// touches a pixel. Only the RATIOS here are meaningful, and they are all it reads.
     /// </summary>
     public static double[]? CameraWhiteBalance(string path)
     {

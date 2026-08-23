@@ -173,14 +173,17 @@ public static class RegionRender
             // look orange. The samplers are unaffected: they read the UniWB preview buffer, never
             // these pixels.
             NegativeView.ApplyWhiteBalance(negOut.Data, negativeWb);
-            // PLAIN step 4 — never the roll's print-film emulation, even when one is selected.
-            // This patch is un-inverted film, and a print stock characterises how a finished
-            // POSITIVE prints; running the negative through it renders a look over the very pixels
-            // the user opened this view to sample. It must also match ShowNegativeView, which
-            // composes the whole-frame version of this picture the same plain way — the patch and
-            // the preview underneath it are the same image at two resolutions, so a difference
-            // here shows up as the patch flashing a different colour wherever the user zooms.
-            ColorPipeline.ToOutputSpace(negOut.Data, cal.ResolvedOutputSpace);
+            // A VIEWER transform — primaries + encoding curve, no display rendering. Not step 4:
+            // that carries the Cineon encode and CineonToDisplay, both of which describe a
+            // CALIBRATED POSITIVE, and this patch is raw un-inverted film that no calibration has
+            // normalised. See NegativeView.ToDisplay.
+            //
+            // Never the roll's print-film emulation either, for the same reason it never was: a
+            // print stock characterises how a finished POSITIVE prints. And it must match
+            // ShowNegativeView, which composes the whole-frame version the same way — the patch and
+            // the preview underneath are one image at two resolutions, so any difference here is a
+            // flash the moment the user zooms.
+            NegativeView.ToDisplay(negOut.Data, cal.ResolvedOutputSpace);
             return (negOut, realised);
         }
 

@@ -1748,9 +1748,10 @@ public partial class MainWindow : Window
         {
             var shown = new OpenRevelare.Core.ImageBuffer(
                 preview.Width, preview.Height, (float[])preview.Data.Clone());
-            // Plain step 4, not the roll's print-film emulation — see the negative view in
-            // MainViewModel: a print stock renders positives, and this strip is un-inverted film.
-            OpenRevelare.Core.ColorPipeline.ToOutputSpace(shown.Data, Vm.CurrentOutputSpace);
+            // A VIEWER transform, not step 4 — see NegativeView.ToDisplay. This strip is raw
+            // un-inverted film with no calibration behind it, and step 4's display rendering
+            // assumes a calibrated positive, which rendered the strip several stops hot.
+            OpenRevelare.Core.NegativeView.ToDisplay(shown.Data, Vm.CurrentOutputSpace);
             plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
         }
 
