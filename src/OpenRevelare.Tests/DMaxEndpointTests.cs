@@ -89,12 +89,14 @@ public class DMaxEndpointTests
         Assert.Equal(2.10, hi[2], 4);
     }
 
-    // ── The shared no-clip rescale, as 智能白平衡 uses it ────────────────────────────
+    // ── The no-clip rescale, split out of the detector ──────────────────────────────
     //
-    // 智能白平衡 solves the highlight BALANCE with the Deep-WB net and then has to land on an
-    // endpoint triple that still clears the frame. It reuses the detector's own two pieces —
-    // MaxChannelDensityFromRoll and RescaleToClearChannelMax — rather than carrying a second copy
-    // of the arithmetic, because the copy that drifted would clip silently.
+    // The lift lives in two public pieces — MaxChannelDensityFromRoll and
+    // RescaleToClearChannelMax — because DetectDMaxPerChannelFromRoll is not the only thing that
+    // may need to ask "does this triple clear the frame?". It IS, currently, the only caller:
+    // 智能白平衡 deliberately does not lift its converged triple (an endpoint lift is an exposure
+    // change, and that button must not move brightness — see AutoWbAiAsync step 3), so clipping is
+    // allowed there. These tests pin the detector's own behaviour across the split.
 
     /// <summary>
     /// The extracted rescale is the SAME function the detector applies to its own answer: run it
@@ -120,15 +122,15 @@ public class DMaxEndpointTests
     }
 
     /// <summary>
-    /// A triple the net walked BELOW the frame's per-channel maxima is lifted back until it
-    /// clears them — the guarantee 智能白平衡 used to drop entirely once its loop had moved the
-    /// channels apart from where the calibration left them.
+    /// A triple sitting BELOW the frame's per-channel maxima is lifted back until it clears them,
+    /// by ONE factor so the balance between the channels is untouched — the property the whole
+    /// helper exists for, asserted directly rather than through the detector's measurement path.
     /// </summary>
     [Fact]
     public void A_solved_triple_below_the_channel_maxima_is_lifted_clear()
     {
         var chanMax = new[] { 2.90, 2.60, 2.60 };
-        var solved = new[] { 2.20, 2.00, 1.95 };          // net's balance, placed too low
+        var solved = new[] { 2.20, 2.00, 1.95 };          // balanced triple, placed too low
 
         double[] safe = FilmBase.RescaleToClearChannelMax(solved, chanMax);
 
@@ -136,7 +138,7 @@ public class DMaxEndpointTests
         Assert.True(chanMax[1] <= safe[1] + 1e-9, $"green clips: {chanMax[1]} vs {safe[1]}");
         Assert.True(chanMax[2] <= safe[2] + 1e-9, $"blue clips: {chanMax[2]} vs {safe[2]}");
 
-        // ONE factor: the balance the net solved survives the lift untouched.
+        // ONE factor: the balance between the channels survives the lift untouched.
         Assert.Equal(solved[0] / solved[1], safe[0] / safe[1], 9);
         Assert.Equal(solved[2] / solved[1], safe[2] / safe[1], 9);
     }

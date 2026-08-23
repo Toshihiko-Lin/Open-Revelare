@@ -519,8 +519,8 @@ public static class FilmBase
         // produced, whose channel ratios are an artefact of which pixel ranked where, baked into
         // the inversion as a cast no Stage-2 control can remove. Scaling all three by the SAME
         // factor leaves every ratio between them untouched, so the balance survives intact and
-        // only the placement moves. RescaleToClearChannelMax is that one ratio; 智能白平衡 applies
-        // the same guarantee to the triple its net converges on, which is why it is shared.
+        // only the placement moves. RescaleToClearChannelMax is that one ratio, kept as its own
+        // public method so the lift can be read and tested apart from the measurement around it.
         //
         // It returns a fresh array rather than scaling in place — `best` still aliases an entry in
         // perFrame, and mutating it would leave that list holding a value it never measured.
@@ -532,12 +532,13 @@ public static class FilmBase
     /// channel's own densest kept pixel sits at or below its endpoint, moving all three by ONE
     /// factor so the ratios between them — the colour balance — survive untouched.
     ///
-    /// Split out of <see cref="DetectDMaxPerChannelFromRoll"/> because 智能白平衡 has to apply the
-    /// same guarantee to the triple its iteration converges on. The net solves the BALANCE; it
-    /// knows nothing about whether the endpoints it lands on still clear the frame's per-channel
-    /// extremes, and an endpoint below a channel's real maximum clips that channel. Two copies of
-    /// this arithmetic would be two things to keep in step, and the one that drifted would clip
-    /// silently — so there is one.
+    /// Split out of <see cref="DetectDMaxPerChannelFromRoll"/>, which is currently its only
+    /// caller. THIS IS A CALIBRATION STEP, not a general safety net: it belongs where the
+    /// endpoints are being chosen from scratch and an endpoint under a channel's own maximum would
+    /// bake a clipped channel into the whole roll. Do not reach for it to "protect" a triple some
+    /// later stage has already placed — the lift is >= 1 by construction, so it can only push the
+    /// endpoints up, and on an already-placed triple that reads as an unasked-for exposure change.
+    /// 智能白平衡 used to call it for exactly that reason and had to stop; see AutoWbAiAsync step 3.
     ///
     /// The factor is the largest overshoot across the three channels, so the worst offender lands
     /// exactly on its endpoint and the other two stay below theirs. It is never less than 1: a
@@ -563,9 +564,8 @@ public static class FilmBase
     /// would keep — same edge inset, same keep mask, same real-density ceiling, same t_base.
     ///
     /// This is the second half of what the detector's no-clip rescale needs, and it exists as its
-    /// own entry point so a caller that solved the balance some other way (智能白平衡, via the net)
-    /// can still ask "does this triple clear the frame?" and get an answer measured exactly the
-    /// way the detector measures it. Deliberately NOT co-sited: the whole question is whether any
+    /// own entry point so "does this triple clear the frame?" can be asked — and tested — apart
+    /// from the detector's own measurement pass. Deliberately NOT co-sited: the whole question is whether any
     /// single channel anywhere overshoots, so each channel's own extreme is the right statistic —
     /// which is safe here precisely because the result is only ever used as a uniform scale factor
     /// (see <see cref="RescaleToClearChannelMax"/>), never as an endpoint triple in its own right.
