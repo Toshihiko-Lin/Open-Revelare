@@ -3,8 +3,9 @@ namespace OpenRevelare.Core;
 /// <summary>
 /// Combine a roll's frames into a single contact-sheet grid — port of Python
 /// <c>negative/contactsheet.py::build_contactsheet</c>. Thumbnails are laid out
-/// left-to-right, top-to-bottom in a grid slightly wider than tall (cols ≥ rows),
-/// separated by a black gap, with the longer side capped at <paramref name="maxLong"/>.
+/// left-to-right, top-to-bottom in a grid whose column count the caller either fixes or leaves
+/// to the default ceil(sqrt(n)) (slightly wider than tall), separated by a black gap, with the
+/// longer side capped at <paramref name="maxLong"/>.
 /// Inputs are already-processed sRGB positives in [0,1]; the output is one image.
 /// </summary>
 public static class ContactSheet
@@ -37,13 +38,20 @@ public static class ContactSheet
     /// Decide the grid without drawing it. <paramref name="gapY"/> is separate from
     /// <paramref name="gapX"/> so a caller that prints frame numbers between rows can buy the
     /// room for them here rather than stretching the sheet afterwards.
+    ///
+    /// <paramref name="cols"/> forces a column count; null keeps the historic ceil(sqrt(n)) grid.
+    /// A caller that wants the finished SHEET to land on a given proportion cannot pick the
+    /// columns from the grid alone — the margins, header and info strip it adds change the
+    /// answer — so it plans several column counts and measures them itself.
     /// </summary>
-    public static Layout Plan(IReadOnlyList<ImageBuffer> images, int maxLong, int gapX, int gapY)
+    public static Layout Plan(IReadOnlyList<ImageBuffer> images, int maxLong, int gapX, int gapY,
+                              int? cols = null)
     {
         if (images.Count == 0) throw new ArgumentException("images list is empty");
         int n = images.Count;
-        int cols = (int)Math.Ceiling(Math.Sqrt(n));
-        int rows = (int)Math.Ceiling((double)n / cols);
+        int c = cols ?? (int)Math.Ceiling(Math.Sqrt(n));
+        c = Math.Clamp(c, 1, n);
+        int rows = (int)Math.Ceiling((double)n / c);
 
         // Median aspect (W/H) → a uniform thumbnail shape.
         var aspects = new double[n];
@@ -52,22 +60,40 @@ public static class ContactSheet
         double medAspect = aspects[n / 2];
         if (medAspect <= 0) medAspect = 1.0;
 
-        int thumbW = Math.Max(1, (maxLong - gapX * (cols - 1)) / cols);
+        // Both axes are solved the same way: take the room the gaps do NOT occupy and divide it
+        // by the cell count. Scaling a too-large thumbnail by maxLong/total instead — which is
+        // what the height did — leaves the gaps at full size on top of the shrunk cells, and a
+        // single-column grid of four frames came out 8% past the cap that way.
+        int gx = FitGaps(gapX, c, maxLong), gy = FitGaps(gapY, rows, maxLong);
+        int roomW = maxLong - gx * (c - 1), roomH = maxLong - gy * (rows - 1);
+
+        int thumbW = Math.Max(1, roomW / c);
         int thumbH = Math.Max(1, (int)Math.Round(thumbW / medAspect));
 
-        int totalH = rows * thumbH + gapY * (rows - 1);
-        if (totalH > maxLong)
+        if (rows * thumbH > roomH)
         {
-            double scale = (double)maxLong / totalH;
-            thumbH = Math.Max(1, (int)(thumbH * scale));
+            thumbH = Math.Max(1, roomH / rows);
             thumbW = Math.Max(1, (int)Math.Round(thumbH * medAspect));
         }
 
         return new Layout
         {
-            Cols = cols, Rows = rows, ThumbW = thumbW, ThumbH = thumbH,
-            GapX = gapX, GapY = gapY, Count = n,
+            Cols = c, Rows = rows, ThumbW = thumbW, ThumbH = thumbH,
+            GapX = gx, GapY = gy, Count = n,
         };
+    }
+
+    /// <summary>
+    /// Squeeze a gap that would not leave a single pixel per cell. Only a degenerate grid gets
+    /// here — one column of a whole roll is 35 row gaps, which at the printed spacing overflows
+    /// a 2048 px sheet on its own — and no such grid would ever be chosen to print. It is solved
+    /// anyway because the page-aspect search PLANS every column count before rejecting them, and
+    /// a planner that can hand back a layout bigger than the cap it was given is a trap.
+    /// </summary>
+    private static int FitGaps(int gap, int cells, int maxLong)
+    {
+        if (cells <= 1 || gap * (cells - 1) <= maxLong - cells) return gap;
+        return Math.Max(0, (maxLong - cells) / (cells - 1));
     }
 
     /// <summary>Draw the thumbnails into a canvas whose gaps are filled with

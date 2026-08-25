@@ -81,6 +81,16 @@ public static class Settings
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public SheetStyle SheetStyle { get; set; } = SheetStyle.Light;
 
+        /// <summary>Which proportion to lay the sheet out for (印样窗口 → 版面比例). Like
+        /// <see cref="SheetStyle"/> this is a standing preference: you print sheets the shape you
+        /// file or post them in, not a shape you re-decide per roll.</summary>
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public SheetAspect SheetAspect { get; set; } = SheetAspect.Auto;
+
+        /// <summary>Which way round <see cref="SheetAspect"/> is read (印样窗口 → 横/竖).</summary>
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public SheetOrientation SheetOrientation { get; set; } = SheetOrientation.Landscape;
+
         /// <summary>
         /// Run the full auto-inversion chain (片基 → 亮部 WB → D-max → 色阶) when a roll is
         /// imported, instead of only estimating the film base.

@@ -14,6 +14,43 @@ public enum SheetStyle
 }
 
 /// <summary>
+/// What proportion the FINISHED sheet — paper, header and info strip included, not just the
+/// thumbnail grid — should come out at. The column count is solved for the target rather than
+/// fixed at ceil(sqrt(n)), which is why a 36-frame roll of 3:2 frames no longer has to print
+/// as a 3:2 sheet.
+/// </summary>
+public enum SheetAspect
+{
+    /// <summary>Whatever lands inside the square…4:3 band with the fewest empty cells — the
+    /// shape a sheet gets pinned to a wall or dropped into a post at.</summary>
+    Auto,
+
+    /// <summary>1:1.</summary>
+    Square,
+
+    /// <summary>4:3.</summary>
+    FourThree,
+
+    /// <summary>3:2, the shape of the frames themselves.</summary>
+    ThreeTwo,
+}
+
+/// <summary>
+/// Which way round <see cref="SheetAspect"/>'s proportion is read — 4:3 wide, or 4:3 tall.
+///
+/// No effect on <see cref="SheetAspect.Square"/>, which is the same page either way round; the
+/// dialog greys the choice out there rather than pretending it does something.
+/// </summary>
+public enum SheetOrientation
+{
+    /// <summary>Wide — the long side runs across the page.</summary>
+    Landscape,
+
+    /// <summary>Tall — the long side runs down the page.</summary>
+    Portrait,
+}
+
+/// <summary>
 /// Every colour the sheet is printed with. One record so the composer and the info bar cannot
 /// drift apart, and so adding a third look later is a matter of adding a preset, not of hunting
 /// literals through two files.

@@ -21,14 +21,39 @@ public static class SheetComposer
 {
     private const double RefWidth = 2048.0;
 
+    /// <summary>
+    /// How tall the row gap may grow, as a multiple of the thumbnail height it separates.
+    ///
+    /// Row spacing is the ONLY lever the page fit has — the column gap is the rebate between
+    /// frames and does not move — so this bound decides which proportions are reachable at all.
+    /// Measured against the FRAME rather than against the sheet because that is what the eye
+    /// judges: a band up to about a frame tall reads as generous spacing, and past that it reads
+    /// as a hole. A 12-frame roll of square negatives asked to be a wide 4:3 is what set it —
+    /// at 1.4 frames the two rows looked like a mistake.
+    ///
+    /// It costs coverage on SHORT rolls, which have too few candidate grids to be spaced into
+    /// every shape: from 20 frames up — every real roll — each target is met exactly.
+    /// </summary>
+    private const double RowGapCapFrames = 1.0;
+
     private static readonly FontFamily Face =
         new("Inter, Segoe UI, Microsoft YaHei, PingFang SC, sans-serif");
 
-    /// <summary>What to print around the thumbnails. Only the palette is a choice — the lab-print
-    /// furniture (header, keylines, frame numbers) is the house style, not a toggle.</summary>
+    /// <summary>What to print around the thumbnails. The palette and the page proportion are the
+    /// choices — the lab-print furniture (header, keylines, frame numbers) is the house style,
+    /// not a toggle.</summary>
     public sealed record Options
     {
         public SheetStyle Style { get; init; } = SheetStyle.Light;
+
+        /// <summary>Proportion the finished page is solved for. Lives here rather than in
+        /// <see cref="ContactSheet"/> because only this class knows how much paper the surround
+        /// adds, and the surround is what makes a grid-shaped answer the wrong one.</summary>
+        public SheetAspect Aspect { get; init; } = SheetAspect.Auto;
+
+        /// <summary>Which way round <see cref="Aspect"/> is read. Moot for
+        /// <see cref="SheetAspect.Square"/>.</summary>
+        public SheetOrientation Orientation { get; init; } = SheetOrientation.Landscape;
 
         public SheetTheme Theme => SheetTheme.For(Style);
     }
@@ -40,50 +65,182 @@ public static class SheetComposer
     /// <summary>Lay out and render the thumbnail grid. Pure CPU; safe off the UI thread.</summary>
     public static Grid BuildGrid(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
     {
-        Metrics m = Metrics.Of(maxLong);
-        // Rows are spaced wider than columns: the extra band is where the frame number goes.
-        ContactSheet.Layout layout = ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi);
+        ContactSheet.Layout layout = Plan(thumbs, maxLong, opt);
         return new Grid(ContactSheet.Build(thumbs, layout, opt.Theme.GapRgb), layout);
     }
 
-    /// <summary>Total pixel size of the composed sheet for a given grid.</summary>
-    public static PixelSize SizeOf(Grid grid) => SizeOf(grid.Layout);
+    /// <summary>
+    /// Pick the grid the requested proportion asks for. Every column count from 1 to n is planned
+    /// and MEASURED as a finished sheet — the margins, header and info strip are a fixed slab of
+    /// paper the grid does not know about, and at 12 frames they are enough to turn what looks
+    /// like a square grid into a portrait page — then scored against the target.
+    ///
+    /// Ties are broken on empty cells: two column counts that land equally close to 4:3 are not
+    /// equally good if one of them prints a half-empty last row.
+    /// </summary>
+    public static ContactSheet.Layout Plan(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
+    {
+        Metrics m = Metrics.Of(maxLong);
+        int n = thumbs.Count;
+
+        ContactSheet.Layout? best = null;
+        (double Pad, int Empty) bestScore = default;
+
+        for (int cols = 1; cols <= n; cols++)
+        {
+            // Rows are spaced wider than columns: the extra band is where the frame number goes.
+            // Both gaps are the design values and stay that way — see PadFor.
+            ContactSheet.Layout l = ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi, cols);
+            (int padX, int padY) = PadFor(l, opt);
+            PixelSize bare = BareSize(l);
+            // What fraction of the page is margin bought purely to make the proportion — the one
+            // thing that separates candidates now that every one of them can reach the target.
+            double pad = (double)(padX * 2) / (bare.Width + padX * 2)
+                       + (double)(padY * 2) / (bare.Height + padY * 2);
+            int empty = l.Rows * l.Cols - n;
+
+            // A per cent of the page is not a difference anyone sees, so inside that the fuller
+            // grid wins — which keeps a 36-frame roll on a complete 6×6.
+            const double Same = 0.01;
+            if (best is null || pad < bestScore.Pad - Same ||
+                (pad < bestScore.Pad + Same && empty < bestScore.Empty))
+            {
+                best = l;
+                bestScore = (pad, empty);
+            }
+        }
+        return best!;
+    }
+
+    /// <summary>
+    /// The extra margin, per side, that brings the page to the requested proportion — the ONLY
+    /// thing the fit is allowed to move.
+    ///
+    /// The column count alone cannot deliver a shape: it is one candidate per integer, and on the
+    /// tall side those are far apart — 36 frames of 3:2 can be 4×9 (0.47), 5×8 (0.69) or 6×6
+    /// (1.18), so a portrait 4:3 (0.75) and a portrait 3:2 (0.67) both had to settle for 5×8 and
+    /// came out as literally the same file.
+    ///
+    /// Spending the residual on the GAPS was the first answer and it was wrong twice over: the
+    /// gap between columns is the rebate between frames on a strip and must not move at all, and
+    /// stretching the ROW gap alone left visible holes between rows on the shapes it had to work
+    /// hardest for. Margin is the right place for it — the grid keeps the density it was designed
+    /// with, and, unlike a gap, margin can widen the page as well as heighten it, so a grid with
+    /// an extra ROW is usable too instead of only ever approaching from the wide side.
+    ///
+    /// Because it works in both directions every column count can reach every target, so the
+    /// search above is free to pick on how little margin it costs rather than on what it can
+    /// reach. Nothing is capped: margin is white paper around a grid that keeps every pixel of
+    /// its thumbnails, which is what a print with a generous border looks like — not a hole.
+    ///
+    /// Bisected rather than solved: the identification strip's height is derived from the page
+    /// WIDTH, so the page is a fixed point of the margin, not a formula with a closed form.
+    /// </summary>
+    private static (int X, int Y) PadFor(ContactSheet.Layout l, Options opt)
+    {
+        PixelSize bare = BareSize(l);
+        double got = (double)bare.Width / Math.Max(1, bare.Height);
+        if (TargetAspect(opt.Aspect, opt.Orientation, got) is not { } target) return (0, 0);
+
+        bool widen = got < target;
+        // One side's worth. The page grows by twice this, centred, so the grid stays in the middle.
+        int lo = 0, hi = Math.Max(bare.Width, bare.Height);
+        while (hi - lo > 1)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (Reached(mid)) hi = mid; else lo = mid;
+        }
+        int pad = Reached(lo) ? lo : hi;
+        return widen ? (pad, 0) : (0, pad);
+
+        bool Reached(int pad)
+        {
+            PixelSize p = PaddedSize(l, widen ? pad : 0, widen ? 0 : pad);
+            double a = (double)p.Width / Math.Max(1, p.Height);
+            return widen ? a >= target : a <= target;
+        }
+    }
+
+    /// <summary>
+    /// The exact proportion the page should be brought to, or null when it already satisfies the
+    /// request. <see cref="SheetAspect.Auto"/> asks for a BAND, so anything inside it is already
+    /// right and only a page outside gets pulled to the nearer edge — which is why an auto sheet
+    /// usually carries no extra margin at all.
+    /// </summary>
+    private static double? TargetAspect(SheetAspect want, SheetOrientation orient, double got)
+    {
+        const double Square = 1.0, FourThree = 4.0 / 3.0, ThreeTwo = 1.5;
+        double Face(double landscape) =>
+            orient == SheetOrientation.Portrait ? 1.0 / landscape : landscape;
+
+        if (want != SheetAspect.Auto)
+        {
+            double t = Face(want switch
+            {
+                SheetAspect.Square => Square,
+                SheetAspect.FourThree => FourThree,
+                _ => ThreeTwo,
+            });
+            return Math.Abs(Math.Log(got / t)) < 1e-6 ? null : t;
+        }
+
+        double lo = Math.Min(Face(Square), Face(FourThree));
+        double hi = Math.Max(Face(Square), Face(FourThree));
+        if (got < lo) return lo;
+        if (got > hi) return hi;
+        return null;   // already in the band
+    }
 
     /// <summary>Size the export will be, without rendering a pixel of it — the planner alone
     /// decides the geometry, so the dialog can label the button without doing the work.</summary>
-    public static PixelSize SizeFor(IReadOnlyList<ImageBuffer> thumbs, int maxLong)
-    {
-        Metrics m = Metrics.Of(maxLong);
-        return SizeOf(ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi));
-    }
+    public static PixelSize SizeFor(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
+        => SizeOf(Plan(thumbs, maxLong, opt), opt);
 
-    private static PixelSize SizeOf(ContactSheet.Layout l)
+    /// <summary>The page at its design margins, before any is added to make the proportion.</summary>
+    private static PixelSize BareSize(ContactSheet.Layout l) => PaddedSize(l, 0, 0);
+
+    /// <summary>The page with <paramref name="padX"/> / <paramref name="padY"/> of extra margin on
+    /// each side. Everything scales off the GRID's width, which the padding never touches, so the
+    /// header and strip keep the proportions they were designed with however wide the border.</summary>
+    private static PixelSize PaddedSize(ContactSheet.Layout l, int padX, int padY)
     {
         Metrics m = Metrics.Of(l.Width);
-        int w = l.Width + (int)Math.Round(m.Margin * 2);
-        int h = (int)Math.Round(m.Margin + m.HeaderH + l.Height + m.Margin)
+        int w = l.Width + (int)Math.Round(m.Margin * 2) + padX * 2;
+        int h = (int)Math.Round(m.Margin + m.HeaderH + l.Height + m.Margin) + padY * 2
               + SheetInfoBar.HeightFor(w);
         return new PixelSize(w, h);
+    }
+
+    /// <summary>The finished page, margin included.</summary>
+    private static PixelSize SizeOf(ContactSheet.Layout l, Options opt)
+    {
+        (int padX, int padY) = PadFor(l, opt);
+        return PaddedSize(l, padX, padY);
     }
 
     /// <summary>Compose the finished sheet. Must run on the UI thread (Avalonia rasteriser).</summary>
     public static RenderTargetBitmap Compose(Grid grid, RollNotes notes, Options opt)
     {
         SheetTheme theme = opt.Theme;
-        PixelSize size = SizeOf(grid);
+        PixelSize size = SizeOf(grid.Layout, opt);
         // Deliberately the same basis SizeOf used — deriving margins from the composed width
         // instead would shift them a few px and leave the bottom margin not matching the top.
         Metrics m = Metrics.Of(grid.Layout.Width);
+        // The margin the requested proportion bought, on top of the design margin. Recomputed
+        // from the layout rather than carried, for the same reason the metrics are: two
+        // derivations of the same number cannot drift apart if there is only one of them.
+        (int padX, int padY) = PadFor(grid.Layout, opt);
+        double marginX = m.Margin + padX, marginY = m.Margin + padY;
 
-        double gridX = m.Margin;
-        double gridY = m.Margin + m.HeaderH;
+        double gridX = marginX;
+        double gridY = marginY + m.HeaderH;
 
         var rtb = new RenderTargetBitmap(size, new Vector(96, 96));
         using (DrawingContext ctx = rtb.CreateDrawingContext())
         {
             ctx.FillRectangle(theme.Paper, new Rect(0, 0, size.Width, size.Height));
 
-            DrawHeader(ctx, m, notes, grid.Layout.Count, size.Width, theme);
+            DrawHeader(ctx, m, notes, grid.Layout.Count, size.Width, marginX, marginY, theme);
 
             WriteableBitmap gridBmp = BitmapConvert.ToBitmap(grid.Image);
             ctx.DrawImage(gridBmp, new Rect(gridX, gridY, grid.Layout.Width, grid.Layout.Height));
@@ -97,7 +254,7 @@ public static class SheetComposer
     }
 
     private static void DrawHeader(DrawingContext ctx, Metrics m, RollNotes n, int count,
-                                   int width, SheetTheme theme)
+                                   int width, double marginX, double marginY, SheetTheme theme)
     {
         // Roll identity, in the order you would read it off an envelope. The strip below carries
         // the full record; this line exists so the sheet is identifiable at a glance when it is
@@ -109,12 +266,12 @@ public static class SheetComposer
         FormattedText left = Text(lead, m.HeaderSize, theme.HeaderText, FontWeight.SemiBold);
         FormattedText right = Text(Loc.F($"{count} 帧"), m.HeaderSize, theme.HeaderDim, FontWeight.Normal);
 
-        double baseline = m.Margin + (m.HeaderH - m.HeaderRuleGap - left.Height) / 2;
-        ctx.DrawText(left, new Point(m.Margin, baseline));
-        ctx.DrawText(right, new Point(width - m.Margin - right.Width, baseline));
+        double baseline = marginY + (m.HeaderH - m.HeaderRuleGap - left.Height) / 2;
+        ctx.DrawText(left, new Point(marginX, baseline));
+        ctx.DrawText(right, new Point(width - marginX - right.Width, baseline));
 
-        double ruleY = m.Margin + m.HeaderH - m.HeaderRuleGap;
-        ctx.FillRectangle(theme.Rule, new Rect(m.Margin, ruleY, width - m.Margin * 2, m.Hairline));
+        double ruleY = marginY + m.HeaderH - m.HeaderRuleGap;
+        ctx.FillRectangle(theme.Rule, new Rect(marginX, ruleY, width - marginX * 2, m.Hairline));
     }
 
     private static void DrawCellAnnotations(DrawingContext ctx, Metrics m, ContactSheet.Layout l,

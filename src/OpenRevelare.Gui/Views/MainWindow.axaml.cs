@@ -2003,11 +2003,15 @@ public partial class MainWindow : Window
         if (await Vm.BuildContactThumbsAsync() is not { } thumbs) return;
         var dlg = new ContactSheetDialog(thumbs, Vm.Notes);
         SheetStyle styleBefore = dlg.Style;
+        SheetAspect aspectBefore = dlg.Aspect;
+        SheetOrientation orientBefore = dlg.Orientation;
         bool confirmed = await dlg.ShowDialog<bool>(this) == true;
-        // The dialog is also where the printed look and the roll's notes get changed, and the
-        // catalog cover is drawn from both — so it has to be redrawn whether or not an export
-        // followed. (Notes already dirty the roll on their own; the style does not.)
-        if (dlg.Style != styleBefore) Vm.OnSheetStyleChanged();
+        // The dialog is also where the printed look, the page proportion and the roll's notes get
+        // changed, and the catalog cover is drawn from all three — so it has to be redrawn whether
+        // or not an export followed. (Notes already dirty the roll on their own; the other two
+        // do not.)
+        if (dlg.Style != styleBefore || dlg.Aspect != aspectBefore || dlg.Orientation != orientBefore)
+            Vm.OnSheetLayoutChanged();
         if (!confirmed) return;
 
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -2023,7 +2027,7 @@ public partial class MainWindow : Window
         });
         string? path = file?.TryGetLocalPath();
         if (path != null)
-            await Vm.ExportContactSheetAsync(thumbs, dlg.Style, path);
+            await Vm.ExportContactSheetAsync(thumbs, dlg.Style, dlg.Aspect, dlg.Orientation, path);
     }
 
     private void OnResetClick(object? sender, RoutedEventArgs e)

@@ -37,6 +37,25 @@
                                      IsCheckedChanged="OnStyleChanged" />
                     </StackPanel>
 
+                    <!-- The proportion of the WHOLE page, margins and strip included — not of the
+                         thumbnail grid. The column count is solved backwards from it. -->
+                    <TextBlock Text="{i18n:T '版面比例'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
+                    <TextBlock Classes="groupHint" Text="{i18n:T '决定排几列；差额落在页边距上，片间距不变。'}" />
+                    <ComboBox Name="AspectBox" HorizontalAlignment="Stretch" Margin="0,2,0,6"
+                              SelectionChanged="OnAspectChanged">
+                        <ComboBoxItem Content="{i18n:T '自动（1:1 ~ 4:3）'}" />
+                        <ComboBoxItem Content="1:1" />
+                        <ComboBoxItem Content="4:3" />
+                        <ComboBoxItem Content="3:2" />
+                    </ComboBox>
+                    <!-- Disabled on 1:1: the same page either way round. -->
+                    <StackPanel Name="OrientPanel" Orientation="Horizontal" Spacing="6" Margin="0,0,0,10">
+                        <RadioButton Name="OrientWide" GroupName="SheetOrient" Content="{i18n:T '横'}"
+                                     IsCheckedChanged="OnOrientChanged" />
+                        <RadioButton Name="OrientTall" GroupName="SheetOrient" Content="{i18n:T '竖'}"
+                                     IsCheckedChanged="OnOrientChanged" />
+                    </StackPanel>
+
                     <TextBlock Text="{i18n:T '卷信息'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
                     <TextBlock Classes="groupHint" Text="{i18n:T '印在页眉与底部标识条上；留空显示为「—」。'}" />
                     <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">

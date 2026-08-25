@@ -25,7 +25,7 @@ public partial class ContactSheetDialog : Window
     private RollNotes? _notes;
     private bool _ready;
     private SheetComposer.Grid? _grid;
-    private SheetStyle _gridStyle;
+    private SheetComposer.Options? _gridOpt;
 
     // The preview composes the whole sheet at a fraction of export width. Every metric in the
     // composer scales with width, so this is the same design, just cheap enough to redo on
@@ -34,6 +34,12 @@ public partial class ContactSheetDialog : Window
 
     /// <summary>The look the user settled on — read by the caller to export with.</summary>
     public SheetStyle Style { get; private set; } = Settings.Current.SheetStyle;
+
+    /// <summary>The page proportion the user settled on — likewise read back for the export.</summary>
+    public SheetAspect Aspect { get; private set; } = Settings.Current.SheetAspect;
+
+    /// <summary>Which way round that proportion is read.</summary>
+    public SheetOrientation Orientation { get; private set; } = Settings.Current.SheetOrientation;
 
     public ContactSheetDialog() { InitializeComponent(); }
 
@@ -44,6 +50,10 @@ public partial class ContactSheetDialog : Window
         DataContext = notes;
 
         if (Style == SheetStyle.Light) StyleLight.IsChecked = true; else StyleDark.IsChecked = true;
+        AspectBox.SelectedIndex = (int)Aspect;
+        if (Orientation == SheetOrientation.Landscape) OrientWide.IsChecked = true;
+        else OrientTall.IsChecked = true;
+        SyncOrientEnabled();
         _ready = true;
 
         notes.PropertyChanged += OnNotesChanged;
@@ -63,18 +73,47 @@ public partial class ContactSheetDialog : Window
         Recompose();
     }
 
+    private void OnAspectChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready) return;
+        Aspect = (SheetAspect)Math.Max(0, AspectBox.SelectedIndex);
+        Settings.Current.SheetAspect = Aspect;
+        Settings.Save();
+        SyncOrientEnabled();
+        Recompose();
+    }
+
+    private void OnOrientChanged(object? sender, RoutedEventArgs e)
+    {
+        if (!_ready) return;
+        Orientation = OrientTall.IsChecked == true
+            ? SheetOrientation.Portrait : SheetOrientation.Landscape;
+        Settings.Current.SheetOrientation = Orientation;
+        Settings.Save();
+        Recompose();
+    }
+
+    /// <summary>A square page is the same page either way round, so the choice is greyed there
+    /// rather than left live and inert. The stored preference is untouched — switching back to
+    /// 4:3 restores whichever way round the user last wanted it.</summary>
+    private void SyncOrientEnabled() => OrientPanel.IsEnabled = Aspect != SheetAspect.Square;
+
     private void Recompose()
     {
         if (_notes is null || _thumbs.Count == 0) return;
 
-        var opt = new SheetComposer.Options { Style = Style };
+        var opt = new SheetComposer.Options
+        {
+            Style = Style, Aspect = Aspect, Orientation = Orientation,
+        };
 
-        // The grid only depends on the style (its gaps carry the paper colour), never on the
-        // notes — so typing must not send the thumbnails back through a resize pass.
-        if (_grid is null || _gridStyle != Style)
+        // The grid only depends on the style (its gaps carry the paper colour) and the page
+        // proportion (which decides the columns), never on the notes — so typing must not send
+        // the thumbnails back through a resize pass.
+        if (_grid is null || _gridOpt != opt)
         {
             _grid = SheetComposer.BuildGrid(_thumbs, PreviewWidth, opt);
-            _gridStyle = Style;
+            _gridOpt = opt;
         }
 
         var old = Disp.Source as RenderTargetBitmap;
@@ -82,8 +121,9 @@ public partial class ContactSheetDialog : Window
         old?.Dispose();
 
         // Report the size the export will be, not the preview's — planning only, no pixels.
-        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048);
-        InfoLbl.Text = Loc.F($"{_thumbs.Count} 帧 · 导出 {size.Width}×{size.Height}");
+        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048, opt);
+        InfoLbl.Text = Loc.F(
+            $"{_thumbs.Count} 帧 · {_grid.Layout.Cols}×{_grid.Layout.Rows} · 导出 {size.Width}×{size.Height}");
     }
 
     protected override void OnClosed(System.EventArgs e)

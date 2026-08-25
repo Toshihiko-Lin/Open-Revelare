@@ -1098,6 +1098,11 @@ public partial class MainViewModel : ViewModelBase
     /// is showing that frame. Rendering the crop while editing it would mean drawing the handles
     /// in one coordinate space and storing them in another, which is the same class of mistake
     /// that made the presets drift.
+    ///
+    /// A RENDER flag, and only that. <see cref="BuildParams"/> honours it because almost every
+    /// caller is a render — but <see cref="CommitLiveParams"/>, the one caller that WRITES, undoes
+    /// it first. Anything else that comes to persist a <see cref="BuildParams"/> result has to do
+    /// the same, or it stores "the tool was open" as "there is no crop".
     /// </summary>
     private bool _cropEditing;
 
@@ -1436,7 +1441,8 @@ public partial class MainViewModel : ViewModelBase
         QuarterTurns = _quarterTurns,
         FlipH = _flipH,
         FlipV = _flipV,
-        // Suppressed while the crop frame is being positioned — see CropEditing.
+        // Suppressed while the crop frame is being positioned — see CropEditing. This is a RENDER
+        // value; CommitLiveParams puts the real rect back before anything is STORED.
         CropRect = _cropEditing ? null : _cropRect,
         // Not suppressed with the crop above: the cell is where this frame's negative sits in the
         // strip, which does not stop being true while the crop tool is open.
@@ -3225,11 +3231,11 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// The printed look changed (印样窗口 → 浅色/深色). Redraws the OPEN roll's cover; the other
+    /// The printed look or page proportion changed (印样窗口). Redraws the OPEN roll's cover; the other
     /// rolls' covers keep the look they were saved with until those rolls are next opened —
     /// re-covering the whole catalog would mean decoding every roll in it.
     /// </summary>
-    public void OnSheetStyleChanged() => MarkSheetDirty();
+    public void OnSheetLayoutChanged() => MarkSheetDirty();
 
     /// <summary>Only the cover needs redrawing (more frames finished decoding).</summary>
     private void MarkSheetDirty()
@@ -3364,10 +3370,14 @@ public partial class MainViewModel : ViewModelBase
         if (BuildSheetCells() is not { } cells) return false;
         string rollId = _roll!.Id;
         if (!MayWriteCover(rollId)) return false;
-        var opt = new SheetComposer.Options { Style = Settings.Current.SheetStyle };
+        var opt = new SheetComposer.Options
+        {
+            Style = Settings.Current.SheetStyle, Aspect = Settings.Current.SheetAspect,
+            Orientation = Settings.Current.SheetOrientation,
+        };
 
         List<ImageBuffer> thumbs = await Task.Run(() => RenderSheetCells(cells));
-        SheetComposer.Grid grid = await Task.Run(() => SheetComposer.BuildGrid(thumbs, SheetLong(thumbs.Count), opt));
+        SheetComposer.Grid grid = await Task.Run(() => SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt));
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);   // UI thread
         ImageBuffer sheet = SheetComposer.ToBuffer(composed);
 
@@ -3382,9 +3392,13 @@ public partial class MainViewModel : ViewModelBase
     {
         if (BuildSheetCells() is not { } cells) return false;
         if (!MayWriteCover(_roll!.Id)) return false;
-        var opt = new SheetComposer.Options { Style = Settings.Current.SheetStyle };
+        var opt = new SheetComposer.Options
+        {
+            Style = Settings.Current.SheetStyle, Aspect = Settings.Current.SheetAspect,
+            Orientation = Settings.Current.SheetOrientation,
+        };
         List<ImageBuffer> thumbs = RenderSheetCells(cells);
-        SheetComposer.Grid grid = SheetComposer.BuildGrid(thumbs, SheetLong(thumbs.Count), opt);
+        SheetComposer.Grid grid = SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt);
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
         SheetStore.Save(_roll!.Id, SheetComposer.ToBuffer(composed));
         return true;
@@ -3436,9 +3450,12 @@ public partial class MainViewModel : ViewModelBase
     /// thousand and print a blurry cover. Capping at cols × tile width gives a smaller cover at
     /// native sharpness, which is the right trade for a card.
     /// </summary>
-    private static int SheetLong(int frameCount)
+    private static int SheetLong(IReadOnlyList<ImageBuffer> thumbs, SheetComposer.Options opt)
     {
-        int cols = (int)Math.Ceiling(Math.Sqrt(frameCount));
+        // Planned at the ceiling to learn the column count, then capped by it. The gaps scale
+        // with maxLong, so which column count wins is all but scale-invariant — planning once at
+        // the top and re-planning inside BuildGrid at the cap agree.
+        int cols = SheetComposer.Plan(thumbs, SheetStore.MaxLong, opt).Cols;
         return Math.Min(SheetStore.MaxLong, cols * TileMaxEdge);
     }
 
@@ -5175,13 +5192,14 @@ public partial class MainViewModel : ViewModelBase
     /// the UI thread: the surround goes through Avalonia's rasteriser. Only the grid pass and the
     /// encode move to a worker.</summary>
     public async Task ExportContactSheetAsync(IReadOnlyList<ImageBuffer> thumbs, SheetStyle style,
+                                              SheetAspect aspect, SheetOrientation orient,
                                               string path)
     {
         IsBusy = true;
         StatusText = Loc.T("正在导出印样 …");
         try
         {
-            var opt = new SheetComposer.Options { Style = style };
+            var opt = new SheetComposer.Options { Style = style, Aspect = aspect, Orientation = orient };
             // Laid out at full width so the header, frame numbers and strip are rendered at
             // export resolution rather than upscaled from the dialog's cheap preview.
             SheetComposer.Grid grid = await Task.Run(
