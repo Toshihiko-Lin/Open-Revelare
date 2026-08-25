@@ -240,7 +240,17 @@ public partial class MainViewModel : ViewModelBase
     private void CommitLiveParams(RollFrame? frame)
     {
         if (frame is null || !_paramsLoaded) return;
-        frame.Params = BuildParams();
+        // Through LiveParams.ForStorage, never raw: BuildParams suppresses the crop while the
+        // tool is open — a statement about the PREVIEW — and stored, that null says "this frame
+        // has no crop", which is permanent.
+        //
+        // Every way out of a frame arrives here, so with the tool left armed all three lost the
+        // crop: creating a virtual copy (CreateVirtualCopyOfCurrent commits the parent, then
+        // CLONES it, so one click erased both frames' crops), stepping to the next frame
+        // (OnCurrentFrameChanged), and the idle autosave or the close (BuildProjectData). Nothing
+        // looks wrong at the time — the tool is open, so the preview is uncropped anyway — and the
+        // loss only shows on the next open.
+        frame.Params = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
     }
 
     /// <summary>

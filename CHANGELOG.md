@@ -14,6 +14,8 @@
 
 **修复**
 
+- **修复了裁切工具开着时裁切会被清掉的问题**。裁切工具打开时预览故意不裁切（好让你把框拖到要排除的画面上），但这个「不裁切」被一路写进了帧参数。于是工具还开着时，任何一次提交都会把真正的裁切抹成「没有裁切」：新建虚拟副本（先提交母本、再克隆，一次点击两帧的裁切一起没）、切到下一帧、以及空闲自动保存或关窗口。当时看不出异常——工具开着本来就不裁切——要到下次打开这一卷才发现裁切没了。
+
 - **修复了竖构图印样超出尺寸上限的问题**。缩到上限内时只缩了格子、没算行间距，整页会比上限高出百分之几。
 
 ---
@@ -29,6 +31,8 @@
   Auto takes whatever needs the least added margin and leaves the fewest empty cells, so a 36-frame roll still prints an untouched 6×6 with no extra margin at all. Portrait is the same proportion read the other way round (4:3 becomes 3:4), which is why 1:1 is orientation-neutral and greys the toggle out. The choice is remembered, and catalog covers follow it.
 
 **Fixed**
+
+- **Fixed the crop being erased while the crop tool is open.** The tool deliberately previews the frame UNCROPPED so the rect can be dragged over what it excludes — but that "uncropped" was being written into the frame's stored params. With the tool still open, every path that commits a frame replaced a real crop with "no crop": creating a virtual copy (which commits the parent and then clones it, so one click lost both frames' crops), stepping to the next frame, and the idle autosave or closing the window. Nothing looked wrong at the time, since the tool being open means the preview is uncropped anyway; the loss only showed on the next open.
 
 - **Fixed portrait contact sheets overrunning the size cap.** Fitting a too-tall grid scaled the cells but not the row gaps, leaving the page a few per cent past the ceiling.
 
