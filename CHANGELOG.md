@@ -6,15 +6,14 @@
 
 - **印样可以选版面比例了**。印样窗口新增「版面比例」：自动（1:1 ~ 4:3）、1:1、4:3、3:2，各自还能选**横或竖**。
 
-  排几列不再固定为 ceil(√n)，而是按**整页**——含页边、页眉、底部标识条——来解：这些是网格不知道的一整块纸，十来张的卷上足以把一个看着方的网格变成竖长的页面。网格给不出的差额落到**页边距**上，所以出的就是所选的比例本身，不是「最接近的可达比例」。
-
-  **片与片的间距（横向纵向都是）恒定不变**，网格永远保持设计好的疏密——只动一行排几个和页边距。页边距是网格外围的白边，不从缩略图身上出，所以画质一分不损。任何卷长、任何目标／朝向／画幅都精确命中（中位偏差 0.03%，最差 0.1%）。
-
-  「自动」取加白边最少、空格最少的一种，36 张仍是原样的 6×6、零额外页边距。竖版就是同一个比例反过来读（4:3 变 3:4），所以 1:1 那一项横竖没有区别，会置灰。选择会记住，图库封面也跟着重排。
+  
+  「自动」取加白边最少、空格最少的一种，
 
 **修复**
 
-- **修复了裁切工具开着时裁切会被清掉的问题**。裁切工具打开时预览故意不裁切（好让你把框拖到要排除的画面上），但这个「不裁切」被一路写进了帧参数。于是工具还开着时，任何一次提交都会把真正的裁切抹成「没有裁切」：新建虚拟副本（先提交母本、再克隆，一次点击两帧的裁切一起没）、切到下一帧、以及空闲自动保存或关窗口。当时看不出异常——工具开着本来就不裁切——要到下次打开这一卷才发现裁切没了。
+- **修复了片基较透的胶卷识别不出齿孔的问题**。片基越透，透光越接近灯板本身，两者在直方图上挨得越近、余量越窄（蓝凤凰这样的片基只有 2.0 倍，彩负隔着橙色罩是 2.9-4.4 倍），画面被判成「没有齿孔」，齿孔遮罩静默关闭。现改为在全分辨率上估一次。
+
+- **修复了裁切工具开着时裁切会被清掉的问题**。
 
 - **修复了竖构图印样超出尺寸上限的问题**。缩到上限内时只缩了格子、没算行间距，整页会比上限高出百分之几。
 
@@ -24,16 +23,15 @@
 
 - **The contact sheet's page proportion is now a choice.** 印样 window → 版面比例: auto (1:1 – 4:3), 1:1, 4:3, 3:2, each of them wide or tall.
 
-  The column count is no longer fixed at ceil(√n) — it is solved for the WHOLE page, margins, header and identification strip included. Those are a slab of paper the grid knows nothing about, and on a short roll they are enough to turn a square-looking grid into a portrait page. Whatever proportion the grid cannot supply is spent on the page MARGIN, so you get the shape you asked for rather than the nearest one a grid happens to reach.
+  
 
-  **Neither gap between frames changes** — the grid always keeps the density it was designed with — so only the column count and the margin move. The margin is paper around the grid rather than space taken out of it, so the thumbnails keep every pixel. Every roll length hits every target, orientation and frame shape exactly (0.03% median error, 0.1% worst).
-
-  Auto takes whatever needs the least added margin and leaves the fewest empty cells, so a 36-frame roll still prints an untouched 6×6 with no extra margin at all. Portrait is the same proportion read the other way round (4:3 becomes 3:4), which is why 1:1 is orientation-neutral and greys the toggle out. The choice is remembered, and catalog covers follow it.
+  Auto takes whatever needs the least added margin and leaves the fewest empty cells.
 
 **Fixed**
 
-- **Fixed the crop being erased while the crop tool is open.** The tool deliberately previews the frame UNCROPPED so the rect can be dragged over what it excludes — but that "uncropped" was being written into the frame's stored params. With the tool still open, every path that commits a frame replaced a real crop with "no crop": creating a virtual copy (which commits the parent and then clones it, so one click lost both frames' crops), stepping to the next frame, and the idle autosave or closing the window. Nothing looked wrong at the time, since the tool being open means the preview is uncropped anyway; the loss only showed on the next open.
+- **Fixed sprocket holes going undetected on films with a clear base.** The clearer the base, the closer its transmission is to the light board itself, and the less room there is between the two in the histogram (a base like 蓝凤凰's leaves a factor of 2.0, against 2.9-4.4 for colour negative seen through its orange mask), so the frame was read as "no sprockets" and the mask silently switched off. It is now measured once at full resolution.
 
+- **Fixed the crop being erased while the crop tool is open.** 
 - **Fixed portrait contact sheets overrunning the size cap.** Fitting a too-tall grid scaled the cells but not the row gaps, leaving the page a few per cent past the ceiling.
 
 ---

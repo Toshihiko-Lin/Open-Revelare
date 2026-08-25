@@ -1102,7 +1102,10 @@ public partial class MainWindow : Window
     /// threshold remains fully adjustable in 整卷校准 → 齿孔遮罩 with a live mask overlay — the
     /// same control the dialog offered, in the place the rest of the calibration lives.
     /// </summary>
-    private void OnRollImported() => Vm?.ApplySprocketAuto();
+    private async void OnRollImported()
+    {
+        if (Vm is { } vm) await vm.ApplySprocketAutoAsync();
+    }
 
     private void OnViewNegToggle(object? sender, RoutedEventArgs e)
     {

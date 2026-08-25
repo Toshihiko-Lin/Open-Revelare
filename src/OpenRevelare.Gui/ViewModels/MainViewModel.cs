@@ -1815,14 +1815,12 @@ public partial class MainViewModel : ViewModelBase
     /// themselves through <see cref="FilmBase.HighDensityKeepMask"/> — so a roll that lands here
     /// with no board still gets its statistics taken over film pixels only.
     /// </summary>
-    public void ApplySprocketAuto()
+    public async Task ApplySprocketAutoAsync()
     {
-        double? threshold = null;
-        if (_previewLinear is { } preview)
-        {
-            double est = Sprocket.EstimateSprocketThreshold(preview);
-            if (est < Sprocket.NoBoard) threshold = est;
-        }
+        // Off the UI thread: unlike every other estimator on this path, this one decodes a frame
+        // at full resolution (see MeasureBoardCut), which is seconds rather than milliseconds on a
+        // 100 MP scan. The chain it hands off to at the end is already async for the same reason.
+        double? threshold = await Task.Run(MeasureBoardCut);
 
         if (threshold is double thr)
         {
@@ -1858,7 +1856,7 @@ public partial class MainViewModel : ViewModelBase
     /// This import's auto-inversion choice, taken from the import dialog's checkbox.
     ///
     /// Held as a field because the decision is made in <see cref="LoadRollWithConfigAsync"/> but
-    /// acted on later, in <see cref="ApplySprocketAuto"/> — the chain has to wait for the
+    /// acted on later, in <see cref="ApplySprocketAutoAsync"/> — the chain has to wait for the
     /// sprocket threshold. Defaults true so a roll opened by any other route (a saved project, the
     /// catalog) still behaves as before.
     /// </summary>
@@ -1977,6 +1975,80 @@ public partial class MainViewModel : ViewModelBase
     private double? AutoBoardCut()
     {
         if (SprocketEnabled) return SprocketThreshold;
+        return MeasureBoardCut();
+    }
+
+    /// <summary>
+    /// The light-board cut, measured on ONE frame at FULL RESOLUTION — null when the frame has no
+    /// board (<see cref="Sprocket.NoBoard"/>).
+    ///
+    /// Full resolution is load-bearing, and this is the only estimator in the program for which
+    /// that is true. Everything else here samples a population — a percentile, a channel mean, a
+    /// mode — and a box-downsampled preview is a fair sample of a population. This one looks for a
+    /// GAP between two populations, and downsampling is precisely the operation that fills gaps in:
+    /// every sprocket-hole edge pixel becomes a blend of hole and film, at a luma that exists
+    /// nowhere in the original, and those blends land in the valley the estimator is trying to
+    /// find.
+    ///
+    /// Measured on the 蓝凤凰 roll (12 frames, 105 MP): the board↔base valley sits at luma 0.607
+    /// full-resolution and the board peak at 0.725, a separation of 0.117 that clears
+    /// MinBoardSeparation's 0.10. On the 1600 px preview the same frame's valley floor is dragged
+    /// up to 0.635 — separation 0.090 — and every frame in the roll is rejected as boardless. That
+    /// is not a threshold that wants loosening: raising the preview to 2400 or 3200 px does NOT
+    /// recover it (separations 0.082 and 0.086, no better than 1600), because the blended pixels
+    /// scale with the hole PERIMETER and never go away. Only the undownsampled histogram has the
+    /// gap in it.
+    ///
+    /// The roll had been getting 齿孔遮罩 = off on import with no indication why, and the whole
+    /// roll's statistics were then taken with the board included. It is the most demanding case
+    /// seen so far — a CLEAR base transmits nearly as much as the bare board above it, putting its
+    /// board/base ratio at 1.98-2.11 against the 2.85-4.38 of the colour rolls, whose orange mask
+    /// costs the base most of a stop; so it has the least margin anywhere to give — but it is not the
+    /// only one affected: on the rolls that DID detect at preview size, the preview's answer
+    /// disagreed with the full-resolution one by up to 0.27 (富士Superia200 DSC_9234), and one
+    /// frame (DSC_9239) was a preview-only false positive. Those rolls' gaps were simply wide
+    /// enough to survive a cut placed in the wrong part of them.
+    ///
+    /// ONE frame, not the roll. The cut is applied roll-wide either way — a roll is one strip of
+    /// one film over one light board — so the extra frames would cost a full-resolution decode each
+    /// to average out a quantity that does not vary between them. The frame is decoded transiently
+    /// and dropped before this returns: it is deliberately NOT put in the preview cache, whose
+    /// entries are preview-sized on purpose (see PreviewAsync — the full-resolution float frame is
+    /// the biggest allocation in the program).
+    /// </summary>
+    private double? MeasureBoardCut()
+    {
+        // Measured on the frame the preview is currently showing, so the answer describes the
+        // same negative the user is looking at.
+        if (CurrentFrame is not { } frame) return null;
+
+        ImageBuffer full;
+        try { full = ImageIo.LoadLinear(frame.Path); }
+        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
+        {
+            // A file the full decoder cannot open is not a reason to lose the estimate entirely —
+            // the preview is already in hand and its answer, while placed less well, is the one
+            // this code used to give.
+            return PreviewBoardCut();
+        }
+
+        // Reproduce the preview's own framing on the full decode. A margin decode is a window
+        // onto a file holding several negatives, so it goes on first; AutoCrop is expressed
+        // against whichever buffer the preview is (the frame's rect within the box when there is
+        // one, the file otherwise), which is exactly what applying the box first leaves behind.
+        // Without this a strip scan would be measured with its neighbouring negatives included.
+        ImageBuffer region = _previewMargin is { } box ? Geometry.ApplyCrop(full, box) : full;
+        if (AutoCrop is { } c) region = Geometry.ApplyCrop(region, c);
+
+        double thr = Sprocket.EstimateSprocketThreshold(region);
+        return thr >= Sprocket.NoBoard ? null : thr;
+    }
+
+    /// <summary>The same measurement on the preview buffer — the fallback for a file the
+    /// full-resolution decoder cannot open. See <see cref="MeasureBoardCut"/> for why this is
+    /// second best rather than equivalent.</summary>
+    private double? PreviewBoardCut()
+    {
         if (AutoRegion() is not { } raw) return null;
         double thr = Sprocket.EstimateSprocketThreshold(raw);
         return thr >= Sprocket.NoBoard ? null : thr;
@@ -3761,7 +3833,7 @@ public partial class MainViewModel : ViewModelBase
 
         // Set roll-level ops BEFORE loading so the sprocket estimate + auto film-base (which run
         // during LoadRollAsync) sample t_base in the DECOUPLED domain and the first render decouples.
-        // The auto-inversion choice rides along for the same reason: ApplySprocketAuto acts on it
+        // The auto-inversion choice rides along for the same reason: ApplySprocketAutoAsync acts on it
         // partway through the load.
         _cfgAutoInvert = cfg.AutoInvert;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
