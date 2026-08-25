@@ -21,14 +21,24 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
+  # 发版前的两道闸：版本号对不对，回归测试过不过。
+  #
   # tag 与 csproj 的 <Version> 必须一致 —— 这两处对不上，发出去的包就会带错版本号，
   # 而更新检测是按版本号比较的。先失败在这里，比失败在用户机器上便宜得多。
+  #
+  # 回归测试同理，而且更要紧：三个平台的打包 job 都 needs: guard，所以测试一红，
+  # 三个包一个都不会打出来。一次发版把回归 bug 带给全部用户的代价，远高于这十秒。
   guard:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 回归测试
+        run: dotnet test -c Release --nologo
       - id: v
         shell: bash
         run: |
