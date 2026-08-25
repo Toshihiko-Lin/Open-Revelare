@@ -17,6 +17,16 @@
 
 - **修复了竖构图印样超出尺寸上限的问题**。缩到上限内时只缩了格子、没算行间距，整页会比上限高出百分之几。
 
+**内部**
+
+- **给「结果可复现」这句话加了机制**。整条管线的输出现在被逐像素钉住，任何改动若无意中动了画面，构建就会红；这套回归测试也从只在本机跑改成了每次提交与发版都跑，测试不绿就不出包。
+
+- **补齐了开源协作所需的文档**：贡献指南、安全策略、问题反馈模板。
+
+- **主界面代码按职责拆分**。纯搬运，功能与画面输出均未改变。
+
+- **补了标定实验的索引**（`docs/calibration/`）。
+
 ---
 
 **Added**
@@ -33,6 +43,16 @@
 
 - **Fixed the crop being erased while the crop tool is open.** 
 - **Fixed portrait contact sheets overrunning the size cap.** Fitting a too-tall grid scaled the cells but not the row gaps, leaving the page a few per cent past the ceiling.
+
+**Internal**
+
+- **Put a mechanism behind "reproducible results".** The pipeline's output is now pinned pixel for pixel, so any change that alters the picture unintentionally turns the build red; that regression suite also went from running only on the author's machine to running on every commit and every release, and no packages are built unless it is green.
+
+- **Added the documentation open-source collaboration needs**: a contributing guide, a security policy, and issue templates.
+
+- **Split the main window's code by responsibility.** A pure move: behaviour and rendered output are unchanged.
+
+- **Indexed the calibration experiments** (`docs/calibration/`).
 
 ---
 
