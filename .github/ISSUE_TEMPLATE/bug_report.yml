@@ -1,0 +1,68 @@
+name: 报告问题 / Bug report
+description: 程序崩溃、报错，或行为不符合预期 / Crash, error, or wrong behaviour
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢你花时间报告问题。
+
+        **如果问题和「转出来颜色不对」有关，请务必附上源文件和 `.ncproj`**——
+        没有这两样，多数颜色问题在别人机器上复现不出来，issue 只能靠猜。
+        源文件不方便公开的话，可以只发一小段裁切，或邮件私发（见 README 联系方式）。
+
+        ---
+        Thanks for taking the time. **If this is about colour being wrong, please attach the
+        source file and its `.ncproj`** — without both, most colour issues cannot be reproduced.
+        A small crop is fine if you can't share the full file.
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么 / What happened
+      description: 你做了什么，期望看到什么，实际看到什么 / What you did, expected, and got
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 导入 ...
+        2. 点击 ...
+        3. 看到 ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 「帮助 → 关于」里的版本号 / From Help → About
+      placeholder: "1.6.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 系统 / OS
+      options: [Windows, Linux, macOS]
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: 源文件类型 / Source file type
+      description: 相机型号 + RAW 格式，或扫描仪型号 + 位深 / Camera + RAW format, or scanner + bit depth
+      placeholder: "Sony A7III / .ARW，或 Flextight X5 / 16-bit TIFF"
+  - type: textarea
+    id: files
+    attributes:
+      label: 源文件与工程 / Source file and .ncproj
+      description: |
+        **颜色问题必填。** 把文件拖进这个框即可上传（GitHub 不接受 RAW 后缀，压成 .zip 再传）。
+        **Required for colour issues.** Drag files here (zip RAW files — GitHub rejects raw extensions).
+  - type: textarea
+    id: logs
+    attributes:
+      label: 报错信息 / Error message
+      description: 如果有崩溃对话框或终端输出，整段贴进来 / Paste any crash dialog or console output
+      render: text

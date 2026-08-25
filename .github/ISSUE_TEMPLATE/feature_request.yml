@@ -1,0 +1,28 @@
+name: 功能建议 / Feature request
+description: 希望增加或改进某个功能 / Suggest a feature or improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前值得先看一眼 README 的「三条原则」和「适合谁」。这个项目**有意**不做某些事——
+        比如逐卷色卡标定（那是 DiVERE 的领域），或者给 Stage 2 加一组对数域滑块（那会让两个
+        控件抢同一个自由度）。不是所有建议都会被接受，但都会被认真回复。
+
+        Worth skimming the README's "three principles" and "who it's for" first — some things
+        are deliberately out of scope, and the README says which.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题 / What problem are you solving
+      description: 先说问题，别直接说方案——问题往往有比你想到的更好的解法
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想的做法 / What you have in mind
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在你是怎么绕过去的 / How you work around it today

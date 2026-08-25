@@ -1,0 +1,49 @@
+name: 转换结果不对 / Wrong conversion result
+description: 程序没报错，但出来的颜色/影调不对 / No error, but the colour or tone is wrong
+labels: [color]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这类问题**必须有文件才能查**。这个程序的每一步都是确定性的：同样的输入加同样的
+        `.ncproj`，在任何机器上都出同一张图。所以只要你给得出这两样，问题一定能被复现和定位；
+        给不出的话，任何人都只能猜。
+
+        This one **needs files**. Every step is deterministic: the same input plus the same
+        `.ncproj` produces the same image on any machine — so with both, this is always
+        reproducible. Without them, nobody can do more than guess.
+  - type: textarea
+    id: wrong
+    attributes:
+      label: 哪里不对 / What's wrong
+      description: 偏色？暗部发灰？高光溢出？和什么比较得出的结论？
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: 源文件 + .ncproj / Source file + .ncproj
+      description: |
+        压成 .zip 拖进来。源文件不方便公开就发一小段裁切——只要能复现就行。
+        Zip and drag here. A small crop is fine as long as it still reproduces.
+    validations:
+      required: true
+  - type: textarea
+    id: readings
+    attributes:
+      label: 标定读数 / Calibration readings
+      description: |
+        「整卷校准」页里的片基（D_min）与高光（D_max）三个数。
+        橙色片基应当 R<G<B（典型 ~0.09 / 0.29 / 0.54），明显不符往往就是问题所在。
+      placeholder: "D_min: 0.09 / 0.29 / 0.54    D_max: 2.21 / 2.34 / 2.79"
+  - type: input
+    id: source
+    attributes:
+      label: 底片与光源 / Stock and light source
+      placeholder: "Kodak Gold 200，翻拍，某某灯箱 / scanned on ..."
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+    validations:
+      required: true
