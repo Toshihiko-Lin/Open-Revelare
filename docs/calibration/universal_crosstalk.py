@@ -1,6 +1,18 @@
 """
 Is there a UNIVERSAL C-41 crosstalk direction, shared by every stock?
 
+*** THIS RESULT WAS WITHDRAWN — do not cite it on its own. ***
+
+Every ColorChecker dataset used below describes densities on Kodak Endura Premier PAPER, so the
+matrix fitted here maps PAPER to scene, and the agreement it finds across stocks is partly the
+shared print chain rather than the film. The question was re-asked against paper-free data in
+paper_free_crosstalk.py; read that one for the answer, and this one only for how the mistake
+was made.
+
+Kept rather than deleted because a withdrawn result is still evidence: the failure mode here —
+data that silently contains an extra stage — is exactly the trap the next experiment has to
+avoid, and that is only visible if the wrong turn stays on the record.
+
 This is the premise the whole design rests on. OpenRevelare deliberately does not calibrate per
 roll — the goal is one fixed transform that recovers what the C-41 PROCESS loses, letting each
 stock's own character come through as a difference rather than being normalised away. For that

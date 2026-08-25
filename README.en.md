@@ -85,10 +85,12 @@ The project started as a self-use tool, was validated with real paying users (8 
 
 **Probably not a fit**
 
-- People who want one-click output and don't want to understand any parameter: there is auto-calibration, but the point of the tool is that everything *can* be inspected and corrected
+- People who want one-click output and have no interest in any parameter: **auto-calibration gets you 90% of the way; the value of this tool is that the remaining 10% is inspectable rather than guesswork**. If that last 10% doesn't matter to you, something else will be less work
 - Strict colour-accurate work — heritage copying, commercial archiving, research: OpenRevelare does not do per-roll colour-chart calibration. For that, use [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)
 
 For standard C-41 stocks like Gold 200, the difference between the defaults and a per-roll calibration is barely visible on screen and essentially indistinguishable in print; stocks further from the reference need a calibration tweak or a SceneBase touch-up to close most of the gap.
+
+Put plainly: **auto-calibration gets you 90% of the way, and the remaining 10% is the reason this tool exists** — not because it insists you work by hand, but because here that 10% is *inspectable*. The film base reads as three numbers you can sanity-check (an orange mask is necessarily R<G<B), the highlight endpoints as three more. When something is off you can see where and which way to move it, instead of pulling another curve and hoping. Other tools have that same 10%; they just give you no way to know where it went.
 
 ## How it compares to the mainstream
 
@@ -97,7 +99,7 @@ For standard C-41 stocks like Gold 200, the difference between the defaults and 
 | Form | Lightroom/PS plugin | Standalone app | Standalone app |
 | Ecosystem | Locked to Adobe, $99+ | Free, open-source | Free, open-source |
 | Processing | Black box, unexplainable | Physically explainable | Physically explainable |
-| Barrier | Low | Needs colour chart + narrowband light | None — copy and go |
+| Barrier | Low | Needs colour chart + narrowband light | No gear; auto-calibrates to 90% |
 | Reproducibility | No | Yes | Yes (every parameter has a physical meaning) |
 
 In one line: plugins sell mask removal as a filter, hardware calibration builds precision on extra gear, OpenRevelare goes "no hardware, explainable, reproducible".
@@ -290,8 +292,17 @@ Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 git clone https://github.com/Toshihiko-Lin/Open-Revelare.git
 cd Open-Revelare
 dotnet build -c Release
+dotnet test  -c Release          # regression suite, ~10 s
 dotnet run --project src/OpenRevelare.Gui
 ```
+
+If you plan to change code, read [CONTRIBUTING.md](CONTRIBUTING.md) first — especially the
+section on the **golden baseline**: `src/OpenRevelare.Tests/Golden/` holds a pixel-exact baseline
+of the whole pipeline, and it is what defends the claim above that the same negative processed
+today, next year, or on another machine gives the same image. If it goes red, you have most
+likely changed every photograph without meaning to.
+
+The calibration experiments behind the physical claims live in [`docs/calibration/`](docs/calibration/).
 
 Command-line front-end (no GUI, same Core):
 
