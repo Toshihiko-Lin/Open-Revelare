@@ -30,4 +30,9 @@
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.9" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Remove="Fixtures\**\*" />
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
