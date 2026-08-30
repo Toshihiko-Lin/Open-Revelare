@@ -6,6 +6,10 @@
 
 - **印样可以选版面比例了**。印样窗口新增「版面比例」：自动（1:1 ~ 4:3）、1:1、4:3、3:2，各自还能选**横或竖**。
 
+**改进**
+
+- **优化了整卷自动标定的色彩**。整卷不再被单张偏色画面带偏。
+
 **修复**
 
 - **修复了片基较透的胶卷识别不出齿孔的问题**。
@@ -13,8 +17,6 @@
 - **修复了裁切工具开着时裁切会被清掉的问题**。
 
 - **修复了竖构图印样超出尺寸上限的问题**。
-
-- **修复了整卷自动标定被单张偏色画面带偏**。
 
 - **修复了整卷自动标定被单张最厚的画面压暗**，整卷不再发闷。
 
@@ -28,6 +30,10 @@
 
 - **The contact sheet's page proportion is now a choice.** Contact sheet window → Page proportion: auto (1:1 – 4:3), 1:1, 4:3, 3:2, each of them wide or tall.
 
+**Improved**
+
+- **Better colour from the roll-wide auto calibration.** One off-colour frame no longer pulls the whole roll with it.
+
 **Fixed**
 
 - **Fixed sprocket holes going undetected on films with a clear base.**
@@ -35,8 +41,6 @@
 - **Fixed the crop being erased while the crop tool is open.**
 
 - **Fixed portrait contact sheets overrunning the size cap.**
-
-- **Fixed roll calibration being thrown off by one off-colour frame.**
 
 - **Fixed the whole roll coming out flat and dark because of its single densest frame.**
 
