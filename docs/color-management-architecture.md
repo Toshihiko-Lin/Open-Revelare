@@ -1,6 +1,6 @@
 # OpenRevelare 色彩管理链路修复架构
 
-状态：**实施基线（Accepted for implementation）**，产品代码尚未按本文完成改造。
+状态：**Windows PR 候选（M1/M2 与 M3/M4 Windows 切片已通过自动化回归）**。macOS M5 按目标延后；Windows 色度计/跨显示器人工验收仍待完成。
 
 范围：输入表征、工作空间、输出渲染、导出 ICC、软打样预留、屏幕呈现与跨平台边界。
 
@@ -332,8 +332,8 @@ CLUT 插值的细微差异会破坏跨平台可复现性。ColorSync/DWM 只在�
 |---|---|---|---|
 | TIFF + 有效 matrix/TRC ICC | `Characterized` | LittleCMS 完整转换为 linear ACEScg | profile 无法建立 transform 时阻止“已表征”路径并报告原因 |
 | TIFF + A2B/CLUT ICC | `Characterized` | LittleCMS 使用 profile LUT；不拆成半个 TRC + 半个 matrix | transform 失败则显式错误/override，不静默猜 sRGB |
-| malformed ICC | `Uncharacterized` + diagnostic | 不执行半次转换 | 用户明确选择 override profile 后才能按该 profile 处理 |
-| untagged 8/16-bit TIFF | `UncharacterizedCapture` | 新项目要求选择/记录输入假设；旧项目走 versioned compatibility | 不按位深偷偷决定原色；现有 8-bit inverse-sRGB 行为仅可留在 legacy route |
+| malformed ICC | `Uncharacterized` 或用户明确指定的 `Characterized` | 不执行半次转换；只有已选择的 roll fallback 可接管，并在 decode recipe 记录拒绝原因 | 无显式 fallback 时拒绝；不得静默忽略坏 profile |
+| untagged 8/16/32-bit TIFF | `UncharacterizedCapture` 或用户明确指定的 sRGB | 新项目强制选择并记录 linear/sRGB 输入假设；旧项目走 versioned compatibility | 不按位深偷偷决定原色；现有 8-bit inverse-sRGB 行为仅可留在 legacy route |
 | RAW negative | `CameraNativeUncharacterized` | UniWB、linear、camera-native 解码保持不变；等待 rig/film 联合表征 | 不自动套普通场景相机 ColorMatrix，不贴 ACEScg/sRGB |
 | RAW + 经验证的 rig/film calibration | `CharacterizedCapture` | 使用与 `t_base`/endpoints 联合求得的输入变换 | calibration identity 随 roll 保存 |
 | 用户指定 capture profile | `Characterized` | 保存 exact bytes/hash；重新建立依赖该输入的 roll calibration | profile 变化显式使相关 calibration stale |
@@ -341,6 +341,12 @@ CLUT 插值的细微差异会破坏跨平台可复现性。ColorSync/DWM 只在�
 当前 `RawDecode.CameraToSrgbMatrix` 可以保留为诊断或未来的明确 opt-in 实验，但不得在没有产品决策、
 fixture 和重标定策略时偷偷接入主链。负片染料 + 光源 + sensor 的等效原色不等于相机拍摄普通场景时的
 ColorMatrix。
+
+Windows/GUI 的新 TIFF 卷即使当前文件带 ICC，也必须选定无/坏 ICC 时的整卷 fallback；有效嵌入 ICC
+始终优先。选择存入 `roll_meta.tiff_is_linear`，并进入 full/preview/region/calibration/split 的 decode
+cache identity。linear fallback 保持原色未表征并只作数值透传；sRGB fallback 使用 exact built-in sRGB
+经一次完整 LittleCMS transform。CLI 用互斥的 `--input-linear` / `--input-srgb` 表达同一选择；无可用
+ICC 且两者都未给出时 fail closed。缺字段的旧工程才使用按位深的冻结兼容路径。
 
 ---
 
@@ -377,13 +383,13 @@ Rec709/2.4，而用户选择 sRGB、Display P3 或 Adobe RGB：
 | 输出 | Profile 政策 |
 |---|---|
 | sRGB JPEG/TIFF | 默认嵌 exact sRGB；允许用户明确省略，但诊断中记录 untagged |
-| Display P3 / Adobe RGB JPEG/TIFF | 默认且应强制嵌 exact profile；若保留 expert override，必须显示不可移植警告 |
-| scene-linear ACEScg TIFF | 目标是嵌 deterministic linear ACEScg ICC；若 VFX 工具链要求无 ICC，作为单独 expert preset，而非默认 |
+| Display P3 / Adobe RGB / Rec709 JPEG/TIFF | 强制嵌 exact profile；不提供会产生不可移植文件的普通 UI |
+| scene-linear ACEScg TIFF | 32-bit IEEE floating-point（`SampleFormat=IEEEFP`），保留负值与 `>1` 分量并嵌 deterministic linear ACEScg ICC；若 VFX 工具链要求无 ICC，作为单独 expert preset，而非默认 |
 | JPEG scene-linear | 不支持 |
 | CLI export | 与 GUI 使用同一个 `RenderedFrame`/exporter，不得走无 ICC 的第二条实现 |
 | contact sheet export | 明确固定输出 profile（初始为 sRGB）并嵌同一 bytes |
 
-JPEG 的 YCbCr 编码与有损压缩意味着不能作逐码值等价测试；TIFF16 是 round-trip 主验收载体。
+JPEG 的 YCbCr 编码与有损压缩意味着不能作逐码值等价测试；normalized 输出用 TIFF16 作 round-trip 主验收载体，extended/scene-linear 输出必须用 TIFF32F 验证负值与 `>1` 分量不被钳制。
 
 ### 8.4 legacy project
 
@@ -650,7 +656,14 @@ Unmanaged fallback · sRGB8 · wide-gamut preview unavailable
 | Linux | fallback 状态与告警 | 已知 compositor/profile 环境记录结果，不冒充统一保证 |
 
 参考查看器比较必须使用同一个导出文件及其嵌入 ICC。系统截图只能辅助定位，不能单独证明物理显示色准；
-有条件时使用校色仪/色度计测测试 patch。
+有条件时使用校色仪/色度计测试 patch。
+
+### 14.4 Windows 当前实机与产物证据（2026-08-30）
+
+- 当前显示器探针：EIZO CG2700X，Windows 11 Advanced Color `WideColorGamut`，10 bpc，SDR reference white 80 nits；选出的 surface contract 为 `LinearExtendedSrgbRgba16F`、`SystemCompositor` owner、无 fallback warning。
+- native smoke 在真实 D3D11 adapter 上分别创建 legacy BGRA8 与 Advanced `R16G16B16A16_FLOAT`/scRGB swapchain，各完成 26 次 present；计时受 DWM/vsync 主导，中位数约 16.67 ms。
+- reproducible native DLL SHA-256 为 `57E90A68D9356421F94C7217BDBA36178D2DABFA877495AAD6377E0DA790B0D5`；source-tree SHA-256 为 `8F00DC11C9932ED660AC43794213859D9A951AB52D78B3FFD16F1353707D8A72`。校验覆盖 AMD64 PE、精确五个 C ABI exports、静态 CRT 与双构建字节一致。
+- 上述证据只证明 contract、格式、所有权和执行路径；与参考查看器的肉眼/色度计 patch 比较，以及 Advanced off 与第二台不同 profile 显示器的跨屏人工比较仍是 M4 未关闭的硬件门槛。
 
 ---
 
@@ -663,12 +676,12 @@ compositor。
 |---|---|---|---|
 | A0 | **完成** | 本架构、远端 fork 基线 | 文档进入仓库并由后续 session 引用 |
 | M0 | **完成** | 冻结复现文件、ICC、synthetic patches、旧项目 fixtures；让现有 null-destination false-positive 测试失败 | Win11+艺卓案例有可重复数值；现状错误被测试钉住 |
-| M1 | 未开始 | typed frames/profile identity；锁定并打包 LittleCMS；transform cache/diagnostics skeleton | 无裸 `ImageBuffer` 穿越色彩边界；三平台 canonical fixture 相同 |
-| M2 | 未开始 | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | TIFF16 export round-trip 等价；embedded bytes 为 exact profile；golden 迁移审阅完成 |
-| M3 | 未开始 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | 主图/patch/masks/crop 单一合成；主 preview 前无 8-bit/clamp；D-011/D-012 关闭 |
-| M4 | 未开始 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | 两模式均恰好一次 transform；艺卓实机通过 |
-| M5 | 未开始 | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | layer contract 自动测试 + Preview/Photos/外接艺卓实机通过 |
-| M6 | 未开始 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | 无旧 `ColorManagedImage` 猜测路径；所有 fallback 可诊断；GUIDE/THEORY 与实现一致 |
+| M1 | **完成** | typed frames/profile identity；锁定并打包 LittleCMS；transform cache/diagnostics skeleton | app-owned LittleCMS 2.19.1 固定来源/哈希/加载路径；typed source/working/render 边界与 canonical fixture 已测试 |
+| M2 | **完成** | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | 有效 ICC 原子转换；untagged/坏 ICC 显式 fallback 与项目往返；normalized TIFF16 与 extended TIFF32F round-trip；exact embedded ICC；L2 显式迁移；稳定 render fingerprint |
+| M3 | Windows 切片完成；macOS 待办 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | Windows 主图/patch/masks/crop 单一合成且末跳前无 8-bit/clamp；D-011 已关闭，D-012 留给 macOS |
+| M4 | 代码/自动化完成；硬件人工验收待办 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | transform-count、ABI、recovery/fallback 与当前 EIZO 契约探针已验证；色度计/参考查看器和双屏人工比较待完成 |
+| M5 | 按当前目标延后 | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | Windows PR 合入后另开修复；D-012 随该阶段关闭 |
+| M6 | 部分完成 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux/macOS 部分待后续 |
 
 ### 15.1 提交边界
 
@@ -715,11 +728,13 @@ compositor。
 | D-008 | Accepted | native GPU API 只 present，不恢复 Core GPU processing backend | 符合现有 CPU 架构与已测性能结论 |
 | D-009 | Accepted | 未表征输入保持 `Uncharacterized`，不得假贴 sRGB/ACEScg | 不用一个新猜测替换旧猜测；保证诊断诚实 |
 | D-010 | Accepted | print LUT native output 必须色度转换到 exact selected output profile | 保颜色而非保 code value，消除 TRC/profile mismatch |
-| D-011 | Open | Windows scRGB 与 macOS extended-linear 的 reference-white scale | M3 spike 后决定；contract 已预留字段 |
+| D-011 | Accepted（Windows） | Windows scRGB `ReferenceWhiteScale=1.0`；canonical `1.0` 表示 Windows 报告的 SDR reference white（不可用时 80 nits） | 当前 EIZO/WCG 探针报告 80 nits；DWM 拥有唯一 monitor transform；macOS 亮度语义不在此决定中，仍由 D-012 验证 |
 | D-012 | Open | macOS SDR WCG 是否/何时设置 `wantsExtendedDynamicRangeContent` | 需实机验证 extended channel 与 SDR 亮度，不能把 HDR 示例直接当 WCG 规范 |
-| D-013 | Open | legacy v1 项目采用 L1、L2 或 L3 | M0 fixtures 与用户迁移成本评估后、M2 开始前决定 |
-| D-014 | Open | 主 F16 compositor 首版用 Skia raster、Skia GPU 还是自有 CPU pack | M3 microbenchmark；必须保持 renderer 共享、presenter 无业务 |
-| D-015 | Open | 外部 LUT/CLUT output profile 的首期支持范围 | 完成标准 RGB 与 ICC input 后，以独立 CMM 对照测试决定 |
+| D-013 | Accepted | 采用 L2 显式 opt-in migration：缺字段为 v1 且不自动改写；新工程为 v2；只有用户迁移才写 v2 | 保持旧 look 和工程可逆性，同时让新工程使用完整 managed 链路 |
+| D-014 | Accepted | 首版采用共享自有 CPU F16 compositor；native presenter 只作固定格式上传 | 1600×900 compose/pack 约 12.8/1.2 ms，3840×2160 约 41.8/6.9 ms；场景语义仍只有一份，未引入平台 shader 分叉 |
+| D-015 | Accepted | 首期支持标准 RGB 与声明为 Rec709 output 的内置 print LUT；ManagedV2 对 output encoding 未知的任意外部 LUT fail closed | 没有可靠 output profile 就不能把像素冒充成用户选择的 ICC；后续 CLUT 支持需独立资产描述与对照测试 |
+| D-016 | Accepted | typed `Extended` TIFF 导出必须为 32-bit IEEE float 并嵌 exact profile；TIFF16 只接收 `Normalized` | 16-bit unsigned 会静默丢掉负值和 `>1` scene-linear headroom，违反 I1/I4 |
+| D-017 | Accepted | ManagedV2 的无/坏 ICC TIFF 使用 roll 级显式 fallback：linear 保持原色未表征并数值透传，sRGB 作为用户指定 exact profile；有效嵌入 ICC 永远优先 | 位深不是色彩声明；选择必须随工程与所有 decode cache 传播，旧项目才保留按位深 compatibility |
 
 ### 17.1 拒绝的替代方案
 
@@ -789,6 +804,9 @@ latency。只比较共享实现；不得以“平台 shader 更快”为由把�
 |---|---|---|---|---|
 | 2026-08-30 | `b7cd46d` + 文档工作区改动 | 建立 A0 架构基线；未修改产品代码 | 代码只读审计、远端/fork 验证 | M0：加入失败用例、fixture 与诊断基线 |
 | 2026-08-30 | `480a702`、`7af8dc9` | 完成 M0：冻结 built-in ICC exact bytes/hash、canonical extended-range patches、Win11/EIZO WCG reproduction TIFF、legacy missing/false fixtures；钉住 null-destination 与 print-LUT profile mismatch；未修改产品代码 | M0 fixture tests 12/12 通过；characterization tests 8 项中 sRGB/Rec709 controls 2 项通过，目标错误 6 项按预期失败 | M1：引入 profile identity、typed frames、LittleCMS 与 transform diagnostics |
+| 2026-08-30 | `b7a3324`、`c61c355` | 完成 M1：固定并打包 app-owned LittleCMS 2.19.1；建立 exact profile identity、typed frame 与 transform diagnostics 基础 | 固定来源/哈希/加载路径验证；typed source/working/render 与 canonical fixtures 通过 | M2：统一 managed 输入、渲染、导出和迁移语义 |
+| 2026-08-30 | `a3e82a5` | 完成 M2 主体与 M3/M4 Windows 切片：统一 managed ICC 链、TIFF32F extended export、L2 显式迁移、稳定 fingerprint、共享 F16 compositor，以及 Advanced/legacy/emergency presenter、recovery 和 fallback | Release `-warnaserror` 0 warning/0 error；managed 402/402、Win32 30/30；native ABI/repro/smoke 通过，DLL SHA-256 `57E90A68D9356421F94C7217BDBA36178D2DABFA877495AAD6377E0DA790B0D5`；EIZO CG2700X 探针选出 FP16/scRGB system-owned contract | 收口 untagged TIFF 与导出 ICC 的 fail-closed UI/CLI 契约 |
+| 2026-08-30 | `98fc462` | 收口 M2：新 TIFF 卷显式选择 linear/sRGB fallback，有效 ICC 原子优先，坏 ICC 仅由显式 fallback 接管；选择随项目、完整图/预览/区域/标定/分割/导出及 cache identity 传播；导出 UI 与 exporter 仅允许 exact display-sRGB 省略 ICC；工程/新卷长预处理采用二次 flush 后原子接管，避免跨卷污染或丢编辑 | Release `-warnaserror` 0 warning/0 error；focused TIFF/ICC 16/16、managed 424/424、Win32 30/30；CLI 互斥/fail-closed 进程级检查通过；两轮独立只读复审 0 P0/P1；native ABI 与 legacy/Advanced smoke 再通过 | 推送并提交上游 Windows PR；用参考查看器/色度计与第二显示器关闭 M4 硬件人工门槛；macOS M5 延后 |
 
 ---
 

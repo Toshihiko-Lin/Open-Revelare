@@ -56,7 +56,7 @@
 
 整个流程里每个参数都有名字、有明确的物理含义。同一卷底片，今天处理、明年处理、换台机器处理，结果都一样——这是「计算」和「拉曲线试手感」的根本区别。
 
-技术栈：C# / .NET 8 + Avalonia，**纯 CPU**，Windows / Linux / macOS 三平台同一份代码。本地优先、非破坏：源文件永不修改，参数存在图片旁边的 `.ncproj` 文件里；不联网、不需要账号。界面中英双语，跟随系统或手动锁定。
+技术栈：C# / .NET 8 + Avalonia。图像处理由三平台共享的 CPU Core 完成；Windows 仅用 D3D11 上传并呈现最终色彩管理 surface，不是图像处理 GPU 后端。本地优先、非破坏：源文件永不修改，参数存在图片旁边的 `.ncproj` 文件里；不联网、不需要账号。界面中英双语，跟随系统或手动锁定。
 
 ## 为什么做这个
 
@@ -181,7 +181,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 2. **整卷校准**——在「整卷校准」页标定当前帧：自动标定会估片基、白平衡、反差等，不满意可手动修正
 3. **应用到整卷**——把这套物理参数同步给整卷，其余帧共用
 4. **帧编辑**——逐帧在「帧编辑」页做审美调整：色温、曝光、对比度、饱和度、曲线
-5. **导出**——8/16-bit TIFF 或 JPEG，可嵌 ICC profile
+5. **导出**——16-bit 照片 TIFF、8-bit JPEG，或 32-bit 浮点场景线性 ACEScg TIFF；默认嵌入与像素匹配的 ICC（仅标准 sRGB 可显式省略）
 
 全程没有「保存」按钮——改动自动落盘，`.ncproj` 与源文件放在一起。
 
@@ -213,7 +213,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 | **RAW 输入** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ 等（LibRaw） |
 | **扫描仪输入** | 哈苏 Flextight `.fff`（按内容识别，自动线性化） |
 | **其他输入** | TIFF / JPEG / PNG |
-| **导出** | 16-bit TIFF、JPEG，三种输出色彩空间（另可导出场景线性 ACEScg），嵌入的 ICC 与实际像素一致 |
+| **导出** | 16-bit TIFF、JPEG，三种输出色彩空间；另可导出保留扩展范围的 32-bit 浮点场景线性 ACEScg TIFF；默认嵌入与实际像素一致的 ICC，仅标准 sRGB 可显式省略 |
 
 ## 工作原理
 
@@ -305,7 +305,7 @@ dotnet run --project src/OpenRevelare.Gui
 命令行前端（无 GUI，同一个 Core）：
 
 ```bash
-dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --d-max 2.0
+dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --d-max 2.0
 dotnet run --project src/OpenRevelare.Cli -- --help
 ```
 
