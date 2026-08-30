@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ImportDialog"
-        Width="600" Height="600"
+        Width="600" Height="680"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '新建项目 / 导入'}">
@@ -29,6 +29,21 @@
                                    Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
                     </StackPanel>
                     <TextBlock Classes="groupHint" Text="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
+                </StackPanel>
+
+                <!-- TIFF input fallback (roll-level; valid embedded ICC always wins) -->
+                <StackPanel Name="TiffInputPanel" Spacing="4" IsVisible="False">
+                    <TextBlock Text="{i18n:T 'TIFF 输入假设（整卷）'}" FontWeight="SemiBold" />
+                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                               Text="{i18n:T '有效的嵌入 ICC 始终优先。仅当 TIFF 没有可用 ICC 时，才使用下面的整卷假设；选择会保存到工程，预览、标定、分割和导出都使用同一语义。'}" />
+                    <RadioButton Name="TiffLinear" GroupName="tiff-input"
+                                 Content="{i18n:T '样本已经是线性（原色未知，数值按工作空间透传）'}"
+                                 Checked="OnTiffAssumptionChanged" />
+                    <RadioButton Name="TiffSrgb" GroupName="tiff-input"
+                                 Content="{i18n:T '样本按 sRGB 编码（使用 exact sRGB profile 解码）'}"
+                                 Checked="OnTiffAssumptionChanged" />
+                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                               Text="{i18n:T '这是必选项：位深不能替代色彩声明。若不确定，请查看扫描软件的输出设置。'}" />
                 </StackPanel>
 
                 <!-- ── 底片分割（仅扫描件）───────────────────────────── -->

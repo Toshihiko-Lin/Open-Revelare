@@ -1678,10 +1678,15 @@ public partial class MainWindow : Window
 
     /// <summary>The single 新建卷 path — 文件 菜单, Ctrl+N, and the 图库's leading tile all land
     /// here. Ends in 修片, because importing a roll is a request to start working on it.</summary>
-    private async Task ImportNewRollAsync()
+    private Task ImportNewRollAsync() => ImportNewRollAsync(initialPaths: null);
+
+    internal async Task ImportNewRollAsync(IEnumerable<string>? initialPaths)
     {
         if (Vm is null) return;
         var dlg = new ImportDialog();
+        if (initialPaths is not null)
+            foreach (string path in initialPaths)
+                if (!dlg.Files.Contains(path)) dlg.Files.Add(path);
         bool ok = await dlg.ShowDialog<bool>(this);
         if (!ok || dlg.Result is not { } cfg) return;
 
@@ -1739,7 +1744,13 @@ public partial class MainWindow : Window
                 // Detection reads the same downsampled preview the dialog shows, so what the
                 // user sees and what was measured cannot drift apart. The rects are normalised,
                 // so they still apply at full resolution.
-                var (preview, _, _) = Services.ImageIo.LoadPreview(p, 1200);
+                var (working, _, _) = Services.ImageIo.LoadWorkingPreview(
+                    p,
+                    1200,
+                    OpenRevelare.Core.ColorPipelineVersion.ManagedV2,
+                    Vm.PresentationColorManagement,
+                    cfg.TiffInputAssumption);
+                OpenRevelare.Core.ImageBuffer preview = working.Pixels;
                 return Models.StripPlan.Detect(p, preview)
                                        .Select(plan => (Plan: plan, Preview: preview));
             }).ToList());

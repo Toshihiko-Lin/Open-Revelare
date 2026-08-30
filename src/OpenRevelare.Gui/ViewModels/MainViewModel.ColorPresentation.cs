@@ -303,6 +303,7 @@ public partial class MainViewModel
         }
 
         text.AppendLine($"Color pipeline version: {(int)_colorPipelineVersion} ({_colorPipelineVersion})");
+        text.AppendLine($"TIFF input fallback: {_tiffInputAssumption}");
         if (rendered is null)
         {
             text.AppendLine("Rendered frame: none");

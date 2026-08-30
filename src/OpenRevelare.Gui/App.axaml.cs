@@ -87,8 +87,10 @@ public partial class App : Application
             else if (startFiles.Count > 0)
                 Dispatcher.UIThread.Post(async () =>
                 {
-                    await vm.LoadRollAsync(startFiles);
-                    vm.EnterDevelop();
+                    // A command-line/double-click import is still a NEW roll. Route it through
+                    // the same dialog so a TIFF cannot bypass the mandatory roll-level fallback
+                    // choice and so that choice is persisted before the first decode.
+                    await ((MainWindow)desktop.MainWindow).ImportNewRollAsync(startFiles);
                 });
             else
                 Dispatcher.UIThread.Post(async () => await vm.EnterLibraryAsync());

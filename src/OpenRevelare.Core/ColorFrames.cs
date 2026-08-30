@@ -16,6 +16,7 @@ public enum WorkingAdmission
 {
     ConvertedFromCharacterized,
     AlreadyLinearAcesCg,
+    ExplicitUncharacterizedPassthrough,
     LegacyPartialIccTransform,
     LegacyUncharacterizedPassthrough,
 }

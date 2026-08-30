@@ -31,9 +31,13 @@ public partial class MainViewModel
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             FrameParams ep = ForExport(p, opt);
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+            TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             await Task.Run(() =>
             {
-                WorkingFrame working = LoadFullWorking(srcPath, pipelineVersion);
+                WorkingFrame working = LoadFullWorking(
+                    srcPath,
+                    pipelineVersion,
+                    tiffInputAssumption);
                 RenderedFrame rendered = Pipeline.Render(
                     working,
                     ep,
@@ -113,6 +117,7 @@ public partial class MainViewModel
     private sealed record RegionSlot(
         string Path,
         ColorPipelineVersion PipelineVersion,
+        TiffInputAssumption TiffInputAssumption,
         WorkingFrame Working,
         int X0,
         int Y0,
@@ -139,10 +144,12 @@ public partial class MainViewModel
         (int X0, int Y0, int X1, int Y1) need,
         int frameW,
         int frameH,
-        ColorPipelineVersion pipelineVersion)
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
     {
         if (_regionSlot is { } s && string.Equals(s.Path, path, StringComparison.OrdinalIgnoreCase)
             && s.PipelineVersion == pipelineVersion
+            && s.TiffInputAssumption == tiffInputAssumption
             && s.X0 <= need.X0 && s.Y0 <= need.Y0 && s.X1 >= need.X1 && s.Y1 >= need.Y1)
             return s.Working;
 
@@ -165,6 +172,7 @@ public partial class MainViewModel
         _regionSlot = new RegionSlot(
             path,
             pipelineVersion,
+            tiffInputAssumption,
             working,
             gx,
             gy,
@@ -276,8 +284,10 @@ public partial class MainViewModel
         int tok = ++_patchToken;
 
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+        TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
         bool needsDecode = _fullSlot is null
                            || _fullSlot.PipelineVersion != pipelineVersion
+                           || _fullSlot.TiffInputAssumption != tiffInputAssumption
                            || !string.Equals(_fullSlot.Path, srcPath, StringComparison.OrdinalIgnoreCase);
         if (needsDecode) ReportBackground(Loc.T("载入全分辨率 …"));
         try
@@ -297,7 +307,8 @@ public partial class MainViewModel
                     need,
                     frameW,
                     frameH,
-                    pipelineVersion);
+                    pipelineVersion,
+                    tiffInputAssumption);
                 cts.Token.ThrowIfCancellationRequested();
                 if (slice is not null)
                 {
@@ -319,7 +330,10 @@ public partial class MainViewModel
                 {
                     // TIFF, or the DNG-Converter backend — neither can region-decode. Fall back
                     // to the whole frame, which is what this path always used to do.
-                    WorkingFrame full = LoadFullWorking(srcPath, pipelineVersion);
+                    WorkingFrame full = LoadFullWorking(
+                        srcPath,
+                        pipelineVersion,
+                        tiffInputAssumption);
                     cts.Token.ThrowIfCancellationRequested();
                     region = RegionRender.Render(
                         full,

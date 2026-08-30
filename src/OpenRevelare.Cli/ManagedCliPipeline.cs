@@ -12,7 +12,7 @@ internal static class ManagedCliPipeline
 
     internal static WorkingFrame LoadWorking(
         string path,
-        bool inputIsSrgb,
+        TiffInputAssumption tiffInputAssumption,
         IColorManagementEngine colorManagement)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -22,7 +22,7 @@ internal static class ManagedCliPipeline
         {
             return TiffIO.LoadWorkingFrame(
                 path,
-                inputIsSrgb,
+                tiffInputAssumption,
                 PipelineVersion,
                 colorManagement);
         }

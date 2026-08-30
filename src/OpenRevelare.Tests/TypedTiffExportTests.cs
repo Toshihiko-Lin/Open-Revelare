@@ -118,6 +118,71 @@ public sealed class TypedTiffExportTests
     }
 
     [Fact]
+    public void Exact_display_referred_srgb_may_be_exported_without_an_icc()
+    {
+        RenderedFrame frame = DisplayFrame(new ImageBuffer(1, 1, new[] { 0.0f, 0.5f, 1.0f }));
+
+        WithTempTiff(path =>
+        {
+            TiffIO.ExportTiff(
+                frame,
+                path,
+                TiffIO.CompressionMode.None,
+                profilePolicy: ExportProfilePolicy.OmitExactSrgb);
+
+            using Tiff tif = Assert.IsType<Tiff>(Tiff.Open(path, "r"));
+            Assert.Null(tif.GetField(TiffTag.ICCPROFILE));
+        });
+    }
+
+    [Theory]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void Non_exact_srgb_omit_is_rejected_before_a_file_is_created(string spaceName)
+    {
+        ColorSpaceDef space = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+        RenderedFrame frame = DisplayFrame(
+            new ImageBuffer(1, 1, new[] { 0.0f, 0.5f, 1.0f }),
+            space);
+
+        WithTempTiff(path =>
+        {
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                TiffIO.ExportTiff(
+                    frame,
+                    path,
+                    TiffIO.CompressionMode.None,
+                    profilePolicy: ExportProfilePolicy.OmitExactSrgb));
+
+            Assert.Contains("only for exact display-referred sRGB", error.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(path));
+            Assert.False(File.Exists(path + ".tmp"));
+        });
+    }
+
+    [Fact]
+    public void Scene_linear_icc_omit_is_rejected_before_a_file_is_created()
+    {
+        RenderedFrame frame = LinearFrame(
+            new ImageBuffer(1, 1, new[] { -0.1f, 0.5f, 1.1f }));
+
+        WithTempTiff(path =>
+        {
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+                TiffIO.ExportTiff(
+                    frame,
+                    path,
+                    TiffIO.CompressionMode.None,
+                    profilePolicy: ExportProfilePolicy.OmitExactSrgb));
+
+            Assert.Contains("only for exact display-referred sRGB", error.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(path));
+            Assert.False(File.Exists(path + ".tmp"));
+        });
+    }
+
+    [Fact]
     public void Explicit_tiff16_rejects_extended_frame_before_creating_a_file()
     {
         RenderedFrame frame = LinearFrame(new ImageBuffer(1, 1, new[] { -0.1f, 0.5f, 1.1f }));
@@ -153,9 +218,10 @@ public sealed class TypedTiffExportTests
             RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
     }
 
-    private static RenderedFrame DisplayFrame(ImageBuffer pixels)
+    private static RenderedFrame DisplayFrame(ImageBuffer pixels, ColorSpaceDef? outputSpace = null)
     {
-        ColorProfileRef profile = BuiltInColorProfiles.Srgb(ProfileRole.Output);
+        ColorSpaceDef space = outputSpace ?? ColorSpaces.Srgb;
+        ColorProfileRef profile = BuiltInColorProfiles.For(space, ProfileRole.Output);
         var encoding = new CharacterizedPixelEncoding(
             profile,
             ColorReference.DisplayReferred,
@@ -166,7 +232,7 @@ public sealed class TypedTiffExportTests
             profile,
             RenderingIntent.RelativeColorimetric,
             blackPointCompensation: false,
-            "test exact sRGB",
+            $"test exact {space.Name}",
             printLutIdentity: string.Empty,
             pixelProfileMismatch: false);
         return new RenderedFrame(

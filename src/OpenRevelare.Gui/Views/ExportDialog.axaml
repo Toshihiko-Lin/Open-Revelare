@@ -85,7 +85,7 @@
                            Text="{i18n:T '交给外部调色用的中间文件：不做第 4 步转换、不套帧编辑，直接写出反相后的场景线性数据。预览不受影响。这类文件在不做色彩管理的看图软件里会显得很暗很平，属正常。'}" />
 
                 <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}" Margin="0,6,0,0"
-                          IsCheckedChanged="OnAnyChanged" />
+                          IsCheckedChanged="OnIccChanged" />
                 <TextBlock Classes="groupHint" Name="IccHint" TextWrapping="Wrap" />
             </StackPanel>
 

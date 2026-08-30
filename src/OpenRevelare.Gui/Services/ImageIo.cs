@@ -138,7 +138,8 @@ public static class ImageIo
     public static WorkingFrame LoadWorking(
         string path,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement) => Gated(() =>
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption) => Gated(() =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -146,7 +147,7 @@ public static class ImageIo
         {
             return TiffIO.LoadWorkingFrame(
                 path,
-                inputIsSrgb: false,
+                tiffInputAssumption,
                 pipelineVersion,
                 colorManagement);
         }
@@ -177,7 +178,8 @@ public static class ImageIo
     public static double[] RoiMeanFull(
         string path,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement) => Gated(() =>
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption) => Gated(() =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -185,7 +187,7 @@ public static class ImageIo
         {
             WorkingFrame working = TiffIO.LoadWorkingFrame(
                 path,
-                inputIsSrgb: false,
+                tiffInputAssumption,
                 pipelineVersion,
                 colorManagement);
             return DecoupleCalibration.RoiMean(working.Pixels);
@@ -264,6 +266,7 @@ public static class ImageIo
         string path,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption,
         params int[] maxEdges) => Gated(() =>
     {
         RequirePipelineVersion(pipelineVersion);
@@ -275,7 +278,7 @@ public static class ImageIo
         {
             WorkingFrame full = TiffIO.LoadWorkingFrame(
                 path,
-                inputIsSrgb: false,
+                tiffInputAssumption,
                 pipelineVersion,
                 colorManagement);
             var previews = new WorkingFrame[maxEdges.Length];
@@ -371,12 +374,14 @@ public static class ImageIo
         string path,
         int maxEdge,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption)
     {
         var (previews, width, height) = LoadWorkingPreviews(
             path,
             pipelineVersion,
             colorManagement,
+            tiffInputAssumption,
             maxEdge);
         return (previews[0], width, height);
     }
@@ -420,7 +425,8 @@ public static class ImageIo
         (double X, double Y, double W, double H) rect,
         int maxEdge,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement) => Gated(() =>
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption) => Gated(() =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -444,7 +450,7 @@ public static class ImageIo
 
         WorkingFrame full = TiffIO.LoadWorkingFrame(
             path,
-            inputIsSrgb: false,
+            tiffInputAssumption,
             pipelineVersion,
             colorManagement);
         ImageBuffer region = Geometry.ApplyCrop(full.Pixels, rect);

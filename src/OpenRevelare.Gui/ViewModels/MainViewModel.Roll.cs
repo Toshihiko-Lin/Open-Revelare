@@ -706,6 +706,8 @@ public partial class MainViewModel
         try
         {
             var frames = Frames.ToList();
+            ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+            TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var reserved = ExportFile.NewReservations();
             string extension = opt.Extension;
@@ -729,13 +731,13 @@ public partial class MainViewModel
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
                 FrameParams ep = ForExport(p, opt);
-                ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
                 await Task.Run(() =>
                 {
                     WorkingFrame working = ImageIo.LoadWorking(
                         f.Path,
                         pipelineVersion,
-                        ColorManagement);
+                        ColorManagement,
+                        tiffInputAssumption);
                     RenderedFrame rendered = Pipeline.Render(
                         working,
                         ep,
@@ -772,6 +774,7 @@ public partial class MainViewModel
             var sources = new WorkingFrame[total];
             var cellParams = new FrameParams[total];
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+            TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             // Warm previews first, on the shared decode path — this used to re-decode the entire
             // roll at full resolution just to shrink each frame to 900 px.
             for (int i = 0; i < total; i++)
@@ -780,7 +783,11 @@ public partial class MainViewModel
                 // strip's first negative. The region is the frame plus its margin, so the crop
                 // still runs below — against the box rather than the whole scan.
                 var pre = SplitCropOf(frames[i]);
-                sources[i] = (await PreviewAsync(frames[i].Path, pre)).Working;
+                sources[i] = (await PreviewAsync(
+                    frames[i].Path,
+                    pre,
+                    pipelineVersion,
+                    tiffInputAssumption)).Working;
                 cellParams[i] = ForRegion(frames[i].Params, frames[i], pre);
                 ReportBackground(Loc.F($"印样 {++done}/{total} …"));
             }
@@ -872,16 +879,22 @@ public partial class MainViewModel
     /// releases the buffer instead of accumulating hundreds of MB per visited frame.</summary>
     private WorkingFrame LoadFullWorking(
         string sourcePath,
-        ColorPipelineVersion pipelineVersion)
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
     {
         lock (_fullSlotGate)
         {
             if (_fullSlot is { } slot
                 && slot.PipelineVersion == pipelineVersion
+                && slot.TiffInputAssumption == tiffInputAssumption
                 && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
                 return slot.Working;
-            WorkingFrame full = ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement);
-            _fullSlot = new FullSlot(sourcePath, pipelineVersion, full);
+            WorkingFrame full = ImageIo.LoadWorking(
+                sourcePath,
+                pipelineVersion,
+                ColorManagement,
+                tiffInputAssumption);
+            _fullSlot = new FullSlot(sourcePath, pipelineVersion, tiffInputAssumption, full);
             return full;
         }
     }

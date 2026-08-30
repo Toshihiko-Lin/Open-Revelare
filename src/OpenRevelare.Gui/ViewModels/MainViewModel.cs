@@ -378,17 +378,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// is what they should do: they really are the same pixels.
     /// </summary>
     private string PreviewKey(string path, (double X, double Y, double W, double H)? preCrop)
-        => PreviewKey(path, preCrop, _colorPipelineVersion);
+        => PreviewKey(path, preCrop, _colorPipelineVersion, _tiffInputAssumption);
 
     private static string PreviewKey(
         string path,
         (double X, double Y, double W, double H)? preCrop,
-        ColorPipelineVersion pipelineVersion)
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
     {
         string source = preCrop is { } pc
             ? $"{path}|{pc.X:F6},{pc.Y:F6},{pc.W:F6},{pc.H:F6}"
             : path;
-        return $"{source}|color-pipeline:{(int)pipelineVersion}";
+        return $"{source}|color-pipeline:{(int)pipelineVersion}|tiff-input:{(int)tiffInputAssumption}";
     }
 
     /// <summary>
@@ -407,7 +408,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                                                   (double X, double Y, double W, double H)? preCrop)
     {
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
-        string key = PreviewKey(path, preCrop, pipelineVersion);
+        TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
+        return PreviewAsync(path, preCrop, pipelineVersion, tiffInputAssumption);
+    }
+
+    private Task<PreviewCache.Entry> PreviewAsync(
+        string path,
+        (double X, double Y, double W, double H)? preCrop,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        string key = PreviewKey(path, preCrop, pipelineVersion, tiffInputAssumption);
 
         if (_previews.Get(key) is { } hit) { CaptureTile(key, hit.Working); return Task.FromResult(hit); }
         lock (_decoding)
@@ -423,12 +434,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         rect,
                         PreviewMaxEdge,
                         pipelineVersion,
-                        ColorManagement)
+                        ColorManagement,
+                        tiffInputAssumption)
                     : ImageIo.LoadWorkingPreview(
                         path,
                         PreviewMaxEdge,
                         pipelineVersion,
-                        ColorManagement);
+                        ColorManagement,
+                        tiffInputAssumption);
                 var e = new PreviewCache.Entry(preview, srcW, srcH);
                 _previews.Put(key, e.Working, e.SourceWidth, e.SourceHeight);
                 CaptureTile(key, e.Working);
@@ -489,6 +502,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private sealed record FullSlot(
         string Path,
         ColorPipelineVersion PipelineVersion,
+        TiffInputAssumption TiffInputAssumption,
         WorkingFrame Working);
     private FullSlot? _fullSlot;
 
@@ -2174,7 +2188,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             full = ImageIo.LoadWorking(
                 frame.Path,
                 _colorPipelineVersion,
-                ColorManagement).Pixels;
+                ColorManagement,
+                _tiffInputAssumption).Pixels;
         }
         catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
         {
@@ -3396,6 +3411,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // user explicitly opts into the managed pipeline; BuildProjectData creates a fresh snapshot,
     // so the version has to live with the open roll rather than rely on Project.Data's default.
     private ColorPipelineVersion _colorPipelineVersion = ColorPipelineVersion.ManagedV2;
+    // One assumption for the whole TIFF roll. It participates in every decode cache key; changing
+    // it can never reuse pixels admitted under a different transfer/profile claim.
+    private TiffInputAssumption _tiffInputAssumption =
+        TiffInputAssumption.LegacyByBitDepthCompatibility;
 
     // Two things are saved on the same idle pause, and they go stale independently: the project
     // file (data) and the cover contact sheet (cosmetic). Warm-up completing dirties only the
@@ -3561,6 +3580,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             {
                 InputType = RollIsRaw ? "raw" : "tiff",
                 SourcePath = _decoupleMatrix is not null ? "A" : "B",
+                TiffIsLinear = RollIsRaw
+                    ? null
+                    : TiffInputAssumptionPolicy.ToPersistedLinearFlag(_tiffInputAssumption),
                 CalSourcePath = _calSourceDir,
                 CalRgbPaths = _calRgbPaths is { Length: 3 } r
                     ? new Dictionary<string, string> { ["R"] = r[0], ["G"] = r[1], ["B"] = r[2] }

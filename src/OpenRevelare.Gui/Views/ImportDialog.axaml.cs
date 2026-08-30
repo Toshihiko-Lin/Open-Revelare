@@ -64,7 +64,7 @@ public partial class ImportDialog : Window
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
-            OkBtn.IsEnabled = Files.Count > 0;
+            UpdateTiffAdmissionUi();
         };
     }
 
@@ -98,6 +98,22 @@ public partial class ImportDialog : Window
     }
 
     private void OnClear(object? sender, RoutedEventArgs e) => Files.Clear();
+
+    private void OnTiffAssumptionChanged(object? sender, RoutedEventArgs e) =>
+        UpdateTiffAdmissionUi();
+
+    /// <summary>
+    /// A new scanner roll must state what untagged/unusable TIFF samples mean. Camera RAW has its
+    /// own fixed admission and does not show this choice. No radio is preselected: clicking one is
+    /// the evidence that this was a deliberate roll-level decision.
+    /// </summary>
+    private void UpdateTiffAdmissionUi()
+    {
+        bool pureTiffRoll = Files.Count > 0 && Files.All(IsScan);
+        TiffInputPanel.IsVisible = pureTiffRoll;
+        OkBtn.IsEnabled = Files.Count > 0
+            && (!pureTiffRoll || TiffLinear.IsChecked == true || TiffSrgb.IsChecked == true);
+    }
 
     private void OnSourceChanged(object? sender, RoutedEventArgs e) => CalRow.IsVisible = SrcA.IsChecked == true;
 
@@ -149,6 +165,17 @@ public partial class ImportDialog : Window
             return;
         }
 
+        if (scans == Files.Count
+            && TiffLinear.IsChecked != true
+            && TiffSrgb.IsChecked != true)
+        {
+            await new InfoDialog(
+                    Loc.T("请选择 TIFF 输入假设"),
+                    Loc.T("有效的嵌入 ICC 会始终优先；这个选择用于没有可用 ICC 的文件，并会随整卷保存。"))
+                .ShowDialog(this);
+            return;
+        }
+
         var cfg = new ImportConfig
         {
             PathA = SrcA.IsChecked == true,
@@ -157,6 +184,11 @@ public partial class ImportDialog : Window
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
             AutoInvert = AutoInvertChk.IsChecked == true,
             SplitStrips = SplitChk.IsChecked == true,
+            TiffInputAssumption = scans == Files.Count
+                ? TiffInputAssumptionPolicy.FromExplicitChoice(
+                    TiffLinear.IsChecked == true,
+                    TiffSrgb.IsChecked == true)
+                : OpenRevelare.Core.TiffInputAssumption.Unspecified,
         };
         // The dialog's choices become the new defaults, so the next import opens on them.
         if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert

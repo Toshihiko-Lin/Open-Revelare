@@ -343,14 +343,10 @@ public static class TiffIO
     }
 
     /// <summary>
-    /// Versioned TIFF decode boundary. <see cref="ColorPipelineVersion.LegacyV1"/> delegates to
-    /// the frozen overload above. <see cref="ColorPipelineVersion.ManagedV2"/> admits a
-    /// characterized source only through one complete LittleCMS source-to-linear-ACEScg
-    /// transform; it never calls the legacy split TRC/matrix parser.
-    ///
-    /// Untagged inputs cannot be colourimetrically converted because they have no primaries.
-    /// They retain an <see cref="UncharacterizedPixelEncoding"/> and use the explicitly recorded
-    /// v1 compatibility admission instead of acquiring a made-up profile.
+    /// Compatibility overload for callers that predate the typed TIFF assumption. In ManagedV2,
+    /// <c>false</c> now means "no fallback selected", not "guess from bit depth"; a usable embedded
+    /// ICC can still open, while an untagged input must use the typed overload below. LegacyV1
+    /// retains the frozen boolean behaviour byte-for-byte.
     /// </summary>
     public static WorkingFrame LoadWorkingFrame(
         string path,
@@ -360,57 +356,218 @@ public static class TiffIO
     {
         if (pipelineVersion == ColorPipelineVersion.LegacyV1)
             return LoadWorkingFrame(path, inputIsSrgb);
+
+        return LoadWorkingFrame(
+            path,
+            inputIsSrgb ? TiffInputAssumption.Srgb : TiffInputAssumption.Unspecified,
+            pipelineVersion,
+            colorManagement);
+    }
+
+    /// <summary>
+    /// Versioned TIFF decode boundary. A usable embedded ICC always has priority. ManagedV2 uses
+    /// <paramref name="inputAssumption"/> only when that profile is absent or unusable, and records
+    /// the exact admission in <see cref="SourceDescriptor.DecodeRecipe"/>. The bit-depth policy is
+    /// reachable only through <see cref="TiffInputAssumption.LegacyByBitDepthCompatibility"/> for
+    /// old/missing-field projects.
+    /// </summary>
+    public static WorkingFrame LoadWorkingFrame(
+        string path,
+        TiffInputAssumption inputAssumption,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (!Enum.IsDefined(inputAssumption))
+            throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null);
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            // Old projects used the bool as a transfer override. Unspecified/compatibility both
+            // select the historical per-bit-depth route, preserving their established look.
+            return LoadWorkingFrame(path, inputIsSrgb: inputAssumption == TiffInputAssumption.Srgb);
+        }
         if (pipelineVersion != ColorPipelineVersion.ManagedV2)
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
 
         ArgumentNullException.ThrowIfNull(colorManagement);
-        return LoadManagedWorkingFrame(path, inputIsSrgb, colorManagement);
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement);
     }
 
     private static WorkingFrame LoadManagedWorkingFrame(
         string path,
-        bool inputIsSrgb,
+        TiffInputAssumption inputAssumption,
         IColorManagementEngine colorManagement)
     {
         SuppressLibTiffWarnings();
         string stableId = FrameSourceIds.ForPath(path);
 
         byte[]? embedded = null;
-        if (!inputIsSrgb)
+        string? fallbackDiagnostic = null;
+        try
         {
-            bool hasEmbeddedProfile;
             using (Tiff profileTif = Tiff.Open(path, "r")
                 ?? throw new IOException($"could not open TIFF: {path}"))
             {
-                hasEmbeddedProfile = TryReadIccPayloadStrict(profileTif, path, out embedded);
+                _ = TryReadIccPayloadStrict(profileTif, path, out embedded);
             }
+        }
+        catch (ColorManagementException ex)
+            when (TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption))
+        {
+            fallbackDiagnostic = OneLine(ex.Message);
+        }
 
-            if (!hasEmbeddedProfile)
+        if (embedded is not null)
+        {
+            try
             {
-                // This is deliberately a compatibility path, not an input-profile guess. Reuse
-                // the frozen decoder byte-for-byte and retain its explicit Uncharacterized
-                // encoding. The profile probe is closed before reopening through the v1 API.
-                WorkingFrame legacy = LoadWorkingFrame(path, inputIsSrgb: false);
-                var source = new SourceDescriptor(
-                    legacy.Source.StableSourceId,
-                    legacy.Source.DisplayName,
-                    legacy.Source.OriginalEncoding,
-                    $"managed v2 explicit uncharacterized compatibility -> {legacy.Source.DecodeRecipe}");
-                return new WorkingFrame(
-                    legacy.Pixels,
-                    legacy.Space,
-                    WorkingAdmission.LegacyUncharacterizedPassthrough,
-                    source);
+                var embeddedProfile = ColorProfileRef.Create(
+                    embedded,
+                    $"Embedded TIFF profile ({Path.GetFileName(path)})",
+                    ProfileRole.Input,
+                    new ProfileSource.Embedded(stableId, "TIFF"));
+                return DecodeManagedWithProfile(
+                    path,
+                    stableId,
+                    embeddedProfile,
+                    ColorReference.SceneReferred,
+                    "managed v2 exact embedded ICC -> LittleCMS -> linear ACEScg",
+                    colorManagement);
+            }
+            catch (Exception ex)
+                when (ex is not OperationCanceledException and not OutOfMemoryException
+                    && TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption))
+            {
+                fallbackDiagnostic = OneLine(ex.Message);
             }
         }
 
-        ColorProfileRef sourceProfile = inputIsSrgb
-            ? BuiltInColorProfiles.Srgb(ProfileRole.Input)
-            : ColorProfileRef.Create(
-                embedded!,
-                $"Embedded TIFF profile ({Path.GetFileName(path)})",
-                ProfileRole.Input,
-                new ProfileSource.Embedded(stableId, "TIFF"));
+        // Flextight metadata is a scanner declaration, not a bit-depth guess. Keep honouring it
+        // before consulting the selected fallback; its primaries remain explicitly unknown.
+        // The declaration does not, however, waive managed-v2 admission: an untagged scanner
+        // file still needs either a deliberate fallback choice or the frozen legacy policy.
+        bool fallbackAdmitted = TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption)
+            || inputAssumption == TiffInputAssumption.LegacyByBitDepthCompatibility;
+        if (fallbackAdmitted
+            && fallbackDiagnostic is null
+            && FlextightMeta.Read(path).HasEncodingGamma)
+            return LoadManagedCompatibility(
+                path,
+                "managed v2 scanner-vendor gamma declaration; primaries uncharacterized");
+
+        return inputAssumption switch
+        {
+            TiffInputAssumption.Linear => DecodeManagedLinearAssumption(
+                path, stableId, fallbackDiagnostic),
+            TiffInputAssumption.Srgb => DecodeManagedSrgbAssumption(
+                path, stableId, fallbackDiagnostic, colorManagement),
+            TiffInputAssumption.LegacyByBitDepthCompatibility when fallbackDiagnostic is null =>
+                LoadManagedCompatibility(
+                    path,
+                    "managed v2 versioned legacy-by-bit-depth compatibility"),
+            TiffInputAssumption.Unspecified => throw MissingTiffInputAssumption(path, fallbackDiagnostic),
+            TiffInputAssumption.LegacyByBitDepthCompatibility =>
+                throw MissingTiffInputAssumption(path, fallbackDiagnostic),
+            _ => throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null),
+        };
+    }
+
+    private static WorkingFrame DecodeManagedSrgbAssumption(
+        string path,
+        string stableId,
+        string? fallbackDiagnostic,
+        IColorManagementEngine colorManagement)
+    {
+        string prefix = fallbackDiagnostic is null
+            ? "managed v2 explicit roll fallback sRGB"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); explicit roll fallback sRGB";
+        return DecodeManagedWithProfile(
+            path,
+            stableId,
+            BuiltInColorProfiles.Srgb(ProfileRole.Input),
+            ColorReference.DisplayReferred,
+            $"{prefix} -> exact built-in sRGB -> LittleCMS -> linear ACEScg",
+            colorManagement);
+    }
+
+    private static WorkingFrame DecodeManagedLinearAssumption(
+        string path,
+        string stableId,
+        string? fallbackDiagnostic)
+    {
+        using Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
+        (int width, int height, int bitsPerSample, float[] encoded, float codeStep, NumericRange range) =
+            ReadTiffSamples(tif, path);
+        var pixels = new ImageBuffer(width, height, encoded)
+        {
+            SourceQuantisationStep = codeStep,
+        };
+        CaptureKind captureKind = bitsPerSample switch
+        {
+            8 => CaptureKind.TiffUntagged8Bit,
+            16 => CaptureKind.TiffUntagged16Bit,
+            _ => CaptureKind.Other,
+        };
+        var original = new UncharacterizedPixelEncoding(
+            captureKind,
+            stableId,
+            CompatibilityPolicy.None,
+            TransferState.LinearInProfilePrimaries,
+            range);
+        string prefix = fallbackDiagnostic is null
+            ? "managed v2 explicit roll fallback linear"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); explicit roll fallback linear";
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            $"{prefix}; primaries uncharacterized; numeric working-space passthrough");
+        return new WorkingFrame(
+            pixels,
+            WorkingSpaceId.LinearAcesCgV1,
+            WorkingAdmission.ExplicitUncharacterizedPassthrough,
+            source);
+    }
+
+    private static WorkingFrame LoadManagedCompatibility(string path, string prefix)
+    {
+        WorkingFrame legacy = LoadWorkingFrame(path, inputIsSrgb: false);
+        var source = new SourceDescriptor(
+            legacy.Source.StableSourceId,
+            legacy.Source.DisplayName,
+            legacy.Source.OriginalEncoding,
+            $"{prefix} -> {legacy.Source.DecodeRecipe}");
+        return new WorkingFrame(
+            legacy.Pixels,
+            legacy.Space,
+            WorkingAdmission.LegacyUncharacterizedPassthrough,
+            source);
+    }
+
+    private static ColorManagementException MissingTiffInputAssumption(
+        string path,
+        string? fallbackDiagnostic)
+    {
+        string reason = fallbackDiagnostic is null
+            ? "has no embedded ICC profile"
+            : $"has no usable embedded ICC profile ({fallbackDiagnostic})";
+        return new ColorManagementException(
+            $"Managed TIFF input '{Path.GetFileName(path)}' {reason}. " +
+            "Select an explicit roll-level Linear or sRGB input assumption; " +
+            "bit depth is not a ManagedV2 colour policy.");
+    }
+
+    private static string OneLine(string text) =>
+        string.Join(" ", text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+
+    private static WorkingFrame DecodeManagedWithProfile(
+        string path,
+        string stableId,
+        ColorProfileRef sourceProfile,
+        ColorReference sourceReference,
+        string decodeRecipe,
+        IColorManagementEngine colorManagement)
+    {
         ColorProfileRef workingProfile = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Working);
 
         EnsureValidInputProfile(colorManagement, sourceProfile, path, "source");
@@ -444,8 +601,7 @@ public static class TiffIO
         {
             using Tiff tif = Tiff.Open(path, "r")
                 ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
-            (int width, int height, float[] encoded, float codeStep, NumericRange sourceRange) =
-                ReadTiffSamples(tif, path);
+            var (width, height, _, encoded, codeStep, sourceRange) = ReadTiffSamples(tif, path);
 
             // Four private probe pixels estimate the source lattice after the full colour
             // conversion: black plus one code in each source primary. They travel through the
@@ -485,16 +641,14 @@ public static class TiffIO
             };
             var original = new CharacterizedPixelEncoding(
                 sourceProfile,
-                inputIsSrgb ? ColorReference.DisplayReferred : ColorReference.SceneReferred,
+                sourceReference,
                 TransferState.ProfileEncoded,
                 sourceRange);
             var source = new SourceDescriptor(
                 stableId,
                 Path.GetFileName(path),
                 original,
-                inputIsSrgb
-                    ? "managed v2 exact built-in sRGB -> LittleCMS -> linear ACEScg"
-                    : "managed v2 exact embedded ICC -> LittleCMS -> linear ACEScg");
+                decodeRecipe);
             return new WorkingFrame(
                 pixels,
                 WorkingSpaceId.LinearAcesCgV1,
@@ -512,6 +666,7 @@ public static class TiffIO
             field = tif.GetField(TiffTag.ICCPROFILE);
         }
         catch (Exception ex)
+            when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
             throw new ColorManagementException(
                 $"TIFF ICC tag in '{Path.GetFileName(path)}' is present but unreadable.", ex);
@@ -547,6 +702,7 @@ public static class TiffIO
             throw;
         }
         catch (Exception ex)
+            when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
             throw new ColorManagementException(
                 $"TIFF ICC tag in '{Path.GetFileName(path)}' is malformed.", ex);
@@ -580,7 +736,7 @@ public static class TiffIO
         }
     }
 
-    private static (int Width, int Height, float[] Encoded, float CodeStep, NumericRange Range)
+    private static (int Width, int Height, int BitsPerSample, float[] Encoded, float CodeStep, NumericRange Range)
         ReadTiffSamples(Tiff tif, string path)
     {
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
@@ -624,7 +780,7 @@ public static class TiffIO
                 }
             }
         }
-        return (w, h, encoded, codeStep,
+        return (w, h, bps, encoded, codeStep,
             isFloat ? NumericRange.Extended : NumericRange.Normalized);
     }
 

@@ -27,6 +27,7 @@ static int Run(string[] args)
             case "-i": case "--input": opts["input"] = Next(args, ref i, a); break;
             case "-o": case "--output": opts["output"] = Next(args, ref i, a); break;
             case "--input-srgb": flags.Add("input-srgb"); break;
+            case "--input-linear": flags.Add("input-linear"); break;
             case "--intent": opts["intent"] = Next(args, ref i, a); break;
             case "--compress": opts["compress"] = Next(args, ref i, a); break;
             case "--bench": opts["bench"] = Next(args, ref i, a); break;
@@ -100,6 +101,19 @@ static int Run(string[] args)
     {
         Console.Error.WriteLine("error: --input and --output are required");
         PrintUsage();
+        return 2;
+    }
+
+    TiffInputAssumption tiffInputAssumption;
+    try
+    {
+        tiffInputAssumption = TiffInputAssumptionPolicy.FromExplicitChoice(
+            flags.Contains("input-linear"),
+            flags.Contains("input-srgb"));
+    }
+    catch (ArgumentException ex)
+    {
+        Console.Error.WriteLine("error: " + ex.Message);
         return 2;
     }
 
@@ -417,6 +431,9 @@ static int Run(string[] args)
         // the stage order subtly wrong.
         if (flags.Contains("dump-preinv"))
         {
+            if (tiffInputAssumption == TiffInputAssumption.Linear)
+                throw new ArgumentException(
+                    "--input-linear cannot be combined with --dump-preinv; this diagnostic preserves the frozen legacy TIFF decoder. Use the normal managed-v2 route for an explicit linear admission.");
             ImageBuffer pre = TiffIO.LoadTiff(opts["input"], flags.Contains("input-srgb"));
             if (cal.DistortionK1 != 0.0) pre = LensCorrections.ApplyDistortion(pre, cal.DistortionK1);
             if (cal.LccFlatField is not null) Lcc.Apply(pre.Data, pre.Width, pre.Height, cal.LccFlatField);
@@ -431,6 +448,9 @@ static int Run(string[] args)
         // frozen camera-native / legacy TIFF numbers and deliberately do not attach an ICC profile.
         if (flags.Contains("decode-only"))
         {
+            if (tiffInputAssumption == TiffInputAssumption.Linear)
+                throw new ArgumentException(
+                    "--input-linear cannot be combined with --decode-only; this diagnostic preserves the frozen legacy TIFF decoder. Use the normal managed-v2 route for an explicit linear admission.");
             var decodeTimer = Stopwatch.StartNew();
             bool rawDiagnostic = RawDecode.IsRawExtension(opts["input"]);
             ImageBuffer decoded = LoadDiagnosticInput(
@@ -449,7 +469,7 @@ static int Run(string[] args)
         var sw = Stopwatch.StartNew();
         bool isRaw = RawDecode.IsRawExtension(opts["input"]);
         WorkingFrame working = ManagedCliPipeline.LoadWorking(
-            opts["input"], flags.Contains("input-srgb"), colorManagement);
+            opts["input"], tiffInputAssumption, colorManagement);
         double tLoad = sw.Elapsed.TotalMilliseconds;
         Console.WriteLine($"loaded {(isRaw ? "RAW" : "TIFF")} {working.Pixels.Width}×{working.Pixels.Height} "
                         + $"({working.Pixels.PixelCount / 1e6:F1} MP) in {tLoad:F1} ms");
@@ -619,7 +639,11 @@ static void PrintUsage()
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
         "  -o, --output <path>         output TIFF (normalized: uint16; scene-linear: float32)\n" +
-        "  --input-srgb                treat input as sRGB-gamma (linearise on load)\n" +
+        "  --input-linear              untagged/unusable-ICC fallback: samples are linear\n" +
+        "  --input-srgb                untagged/unusable-ICC fallback: exact sRGB profile\n" +
+        "                              (mutually exclusive; usable embedded ICC always wins)\n" +
+        "                              --decode-only/--dump-preinv keep the legacy decoder\n" +
+        "                              and reject --input-linear\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +
         "  --d-max <v>                 output range (endpoint model) / max density (legacy)\n" +

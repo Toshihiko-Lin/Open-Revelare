@@ -80,24 +80,29 @@ public class AtomicIccTiffInputTests
     }
 
     [Fact]
-    public void Explicit_sRGB_override_uses_the_exact_sRGB_profile_through_the_CMM()
+    public void Explicit_sRGB_fallback_does_not_override_a_usable_embedded_profile()
     {
-        (float[] encoded, _) = ReadEncodedFixture(AdobeRgbTiff);
-        ColorProfileRef srgb = BuiltInColorProfiles.Srgb(ProfileRole.Input);
+        (float[] encoded, byte[] embedded) = ReadEncodedFixture(AdobeRgbTiff);
+        ColorProfileRef embeddedProfile = ColorProfileRef.Create(
+            embedded,
+            "embedded fixture profile",
+            ProfileRole.Input,
+            new ProfileSource.Embedded("embedded-priority", "TIFF"));
         using var engine = new LittleCmsEngine();
-        float[] expected = DirectTransform(engine, encoded, srgb);
+        float[] expected = DirectTransform(engine, encoded, embeddedProfile);
 
         WorkingFrame actual = TiffIO.LoadWorkingFrame(
             AdobeRgbTiff,
-            inputIsSrgb: true,
+            TiffInputAssumption.Srgb,
             ColorPipelineVersion.ManagedV2,
             engine);
 
         CharacterizedPixelEncoding original = Assert.IsType<CharacterizedPixelEncoding>(
             actual.Source.OriginalEncoding);
-        Assert.Equal(srgb.Identity, original.Profile.Identity);
-        Assert.IsType<ProfileSource.BuiltIn>(original.Profile.Source);
-        Assert.Equal(ColorReference.DisplayReferred, original.Reference);
+        Assert.Equal(embeddedProfile.Identity, original.Profile.Identity);
+        Assert.IsType<ProfileSource.Embedded>(original.Profile.Source);
+        Assert.Equal(ColorReference.SceneReferred, original.Reference);
+        Assert.Contains("exact embedded ICC", actual.Source.DecodeRecipe, StringComparison.Ordinal);
         AssertFloatBitsEqual(expected, actual.Pixels.Data);
     }
 
@@ -167,7 +172,7 @@ public class AtomicIccTiffInputTests
 
             WorkingFrame managed = TiffIO.LoadWorkingFrame(
                 path,
-                inputIsSrgb: false,
+                TiffInputAssumption.LegacyByBitDepthCompatibility,
                 ColorPipelineVersion.ManagedV2,
                 neverCalled);
 
@@ -178,7 +183,7 @@ public class AtomicIccTiffInputTests
                 CompatibilityPolicy.LegacyDecodeSrgbTransferThenTreatAsWorking,
                 encoding.Compatibility);
             Assert.Equal(WorkingAdmission.LegacyUncharacterizedPassthrough, managed.Admission);
-            Assert.Contains("managed v2 explicit uncharacterized compatibility", managed.Source.DecodeRecipe);
+            Assert.Contains("legacy-by-bit-depth compatibility", managed.Source.DecodeRecipe);
             AssertFloatBitsEqual(legacy.Pixels.Data, managed.Pixels.Data);
             Assert.Equal(0, neverCalled.ValidationCalls);
             Assert.Equal(0, neverCalled.LeaseCalls);
