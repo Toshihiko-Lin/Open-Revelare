@@ -1,11 +1,8 @@
 name: ci
 
-# 只做「还能不能编」这一件事，跑在最便宜的 Linux runner 上。
-#
-# 真正只有 CI 能验的是「Linux 产物齐不齐」—— Core 的 LibRaw runtime 包是按 RID 条件挑的，
-# 挑错了本机 Windows 构建看不出来。发版时 release.yml 的 linux job 也会做同样的事。
-#
-# macos job 见文件末尾：那一格补的是另一个盲区 —— macOS 的行为差异过去只能等用户报障。
+# 三个平台各自构建固定版本的 app-owned Little CMS，再编译、测试和检查 publish 产物。
+# native ABI、动态库命名与 RID 装配都只能由对应平台可靠验证，不能再由一格 Linux
+# 交叉 publish 代替。
 
 on:
   workflow_dispatch:
@@ -18,13 +15,15 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: 构建固定 Little CMS 2.19.1
+        run: bash packaging/lcms/build-unix.sh
       # -warnaserror：本仓库长期保持 0 警告，退化了应当在这里就红
       - run: dotnet build -c Release -warnaserror
       # 回归测试。整套约 10 秒，而它守的是这个项目的核心承诺 ——「同一卷底片任何时候、
@@ -34,12 +33,49 @@ jobs:
       # 跨平台 publish 能力本身也要守住：Core 的 runtime 包是按 RID 条件挑的，
       # 挑错了在这一步就会缺原生库。
       - run: dotnet publish src/OpenRevelare.Gui -c Release -r linux-x64 --self-contained true -o /tmp/pub
+      - name: 装配 app-owned Little CMS
+        run: |
+          install -m 0755 native/linux-x64/liblcms2.so.2 /tmp/pub/liblcms2.so.2
+          install -m 0755 native/linux-x64/liblcms2.so /tmp/pub/liblcms2.so
+          install -m 0644 native/linux-x64/lcms2.manifest.json /tmp/pub/lcms2.manifest.json
+          cmp -s native/linux-x64/liblcms2.so.2 /tmp/pub/liblcms2.so.2
       - name: 产物自检
         run: |
           test -f /tmp/pub/OpenRevelare          || { echo "缺主程序"; exit 1; }
-          test -f /tmp/pub/libraw_r.so.23    || { echo "缺 LibRaw 原生库"; exit 1; }
-          test -f /tmp/pub/models/net_awb.onnx || { echo "缺 Deep-WB 模型"; exit 1; }
+          test -f /tmp/pub/libraw_r.so.23         || { echo "缺 LibRaw 原生库"; exit 1; }
+          test -f /tmp/pub/liblcms2.so.2          || { echo "缺 app-owned Little CMS"; exit 1; }
+          test -f /tmp/pub/liblcms2.so            || { echo "缺 Little CMS loader alias"; exit 1; }
+          test -f /tmp/pub/lcms2.manifest.json    || { echo "缺 Little CMS manifest"; exit 1; }
+          test -f /tmp/pub/models/net_awb.onnx    || { echo "缺 Deep-WB 模型"; exit 1; }
           ls /tmp/pub/*.dll > /dev/null
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 构建固定 Little CMS 2.19.1
+        shell: pwsh
+        run: ./packaging/lcms/build-windows.ps1
+      - run: dotnet build -c Release -warnaserror
+      - run: dotnet test -c Release --no-build --nologo
+      - name: publish + 装配 app-owned Little CMS
+        shell: pwsh
+        run: |
+          $pub = Join-Path $env:RUNNER_TEMP "openrevelare-publish"
+          dotnet publish src/OpenRevelare.Gui -c Release -r win-x64 --self-contained true -warnaserror -o $pub
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（$LASTEXITCODE）" }
+          Copy-Item -LiteralPath native/win-x64/lcms2.dll -Destination (Join-Path $pub "lcms2.dll") -Force
+          Copy-Item -LiteralPath native/win-x64/lcms2.manifest.json -Destination (Join-Path $pub "lcms2.manifest.json") -Force
+          if (-not (Test-Path -LiteralPath (Join-Path $pub "OpenRevelare.exe"))) { throw "缺主程序" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub "raw_r.dll"))) { throw "缺 LibRaw 原生库" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.dll"))) { throw "缺 app-owned Little CMS" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.manifest.json"))) { throw "缺 Little CMS manifest" }
+          $sourceHash = (Get-FileHash -LiteralPath native/win-x64/lcms2.dll -Algorithm SHA256).Hash
+          $publishHash = (Get-FileHash -LiteralPath (Join-Path $pub "lcms2.dll") -Algorithm SHA256).Hash
+          if ($sourceHash -ne $publishHash) { throw "publish 中的 lcms2.dll 与 app-owned 构建不一致" }
 
   # macOS 的构建能力守门。
   #
@@ -61,6 +97,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: 构建固定 Little CMS 2.19.1
+        run: bash packaging/lcms/build-unix.sh
       - run: dotnet build -c Release -warnaserror
       # 同一套回归测试也在 macOS 上跑一遍：这里的测试有相当一部分在验数值结果，
       # 而浮点行为、文化相关的数字解析、路径大小写都是跨平台会分岔的地方。
@@ -73,12 +111,18 @@ jobs:
           echo "placeholder — real dylib is built by packaging/macos/bundle-libraw.sh" \
             > native/osx-arm64/libraw.23.dylib
       - run: dotnet publish src/OpenRevelare.Gui -c Release -r osx-arm64 --self-contained true -warnaserror -o /tmp/pub
+      - name: 装配 Little CMS manifest
+        run: cp native/osx-arm64/lcms2.manifest.json /tmp/pub/lcms2.manifest.json
       - name: 产物自检
         # 这三条正是 v1.0.0 那几次 CI 栽过的地方：dylib 因为 RID 条件写在 Core 里而静默
         # 不复制，包照打，直到 mac 上导入 RAW 才 DllNotFoundException。
         run: |
           test -f /tmp/pub/OpenRevelare         || { echo "缺主程序"; exit 1; }
           test -f /tmp/pub/libraw.23.dylib      || { echo "dylib 没进产物 —— 检查 Gui.csproj 里按 RID 条件的 Content 项"; exit 1; }
+          test -f /tmp/pub/liblcms2.2.dylib     || { echo "缺 app-owned Little CMS"; exit 1; }
+          test -f /tmp/pub/liblcms2.dylib       || { echo "缺 Little CMS loader alias"; exit 1; }
+          test -f /tmp/pub/lcms2.manifest.json  || { echo "缺 Little CMS manifest"; exit 1; }
+          cmp -s native/osx-arm64/liblcms2.2.dylib /tmp/pub/liblcms2.2.dylib
           test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
           ls /tmp/pub/*.dll > /dev/null
       # SystemMemory.TryMacOS 依赖的 sysctl 键是否真的存在、是否真的读得出数。

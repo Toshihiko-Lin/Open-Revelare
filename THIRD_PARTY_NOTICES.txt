@@ -4,14 +4,19 @@ OpenRevelare — Third-Party Notices
 This file lists the third-party components redistributed with OpenRevelare
 (C# / .NET 8 build), along with their licenses and required attribution.
 
-All native libraries are loaded dynamically and are shipped unmodified.
+All native libraries are loaded dynamically and are built from unmodified
+upstream source or redistributed upstream binaries. Platform packaging may
+adjust loader metadata (for example a macOS dylib install name) without
+changing library code.
 Where a component is licensed under the LGPL, users may replace it with a
 compatible (including modified) version by substituting the corresponding
 file in the installation directory.
 
 Platform note: the exact set of native libraries differs per platform —
-Windows ships raw_r.dll, Linux libraw_r.so.23, macOS libraw.23.dylib
-(built from LibRaw 0.21.4 source, see packaging/macos/bundle-libraw.sh).
+Windows ships raw_r.dll and lcms2.dll; Linux ships libraw_r.so.23 and the
+app-owned liblcms2.so.2; macOS ships libraw.23.dylib and the app-owned
+liblcms2.2.dylib (LibRaw is built from 0.21.4 source; Little CMS from 2.19.1,
+see packaging/macos/bundle-libraw.sh and packaging/lcms/).
 The licenses below apply to all of them.
 
 -------------------------------------------------------------------------------
@@ -42,10 +47,16 @@ The licenses below apply to all of them.
    Source   : https://libjpeg-turbo.org/
 
 -------------------------------------------------------------------------------
-4. Little CMS (lcms2)  (bundled with LibRaw)
+4. Little CMS (lcms2) 2.19.1
    License  : MIT License
    Author   : Marti Maria Saguer
-   Source   : https://www.littlecms.com/
+   Copyright: Copyright (c) 1998-2026 Marti Maria Saguer
+   Source   : https://github.com/mm2/Little-CMS/releases/tag/lcms2.19.1
+
+   OpenRevelare builds and redistributes its own shared Little CMS library from
+   the unmodified official 2.19.1 release archive. The source URL and SHA-256
+   are pinned in packaging/lcms/, and each platform build produces an
+   lcms2.manifest.json containing the exact source and binary hashes.
 
 -------------------------------------------------------------------------------
 5. GNU OpenMP runtime (libgomp, Linux build only)

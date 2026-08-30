@@ -37,6 +37,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: 构建固定 Little CMS 2.19.1
+        run: bash packaging/lcms/build-unix.sh
       - name: 回归测试
         run: dotnet test -c Release --nologo
       - id: v
@@ -61,8 +63,20 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: 构建固定 Little CMS 2.19.1
+        shell: pwsh
+        run: ./packaging/lcms/build-windows.ps1
       - name: publish
-        run: dotnet publish src/OpenRevelare.Gui -c Release -r win-x64 --self-contained true -o publish/win-x64
+        shell: pwsh
+        run: |
+          dotnet publish src/OpenRevelare.Gui -c Release -r win-x64 --self-contained true -o publish/win-x64
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（$LASTEXITCODE）" }
+          Copy-Item -LiteralPath native/win-x64/lcms2.dll -Destination publish/win-x64/lcms2.dll -Force
+          Copy-Item -LiteralPath native/win-x64/lcms2.manifest.json -Destination publish/win-x64/lcms2.manifest.json -Force
+          $sourceHash = (Get-FileHash -LiteralPath native/win-x64/lcms2.dll -Algorithm SHA256).Hash
+          $publishHash = (Get-FileHash -LiteralPath publish/win-x64/lcms2.dll -Algorithm SHA256).Hash
+          if ($sourceHash -ne $publishHash) { throw "publish 中的 lcms2.dll 与 app-owned 构建不一致" }
+          if (-not (Test-Path -LiteralPath publish/win-x64/lcms2.manifest.json)) { throw "缺 Little CMS manifest" }
       - name: Inno Setup
         shell: pwsh
         run: |
@@ -87,6 +101,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: 构建固定 Little CMS 2.19.1
+        run: bash packaging/lcms/build-unix.sh
       - name: 取 appimagetool 与静态 runtime
         run: |
           mkdir -p tools
@@ -95,8 +111,21 @@ jobs:
           chmod +x tools/appimagetool-x86_64.AppImage
           curl -fL --retry 3 -o tools/runtime-x86_64 \
             https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+      - name: publish + 装配 app-owned Little CMS
+        run: |
+          dotnet publish src/OpenRevelare.Gui -c Release -r linux-x64 --self-contained true -o publish/linux-x64
+          install -m 0755 native/linux-x64/liblcms2.so.2 publish/linux-x64/liblcms2.so.2
+          install -m 0755 native/linux-x64/liblcms2.so publish/linux-x64/liblcms2.so
+          install -m 0644 native/linux-x64/lcms2.manifest.json publish/linux-x64/lcms2.manifest.json
+          cmp -s native/linux-x64/liblcms2.so.2 publish/linux-x64/liblcms2.so.2
       - name: 打 AppImage
-        run: ./packaging/linux/build-appimage.sh
+        run: ./packaging/linux/build-appimage.sh --no-publish
+      - name: AppImage 装配自检
+        run: |
+          test -f publish/OpenRevelare.AppDir/usr/bin/liblcms2.so.2 || { echo "AppImage 缺 app-owned Little CMS"; exit 1; }
+          test -f publish/OpenRevelare.AppDir/usr/bin/liblcms2.so || { echo "AppImage 缺 Little CMS loader alias"; exit 1; }
+          test -f publish/OpenRevelare.AppDir/usr/bin/lcms2.manifest.json || { echo "AppImage 缺 Little CMS manifest"; exit 1; }
+          cmp -s native/linux-x64/liblcms2.so.2 publish/OpenRevelare.AppDir/usr/bin/liblcms2.so.2
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -122,12 +151,30 @@ jobs:
         run: brew install jpeg-turbo little-cms2 librsvg
       - name: 编 + 装配 libraw.23.dylib
         run: ./packaging/macos/bundle-libraw.sh
+      # bundle-libraw 会把 Homebrew 的 lcms 依赖一并复制；固定版本必须在它之后写入，
+      # 这样最终 app-owned 文件确定来自上面校验过 SHA-256 的官方 2.19.1 源码。
+      - name: 构建固定 Little CMS 2.19.1
+        run: bash packaging/lcms/build-unix.sh
+      - name: publish + 装配 Little CMS manifest
+        run: |
+          dotnet publish src/OpenRevelare.Gui -c Release -r osx-arm64 --self-contained true -o publish/osx-arm64
+          cp native/osx-arm64/lcms2.manifest.json publish/osx-arm64/lcms2.manifest.json
+          cmp -s native/osx-arm64/liblcms2.2.dylib publish/osx-arm64/liblcms2.2.dylib
       - name: 打 .app / .dmg（ad-hoc 签名）
         # ad-hoc 是**定下来的路线**，不是临时凑合：用户 2026-08-04 决定不买 Apple
         # Developer Program（99 美元/年）。代价是用户首次打开要自己绕 Gatekeeper，
         # 所以 release 正文里那段说明不能删。脚本的 --sign/--notarize 保留着，
         # 哪天真买了证书直接能用。
-        run: ./packaging/macos/build-app.sh --dmg
+        run: ./packaging/macos/build-app.sh --no-publish --dmg
+      - name: .app 装配自检
+        run: |
+          test -f publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib || { echo ".app 缺 app-owned Little CMS"; exit 1; }
+          test -f publish/OpenRevelare.app/Contents/MacOS/liblcms2.dylib || { echo ".app 缺 Little CMS loader alias"; exit 1; }
+          test -f publish/OpenRevelare.app/Contents/MacOS/lcms2.manifest.json || { echo ".app 缺 Little CMS manifest"; exit 1; }
+          # build-app.sh 会补 ad-hoc 签名，因此 app 内 Mach-O 的整文件 hash 合法地不同于
+          # 签名前的 native 文件；上一个步骤已在签名前做过逐字节比较，这里验证签名与 ID。
+          codesign -v publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib
+          otool -D publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib | grep -F '@loader_path/liblcms2.2.dylib'
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
