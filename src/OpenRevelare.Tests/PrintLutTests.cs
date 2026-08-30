@@ -796,6 +796,69 @@ public class PrintLutTests
     }
 
     /// <summary>
+    /// The output profile embedded beside a print-LUT render must describe the pixels that were
+    /// actually written.  The native Rec709 cube result and the target-space result may use
+    /// different code values, but decoding each through its declared profile must recover the
+    /// same XYZ colour.
+    ///
+    /// This is deliberately a production-characterisation test for M0.  The current exit keeps
+    /// the cube's Rec709 transfer curve while the exporter labels the pixels as sRGB, Display P3,
+    /// or Adobe RGB.  Rec709 is therefore the green control; the other cases expose the existing
+    /// pixels/profile mismatch and remain red until the M2 output conversion is implemented.
+    /// </summary>
+    [Theory]
+    [InlineData("sRGB")]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void Print_lut_pixels_match_the_declared_output_profile_in_XYZ(string spaceName)
+    {
+        string path = WriteCube(TempCube("profile-contract"), 33, v => v);
+        try
+        {
+            CubeLut lut = CubeLut.Load(path);
+            ColorSpaceDef target = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+            var sceneLinear = new[] { 0.18f, 0.09f, 0.04f };
+
+            var nativePixels = (float[])sceneLinear.Clone();
+            ColorPipeline.ToOutputSpaceVia(nativePixels, lut, ColorSpaces.Rec709);
+            double[] expectedXyz = DecodeToXyz(nativePixels, ColorSpaces.Rec709);
+
+            var targetPixels = (float[])sceneLinear.Clone();
+            ColorPipeline.ToOutputSpaceVia(targetPixels, lut, target);
+            double[] actualXyz = DecodeToXyz(targetPixels, target);
+
+            for (int channel = 0; channel < 3; channel++)
+            {
+                Assert.True(Math.Abs(expectedXyz[channel] - actualXyz[channel]) < 1e-4,
+                    $"{spaceName} XYZ[{channel}] differs: native={Rgb(nativePixels)}, " +
+                    $"target={Rgb(targetPixels)}, expectedXYZ={Xyz(expectedXyz)}, " +
+                    $"actualXYZ={Xyz(actualXyz)}");
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    private static double[] DecodeToXyz(float[] encoded, ColorSpaceDef declaredSpace)
+    {
+        var linear = (float[])encoded.Clone();
+        OutputRender.Decode(linear, declaredSpace);
+        double[,] matrix = declaredSpace.ToXyz();
+        return
+        [
+            matrix[0, 0] * linear[0] + matrix[0, 1] * linear[1] + matrix[0, 2] * linear[2],
+            matrix[1, 0] * linear[0] + matrix[1, 1] * linear[1] + matrix[1, 2] * linear[2],
+            matrix[2, 0] * linear[0] + matrix[2, 1] * linear[1] + matrix[2, 2] * linear[2],
+        ];
+    }
+
+    private static string Rgb(float[] values) =>
+        $"[{values[0]:F6}, {values[1]:F6}, {values[2]:F6}]";
+
+    private static string Xyz(double[] values) =>
+        $"[{values[0]:F6}, {values[1]:F6}, {values[2]:F6}]";
+
+    /// <summary>
     /// Relative luminance of a cube's encoded output, weighted by <paramref name="space"/>'s own
     /// Y row — not sRGB's, which would be wrong for P3.
     ///
