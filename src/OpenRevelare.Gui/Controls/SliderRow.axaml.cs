@@ -140,7 +140,19 @@ public partial class SliderRow : UserControl
         else if (change.Property == SpinValueProperty && !_syncing)
         {
             _syncing = true;
+            // An EMPTY NumericUpDown writes null. Not an unparseable one — "abc" and "   " both
+            // leave the old number alone — but an empty string does, and so does a null one, which
+            // is the state the box passes through every time the user selects the digits and
+            // deletes them on the way to typing a different value.
+            //
+            // Refusing the null protects Value, but that alone leaves the two halves of the bridge
+            // disagreeing: the spin box is bound to null and renders empty while Value still holds
+            // the real number, and nothing re-syncs them, because the only thing that pushes
+            // Value → SpinValue is a CHANGE to Value — which never came. The row then reads as
+            // cleared, and the next edit commits from an empty baseline. Push the authoritative
+            // Value back out instead, so a null round-trips to where it started.
             if (SpinValue is { } v) Value = (double)v;
+            else SpinValue = (decimal)Value;
             _syncing = false;
         }
     }

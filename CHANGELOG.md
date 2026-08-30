@@ -22,6 +22,8 @@
 
 - **修复了竖构图印样超出尺寸上限的问题**。
 
+- **修复了参数数字框被删空后就一直空着的问题**。已存盘的参数未受影响，旧工程无需处理。
+
 ---
 
 **Added**
@@ -43,6 +45,8 @@
 - **Fixed the crop being erased while the crop tool is open.**
 
 - **Fixed portrait contact sheets overrunning the size cap.**
+
+- **Fixed a parameter spin box staying empty once its number is deleted.** Saved parameters were never affected, so existing projects need nothing.
 
 ---
 
