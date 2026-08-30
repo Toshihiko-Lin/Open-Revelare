@@ -883,6 +883,27 @@ public static class RawDecode
         out bool dngFellBack)
     {
         ImageBuffer pixels = DecodeRaw(path, backend, fbdd, out dngFellBack);
+        string backendName = dngFellBack ? $"{backend}->LibRaw fallback" : backend.ToString();
+        return AdmitRawWorking(pixels, path, backendName, fbdd, "full-quality decode");
+    }
+
+    /// <summary>
+    /// Carries an optimized RAW preview/region decode across the same typed admission boundary as
+    /// <see cref="DecodeRawWorking"/>. The optimized decoders intentionally return pixels only;
+    /// callers must use this helper rather than silently relabeling those camera-native numbers as
+    /// characterized ACEScg.
+    /// </summary>
+    public static WorkingFrame AdmitRawWorking(
+        ImageBuffer pixels,
+        string path,
+        string backendName,
+        FbddMode fbdd,
+        string decodeKind)
+    {
+        ArgumentNullException.ThrowIfNull(pixels);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(backendName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(decodeKind);
         string stableId = FrameSourceIds.ForPath(path);
         var original = new UncharacterizedPixelEncoding(
             CaptureKind.RawCameraNative,
@@ -890,12 +911,11 @@ public static class RawDecode
             CompatibilityPolicy.LegacyTreatNumbersAsWorking,
             TransferState.Unknown,
             NumericRange.Normalized);
-        string backendName = dngFellBack ? $"{backend}->LibRaw fallback" : backend.ToString();
         var source = new SourceDescriptor(
             stableId,
             Path.GetFileName(path),
             original,
-            $"linear camera-native UniWB; backend={backendName}; fbdd={fbdd}");
+            $"linear camera-native UniWB; backend={backendName}; fbdd={fbdd}; {decodeKind}");
         return new WorkingFrame(
             pixels,
             WorkingSpaceId.LinearAcesCgV1,

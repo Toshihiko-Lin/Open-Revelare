@@ -333,8 +333,9 @@ public sealed class FrameParams
     /// <summary>Dedicated chroma scale (factor 1+sat). 0 = pass-through.</summary>
     public double Saturation { get; set; } = 0.0;
 
-    // Per-channel tone curves in gamma-2.2 domain: control points (x,y) in [0,1].
-    // Empty = identity. Master (M) applies first, then R/G/B.
+    // Per-channel tone curves: control points (x,y) in [0,1]. LegacyV1 preserves its historical
+    // private gamma-2.2 interpretation; ManagedV2 samples these coordinates directly in the exact
+    // target-profile encoding. Empty = identity. Master (M) applies first, then R/G/B.
     public List<(double X, double Y)> CurvePointsM { get; set; } = new();
     public List<(double X, double Y)> CurvePointsR { get; set; } = new();
     public List<(double X, double Y)> CurvePointsG { get; set; } = new();

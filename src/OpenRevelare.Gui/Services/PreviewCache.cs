@@ -38,7 +38,10 @@ public sealed class PreviewCache
 
     /// <summary>A cached preview plus the dimensions of the full-resolution decode it came from —
     /// the source size is worth keeping because nothing else holds the full buffer any more.</summary>
-    public sealed record Entry(ImageBuffer Preview, int SourceWidth, int SourceHeight);
+    public sealed record Entry(WorkingFrame Working, int SourceWidth, int SourceHeight)
+    {
+        public ImageBuffer Preview => Working.Pixels;
+    }
 
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _lru = new();          // front = most recently used
@@ -61,14 +64,15 @@ public sealed class PreviewCache
 
     /// <summary>Store (or replace) the preview for <paramref name="path"/>, evicting LRU entries
     /// until the total fits the budget. The entry just added is never the one evicted.</summary>
-    public void Put(string path, ImageBuffer preview, int sourceWidth, int sourceHeight)
+    public void Put(string path, WorkingFrame working, int sourceWidth, int sourceHeight)
     {
+        ArgumentNullException.ThrowIfNull(working);
         lock (_gate)
         {
             if (_entries.TryGetValue(path, out Entry? old))
                 _bytes -= SizeOf(old.Preview);
-            _entries[path] = new Entry(preview, sourceWidth, sourceHeight);
-            _bytes += SizeOf(preview);
+            _entries[path] = new Entry(working, sourceWidth, sourceHeight);
+            _bytes += SizeOf(working.Pixels);
             Touch(path);
 
             while (_bytes > BudgetBytes && _lru.Last is { } victim && victim.Value != path)

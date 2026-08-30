@@ -66,6 +66,7 @@ public enum BuiltInProfileId
     AdobeRgb1998,
     Rec709,
     LinearAcesCg,
+    LinearExtendedSrgb,
 }
 
 /// <summary>

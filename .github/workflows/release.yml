@@ -57,7 +57,7 @@ jobs:
 
   windows:
     needs: guard
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -66,6 +66,12 @@ jobs:
       - name: 构建固定 Little CMS 2.19.1
         shell: pwsh
         run: ./packaging/lcms/build-windows.ps1
+      - name: 构建可重复 Win32 presenter
+        shell: pwsh
+        run: ./packaging/windows/build-win32-presenter.ps1
+      - name: Windows presenter contract tests
+        shell: pwsh
+        run: dotnet test src/OpenRevelare.Presentation.Win32.Tests -c Release --nologo
       - name: publish
         shell: pwsh
         run: |
@@ -73,10 +79,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（$LASTEXITCODE）" }
           Copy-Item -LiteralPath native/win-x64/lcms2.dll -Destination publish/win-x64/lcms2.dll -Force
           Copy-Item -LiteralPath native/win-x64/lcms2.manifest.json -Destination publish/win-x64/lcms2.manifest.json -Force
+          $presenterDll = "OpenRevelare.Presentation.Win32.Native.dll"
+          $presenterManifest = "OpenRevelare.Presentation.Win32.Native.manifest.json"
+          Copy-Item -LiteralPath (Join-Path native/win-x64 $presenterDll) -Destination (Join-Path publish/win-x64 $presenterDll) -Force
+          Copy-Item -LiteralPath (Join-Path native/win-x64 $presenterManifest) -Destination (Join-Path publish/win-x64 $presenterManifest) -Force
+          ./packaging/windows/verify-win32-presenter.ps1 -Directory publish/win-x64 -RepositoryRoot $PWD
+          ./packaging/windows/smoke-win32-presenter.ps1 -Directory publish/win-x64
           $sourceHash = (Get-FileHash -LiteralPath native/win-x64/lcms2.dll -Algorithm SHA256).Hash
           $publishHash = (Get-FileHash -LiteralPath publish/win-x64/lcms2.dll -Algorithm SHA256).Hash
           if ($sourceHash -ne $publishHash) { throw "publish 中的 lcms2.dll 与 app-owned 构建不一致" }
           if (-not (Test-Path -LiteralPath publish/win-x64/lcms2.manifest.json)) { throw "缺 Little CMS manifest" }
+          if (-not (Test-Path -LiteralPath (Join-Path publish/win-x64 $presenterDll))) { throw "缺 Win32 presenter" }
+          if (-not (Test-Path -LiteralPath (Join-Path publish/win-x64 $presenterManifest))) { throw "缺 Win32 presenter manifest" }
       - name: Inno Setup
         shell: pwsh
         run: |
@@ -86,7 +100,27 @@ jobs:
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC).Source }
           & $iscc open-revelare.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC 失败（$LASTEXITCODE）" }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+      - name: Windows installer contents check
+        shell: pwsh
+        run: |
+          $setups = @(Get-ChildItem -LiteralPath installer -Filter "OpenRevelare-*-setup.exe" -File)
+          if ($setups.Count -ne 1) { throw "Expected exactly one Windows setup, got $($setups.Count)" }
+          $installed = Join-Path $env:RUNNER_TEMP "openrevelare-installed"
+          $arguments = @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER",
+            "/DIR=$installed")
+          & $setups[0].FullName @arguments
+          if ($LASTEXITCODE -ne 0) { throw "Silent setup failed ($LASTEXITCODE)" }
+          ./packaging/windows/verify-win32-presenter.ps1 -Directory $installed -RepositoryRoot $PWD
+          ./packaging/windows/smoke-win32-presenter.ps1 -Directory $installed
+          if (-not (Test-Path -LiteralPath (Join-Path $installed "OpenRevelare.exe"))) { throw "Installed app executable is missing" }
+          if (-not (Test-Path -LiteralPath (Join-Path $installed "lcms2.dll"))) { throw "Installed Little CMS is missing" }
+          if (-not (Test-Path -LiteralPath (Join-Path $installed "lcms2.manifest.json"))) { throw "Installed Little CMS manifest is missing" }
+          $uninstaller = Join-Path $installed "unins000.exe"
+          if (-not (Test-Path -LiteralPath $uninstaller)) { throw "Installed uninstaller is missing" }
+          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ($LASTEXITCODE -ne 0) { throw "Installer-check uninstall failed ($LASTEXITCODE)" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows

@@ -31,6 +31,10 @@ public static class BuiltInColorProfiles
     public static ColorProfileRef LinearAcesCg(ProfileRole role = ProfileRole.Working) =>
         For(ColorSpaces.AcesCg, role);
 
+    public static ColorProfileRef LinearExtendedSrgb(
+        ProfileRole role = ProfileRole.CanonicalPresentation) =>
+        For(ColorSpaces.LinearExtendedSrgb, role);
+
     /// <summary>
     /// Describes the pixels produced by the v1 print-LUT exit without changing them. The cube
     /// leaves a Rec709/2.4 curve in place, while wider output selections rotate only the
@@ -55,6 +59,32 @@ public static class BuiltInColorProfiles
                 new ProfileSource.Generated("OpenRevelare.IccProfiles", "legacy-v1"));
         });
 
+    /// <summary>
+    /// Truthfully describes the frozen v1 route used when DisplayReferredStage2 was disabled.
+    /// That route never performed the working-to-output primary conversion (and ignored a print
+    /// LUT entirely); it only applied the selected output transfer function to ACEScg-channel
+    /// numbers. Keeping the old pixels therefore requires this compatibility profile rather than
+    /// relabelling them as the requested output space.
+    /// </summary>
+    public static ColorProfileRef LegacyLinearStage2Output(ColorSpaceDef selected) =>
+        Cache.GetOrAdd(($"legacy-linear-stage2:{selected.Name}", ProfileRole.Output), _ =>
+        {
+            ColorSpaceDef working = ColorSpaces.AcesCg;
+            var actual = new ColorSpaceDef(
+                $"Legacy-ACEScg-{selected.Name}-TRC",
+                working.Red,
+                working.Green,
+                working.Blue,
+                working.White,
+                selected.Transfer,
+                selected.Gamma);
+            return ColorProfileRef.Create(
+                IccProfiles.Build(actual),
+                $"Legacy v1 ACEScg primaries / {selected.Name} transfer",
+                ProfileRole.Output,
+                new ProfileSource.Generated("OpenRevelare.IccProfiles", "legacy-v1"));
+        });
+
     private static ColorProfileRef Create(ColorSpaceDef space, ProfileRole role) =>
         ColorProfileRef.Create(
             IccProfiles.Build(space),
@@ -74,6 +104,8 @@ public static class BuiltInColorProfiles
             return BuiltInProfileId.Rec709;
         if (space.Name.Equals(ColorSpaces.AcesCg.Name, StringComparison.OrdinalIgnoreCase))
             return BuiltInProfileId.LinearAcesCg;
+        if (space.Name.Equals(ColorSpaces.LinearExtendedSrgb.Name, StringComparison.OrdinalIgnoreCase))
+            return BuiltInProfileId.LinearExtendedSrgb;
         throw new ArgumentException($"'{space.Name}' is not a built-in profile.", nameof(space));
     }
 }

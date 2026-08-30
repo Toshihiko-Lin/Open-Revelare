@@ -6,7 +6,10 @@ namespace OpenRevelare.Gui.Models;
 /// <summary>Container the export writes into. Only what an encoder actually exists for.</summary>
 public enum ExportFormat
 {
-    /// <summary>16-bit RGB TIFF — the archival / continue-editing output.</summary>
+    /// <summary>
+    /// TIFF selection persisted for compatibility: normalized output is RGB16, while
+    /// <see cref="ExportLinear"/> upgrades the same container choice to RGB float32.
+    /// </summary>
     Tiff16,
     /// <summary>8-bit JPEG, 4:4:4.</summary>
     Jpeg,
@@ -36,9 +39,8 @@ public sealed class ExportOptions
 
     public int JpegQuality { get; set; } = 95;
 
-    /// <summary>Embed the profile describing what was written. Ignored when
-    /// <see cref="ExportLinear"/> is set, whose output is scene-linear and which no profile here
-    /// describes.</summary>
+    /// <summary>Embed the profile describing what was written. Scene-linear export always embeds
+    /// the deterministic linear ACEScg profile regardless of this display-export preference.</summary>
     public bool EmbedIcc { get; set; } = true;
 
     /// <summary>
@@ -93,17 +95,20 @@ public sealed class ExportOptions
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
     public string Summary()
     {
-        string format = Format == ExportFormat.Jpeg
+        string compression = TiffCompression switch
+        {
+            TiffIO.CompressionMode.None => Loc.T("不压缩"),
+            TiffIO.CompressionMode.Deflate => "Deflate",
+            _ => "LZW",
+        };
+        string format = ExportLinear
+            ? Loc.F($"32-bit float TIFF · {compression}")
+            : Format == ExportFormat.Jpeg
             ? Loc.F($"JPEG 品质 {JpegQuality}")
-            : Loc.F($"16-bit TIFF · {TiffCompression switch
-            {
-                TiffIO.CompressionMode.None => Loc.T("不压缩"),
-                TiffIO.CompressionMode.Deflate => "Deflate",
-                _ => "LZW",
-            }}");
+            : Loc.F($"16-bit TIFF · {compression}");
         string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
         if (ExportLinear)
-            return $"{format} · {size} · " + Loc.T("场景线性 ACEScg（无 ICC）");
+            return $"{format} · {size} · " + Loc.T("场景线性 ACEScg · 嵌 exact ICC");
         string space = ResolvedColorSpace.Name;
         return $"{format} · {size} · {space}" + (EmbedIcc ? Loc.F($" · 嵌 {space}") : "");
     }

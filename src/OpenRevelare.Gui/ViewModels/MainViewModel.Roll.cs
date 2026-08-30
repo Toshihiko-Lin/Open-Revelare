@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
@@ -667,27 +668,33 @@ public partial class MainViewModel
         return q;
     }
 
-    private static void WriteExport(ImageBuffer img, string path, FrameParams p, ExportOptions opt)
+    private static void WriteExport(RenderedFrame rendered, string path, ExportOptions opt)
     {
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
         // whereas shrinking the negative first would throw away detail the render still needed
         // — and would move every Stage-1 measurement with it.
-        ImageBuffer outImg = opt.Downsample ? Resample.Box(img, opt.MaxLongEdge) : img;
-
-        // NO conversion happens here any more, and that is the point. The render already landed in
-        // the roll's output space — step 4 ran before Stage 2, and Stage 2 ran inside it — so the
-        // bytes on screen are the bytes to write. Converting again would be converting a second
-        // time. All that is left is to name the space in the profile.
-        //
-        // NONE intent writes linear data: no profile offered here describes that, so the embed
-        // request is skipped rather than producing a file whose profile disagrees with its pixels.
-        ColorSpaceDef? icc = p.OutputIntent == OutputIntent.Basic && opt.EmbedIcc
-            ? p.ResolvedOutputSpace
-            : null;
+        RenderedFrame output = opt.Downsample
+            ? rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge))
+            : rendered;
+        // Scene-linear/extended output is only portable with its exact linear ACEScg profile.
+        // The old dialog setting may contain a stale "omit ICC" value from an sRGB export; it
+        // must not turn a later linear export into an error or an uncharacterized file.
+        ExportProfilePolicy profilePolicy = opt.ExportLinear || opt.EmbedIcc
+            ? ExportProfilePolicy.EmbedExact
+            : ExportProfilePolicy.OmitExactSrgb;
 
         if (opt.Format == ExportFormat.Jpeg)
-            JpegIO.ExportJpeg(outImg, path, opt.JpegQuality, null, icc);
-        else TiffIO.ExportTiff16(outImg, path, opt.TiffCompression, icc);
+            JpegIO.ExportJpeg(
+                output,
+                path,
+                opt.JpegQuality,
+                profilePolicy: profilePolicy);
+        else
+            TiffIO.ExportTiff(
+                output,
+                path,
+                opt.TiffCompression,
+                profilePolicy: profilePolicy);
     }
 
     /// <summary>Export every frame at full resolution into a folder, each with its own params.</summary>
@@ -722,8 +729,20 @@ public partial class MainViewModel
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
                 FrameParams ep = ForExport(p, opt);
-                await Task.Run(() => WriteExport(Pipeline.ProcessFrame(ImageIo.LoadLinear(f.Path), ep),
-                                                 outPath, ep, opt));
+                ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+                await Task.Run(() =>
+                {
+                    WorkingFrame working = ImageIo.LoadWorking(
+                        f.Path,
+                        pipelineVersion,
+                        ColorManagement);
+                    RenderedFrame rendered = Pipeline.Render(
+                        working,
+                        ep,
+                        pipelineVersion,
+                        ColorManagement);
+                    WriteExport(rendered, outPath, opt);
+                });
             }
             string detail = "";
             if (renamed > 0) detail += Loc.F($"，其中 {renamed} 帧重名已另存");
@@ -750,8 +769,9 @@ public partial class MainViewModel
         {
             var frames = Frames.ToList();
             int done = 0, total = frames.Count;
-            var sources = new ImageBuffer[total];
+            var sources = new WorkingFrame[total];
             var cellParams = new FrameParams[total];
+            ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             // Warm previews first, on the shared decode path — this used to re-decode the entire
             // roll at full resolution just to shrink each frame to 900 px.
             for (int i = 0; i < total; i++)
@@ -760,7 +780,7 @@ public partial class MainViewModel
                 // strip's first negative. The region is the frame plus its margin, so the crop
                 // still runs below — against the box rather than the whole scan.
                 var pre = SplitCropOf(frames[i]);
-                sources[i] = (await PreviewAsync(frames[i].Path, pre)).Preview;
+                sources[i] = (await PreviewAsync(frames[i].Path, pre)).Working;
                 cellParams[i] = ForRegion(frames[i].Params, frames[i], pre);
                 ReportBackground(Loc.F($"印样 {++done}/{total} …"));
             }
@@ -769,7 +789,15 @@ public partial class MainViewModel
             {
                 var t = new List<ImageBuffer>(total);
                 for (int i = 0; i < total; i++)
-                    t.Add(Pipeline.ProcessFrame(Resample.Box(sources[i], 900), cellParams[i]));
+                {
+                    WorkingFrame source = sources[i].WithPixels(
+                        Resample.Box(sources[i].Pixels, 900));
+                    t.Add(Pipeline.Render(
+                        source,
+                        cellParams[i],
+                        pipelineVersion,
+                        ColorManagement).Pixels);
+                }
                 return t;
             });
             StatusText = Loc.F($"印样已生成（{total} 帧）");
@@ -803,10 +831,11 @@ public partial class MainViewModel
             await Task.Run(() =>
             {
                 string ext = Path.GetExtension(path).ToLowerInvariant();
+                RenderedFrame rendered = ContactSheetRenderedFrame(outImg);
                 if (ext is ".jpg" or ".jpeg")
-                    JpegIO.ExportJpeg(outImg, path, quality: 92);
+                    JpegIO.ExportJpeg(rendered, path, quality: 92);
                 else
-                    TiffIO.ExportTiff16(outImg, path, TiffIO.CompressionMode.Lzw, ColorSpace.Srgb);
+                    TiffIO.ExportTiff(rendered, path, TiffIO.CompressionMode.Lzw);
             });
             StatusText = Loc.F($"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）");
         }
@@ -814,18 +843,45 @@ public partial class MainViewModel
         finally { IsBusy = false; }
     }
 
+    private static RenderedFrame ContactSheetRenderedFrame(ImageBuffer pixels)
+    {
+        ColorProfileRef profile = BuiltInColorProfiles.Srgb(ProfileRole.Output);
+        var encoding = new CharacterizedPixelEncoding(
+            profile,
+            ColorReference.DisplayReferred,
+            TransferState.ProfileEncoded,
+            NumericRange.Normalized);
+        var recipe = new OutputRecipe(
+            ColorPipelineVersion.ManagedV2,
+            profile,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            "contact sheet fixed exact sRGB",
+            printLutIdentity: string.Empty,
+            pixelProfileMismatch: false);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
+    }
+
     /// <summary>The current frame at full resolution, decoded on demand. Nothing else in the GUI
     /// needs full-res, so this is the only place it is paid for; the single slot means an
     /// export → tweak → re-export loop on the same frame decodes once, and switching frames
     /// releases the buffer instead of accumulating hundreds of MB per visited frame.</summary>
-    private ImageBuffer LoadFullLinear(string sourcePath)
+    private WorkingFrame LoadFullWorking(
+        string sourcePath,
+        ColorPipelineVersion pipelineVersion)
     {
         lock (_fullSlotGate)
         {
-            if (_fullSlot is { } slot && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
-                return slot.Buf;
-            ImageBuffer full = ImageIo.LoadLinear(sourcePath);
-            _fullSlot = new FullSlot(sourcePath, full);
+            if (_fullSlot is { } slot
+                && slot.PipelineVersion == pipelineVersion
+                && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
+                return slot.Working;
+            WorkingFrame full = ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement);
+            _fullSlot = new FullSlot(sourcePath, pipelineVersion, full);
             return full;
         }
     }

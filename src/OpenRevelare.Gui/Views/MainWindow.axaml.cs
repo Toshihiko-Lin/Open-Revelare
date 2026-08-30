@@ -36,6 +36,8 @@ public partial class MainWindow : Window
         {
             if (DataContext is MainViewModel vm)
             {
+                if (OperatingSystem.IsWindows())
+                    WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
                 vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
@@ -44,8 +46,11 @@ public partial class MainWindow : Window
                         Curves.SetHistogram(vm.Histogram);
                     else if (args.PropertyName == nameof(MainViewModel.PreviewImage))
                         OnPreviewBitmapChanged();
-                    else if (args.PropertyName == nameof(MainViewModel.Patch))
+                    else if (args.PropertyName is nameof(MainViewModel.Patch) or
+                             nameof(MainViewModel.ShowClipping) or
+                             nameof(MainViewModel.ShowSprocketMask))
                         UpdatePatchLayout();
+                    OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>
                 {
@@ -118,6 +123,7 @@ public partial class MainWindow : Window
         }
 
         SyncViewerBgChecks();
+        InitializeWindowsPresentation();
     }
 
     /// <summary>
@@ -314,6 +320,7 @@ public partial class MainWindow : Window
         UpdatePanCursor();
         UpdatePatchLayout();
         RenderCropFrame();
+        QueueWindowsPresentation();
     }
 
     private void ResetZoom() { _zoom = 1.0; _pan = default; ApplyTransform(); Vm?.ClearSharpPatch(); }
@@ -564,7 +571,11 @@ public partial class MainWindow : Window
                                               CropV1, CropV2, CropH1, CropH2 })
             c.IsVisible = show;
         foreach (Rectangle r in _cropHandleShapes) if (r is not null) r.IsVisible = show;
-        if (!show) return;
+        if (!show)
+        {
+            QueueWindowsPresentation();
+            return;
+        }
 
         var b = LetterboxRect()!.Value;
         var (cx, cy, cw, ch) = _cropDraft!.Value;
@@ -605,6 +616,7 @@ public partial class MainWindow : Window
             _cropHandleShapes[i].StrokeThickness = 1.0 * inv;
             Put(_cropHandleShapes[i], pos[i].X - half, pos[i].Y - half, hs, hs);
         }
+        QueueWindowsPresentation();
     }
 
     private void CommitCrop()
@@ -667,7 +679,9 @@ public partial class MainWindow : Window
     private void UpdatePatchLayout()
     {
         MainViewModel.SharpPatch? patch = Vm?.Patch;
-        if (patch is null || LetterboxRect() is not { } box)
+        if (patch is null ||
+            !MainViewModel.ShouldPresentSharpPatch(Vm?.ShowClipping == true, Vm?.ShowSprocketMask == true) ||
+            LetterboxRect() is not { } box)
         {
             PatchImg.Source = null;
             PatchImg.IsVisible = false;
@@ -946,6 +960,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         Vm?.FlushRollNow();
+        StopWindowsPresentation();
         // Loc.Changed 是静态事件，订阅方却是这个窗口：不摘掉就会把窗口钉在进程生命周期上。
         // 实际只有一个主窗口，但配对的 -= 是这个项目里其余订阅一贯的写法。
         TearDownNativeMenu();
@@ -1149,6 +1164,7 @@ public partial class MainWindow : Window
         Services.Settings.Save();
         App.ApplyViewerBackground(hex);
         SyncViewerBgChecks();
+        QueueWindowsPresentation();
     }
 
     /// <summary>Tick the swatch that matches the saved backdrop, in every copy of the menu
@@ -1511,11 +1527,17 @@ public partial class MainWindow : Window
 
         if (!_dragging) return;
         Point p = e.GetPosition(Overlay);
-        if (IsLineMode(_mode)) { SelLine.EndPoint = p; return; }
+        if (IsLineMode(_mode))
+        {
+            SelLine.EndPoint = p;
+            QueueWindowsPresentation();
+            return;
+        }
         Canvas.SetLeft(SelRect, Math.Min(p.X, _dragStart.X));
         Canvas.SetTop(SelRect, Math.Min(p.Y, _dragStart.Y));
         SelRect.Width = Math.Abs(p.X - _dragStart.X);
         SelRect.Height = Math.Abs(p.Y - _dragStart.Y);
+        QueueWindowsPresentation();
     }
 
     private void OnOverlayReleased(object? sender, PointerReleasedEventArgs e)
@@ -1749,13 +1771,10 @@ public partial class MainWindow : Window
         // dark to judge.
         foreach (var (plan, preview) in detected)
         {
-            var shown = new OpenRevelare.Core.ImageBuffer(
-                preview.Width, preview.Height, (float[])preview.Data.Clone());
             // A VIEWER transform, not step 4 — see NegativeView.ToDisplay. This strip is raw
             // un-inverted film with no calibration behind it, and step 4's display rendering
             // assumes a calibrated positive, which rendered the strip several stops hot.
-            OpenRevelare.Core.NegativeView.ToDisplay(shown.Data, Vm.CurrentOutputSpace);
-            plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
+            plan.Preview = Vm.BuildTransientNegativeFallback(preview);
         }
 
         var dlg = new SplitDialog(plans);
@@ -1896,6 +1915,18 @@ public partial class MainWindow : Window
         if (path != null) await Vm.SaveProjectAsync(path);
     }
 
+    private async void OnMigrateColorPipelineClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null || !Vm.UsesLegacyColorPipeline) return;
+        bool confirmed = false;
+        await new InfoDialog(
+                Loc.T("迁移色彩管线"),
+                Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。画面和之后的导出可能变化；工程保存后不会自动退回 v1。"))
+            .WithAction(Loc.T("迁移并重新渲染"), Loc.T("取消"), () => confirmed = true)
+            .ShowDialog(this);
+        if (confirmed) await Vm.MigrateColorPipelineToV2Async();
+    }
+
     // ── Roll management (add / virtual copy / remove) ───────────────────────────
     private async void OnAddImagesClick(object? sender, RoutedEventArgs e)
     {
@@ -1938,7 +1969,8 @@ public partial class MainWindow : Window
             {
                 jpeg
                     ? new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } }
-                    : new FilePickerFileType("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
+                    : new FilePickerFileType(opt.ExportLinear ? "32-bit float TIFF" : "16-bit TIFF")
+                        { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
         string? path = file?.TryGetLocalPath();

@@ -1,3 +1,5 @@
+using OpenRevelare.ColorManagement;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -119,6 +121,68 @@ public static class RegionRender
     }
 
     /// <summary>
+    /// Versioned sharp-patch boundary. LegacyV1 delegates to the frozen ImageBuffer overload
+    /// above. ManagedV2 carries the characterized working frame through the same regional Stage 1
+    /// and geometry, then uses the versioned step-4/CMM boundary followed by target-encoded Stage 2.
+    /// The negative viewer is deliberately version-independent and never invokes the CMM.
+    /// </summary>
+    public static RenderedRegion Render(
+        WorkingFrame full,
+        FrameParams cal,
+        Roi roi,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine? colorManagement,
+        bool negative = false,
+        double[]? negativeWb = null)
+    {
+        ArgumentNullException.ThrowIfNull(full);
+        ArgumentNullException.ThrowIfNull(cal);
+        if (pipelineVersion is not (ColorPipelineVersion.LegacyV1 or ColorPipelineVersion.ManagedV2))
+            throw new ArgumentOutOfRangeException(
+                nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        // The negative is a viewer transform over un-inverted source pixels, not a print/output
+        // render. Keep the exact old route and do not even require a CMM instance.
+        if (negative)
+        {
+            var raw = Render(full.Pixels, cal, roi, negative: true, negativeWb: negativeWb);
+            return DescribeRegion(raw, cal, pipelineVersion, negative: true);
+        }
+
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            var raw = Render(full.Pixels, cal, roi, negative: false, negativeWb: negativeWb);
+            return DescribeRegion(raw, cal, pipelineVersion, negative: false);
+        }
+        ArgumentNullException.ThrowIfNull(colorManagement);
+
+        var bounds = RequiredSourceBounds(full.Pixels.Width, full.Pixels.Height, cal, roi);
+        int sliceWidth = bounds.X1 - bounds.X0;
+        int sliceHeight = bounds.Y1 - bounds.Y0;
+        var slice = new ImageBuffer(sliceWidth, sliceHeight);
+        for (int y = 0; y < sliceHeight; y++)
+        {
+            Array.Copy(
+                full.Pixels.Data,
+                ((bounds.Y0 + y) * full.Pixels.Width + bounds.X0) * 3,
+                slice.Data,
+                y * sliceWidth * 3,
+                sliceWidth * 3);
+        }
+
+        return RenderFromSlice(
+            full.WithPixels(slice),
+            bounds.X0,
+            bounds.Y0,
+            full.Pixels.Width,
+            full.Pixels.Height,
+            cal,
+            roi,
+            pipelineVersion,
+            colorManagement);
+    }
+
+    /// <summary>
     /// <inheritdoc cref="Render"/>
     /// </summary>
     /// <param name="source">A slice of the frame that CONTAINS
@@ -221,6 +285,200 @@ public static class RegionRender
         if (cal.OutputIntent == OutputIntent.Basic)
             Stage2.ApplyChain(outImg.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return (outImg, realised);
+    }
+
+    /// <summary>
+    /// Versioned counterpart of <see cref="RenderFromSlice(ImageBuffer,int,int,int,int,FrameParams,Roi,bool,double[]?)"/>.
+    /// The supplied working-frame identity survives a region decode; only its pixel storage is the
+    /// source slice. LegacyV1 and the negative viewer delegate exactly to the frozen overload.
+    /// </summary>
+    public static RenderedRegion RenderFromSlice(
+        WorkingFrame source,
+        int sourceX0,
+        int sourceY0,
+        int frameW,
+        int frameH,
+        FrameParams cal,
+        Roi roi,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine? colorManagement,
+        bool negative = false,
+        double[]? negativeWb = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(cal);
+        if (pipelineVersion is not (ColorPipelineVersion.LegacyV1 or ColorPipelineVersion.ManagedV2))
+            throw new ArgumentOutOfRangeException(
+                nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        if (negative)
+        {
+            var raw = RenderFromSlice(
+                source.Pixels,
+                sourceX0,
+                sourceY0,
+                frameW,
+                frameH,
+                cal,
+                roi,
+                negative: true,
+                negativeWb: negativeWb);
+            return DescribeRegion(raw, cal, pipelineVersion, negative: true);
+        }
+
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            var raw = RenderFromSlice(
+                source.Pixels,
+                sourceX0,
+                sourceY0,
+                frameW,
+                frameH,
+                cal,
+                roi,
+                negative: false,
+                negativeWb: negativeWb);
+            return DescribeRegion(raw, cal, pipelineVersion, negative: false);
+        }
+        ArgumentNullException.ThrowIfNull(colorManagement);
+
+        var managed = RenderManagedPositiveFromSlice(
+            source.Pixels,
+            sourceX0,
+            sourceY0,
+            frameW,
+            frameH,
+            cal,
+            roi,
+            colorManagement);
+        return DescribeRegion(managed, cal, pipelineVersion, negative: false);
+    }
+
+    private static RenderedRegion DescribeRegion(
+        (ImageBuffer Image, Roi Realised) raw,
+        FrameParams cal,
+        ColorPipelineVersion pipelineVersion,
+        bool negative)
+    {
+        RenderedFrame frame = negative
+            ? DescribeNegativeViewerPixels(raw.Image, cal, pipelineVersion)
+            : Pipeline.DescribeRenderedPixels(raw.Image, cal, pipelineVersion);
+        return new RenderedRegion(frame, raw.Realised);
+    }
+
+    /// <summary>
+    /// Describes pixels produced by <see cref="NegativeView"/>. The whole-frame GUI viewer and
+    /// regional sharp patch share this boundary so their transient recipe/profile identity cannot
+    /// drift even though the viewer transform is intentionally outside the positive pipeline.
+    /// </summary>
+    public static RenderedFrame DescribeNegativeViewerPixels(
+        ImageBuffer pixels,
+        FrameParams cal,
+        ColorPipelineVersion pipelineVersion)
+    {
+        ColorProfileRef output = BuiltInColorProfiles.For(
+            cal.ResolvedOutputSpace,
+            ProfileRole.Output);
+        var encoding = new CharacterizedPixelEncoding(
+            output,
+            ColorReference.DisplayReferred,
+            TransferState.ProfileEncoded,
+            NumericRange.Normalized);
+        var recipe = new OutputRecipe(
+            pipelineVersion,
+            output,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            "negative viewer: linear ACEScg -> exact output profile (print LUT ignored)",
+            printLutIdentity: string.Empty,
+            pixelProfileMismatch: false);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            new RenderFingerprint.Unavailable(FingerprintUnavailableReason.TransientPreview));
+    }
+
+    private static (ImageBuffer Image, Roi Realised) RenderManagedPositiveFromSlice(
+        ImageBuffer source,
+        int sourceX0,
+        int sourceY0,
+        int frameW,
+        int frameH,
+        FrameParams cal,
+        Roi roi,
+        IColorManagementEngine colorManagement)
+    {
+        var (rect, realised) = Realise(frameW, frameH, cal, roi);
+        var bounds = SourceBounds(frameW, frameH, cal, rect);
+
+        int sliceWidth = bounds.X1 - bounds.X0;
+        int sliceHeight = bounds.Y1 - bounds.Y0;
+        var slice = new ImageBuffer(sliceWidth, sliceHeight);
+        for (int y = 0; y < sliceHeight; y++)
+        {
+            int sourceY = bounds.Y0 + y - sourceY0;
+            int sourceX = bounds.X0 - sourceX0;
+            Array.Copy(
+                source.Data,
+                (sourceY * source.Width + sourceX) * 3,
+                slice.Data,
+                y * sliceWidth * 3,
+                sliceWidth * 3);
+        }
+
+        var region = new FrameRegion(bounds.X0, bounds.Y0, frameW, frameH);
+        if (cal.DistortionK1 != 0.0)
+            slice = LensCorrections.ApplyDistortion(slice, cal.DistortionK1, region);
+        if (cal.LccFlatField != null)
+            Lcc.Apply(slice.Data, sliceWidth, sliceHeight, cal.LccFlatField, region);
+        if (cal.VignetteAmount != 0.0)
+        {
+            LensCorrections.ApplyVignette(
+                slice.Data,
+                sliceWidth,
+                sliceHeight,
+                cal.VignetteAmount,
+                cal.VignetteFalloff,
+                region);
+        }
+
+        bool[]? mask = null;
+        if (cal.SprocketEnabled && cal.SprocketThreshold is double threshold)
+            mask = Sprocket.MakeMask(slice.Data, slice.PixelCount, (float)threshold);
+
+        if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputMatrix)
+            InputTransform.Apply(slice.Data, inputMatrix);
+        if (cal.DecoupleMatrix != null)
+            Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
+
+        ImageBuffer inverted = Inversion.Invert(
+            slice,
+            cal,
+            cal.DecoupleChromaAmp,
+            Pipeline.ResolveChromaMatrix(cal));
+        if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);
+
+        ImageBuffer output = MapGeometry(
+            inverted,
+            bounds.X0,
+            bounds.Y0,
+            frameW,
+            frameH,
+            cal,
+            rect);
+
+        if (cal.OutputIntent == OutputIntent.Basic)
+        {
+            ColorPipeline.ToOutputSpaceFor(
+                output.Data,
+                cal,
+                ColorPipelineVersion.ManagedV2,
+                colorManagement);
+            Stage2.ApplyManagedAfterTargetEncoding(output.Data, cal, cal.ResolvedOutputSpace);
+        }
+
+        return (output, realised);
     }
 
     // ── request → whole displayed pixels ─────────────────────────────────────────
@@ -391,5 +649,26 @@ public static class RegionRender
             (w, h) = (h, w);
         }
         return (x, y);
+    }
+}
+
+/// <summary>
+/// A sharp patch whose pixels cannot be separated from their exact colour meaning, plus the
+/// whole-pixel ROI the caller must use when compositing it over the preview.
+/// </summary>
+public sealed record RenderedRegion
+{
+    public RenderedFrame Frame { get; }
+    public RegionRender.Roi Realised { get; }
+
+    /// <summary>Convenience alias for pixel consumers; colour-aware boundaries should retain
+    /// <see cref="Frame"/> alongside it.</summary>
+    public ImageBuffer Image => Frame.Pixels;
+
+    public RenderedRegion(RenderedFrame frame, RegionRender.Roi realised)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        Frame = frame;
+        Realised = realised;
     }
 }

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />
+  </ItemGroup>
+
+  <!-- packaging/windows/build-win32-presenter.ps1 is the sole assembly step. Flow its verified
+       DLL+manifest pair through managed consumers without adding a solution-level VC++ build. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Include="..\..\native\win-x64\OpenRevelare.Presentation.Win32.Native.dll"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\OpenRevelare.Presentation.Win32.Native.dll')"
+             Link="OpenRevelare.Presentation.Win32.Native.dll"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\native\win-x64\OpenRevelare.Presentation.Win32.Native.manifest.json"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\OpenRevelare.Presentation.Win32.Native.manifest.json')"
+             Link="OpenRevelare.Presentation.Win32.Native.manifest.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

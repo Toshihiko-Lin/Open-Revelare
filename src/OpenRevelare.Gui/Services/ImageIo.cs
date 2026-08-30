@@ -1,3 +1,4 @@
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 
 namespace OpenRevelare.Gui.Services;
@@ -130,6 +131,35 @@ public static class ImageIo
     });
 
     /// <summary>
+    /// Versioned, typed decode boundary used by the editor/export pipeline. TIFF input honours the
+    /// exact embedded ICC through the app-owned CMM in ManagedV2; RAW remains explicitly
+    /// uncharacterized because no camera characterization has been selected.
+    /// </summary>
+    public static WorkingFrame LoadWorking(
+        string path,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement) => Gated(() =>
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (!RawDecode.IsRawExtension(path))
+        {
+            return TiffIO.LoadWorkingFrame(
+                path,
+                inputIsSrgb: false,
+                pipelineVersion,
+                colorManagement);
+        }
+
+        var settings = Settings.Current;
+        return RawDecode.DecodeRawWorking(
+            path,
+            settings.DecodeBackend,
+            settings.FbddMode,
+            out _);
+    });
+
+    /// <summary>
     /// Centre-ROI channel mean of a full-quality decode — the Path A calibration frames' entire
     /// contribution. Streams off the decoder rather than decoding to a full float frame and then
     /// averaging a fifth of it; the mean is identical (see <see cref="RawDecode.RoiMeanFull"/>).
@@ -140,6 +170,29 @@ public static class ImageIo
             return DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false));
         var s = Settings.Current;
         return RawDecode.RoiMeanFull(path, s.DecodeBackend, s.FbddMode);
+    });
+
+    /// <summary>Versioned counterpart used by calibration so profiled TIFF samples are measured
+    /// in the same linear working domain as their content frames.</summary>
+    public static double[] RoiMeanFull(
+        string path,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement) => Gated(() =>
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (!RawDecode.IsRawExtension(path))
+        {
+            WorkingFrame working = TiffIO.LoadWorkingFrame(
+                path,
+                inputIsSrgb: false,
+                pipelineVersion,
+                colorManagement);
+            return DecoupleCalibration.RoiMean(working.Pixels);
+        }
+
+        var settings = Settings.Current;
+        return RawDecode.RoiMeanFull(path, settings.DecodeBackend, settings.FbddMode);
     });
 
     /// <summary>
@@ -205,6 +258,52 @@ public static class ImageIo
                                               RawDecode.Demosaic.Preview);
     });
 
+    /// <summary>Typed/versioned preview decode. Every returned downsample keeps the exact source
+    /// admission and profile identity of the full working frame.</summary>
+    public static (WorkingFrame[] Previews, int SourceWidth, int SourceHeight) LoadWorkingPreviews(
+        string path,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement,
+        params int[] maxEdges) => Gated(() =>
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (maxEdges.Length == 0)
+            throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
+
+        if (!RawDecode.IsRawExtension(path))
+        {
+            WorkingFrame full = TiffIO.LoadWorkingFrame(
+                path,
+                inputIsSrgb: false,
+                pipelineVersion,
+                colorManagement);
+            var previews = new WorkingFrame[maxEdges.Length];
+            for (int index = 0; index < maxEdges.Length; index++)
+                previews[index] = full.WithPixels(Resample.Box(full.Pixels, maxEdges[index]));
+            return (previews, full.Pixels.Width, full.Pixels.Height);
+        }
+
+        var settings = Settings.Current;
+        var (pixels, width, height) = RawDecode.DecodeRawDownsampled(
+            path,
+            settings.DecodeBackend,
+            settings.FbddMode,
+            maxEdges,
+            RawDecode.Demosaic.Preview);
+        var typed = new WorkingFrame[pixels.Length];
+        for (int index = 0; index < pixels.Length; index++)
+        {
+            typed[index] = RawDecode.AdmitRawWorking(
+                pixels[index],
+                path,
+                settings.DecodeBackend.ToString(),
+                settings.FbddMode,
+                $"preview decode; max-edge={maxEdges[index]}");
+        }
+        return (typed, width, height);
+    });
+
     /// <summary>
     /// Decode ONE RECTANGLE of a source at full resolution — the sharp-patch path.
     ///
@@ -221,11 +320,65 @@ public static class ImageIo
                                                      x, y, w, h, frameW, frameH));
     }
 
+    public static (WorkingFrame Slice, int X0, int Y0)? LoadWorkingRegion(
+        string path,
+        int x,
+        int y,
+        int width,
+        int height,
+        int frameWidth,
+        int frameHeight,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (!RawDecode.IsRawExtension(path)) return null;
+        var settings = Settings.Current;
+        return Gated<(WorkingFrame Slice, int X0, int Y0)?>(() =>
+        {
+            var decoded = RawDecode.DecodeRawRegion(
+                path,
+                settings.DecodeBackend,
+                settings.FbddMode,
+                x,
+                y,
+                width,
+                height,
+                frameWidth,
+                frameHeight);
+            if (decoded is not { } region) return null;
+            return (
+                RawDecode.AdmitRawWorking(
+                    region.Slice,
+                    path,
+                    settings.DecodeBackend.ToString(),
+                    settings.FbddMode,
+                    "sharp-region decode"),
+                region.X0,
+                region.Y0);
+        });
+    }
+
     /// <summary>Single-edge <see cref="LoadPreviews"/>.</summary>
     public static (ImageBuffer Preview, int SourceWidth, int SourceHeight) LoadPreview(string path, int maxEdge)
     {
         var (outs, w, h) = LoadPreviews(path, maxEdge);
         return (outs[0], w, h);
+    }
+
+    public static (WorkingFrame Preview, int SourceWidth, int SourceHeight) LoadWorkingPreview(
+        string path,
+        int maxEdge,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        var (previews, width, height) = LoadWorkingPreviews(
+            path,
+            pipelineVersion,
+            colorManagement,
+            maxEdge);
+        return (previews[0], width, height);
     }
 
     /// <summary>
@@ -256,4 +409,54 @@ public static class ImageIo
         int rh = Math.Max(1, (int)Math.Round(rect.H * fullH));
         return (region, rw, rh);
     });
+
+    /// <summary>
+    /// Versioned typed region preview. Managed profiled TIFFs currently decode/convert atomically
+    /// before cropping; this trades peak memory for the invariant that a split scan never takes a
+    /// partial ICC path. A future streaming implementation must preserve the same result/metadata.
+    /// </summary>
+    public static (WorkingFrame Preview, int SourceWidth, int SourceHeight) LoadWorkingPreviewRegion(
+        string path,
+        (double X, double Y, double W, double H) rect,
+        int maxEdge,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement) => Gated(() =>
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (RawDecode.IsRawExtension(path))
+        {
+            var settings = Settings.Current;
+            var (pixels, fullWidth, fullHeight) = RawDecode.DecodeRawDownsampled(
+                path,
+                settings.DecodeBackend,
+                settings.FbddMode,
+                new[] { maxEdge },
+                RawDecode.Demosaic.Preview);
+            WorkingFrame working = RawDecode.AdmitRawWorking(
+                pixels[0],
+                path,
+                settings.DecodeBackend.ToString(),
+                settings.FbddMode,
+                $"whole-frame preview fallback for requested region; max-edge={maxEdge}");
+            return (working, fullWidth, fullHeight);
+        }
+
+        WorkingFrame full = TiffIO.LoadWorkingFrame(
+            path,
+            inputIsSrgb: false,
+            pipelineVersion,
+            colorManagement);
+        ImageBuffer region = Geometry.ApplyCrop(full.Pixels, rect);
+        ImageBuffer preview = Resample.Box(region, maxEdge);
+        int sourceWidth = Math.Max(1, (int)Math.Round(rect.W * full.Pixels.Width));
+        int sourceHeight = Math.Max(1, (int)Math.Round(rect.H * full.Pixels.Height));
+        return (full.WithPixels(preview), sourceWidth, sourceHeight);
+    });
+
+    private static void RequirePipelineVersion(ColorPipelineVersion version)
+    {
+        if (version is not ColorPipelineVersion.LegacyV1 and not ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(version), version, "Unknown colour pipeline version.");
+    }
 }

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Globalization;
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 
 // OpenRevelare (C# rewrite) — headless CLI.
 //
 // Reads a RAW/TIFF negative, runs the density-inversion pipeline, and writes a
-// 16-bit positive TIFF or JPEG. Its main job now is verification: the --print-* flags
+// normalized 16-bit TIFF/JPEG or an extended 32-bit float TIFF. Its main job now is
+// verification: the --print-* flags
 // below are what tools/parity compares against the frozen Python build.
 //
 //   OpenRevelare.Cli -i neg.tiff -o pos.tiff --input-srgb --grade 1.65 --d-max 2.0
@@ -152,7 +154,7 @@ static int Run(string[] args)
         : OutputIntent.Basic;
 
     // --color-space is a RENDER parameter now, not a post-conversion: it names the Cineon step-4
-    // target, so it must be set before ProcessFrame runs — Stage 2 executes inside that space.
+    // target, so it must be set before the typed render runs — Stage 2 executes inside that space.
     if (opts.TryGetValue("color-space", out var csName))
     {
         if (!ColorSpaces.All.TryGetValue(csName, out var target))
@@ -200,10 +202,10 @@ static int Run(string[] args)
         // chroma_amp / chroma_matrix from R/G/B cal frames (+ content = -i) and print.
         if (flags.Contains("print-decouple-calib"))
         {
-            ImageBuffer calR = LoadLinear(opts["decouple-cal-r"]);
-            ImageBuffer calG = LoadLinear(opts["decouple-cal-g"]);
-            ImageBuffer calB = LoadLinear(opts["decouple-cal-b"]);
-            ImageBuffer content = LoadLinear(opts["input"]);
+            ImageBuffer calR = LoadDiagnosticLinear(opts["decouple-cal-r"]);
+            ImageBuffer calG = LoadDiagnosticLinear(opts["decouple-cal-g"]);
+            ImageBuffer calB = LoadDiagnosticLinear(opts["decouple-cal-b"]);
+            ImageBuffer content = LoadDiagnosticLinear(opts["input"]);
 
             double[,] mLin = DecoupleCalibration.ComputeDecoupleMatrix(calR, calG, calB);
             double[,] mDen = DecoupleCalibration.ComputeDensityMatrix(calR, calG, calB);
@@ -287,8 +289,8 @@ static int Run(string[] args)
         // composition / gm-normalisation / plateau logic is verifiable without ONNX).
         if (flags.Contains("print-wb-calib"))
         {
-            ImageBuffer inSrgb = LoadLinear(opts["input"]);
-            ImageBuffer targetSrgb = LoadLinear(opts["wb-target"]);
+            ImageBuffer inSrgb = LoadDiagnosticLinear(opts["input"]);
+            ImageBuffer targetSrgb = LoadDiagnosticLinear(opts["wb-target"]);
             double grade = 1.0, pivot = 0.0, dMax = FrameParams.OutputRange;
             double cgrade = grade;   // the retired chroma split; kept neutral for the harness
             double[] ccs = cal.ChromaChannelScale;
@@ -335,7 +337,7 @@ static int Run(string[] args)
         // the mandated one (offset before high) — see FilmBase's class remarks.
         if (flags.Contains("print-film-base-calib"))
         {
-            ImageBuffer content = LoadLinear(opts["input"]);
+            ImageBuffer content = LoadDiagnosticLinear(opts["input"]);
             double[]? tBase = null;
 
             if (opts.TryGetValue("fb-base-rect", out var br))
@@ -345,9 +347,9 @@ static int Run(string[] args)
             }
             if (opts.TryGetValue("fb-roll", out var roll))
             {
-                var frames = roll.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadLinear).ToList();
+                var frames = roll.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadDiagnosticLinear).ToList();
                 var vals = opts.TryGetValue("fb-roll-values", out var rv)
-                    ? rv.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadLinear).ToList()
+                    ? rv.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadDiagnosticLinear).ToList()
                     : null;
                 double? thr = opts.TryGetValue("fb-sprocket-threshold", out var ft) ? ParseD(ft) : null;
                 // ⚠ Both t_base_roll lines are NO LONGER a Python parity check: the per-frame
@@ -425,32 +427,43 @@ static int Run(string[] args)
             return 0;
         }
 
-        var sw = Stopwatch.StartNew();
-        bool isRaw = RawDecode.IsRawExtension(opts["input"]);
-        ImageBuffer img = isRaw
-            ? RawDecode.DecodeRaw(opts["input"])
-            : TiffIO.LoadTiff(opts["input"], flags.Contains("input-srgb"));
-        double tLoad = sw.Elapsed.TotalMilliseconds;
-        Console.WriteLine($"loaded {(isRaw ? "RAW" : "TIFF")} {img.Width}×{img.Height} ({img.PixelCount / 1e6:F1} MP) in {tLoad:F1} ms");
-
-        // Decode-only: write the linear camera-native array as-is (parity check vs rawpy).
+        // Decode-only is an explicit diagnostic dump, not a rendered/exported image. Preserve the
+        // frozen camera-native / legacy TIFF numbers and deliberately do not attach an ICC profile.
         if (flags.Contains("decode-only"))
         {
-            TiffIO.ExportTiff16(img, opts["output"], TiffIO.CompressionMode.None);
+            var decodeTimer = Stopwatch.StartNew();
+            bool rawDiagnostic = RawDecode.IsRawExtension(opts["input"]);
+            ImageBuffer decoded = LoadDiagnosticInput(
+                opts["input"], flags.Contains("input-srgb"));
+            Console.WriteLine($"loaded {(rawDiagnostic ? "RAW" : "TIFF")} {decoded.Width}×{decoded.Height} "
+                            + $"({decoded.PixelCount / 1e6:F1} MP) in {decodeTimer.Elapsed.TotalMilliseconds:F1} ms");
+            TiffIO.ExportTiff16(decoded, opts["output"], TiffIO.CompressionMode.None);
             Console.WriteLine($"wrote decoded linear {opts["output"]}");
             return 0;
         }
 
-        ImageBuffer outImg;
+        // The CLI owns exactly one CMM for the complete managed-v2 input -> render -> export
+        // transaction. The typed helper below is also the static seam that keeps this route on
+        // the same Core boundary as the GUI; there is no profile-name/untagged wide-gamut route.
+        using var colorManagement = new LittleCmsEngine();
+        var sw = Stopwatch.StartNew();
+        bool isRaw = RawDecode.IsRawExtension(opts["input"]);
+        WorkingFrame working = ManagedCliPipeline.LoadWorking(
+            opts["input"], flags.Contains("input-srgb"), colorManagement);
+        double tLoad = sw.Elapsed.TotalMilliseconds;
+        Console.WriteLine($"loaded {(isRaw ? "RAW" : "TIFF")} {working.Pixels.Width}×{working.Pixels.Height} "
+                        + $"({working.Pixels.PixelCount / 1e6:F1} MP) in {tLoad:F1} ms");
+
+        RenderedFrame rendered;
         if (opts.TryGetValue("bench", out var bn) && int.TryParse(bn, out int iters) && iters > 0)
         {
             // Warm-up (JIT + first-touch), then N timed in-process runs; report min/median.
-            outImg = Pipeline.ProcessFrame(img, cal);
+            rendered = ManagedCliPipeline.Render(working, cal, colorManagement);
             var times = new double[iters];
             for (int k = 0; k < iters; k++)
             {
                 var s = Stopwatch.StartNew();
-                outImg = Pipeline.ProcessFrame(img, cal);
+                rendered = ManagedCliPipeline.Render(working, cal, colorManagement);
                 times[k] = s.Elapsed.TotalMilliseconds;
             }
             Array.Sort(times);
@@ -460,7 +473,7 @@ static int Run(string[] args)
         else
         {
             sw.Restart();
-            outImg = Pipeline.ProcessFrame(img, cal);
+            rendered = ManagedCliPipeline.Render(working, cal, colorManagement);
             Console.WriteLine($"processed in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
 
@@ -476,26 +489,21 @@ static int Run(string[] args)
         sw.Restart();
         string outPath = opts["output"];
         string ext = Path.GetExtension(outPath).ToLowerInvariant();
+        opts.TryGetValue("description", out var desc);
         if (ext is ".jpg" or ".jpeg")
         {
             int quality = opts.TryGetValue("quality", out var qv) ? int.Parse(qv) : 95;
-            JpegIO.ExportJpeg(outImg, outPath, quality);
+            ManagedCliPipeline.ExportJpeg(rendered, outPath, quality, desc);
             Console.WriteLine($"wrote {outPath} (JPEG q{quality}) in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
         else
         {
-            // --color-space names the step-4 target, which the render already used: it was applied
-            // to cal before ProcessFrame, so Stage 2 ran inside that space and the buffer is
-            // already encoded in it. Nothing to convert here — only the profile to name.
-            //
-            // Under intent none the data is scene-linear ACEScg and no display profile describes
-            // it, so none is embedded.
-            ColorSpaceDef? icc = cal.OutputIntent == OpenRevelare.Core.OutputIntent.Basic
-                ? cal.ResolvedOutputSpace
-                : null;
-            opts.TryGetValue("description", out var desc);
-            TiffIO.ExportTiff16(outImg, outPath, compress, icc, desc);
-            Console.WriteLine($"wrote {outPath} (TIFF {compress}{(icc is null ? "" : $", ICC {icc}")}) "
+            ManagedCliPipeline.ExportTiff(rendered, outPath, compress, desc);
+            string sampleStorage = rendered.Encoding.Range == NumericRange.Extended
+                ? "32-bit float"
+                : "16-bit unsigned";
+            Console.WriteLine($"wrote {outPath} (TIFF {sampleStorage}, {compress}, " +
+                            $"exact ICC {rendered.OutputProfile.Description}) "
                             + $"in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
         return 0;
@@ -507,9 +515,12 @@ static int Run(string[] args)
     }
 }
 
-// Load a calibration/content image as linear-light (RAW → UniWB decode; TIFF → linear).
-static ImageBuffer LoadLinear(string path)
-    => RawDecode.IsRawExtension(path) ? RawDecode.DecodeRaw(path) : TiffIO.LoadTiff(path, inputIsSrgb: false);
+// Diagnostics and calibration probes intentionally consume naked legacy pixels: their output is
+// a numeric parity signature or an explicitly unprofiled dump, never a standard image export.
+static ImageBuffer LoadDiagnosticLinear(string path) => LoadDiagnosticInput(path, inputIsSrgb: false);
+
+static ImageBuffer LoadDiagnosticInput(string path, bool inputIsSrgb)
+    => RawDecode.IsRawExtension(path) ? RawDecode.DecodeRaw(path) : TiffIO.LoadTiff(path, inputIsSrgb);
 
 // '' → 0, 'guard' → 1, 'maxiter' → 2 (compare_calib.py compares numbers, not strings).
 static double ReasonCode(string reason) => reason switch { "" => 0, "guard" => 1, _ => 2 };
@@ -606,8 +617,8 @@ static void PrintUsage()
 {
     Console.WriteLine(
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
-        "  -i, --input <path>          input negative TIFF (RGB, 8/16-bit)\n" +
-        "  -o, --output <path>         output positive TIFF (16-bit RGB)\n" +
+        "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
+        "  -o, --output <path>         output TIFF (normalized: uint16; scene-linear: float32)\n" +
         "  --input-srgb                treat input as sRGB-gamma (linearise on load)\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +

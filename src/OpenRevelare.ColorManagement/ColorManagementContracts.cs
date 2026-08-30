@@ -23,6 +23,12 @@ public enum PixelFormatDescriptor : uint
 {
     /// <summary>Interleaved R, G, B; one IEEE-754 float32 per channel.</summary>
     RgbFloat32 = (1u << 22) | (4u << 16) | (3u << 3) | 4u,
+
+    /// <summary>
+    /// Interleaved CIE X, Y, Z in the ICC D50 profile connection space; one IEEE-754
+    /// float32 per channel.
+    /// </summary>
+    XyzFloat32 = (1u << 22) | (9u << 16) | (3u << 3) | 4u,
 }
 
 [Flags]
@@ -87,9 +93,9 @@ public sealed class ColorTransformRequest
         if (!Enum.IsDefined(intent)) throw new ArgumentOutOfRangeException(nameof(intent));
         if (!double.IsFinite(adaptationState) || adaptationState is < 0.0 or > 1.0)
             throw new ArgumentOutOfRangeException(nameof(adaptationState), "Adaptation state must be finite and in [0,1].");
-        if (sourceFormat != PixelFormatDescriptor.RgbFloat32)
+        if (!IsSupported(sourceFormat))
             throw new NotSupportedException($"Unsupported source pixel format: {sourceFormat}.");
-        if (destinationFormat != PixelFormatDescriptor.RgbFloat32)
+        if (!IsSupported(destinationFormat))
             throw new NotSupportedException($"Unsupported destination pixel format: {destinationFormat}.");
 
         Source = source;
@@ -100,6 +106,9 @@ public sealed class ColorTransformRequest
         AdaptationState = adaptationState;
         SourceFormat = sourceFormat;
         DestinationFormat = destinationFormat;
+
+        static bool IsSupported(PixelFormatDescriptor format) =>
+            format is PixelFormatDescriptor.RgbFloat32 or PixelFormatDescriptor.XyzFloat32;
     }
 }
 

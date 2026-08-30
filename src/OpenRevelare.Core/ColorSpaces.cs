@@ -152,6 +152,20 @@ public static class ColorSpaces
         "sRGB", (0.6400, 0.3300), (0.3000, 0.6000), (0.1500, 0.0600), (0.3127, 0.3290),
         TransferFunction.SrgbPiecewise);
 
+    /// <summary>
+    /// Canonical presentation carrier: sRGB/Rec.709 D65 primaries with a linear transfer. The
+    /// profile itself is not bounded to [0,1]; float transforms may carry negative and extended
+    /// components until the final platform/device boundary.
+    /// </summary>
+    public static readonly ColorSpaceDef LinearExtendedSrgb = new(
+        "LinearExtendedSrgb",
+        Srgb.Red,
+        Srgb.Green,
+        Srgb.Blue,
+        Srgb.White,
+        TransferFunction.Linear,
+        1.0);
+
     /// <summary>Adobe RGB (1998). D65.</summary>
     public static readonly ColorSpaceDef AdobeRgb = new(
         "AdobeRGB", (0.6400, 0.3300), (0.2100, 0.7100), (0.1500, 0.0600), (0.3127, 0.3290),

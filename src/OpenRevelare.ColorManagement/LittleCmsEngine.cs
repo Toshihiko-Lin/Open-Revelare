@@ -406,12 +406,13 @@ public sealed class LittleCmsEngine : IColorManagementEngine
                         uint version = LittleCmsNative.cmsGetEncodedICCversion(nativeProfile);
                         int channels = LittleCmsNative.cmsChannelsOfColorSpace(colorSpace);
 
-                        if (colorSpace != LittleCmsNative.RgbSignature || channels != 3)
+                        if (colorSpace is not (LittleCmsNative.RgbSignature or LittleCmsNative.XyzSignature) ||
+                            channels != 3)
                         {
                             return new ProfileValidationResult(
                                 false, profile.Identity, profile.Description, colorSpace, pcs, version,
                                 Errors.Last,
-                                $"Only three-channel RGB ICC profiles are supported; profile signature is " +
+                                $"Only three-channel RGB or XYZ ICC profiles are supported; profile signature is " +
                                 $"{Signature(colorSpace)} with {channels} channel(s).");
                         }
                         if (pcs is not (LittleCmsNative.XyzSignature or LittleCmsNative.LabSignature))
@@ -424,7 +425,8 @@ public sealed class LittleCmsEngine : IColorManagementEngine
 
                         return new ProfileValidationResult(
                             true, profile.Identity, profile.Description, colorSpace, pcs, version,
-                            Errors.Last, "Valid three-channel RGB ICC profile.");
+                            Errors.Last,
+                            $"Valid three-channel {(colorSpace == LittleCmsNative.RgbSignature ? "RGB" : "XYZ")} ICC profile.");
                     }
                     finally
                     {
@@ -479,8 +481,16 @@ public sealed class LittleCmsEngine : IColorManagementEngine
                         if (destinationProfile == IntPtr.Zero)
                             throw TransformFailure(request, effectiveFlags, "destination profile could not be opened");
 
-                        EnsureRgbProfile(sourceProfile, request.Source, "source");
-                        EnsureRgbProfile(destinationProfile, request.Destination, "destination");
+                        EnsureProfileMatchesFormat(
+                            sourceProfile,
+                            request.Source,
+                            request.SourceFormat,
+                            "source");
+                        EnsureProfileMatchesFormat(
+                            destinationProfile,
+                            request.Destination,
+                            request.DestinationFormat,
+                            "destination");
                         LittleCmsNative.cmsSetAdaptationStateTHR(
                             Context.DangerousGetHandle(), request.AdaptationState);
 
@@ -508,15 +518,27 @@ public sealed class LittleCmsEngine : IColorManagementEngine
             }
         }
 
-        private void EnsureRgbProfile(IntPtr handle, ColorProfileRef profile, string side)
+        private void EnsureProfileMatchesFormat(
+            IntPtr handle,
+            ColorProfileRef profile,
+            PixelFormatDescriptor format,
+            string side)
         {
             uint colorSpace = LittleCmsNative.cmsGetColorSpace(handle);
             int channels = LittleCmsNative.cmsChannelsOfColorSpace(colorSpace);
-            if (colorSpace != LittleCmsNative.RgbSignature || channels != 3)
+            uint expectedColorSpace = format switch
+            {
+                PixelFormatDescriptor.RgbFloat32 => LittleCmsNative.RgbSignature,
+                PixelFormatDescriptor.XyzFloat32 => LittleCmsNative.XyzSignature,
+                _ => throw new NotSupportedException($"Unsupported {side} pixel format: {format}."),
+            };
+
+            if (colorSpace != expectedColorSpace || channels != 3)
             {
                 throw new ColorManagementException(
-                    $"Cannot use {side} profile {profile}: RGB float transforms require a " +
-                    $"three-channel RGB profile, got {Signature(colorSpace)} / {channels} channels.");
+                    $"Cannot use {side} profile {profile} with {format}: the pixel format requires " +
+                    $"a three-channel {Signature(expectedColorSpace)} profile, got " +
+                    $"{Signature(colorSpace)} / {channels} channels.");
             }
         }
 

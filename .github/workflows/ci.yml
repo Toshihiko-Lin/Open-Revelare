@@ -50,7 +50,7 @@ jobs:
           ls /tmp/pub/*.dll > /dev/null
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -59,6 +59,9 @@ jobs:
       - name: 构建固定 Little CMS 2.19.1
         shell: pwsh
         run: ./packaging/lcms/build-windows.ps1
+      - name: 构建可重复 Win32 presenter
+        shell: pwsh
+        run: ./packaging/windows/build-win32-presenter.ps1
       - run: dotnet build -c Release -warnaserror
       - run: dotnet test -c Release --no-build --nologo
       - name: publish + 装配 app-owned Little CMS
@@ -69,10 +72,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败（$LASTEXITCODE）" }
           Copy-Item -LiteralPath native/win-x64/lcms2.dll -Destination (Join-Path $pub "lcms2.dll") -Force
           Copy-Item -LiteralPath native/win-x64/lcms2.manifest.json -Destination (Join-Path $pub "lcms2.manifest.json") -Force
+          $presenterDll = "OpenRevelare.Presentation.Win32.Native.dll"
+          $presenterManifest = "OpenRevelare.Presentation.Win32.Native.manifest.json"
+          Copy-Item -LiteralPath (Join-Path native/win-x64 $presenterDll) -Destination (Join-Path $pub $presenterDll) -Force
+          Copy-Item -LiteralPath (Join-Path native/win-x64 $presenterManifest) -Destination (Join-Path $pub $presenterManifest) -Force
+          ./packaging/windows/verify-win32-presenter.ps1 -Directory $pub -RepositoryRoot $PWD
+          ./packaging/windows/smoke-win32-presenter.ps1 -Directory $pub
           if (-not (Test-Path -LiteralPath (Join-Path $pub "OpenRevelare.exe"))) { throw "缺主程序" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub "raw_r.dll"))) { throw "缺 LibRaw 原生库" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.dll"))) { throw "缺 app-owned Little CMS" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.manifest.json"))) { throw "缺 Little CMS manifest" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub $presenterDll))) { throw "缺 Win32 presenter" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub $presenterManifest))) { throw "缺 Win32 presenter manifest" }
           $sourceHash = (Get-FileHash -LiteralPath native/win-x64/lcms2.dll -Algorithm SHA256).Hash
           $publishHash = (Get-FileHash -LiteralPath (Join-Path $pub "lcms2.dll") -Algorithm SHA256).Hash
           if ($sourceHash -ne $publishHash) { throw "publish 中的 lcms2.dll 与 app-owned 构建不一致" }

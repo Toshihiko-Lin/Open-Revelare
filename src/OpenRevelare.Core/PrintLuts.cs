@@ -62,7 +62,14 @@ public static class PrintLuts
             ?? throw new InvalidDataException($"内置 LUT 缺失：{name}");
         using var reader = new StreamReader(stream);
         string fallback = Builtins.First(b => b.Id == id).Name;
-        return CubeLut.Parse(reader, fallback);
+        // These two embedded Resolve assets declare "Display: ITU-Rec.709, Gamma 2.4" in their
+        // shipped headers. Generic user .cube files have no equivalent machine-readable contract
+        // and therefore retain CubeLut's fail-closed Unknown output characterization.
+        return CubeLut.Parse(
+            reader,
+            fallback,
+            LutInputEncoding.Cineon,
+            LutOutputEncoding.Rec709);
     }
 
     /// <summary>

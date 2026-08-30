@@ -16,6 +16,8 @@
   <ItemGroup>
     <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
     <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation.Win32\OpenRevelare.Presentation.Win32.csproj" />
     <!-- For the pure view-model rules only (OpenRevelare.Gui.ViewModels.LiveParams). Nothing here
          starts Avalonia; referencing the app assembly is what lets a rule that lives on the UI
          side of the line still be pinned by a test. -->

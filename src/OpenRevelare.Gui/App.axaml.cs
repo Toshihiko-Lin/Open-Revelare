@@ -61,7 +61,12 @@ public partial class App : Application
             var vm = new MainViewModel();
             // Also flush the open roll here, not only in MainWindow.OnClosing: a shutdown driven
             // by the OS or by Exit() never closes the window through the normal path.
-            desktop.ShutdownRequested += (_, _) => { vm.FlushRollNow(); Services.DngCache.Cleanup(); };
+            desktop.ShutdownRequested += (_, _) =>
+            {
+                vm.FlushRollNow();
+                vm.Dispose();
+                Services.DngCache.Cleanup();
+            };
             desktop.MainWindow = new MainWindow { DataContext = vm };
 
             // Optional startup files: `OpenRevelare.Gui <path> [<path> …]` opens them as a roll

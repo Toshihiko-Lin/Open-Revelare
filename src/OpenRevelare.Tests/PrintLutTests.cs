@@ -1,3 +1,4 @@
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using Xunit;
 
@@ -455,6 +456,7 @@ public class PrintLutTests
         Assert.Equal(name, lut.Title);          // the name the picker shows
         Assert.Equal(33, lut.Size);
         Assert.Equal(LutInputEncoding.Cineon, lut.InputEncoding);
+        Assert.Equal(LutOutputEncoding.Rec709, lut.OutputEncoding);
 
         // Resolve is the render path's entry point and must agree, and cache to one instance.
         Assert.Same(lut, PrintLuts.Resolve(sentinel));
@@ -795,23 +797,15 @@ public class PrintLutTests
         finally { File.Delete(path); }
     }
 
-    /// <summary>
-    /// The output profile embedded beside a print-LUT render must describe the pixels that were
-    /// actually written.  The native Rec709 cube result and the target-space result may use
-    /// different code values, but decoding each through its declared profile must recover the
-    /// same XYZ colour.
-    ///
-    /// This is deliberately a production-characterisation test for M0.  The current exit keeps
-    /// the cube's Rec709 transfer curve while the exporter labels the pixels as sRGB, Display P3,
-    /// or Adobe RGB.  Rec709 is therefore the green control; the other cases expose the existing
-    /// pixels/profile mismatch and remain red until the M2 output conversion is implemented.
-    /// </summary>
+    /// <summary>The frozen v1 exit remains an explicit mismatch characterization. It preserves
+    /// Rec709 code values/transfer semantics while callers historically requested another profile;
+    /// only the Rec709 control can therefore agree in PCS.</summary>
     [Theory]
     [InlineData("sRGB")]
     [InlineData("DisplayP3")]
     [InlineData("AdobeRGB")]
     [InlineData("Rec709")]
-    public void Print_lut_pixels_match_the_declared_output_profile_in_XYZ(string spaceName)
+    public void Legacy_print_lut_exit_characterizes_the_known_profile_mismatch(string spaceName)
     {
         string path = WriteCube(TempCube("profile-contract"), 33, v => v);
         try
@@ -828,12 +822,62 @@ public class PrintLutTests
             ColorPipeline.ToOutputSpaceVia(targetPixels, lut, target);
             double[] actualXyz = DecodeToXyz(targetPixels, target);
 
+            double largestDifference = Enumerable.Range(0, 3)
+                .Max(channel => Math.Abs(expectedXyz[channel] - actualXyz[channel]));
+            if (spaceName == "Rec709")
+                Assert.True(largestDifference < 1e-4, $"Rec709 control moved by {largestDifference:R}");
+            else
+                Assert.True(
+                    largestDifference > 1e-4,
+                    $"{spaceName} unexpectedly ceased characterizing the frozen v1 mismatch: " +
+                    $"native={Rgb(nativePixels)}, target={Rgb(targetPixels)}, " +
+                    $"expectedXYZ={Xyz(expectedXyz)}, actualXYZ={Xyz(actualXyz)}");
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>ManagedV2 converts the characterized native Rec709 cube result through the CMM,
+    /// so decoding native and target pixels through their exact profiles recovers the same PCS
+    /// colour even though their code values/TRCs differ.</summary>
+    [Theory]
+    [InlineData("sRGB")]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void Managed_v2_print_lut_pixels_match_the_exact_target_profile_in_XYZ(string spaceName)
+    {
+        string path = WriteCube(TempCube("managed-profile-contract"), 33, v => v);
+        try
+        {
+            CubeLut lut = CubeLut.Load(
+                path,
+                LutInputEncoding.Cineon,
+                LutOutputEncoding.Rec709);
+            ColorSpaceDef target = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+            var sceneLinear = new[] { 0.18f, 0.09f, 0.04f };
+
+            var nativePixels = (float[])sceneLinear.Clone();
+            ColorPipeline.ToOutputSpaceVia(nativePixels, lut, ColorSpaces.Rec709);
+            double[] expectedXyz = DecodeToXyz(nativePixels, ColorSpaces.Rec709);
+
+            using var engine = new LittleCmsEngine();
+            var targetPixels = (float[])sceneLinear.Clone();
+            ColorPipeline.ToOutputSpaceVia(
+                targetPixels,
+                lut,
+                target,
+                ColorPipelineVersion.ManagedV2,
+                engine);
+            double[] actualXyz = DecodeToXyz(targetPixels, target);
+
             for (int channel = 0; channel < 3; channel++)
             {
-                Assert.True(Math.Abs(expectedXyz[channel] - actualXyz[channel]) < 1e-4,
-                    $"{spaceName} XYZ[{channel}] differs: native={Rgb(nativePixels)}, " +
-                    $"target={Rgb(targetPixels)}, expectedXYZ={Xyz(expectedXyz)}, " +
-                    $"actualXYZ={Xyz(actualXyz)}");
+                double difference = Math.Abs(expectedXyz[channel] - actualXyz[channel]);
+                Assert.True(
+                    difference <= 0.0025,
+                    $"{spaceName} XYZ[{channel}] differs by {difference:R}: " +
+                    $"native={Rgb(nativePixels)}, target={Rgb(targetPixels)}, " +
+                    $"expectedXYZ={Xyz(expectedXyz)}, actualXYZ={Xyz(actualXyz)}");
             }
         }
         finally { File.Delete(path); }

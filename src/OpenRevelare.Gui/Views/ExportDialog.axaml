@@ -23,13 +23,13 @@
             <StackPanel Spacing="4">
                 <TextBlock Text="{i18n:T '格式'}" FontWeight="SemiBold" />
                 <StackPanel Orientation="Horizontal" Spacing="16">
-                    <RadioButton Name="FmtTiff" GroupName="fmt" Content="16-bit TIFF"
+                    <RadioButton Name="FmtTiff" GroupName="fmt" Content="TIFF"
                                  IsCheckedChanged="OnFormatChanged" />
                     <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
                                  IsCheckedChanged="OnFormatChanged" />
                 </StackPanel>
                 <TextBlock Classes="groupHint"
-                           Text="{i18n:T '16-bit TIFF 保留全部层次，适合存档或转到其他软件继续调；JPEG 适合直接分享。'}" />
+                           Text="{i18n:T '普通输出使用 16-bit TIFF；场景线性输出自动使用 32-bit float TIFF 保留超范围分量。JPEG 适合直接分享。'}" />
             </StackPanel>
 
             <!-- Disabled rather than hidden: an option that vanishes reads as a missing
@@ -79,7 +79,7 @@
                 <TextBlock Text="{i18n:T '色彩空间'}" FontWeight="SemiBold" />
                 <TextBlock Classes="groupHint" Name="ColorSpaceHint" TextWrapping="Wrap" />
 
-                <CheckBox Name="LinearChk" Content="{i18n:T '导出为场景线性 ACEScg（跳过帧编辑）'}"
+                <CheckBox Name="LinearChk" Content="{i18n:T '导出为场景线性 ACEScg（32-bit float，跳过帧编辑）'}"
                           Margin="0,6,0,0" IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
                            Text="{i18n:T '交给外部调色用的中间文件：不做第 4 步转换、不套帧编辑，直接写出反相后的场景线性数据。预览不受影响。这类文件在不做色彩管理的看图软件里会显得很暗很平，属正常。'}" />

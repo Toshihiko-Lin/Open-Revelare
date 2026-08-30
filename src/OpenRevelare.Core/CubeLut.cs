@@ -27,6 +27,18 @@ public enum LutInputEncoding
 }
 
 /// <summary>
+/// What the cube's output numbers are characterized as. Unlike the input domain, the generic
+/// <c>.cube</c> format does not carry this fact, so an arbitrary file is unknown until a trusted
+/// asset descriptor supplies it. Managed colour conversion must fail closed for <see cref="Unknown"/>
+/// rather than silently treating every user cube as Rec709.
+/// </summary>
+public enum LutOutputEncoding
+{
+    Unknown,
+    Rec709,
+}
+
+/// <summary>
 /// A 3D lookup table loaded from an Iridas/Adobe <c>.cube</c> file, plus the encoding its input
 /// is authored against.
 ///
@@ -63,17 +75,24 @@ public sealed class CubeLut
     /// <summary>What the cube expects on its input; see <see cref="LutInputEncoding"/>.</summary>
     public LutInputEncoding InputEncoding { get; }
 
+    /// <summary>
+    /// The characterized encoding produced by the cube. External files default to
+    /// <see cref="LutOutputEncoding.Unknown"/> because the file format cannot prove it.
+    /// </summary>
+    public LutOutputEncoding OutputEncoding { get; }
+
     /// <summary>Display name, from the file's <c>TITLE</c> or else its filename.</summary>
     public string Title { get; }
 
     private CubeLut(int size, float[] data, float[] domainMin, float[] domainMax,
-                    LutInputEncoding encoding, string title)
+                    LutInputEncoding encoding, LutOutputEncoding outputEncoding, string title)
     {
         Size = size;
         _data = data;
         DomainMin = domainMin;
         DomainMax = domainMax;
         InputEncoding = encoding;
+        OutputEncoding = outputEncoding;
         Title = title;
     }
 
@@ -84,10 +103,15 @@ public sealed class CubeLut
     /// <param name="encoding">What the cube's input is authored against. Not discoverable from
     /// the file: .cube carries no encoding declaration, so it has to be stated by whoever knows
     /// which stock this is.</param>
-    public static CubeLut Load(string path, LutInputEncoding encoding = LutInputEncoding.Cineon)
+    /// <param name="outputEncoding">What the cube produces. Also not discoverable from a generic
+    /// .cube file; leave this unknown unless a trusted asset manifest states it.</param>
+    public static CubeLut Load(
+        string path,
+        LutInputEncoding encoding = LutInputEncoding.Cineon,
+        LutOutputEncoding outputEncoding = LutOutputEncoding.Unknown)
     {
         using var reader = new StreamReader(path);
-        return Parse(reader, Path.GetFileNameWithoutExtension(path), encoding);
+        return Parse(reader, Path.GetFileNameWithoutExtension(path), encoding, outputEncoding);
     }
 
     /// <summary>
@@ -98,9 +122,16 @@ public sealed class CubeLut
     /// </summary>
     /// <param name="fallbackTitle">Used when the cube declares no TITLE, in place of the
     /// filename <see cref="Load"/> would have taken it from.</param>
-    public static CubeLut Parse(TextReader reader, string fallbackTitle,
-                                LutInputEncoding encoding = LutInputEncoding.Cineon)
+    /// <param name="outputEncoding">Trusted native-output characterization, or unknown for a
+    /// generic/user-provided cube.</param>
+    public static CubeLut Parse(
+        TextReader reader,
+        string fallbackTitle,
+        LutInputEncoding encoding = LutInputEncoding.Cineon,
+        LutOutputEncoding outputEncoding = LutOutputEncoding.Unknown)
     {
+        if (!Enum.IsDefined(outputEncoding))
+            throw new ArgumentOutOfRangeException(nameof(outputEncoding));
         int size = -1;
         string title = fallbackTitle;
         float[] domainMin = { 0f, 0f, 0f };
@@ -192,7 +223,7 @@ public sealed class CubeLut
             if (!(domainMax[c] > domainMin[c]))
                 throw new InvalidDataException("DOMAIN_MAX 必须大于 DOMAIN_MIN。");
 
-        return new CubeLut(size, data, domainMin, domainMax, encoding, title);
+        return new CubeLut(size, data, domainMin, domainMax, encoding, outputEncoding, title);
     }
 
     private static void ReadTriple(string[] tok, string line, float[] into)

@@ -18,6 +18,69 @@ namespace OpenRevelare.Gui.ViewModels;
 /// </summary>
 public partial class MainViewModel
 {
+    public bool UsesLegacyColorPipeline =>
+        _colorPipelineVersion == ColorPipelineVersion.LegacyV1;
+
+    public string LegacyColorPipelineNotice => Loc.T(
+        "此工程仍使用旧版色彩管线。画面保持原样，但输出会嵌入准确的兼容 ICC；迁移到色彩管理版会重新渲染并可能改变外观。");
+
+    public string ColorPipelineDiagnostic =>
+        _colorPipelineVersion == ColorPipelineVersion.LegacyV1
+            ? "LegacyV1 (explicit compatibility)"
+            : "ManagedV2 (exact ICC)";
+
+    private void SetColorPipelineVersion(ColorPipelineVersion value)
+    {
+        if (_colorPipelineVersion == value) return;
+        _colorPipelineVersion = value;
+        OnPropertyChanged(nameof(UsesLegacyColorPipeline));
+        OnPropertyChanged(nameof(LegacyColorPipelineNotice));
+        OnPropertyChanged(nameof(ColorPipelineDiagnostic));
+    }
+
+    /// <summary>
+    /// Explicit L2 opt-in migration. The old project is never changed by load/save alone; this
+    /// interaction invalidates every decode/render cache whose meaning depends on the pipeline
+    /// version, then re-decodes the current frame before publishing v2 pixels.
+    /// </summary>
+    public async Task MigrateColorPipelineToV2Async()
+    {
+        if (!UsesLegacyColorPipeline) return;
+
+        CommitLiveParams(CurrentFrame);
+        Project.Data migration = BuildProjectData();
+        Project.MigrateColorPipelineToV2(migration);
+
+        _renderCts?.Cancel();
+        _thumbCts?.Cancel();
+        _warmCts?.Cancel();
+        _patchCts?.Cancel();
+        _switchToken++;
+        ClearSharpPatch();
+
+        SetColorPipelineVersion(migration.ColorPipelineVersion);
+        _previews.Clear();
+        ClearTiles();
+        _negativeWb.Clear();
+        lock (_decoding) _decoding.Clear();
+        lock (_fullSlotGate) _fullSlot = null;
+        _regionSlot = null;
+        _previewWorking = null;
+        _previewMargin = null;
+        foreach (RollFrame frame in Frames) SetThumbnail(frame, null);
+        PreviewImage = null;
+        HasImage = false;
+        MarkRollDirty();
+
+        RollFrame? current = CurrentFrame;
+        if (current is not null)
+            await SwitchFrameAsync(current);
+
+        RestartThumbnails();
+        StartRollWarmUp();
+        StatusText = Loc.T("已迁移到色彩管理版（v2）；工程将以新版本保存，外观变化不会自动回退。");
+    }
+
     // ── Project save / load (.ncproj, schema-compatible with Python) ────────────
     /// <summary>Write a COPY of the roll to an arbitrary path (「另存工程副本」). The open roll
     /// keeps autosaving to its own project file — this is for handing a roll to someone else or
@@ -45,6 +108,11 @@ public partial class MainViewModel
         try { data = await Task.Run(() => Project.Load(path)); }
         catch (Exception ex) { StatusText = Loc.T("打开工程失败：") + ex.Message; IsBusy = false; return; }
         if (data.Frames.Count == 0) { StatusText = Loc.T("工程为空"); IsBusy = false; return; }
+
+        // Adopt the rendering semantics before any decode/render work begins. In particular,
+        // BuildProjectData must not replace a missing-on-disk legacy marker with the default v2
+        // value when autosave snapshots this roll later.
+        SetColorPipelineVersion(data.ColorPipelineVersion);
 
         // Before anything reads pixels: the negatives may have moved since this was saved.
         bool relinked = await RelinkIfMissingAsync(data);
@@ -288,7 +356,10 @@ public partial class MainViewModel
                 // Full-quality decode: ComputeDecoupleMatrix only wants the centre-ROI mean, but
                 // that mean is what the entire Path A colour basis rests on — its precision is not
                 // negotiable. Streamed off the decoder, so the precision costs nothing in memory.
-                roi[i] = ImageIo.RoiMeanFull(calRgb[i]);
+                roi[i] = ImageIo.RoiMeanFull(
+                    calRgb[i],
+                    _colorPipelineVersion,
+                    ColorManagement);
             }
             else
             {
@@ -296,9 +367,16 @@ public partial class MainViewModel
                 // Both sizes off ONE decode, neither of them via a full-resolution frame. These are
                 // the roll's first frames — exactly what the warm-up would decode next — so their
                 // previews go into the cache and that work is not paid for twice.
-                var (outs, srcW, srcH) = ImageIo.LoadPreviews(paths[fi], PreviewMaxEdge, 720);
-                _previews.Put(paths[fi], outs[0], srcW, srcH);
-                negs[fi] = outs[1];
+                var (outs, srcW, srcH) = ImageIo.LoadWorkingPreviews(
+                    paths[fi],
+                    _colorPipelineVersion,
+                    ColorManagement,
+                    PreviewMaxEdge,
+                    720);
+                string previewKey = PreviewKey(paths[fi], preCrop: null);
+                _previews.Put(previewKey, outs[0], srcW, srcH);
+                CaptureTile(previewKey, outs[0]);
+                negs[fi] = outs[1].Pixels;
             }
             ReportBackground(Loc.F($"解码校正图与内容帧 {Interlocked.Increment(ref done)}/{total} …"));
         });
@@ -338,6 +416,7 @@ public partial class MainViewModel
         _roll = null;
         _rollDirty = false;
         _sheetDirty = false;
+        SetColorPipelineVersion(ColorPipelineVersion.ManagedV2);
         Notes.Reset();            // notes are per-roll; a new roll starts blank
         _thumbCts?.Cancel();
         _warmCts?.Cancel();

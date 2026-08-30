@@ -1,3 +1,5 @@
+using OpenRevelare.ColorManagement;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -335,9 +337,44 @@ public static class ColorPipeline
     }
 
     /// <summary>
-    /// The space a print-film cube renders INTO. Resolve's film looks — and every other cube of
-    /// this kind — are authored to land on Rec709 with a 2.4 display gamma, which their headers
-    /// state outright.
+    /// Versioned step-4 boundary. LegacyV1 is the exact overload above. ManagedV2 keeps a
+    /// print-film cube's native output characterized as Rec709 and then asks the injected CMM to
+    /// convert those colours into the exact selected output profile.
+    /// </summary>
+    public static void ToOutputSpaceFor(
+        float[] data,
+        FrameParams cal,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            ToOutputSpaceFor(data, cal);
+            return;
+        }
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        ColorSpaceDef output = cal.ResolvedOutputSpace;
+        CubeLut? lut = PrintLuts.Resolve(cal.PrintLut);
+        if (lut is not null)
+            ToOutputSpaceVia(data, lut, output, pipelineVersion, colorManagement);
+        else if (!string.IsNullOrWhiteSpace(cal.PrintLut))
+        {
+            throw new NotSupportedException(
+                $"ManagedV2 cannot use configured print LUT '{cal.PrintLut}' because it could " +
+                "not be loaded and its native output encoding therefore cannot be proven.");
+        }
+        else
+            ToOutputSpace(data, output);
+    }
+
+    /// <summary>
+    /// The native space supported for managed print-film rendering. Resolve's two embedded film
+    /// looks are authored to land on Rec709 with a 2.4 display gamma, which their trusted asset
+    /// headers state outright. Generic user cubes are not assumed to share that contract; their
+    /// <see cref="CubeLut.OutputEncoding"/> remains unknown and ManagedV2 rejects them.
     ///
     /// Hard-coded rather than configurable because it is a fact about the cube, not a choice: a
     /// stock emulation has one output by construction, and offering a picker would invite the
@@ -415,6 +452,98 @@ public static class ColorPipeline
         OutputRender.Decode(data, LutOutput);
         OutputRender.Convert(data, LutOutput, output);
         OutputRender.Encode(data, LutOutput);
+    }
+
+    /// <summary>
+    /// Versioned print-film rendering. LegacyV1 delegates byte-for-byte to the overload above.
+    /// ManagedV2 treats the cube result as exact Rec709-encoded RGB and performs one complete CMM
+    /// transform into the selected exact profile; it never preserves Rec709 code values while
+    /// changing only the profile label.
+    /// </summary>
+    public static void ToOutputSpaceVia(
+        float[] data,
+        CubeLut lut,
+        ColorSpaceDef output,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            ToOutputSpaceVia(data, lut, output);
+            return;
+        }
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (lut.OutputEncoding != LutOutputEncoding.Rec709)
+        {
+            throw new NotSupportedException(
+                $"ManagedV2 cannot use print LUT '{lut.Title}' because its output profile is " +
+                "unknown. Select one of the characterized built-in Rec709 LUTs or supply an " +
+                "asset descriptor that proves the cube's native output encoding.");
+        }
+
+        // Render only into the cube's declared native output. The legacy overload's manual
+        // primaries-only exit is intentionally not called here: it creates the hybrid
+        // target-primaries/Rec709-TRC encoding that ManagedV2 exists to remove.
+        OutputRender.Convert(data, Working, LutOutput, GamutMapping.Clip);
+        switch (lut.InputEncoding)
+        {
+            case LutInputEncoding.Cineon:
+                LogEncoding.ToCineon(data);
+                break;
+            default:
+                throw new NotSupportedException($"Unsupported LUT input encoding: {lut.InputEncoding}");
+        }
+        lut.Apply(data);
+
+        ConvertPrintLutNativeOutput(data, output, colorManagement);
+    }
+
+    /// <summary>
+    /// Converts pixels already rendered into the print cube's native Rec709 encoding to the exact
+    /// selected profile before target-space Stage 2. The source array is replaced only after
+    /// transform creation and application both succeed.
+    /// </summary>
+    internal static void ConvertPrintLutNativeOutput(
+        float[] data,
+        ColorSpaceDef output,
+        IColorManagementEngine colorManagement)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (data.Length % 3 != 0)
+            throw new ArgumentException("Print-LUT RGB data length must be divisible by three.", nameof(data));
+
+        ColorProfileRef nativeProfile = BuiltInColorProfiles.Rec709(ProfileRole.Input);
+        ColorProfileRef outputProfile = BuiltInColorProfiles.For(output, ProfileRole.Output);
+        if (nativeProfile.Identity == outputProfile.Identity)
+            return;
+
+        var request = new ColorTransformRequest(
+            nativeProfile,
+            outputProfile,
+            TransformPurpose.PrintLutOutput,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            adaptationState: 1.0);
+        float[] converted = new float[data.Length];
+
+        try
+        {
+            using (IColorTransformLease transform = colorManagement.Lease(request))
+                transform.Apply(data, converted, data.Length / 3);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorManagementException(
+                $"Managed print-LUT output conversion failed ({nativeProfile.Identity} -> " +
+                $"{outputProfile.Identity}, output={output.Name}); the native pixels were left unchanged.",
+                ex);
+        }
+
+        converted.CopyTo(data, 0);
     }
 
 }

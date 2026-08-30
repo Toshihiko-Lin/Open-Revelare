@@ -8,6 +8,7 @@ using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
+using OpenRevelare.Presentation;
 
 namespace OpenRevelare.Gui.ViewModels;
 
@@ -76,14 +77,9 @@ public partial class MainViewModel
     private async void ScheduleRender()
     {
         if (_suppressRender || _previewLinear is null) return;
-        // Any edit invalidates the sharp patch — it was rendered under the OLD parameters, and
-        // leaving it up would show a stale rectangle pasted over a freshly rendered preview.
-        // The view re-requests once the new render lands, if still zoomed in far enough.
-        ClearSharpPatch();
         // The sprocket overlay is drawn in the FINISHED preview's geometry, so a rotation, a flip
         // or a crop moves it too. Refreshing here catches all of them at once — they each land in
         // this method, and hooking them individually is how one gets missed.
-        if (ShowSprocketMask) UpdateSprocketOverlay();
         if (!_restoring) MarkEdit();   // a real, user-driven param change → undo-committable
         // The negative view owns the screen while it is up, so a render must not push a positive
         // into it — rotating mid-sampling did exactly that, replacing the negative being sampled
@@ -91,6 +87,12 @@ public partial class MainViewModel
         // the whole GEOMETRY chain: a turn, a straighten or a crop applied while it is up has to
         // move the negative with it, or the two views stop agreeing the moment one is toggled.
         if (_showingNegative) { RefreshNegativeView(); return; }
+        if (_showingBeforeEdits) { ShowBeforeEdits(); return; }
+        // Any edit invalidates the sharp patch — it was rendered under the OLD parameters, and
+        // leaving it up would show a stale rectangle pasted over a freshly rendered preview.
+        // The synchronous negative/before branches clear it inside their complete publication;
+        // an asynchronous positive render must drop it immediately while the new pass is pending.
+        ClearSharpPatch();
         if (_interacting) { RenderInteractive(); return; }
         _renderCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -108,6 +110,8 @@ public partial class MainViewModel
     private async void RenderNow()
     {
         if (_suppressRender || _previewLinear is null) return;
+        if (_showingNegative) { RefreshNegativeView(); return; }
+        if (_showingBeforeEdits) { ShowBeforeEdits(); return; }
         ClearSharpPatch();
         _renderCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -120,38 +124,63 @@ public partial class MainViewModel
     /// <summary>One drag frame, inline on the UI thread at drag resolution.</summary>
     private void RenderInteractive()
     {
-        if (_previewLinear is null) return;
+        if (_previewWorking is null) return;
         try
         {
-            _dragSmall ??= Resample.Box(_previewLinear, DragMaxEdge);
+            _dragSmall ??= Resample.Box(_previewWorking.Pixels, DragMaxEdge);
             // _dragSmall comes off _previewLinear, so it inherits its pre-cropped-ness.
-            ImageBuffer outImg = Pipeline.ProcessFrame(_dragSmall, ForPreview(BuildParams()));
+            FrameParams parameters = ForPreview(BuildParams());
+            RenderedFrame rendered = Pipeline.Render(
+                _previewWorking.WithPixels(_dragSmall),
+                parameters,
+                _colorPipelineVersion,
+                ColorManagement);
+            ImageBuffer outImg = rendered.Pixels;
+            PresentationScene scene = ConvertPreviewScene(rendered);
+            Bitmap fallback = BuildFallbackBitmap(rendered, scene);
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
-            Histogram = HistogramData.FromBuffer(outImg.Data);
-            ClippingOverlay = ShowClipping ? BuildClippingOverlay(outImg) : null;
-            PreviewImage = BitmapConvert.ToBitmap(outImg, CurrentOutputSpace);
+            HistogramData histogram = HistogramData.FromBuffer(outImg.Data);
+            WriteableBitmap? clipping = ShowClipping ? BuildClippingOverlay(outImg) : null;
+            PresentationScene? clippingScene = ShowClipping
+                ? BuildClippingPresentationScene(outImg)
+                : null;
+            PublishCompletePreview(
+                rendered,
+                scene,
+                fallback,
+                histogram,
+                clipping,
+                clippingScene,
+                refreshSprocketMask: true);
         }
         catch (Exception ex) { ReportRenderFailure(ex); }
     }
 
     private async Task RenderPreviewAsync(FrameParams p, CancellationToken ct)
     {
-        ImageBuffer src = _previewLinear!;
+        WorkingFrame source = _previewWorking!;
         p = ForPreview(p);
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         // Captured now, not read at apply time: if the user switches frames while this render is
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
         RollFrame? frame = CurrentFrame;
 
         bool wantClipping = ShowClipping;
 
-        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip) = await Task.Run(() =>
+        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip,
+         PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(() =>
         {
-            ImageBuffer outImg = Pipeline.ProcessFrame(src, p);
+            RenderedFrame rendered = Pipeline.Render(source, p, pipelineVersion, ColorManagement);
+            ImageBuffer outImg = rendered.Pixels;
+            PresentationScene scene = ConvertPreviewScene(rendered);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
             HistogramData h = HistogramData.FromBuffer(outImg.Data);
             WriteableBitmap? c = wantClipping ? BuildClippingOverlay(outImg) : null;
+            PresentationScene? clipScene = wantClipping
+                ? BuildClippingPresentationScene(outImg)
+                : null;
             // The film strip gets a SCALED COPY of this same finished positive — it does not run
             // its own pipeline pass. Until now the current frame's thumbnail was only rebuilt when
             // you LEFT the frame, so the strip showed a stale version of whatever you were
@@ -160,16 +189,23 @@ public partial class MainViewModel
             // (main_window.py::_on_process_done → _film_strip.update_thumbnail(result)) rather
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
-            var t = (Bitmap)BitmapConvert.ToBitmap(Resample.Box(outImg, ThumbMaxEdge), p.ResolvedOutputSpace);
-            return ((Bitmap)BitmapConvert.ToBitmap(outImg, p.ResolvedOutputSpace), h, t, c);
+            RenderedFrame thumbnailFrame = rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
+            var t = BuildFallbackBitmap(thumbnailFrame);
+            return (BuildFallbackBitmap(rendered, scene), h, t, c,
+                    scene, clipScene, rendered);
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }
         void Apply()
         {
-            PreviewImage = bmp;
-            Histogram = hist;
-            ClippingOverlay = clip;
+            PublishCompletePreview(
+                rendered,
+                scene,
+                bmp,
+                hist,
+                clip,
+                clipScene,
+                refreshSprocketMask: true);
             if (frame is not null) SetThumbnail(frame, thumb); else thumb.Dispose();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();

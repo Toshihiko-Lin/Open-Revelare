@@ -143,20 +143,20 @@ public class PreviewColorSpaceTests
     }
 
     /// <summary>
-    /// The production-like path: the source image carries its declared space, but Avalonia's
-    /// destination surface has a null colour space. The desired preview contract still requires
-    /// the pixels landing there to agree with the colour-managed sRGB reference.
+    /// Historical characterization: the source image carries its declared space, but Avalonia's
+    /// destination surface has a null colour space. Skia then preserves the source code values
+    /// instead of converting them to the colour-managed sRGB reference.
     ///
-    /// sRGB is the control: its source and reference spaces coincide. The three non-sRGB cases
-    /// expose the current false coverage, because a null Skia destination skips the conversion
-    /// that the explicitly tagged destination in the test above performs.
+    /// The repaired shell fallback canonicalizes every RenderedFrame to explicit sRGB before it
+    /// reaches this null destination, while the Windows main preview no longer uses this surface
+    /// at all. Keeping this as a passing characterization prevents a future refactor from treating
+    /// a source tag plus a null destination as a colour-management guarantee again.
     /// </summary>
     [Theory]
-    [InlineData("sRGB")]
     [InlineData("DisplayP3")]
     [InlineData("AdobeRGB")]
     [InlineData("Rec709")]
-    public void Production_like_null_destination_matches_color_managed_reference(string name)
+    public void Null_destination_does_not_convert_non_sRGB_source_to_the_reference(string name)
     {
         ColorSpaceDef space = ColorSpaces.All[name];
         var encoded = new[] { 0.75f, 0.25f, 0.20f };
@@ -164,7 +164,10 @@ public class PreviewColorSpaceTests
         float[] expected = ConvertToSrgb(encoded, space);
         float[] actual = ThroughSkia(encoded, space, null);
 
-        AssertRgbClose(name, encoded, expected, actual);
+        AssertRgbClose(name, encoded, encoded, actual);
+        Assert.Contains(
+            Enumerable.Range(0, 3),
+            channel => Math.Abs(expected[channel] - actual[channel]) >= 3.0f / 255.0f);
     }
 
     private static float[] ConvertToSrgb(float[] encoded, ColorSpaceDef sourceSpace)

@@ -91,7 +91,9 @@ public partial class ExportDialog : Window
         // Carried, not chosen: the render already landed in this space.
         ColorSpace = _space.Name,
         ExportLinear = LinearChk.IsChecked == true,
-        EmbedIcc = IccChk.IsChecked == true,
+        // Linear ACEScg always carries its exact deterministic profile. Keep the checkbox as the
+        // persisted preference for ordinary display-referred exports only.
+        EmbedIcc = LinearChk.IsChecked == true || IccChk.IsChecked == true,
         Downsample = DownsampleChk.IsChecked == true,
         MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
         Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
@@ -118,22 +120,24 @@ public partial class ExportDialog : Window
         bool jpeg = FmtJpeg.IsChecked == true;
         TiffGroup.IsEnabled = !jpeg;
         JpegGroup.IsEnabled = jpeg;
+        LinearChk.IsEnabled = !jpeg;
+        if (jpeg && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
-        // A scene-linear export has no output space and no profile that describes it, so both the
-        // space it would have gone to and the embed option stop applying. Disabled rather than
-        // hidden: they read as "not for this kind of file", which is what is true.
+        // Scene-linear export uses float32 TIFF and the deterministic linear ACEScg ICC. The
+        // ordinary display-profile preference stops applying, so it is disabled rather than
+        // hidden while the summary states the forced exact profile.
         bool linear = LinearChk.IsChecked == true;
         ColorSpaceHint.IsEnabled = !linear;
         IccChk.IsEnabled = !linear;
 
         ColorSpaceHint.Text = linear
-            ? Loc.T("场景线性导出不经过第 4 步，因此没有输出色彩空间。")
+            ? Loc.T("场景线性导出不经过第 4 步；以 32-bit float ACEScg 保留负值和大于 1 的通道。")
             : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
 
         IccHint.Text = linear
-            ? Loc.T("场景线性数据没有对应的显示配置文件，贴任何标签都会误导下游，故不嵌入。")
+            ? Loc.T("自动嵌入与像素一致的 deterministic linear ACEScg ICC。")
             : Loc.T("嵌入的配置文件与实际写入的像素一致。");
 
         SummaryLbl.Text = Collect().Summary();

@@ -1,3 +1,4 @@
+using OpenRevelare.ColorManagement;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
@@ -40,10 +41,20 @@ public static class JpegIO
         RenderedFrame frame,
         string path,
         int quality = 95,
-        string? description = null)
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        byte[] profileBytes = frame.OutputProfile.IccBytes.ToArray();
+        if (frame.Encoding.Reference != ColorReference.DisplayReferred
+            || frame.Encoding.Transfer != TransferState.ProfileEncoded
+            || frame.Encoding.Range != NumericRange.Normalized)
+        {
+            throw new NotSupportedException(
+                "JPEG export requires normalized, display-referred, profile-encoded pixels; " +
+                "scene-linear JPEG is not supported.");
+        }
+
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
         ExportFile.Write(path, target => WriteJpeg(
             frame.Pixels, target, quality, description, profileBytes));
     }
