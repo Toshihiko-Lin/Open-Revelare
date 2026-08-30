@@ -10,19 +10,17 @@
 
 - **优化了整卷自动标定的色彩**。整卷不再被单张偏色画面带偏。
 
-**修复**
+- **优化了整卷自动标定的亮度**。整卷不再被单张最厚的画面压暗、发闷。
 
-- **修复了片基较透的胶卷识别不出齿孔的问题**。
+- **优化了齿孔判定**。片基较透的胶卷（黑白片等）不再漏检齿孔。
+
+- **优化了白端判定**。灯板边缘、大片同色区域（未剪净的片框、纯黑天空）不再抢占白端，同时不再多切画面。
+
+**修复**
 
 - **修复了裁切工具开着时裁切会被清掉的问题**。
 
 - **修复了竖构图印样超出尺寸上限的问题**。
-
-- **修复了整卷自动标定被单张最厚的画面压暗**，整卷不再发闷。
-
-- **修复了整卷标定被灯板边缘带偏**，同时不再多切画面。
-
-- **修复了大片同色区域（未剪净的片框、纯黑天空）抢占白端**。
 
 ---
 
@@ -34,19 +32,17 @@
 
 - **Better colour from the roll-wide auto calibration.** One off-colour frame no longer pulls the whole roll with it.
 
-**Fixed**
+- **Better brightness from the roll-wide auto calibration.** The single densest frame no longer leaves the whole roll flat and dark.
 
-- **Fixed sprocket holes going undetected on films with a clear base.**
+- **Better sprocket detection.** Films with a clear base (black-and-white among them) no longer go undetected.
+
+- **Better white-point detection.** The edge of the light board and large flat areas — an uncropped film edge, a solid black sky — no longer capture the white end, and it no longer cuts away more of the picture than it needs to.
+
+**Fixed**
 
 - **Fixed the crop being erased while the crop tool is open.**
 
 - **Fixed portrait contact sheets overrunning the size cap.**
-
-- **Fixed the whole roll coming out flat and dark because of its single densest frame.**
-
-- **Fixed roll calibration being pulled off by the edge of the light board**, and it no longer cuts away more of the picture than it needs to.
-
-- **Fixed large flat areas — an uncropped film edge, a solid black sky — capturing the white end.**
 
 ---
 
