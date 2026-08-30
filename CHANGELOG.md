@@ -16,6 +16,8 @@
 
 - **修复了整卷自动标定被单张偏色画面带偏**。
 
+- **修复了整卷自动标定被单张最厚的画面压暗**，整卷不再发闷。
+
 - **修复了整卷标定被灯板边缘带偏**，同时不再多切画面。
 
 - **修复了大片同色区域（未剪净的片框、纯黑天空）抢占白端**。
@@ -35,6 +37,8 @@
 - **Fixed portrait contact sheets overrunning the size cap.**
 
 - **Fixed roll calibration being thrown off by one off-colour frame.**
+
+- **Fixed the whole roll coming out flat and dark because of its single densest frame.**
 
 - **Fixed roll calibration being pulled off by the edge of the light board**, and it no longer cuts away more of the picture than it needs to.
 

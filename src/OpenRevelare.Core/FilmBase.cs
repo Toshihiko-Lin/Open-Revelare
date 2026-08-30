@@ -358,6 +358,65 @@ public static class FilmBase
     /// the same highlight; at any inset from 2% upward the two agree to within 0.5%. The default
     /// matches AutoWbHighFromRoll's so the two ends of the model see the same region.
     /// </param>
+    /// <summary>
+    /// Where the roll's no-clip headroom is read off the per-frame channel maxima.
+    ///
+    /// This is a ROBUST pooling of a quantity that used to be pooled by plain maximum. The lift
+    /// it feeds is applied to every frame of the roll, so a statistic decided by a single frame
+    /// lets that frame set the roll's exposure — and the frame a maximum selects is always the
+    /// deepest one, which on real film is systematically the most off-colour (depth and cast are
+    /// correlated: an off-neutral highlight reads as denser). That is the same failure
+    /// <see cref="PickRepresentativeFrame"/> already rejects at the triple, arriving through the
+    /// rescale instead.
+    ///
+    /// 95 rather than 100: high enough that ordinary frame-to-frame spread still lifts the
+    /// endpoint and the roll's real highlights stay unclipped, low enough that one anomalous
+    /// frame in twenty cannot carry the roll. On a 32-frame roll it admits the 30th deepest
+    /// frame — every frame at or below it keeps full headroom, and only a lone extreme above it
+    /// gives up some highlight detail, recoverable with 单张 on that frame.
+    /// </summary>
+    private const double HeadroomPercentile = 95.0;
+
+    /// <summary>
+    /// How many frames a roll needs before <see cref="HeadroomPercentile"/> replaces the plain
+    /// maximum — below this the pool stays a maximum.
+    ///
+    /// A percentile earns its keep by having a population to judge an outlier against. On a short
+    /// roll there is none: at eight frames the 95th percentile sits between the top two, so it
+    /// clips the deepest frame while rejecting nothing. That is the worst of both — the guard
+    /// gives up highlight detail and buys no robustness for it.
+    ///
+    /// Twelve is a real roll's shortest ordinary length (a 120 roll at 6×9), which is also about
+    /// where one frame stops being a sixth of the evidence and starts being a twelfth.
+    /// </summary>
+    private const int MinFramesForHeadroomPercentile = 12;
+
+    /// <summary>
+    /// Where on the roll's depth distribution the highlight colour is read off — the SHALLOW end.
+    ///
+    /// A highlight that barely clears the film base is mostly base: it carries little of its
+    /// subject's own colour, so what it reports is close to the film's. A deep highlight is the
+    /// opposite — it is dominated by whatever was bright in that scene. The roll's ratio-vs-depth
+    /// trend is the measurable form of that contamination, and evaluating it here is what removes
+    /// it. See <see cref="PickRepresentativeFrame"/>.
+    ///
+    /// The 10th percentile rather than the minimum, for the usual reason: the shallowest frame on
+    /// a roll is as likely to be a blank or a failed exposure as a useful one, and a single frame
+    /// must not define the target any more than it may define the endpoint.
+    /// </summary>
+    private const double ShallowHighlightPercentile = 10.0;
+
+    /// <summary>
+    /// How many frames the ratio-vs-depth trend fit needs before it is trusted over a plain
+    /// median. Below this a least-squares slope through the roll is dominated by noise, and
+    /// extrapolating it would be worse than not modelling the trend at all.
+    ///
+    /// Matches <see cref="MinFramesForHeadroomPercentile"/>: both ask the same question — is this
+    /// roll long enough for a population statistic to mean something — and there is no reason for
+    /// the two to disagree about the answer.
+    /// </summary>
+    private const int MinFramesForTrendFit = 12;
+
     public static double[]? DetectDMaxPerChannelFromRoll(
         IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
         IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
@@ -547,24 +606,69 @@ public static class FilmBase
         int bestIdx = PickRepresentativeFrame(perFrame);
         double[] best = perFrame[bestIdx];
 
-        // ROLL-WIDE maximum, deliberately — not the winner's own.
+        // ROLL-WIDE headroom, deliberately — not the winner's own.
         //
         // The winner is now chosen for its COLOUR, so it can be a frame of ordinary depth while
         // other frames on the roll go deeper. Its own maximum only clears its own pixels; every
         // deeper frame would then exceed the endpoint it is divided by and clip its highlight,
-        // which is an unrecoverable loss of picture. Pooling the maxima is what lifts the chosen
-        // triple clear of the WHOLE roll, and because the lift is one factor on all three
+        // which is an unrecoverable loss of picture. Pooling across frames is what lifts the
+        // chosen triple clear of the WHOLE roll, and because the lift is one factor on all three
         // channels it cannot disturb the colour the frame was chosen for.
+        //
+        // POOLED BY AN UPPER PERCENTILE, NOT BY THE MAXIMUM. This is the same reduction the
+        // per-frame tail above already uses, applied one level up, and for the same reason.
+        // A plain max is decided by exactly ONE frame — necessarily the deepest on the strip —
+        // and depth is correlated with cast, so that frame is systematically the least
+        // representative one. PickRepresentativeFrame exists precisely to keep such a frame from
+        // speaking for the roll; taking a raw max here handed it the roll back through the lift
+        // instead of through the triple, which is the same failure wearing a different hat.
+        //
+        // Measured on the 除碳5219 roll (32 frames, Fuji): DSCF5657 set all three channels of the
+        // pool on its own and lifted the chosen triple 1.197×, from DSCF5654's measured
+        // [1.323, 1.622, 2.274] to [1.584, 1.942, 2.722]. Every ordinary frame on that roll then
+        // rendered against an endpoint ~20% above its own highlight — frame DSCF5635's brightest
+        // tone reached only 0.82/0.81/0.77 of the divisor it was applied to, so the whole strip
+        // came out flat and dark with 17.6% of its highlight range unreachable. Dropping that one
+        // frame moved the roll to [1.344, 1.648, 2.310] and the lift to 1.016. The percentile
+        // reaches that answer WITHOUT having to know which frame to drop.
+        //
+        // The percentile is high enough that ordinary frame-to-frame spread still lifts the
+        // endpoint — clipping the roll's genuine highlights is the failure this rescale exists to
+        // prevent, and it stays prevented for every frame at or below the percentile. What it
+        // gives up is absolute protection for the extreme tail: a lone frame above it can clip.
+        // That is the correct trade at this end. Clipping is bounded and local — it costs that
+        // one frame some highlight detail, and 单张 on it recovers the full range. An inflated
+        // endpoint is neither: it is a per-channel divisor applied to all 32 frames at once.
         //
         // THE COST, STATED PLAINLY: 整卷 no longer equals 单张 on any one frame. Those two now
         // answer different questions — 单张 measures one negative, 整卷 measures a roll and must
-        // fit every frame in it — so a roll whose frames differ in depth will not reproduce its
+        // fit the frames in it — so a roll whose frames differ in depth will not reproduce its
         // answer from any single frame. That is a deliberate trade of a checkable invariant for a
         // correct colour, taken because the invariant was costing the roll its highlight balance:
         // ranking on depth handed an expired Superia 200 roll to its most off-colour frame.
+        //
+        // BELOW <see cref="MinFramesForHeadroomPercentile"/> FRAMES THE POOL IS STILL A MAXIMUM,
+        // the same guard and the same reasoning as PickRepresentativeFrame's own three-frame
+        // floor. A percentile rejects an outlier by having a population to judge it against; on a
+        // handful of frames there is none, and the percentile stops being a robust statistic and
+        // becomes merely a slightly shrunken maximum — it would clip the deepest frame without
+        // rejecting anything, which is a pure loss. A short roll's deepest frame is not yet
+        // distinguishable from ordinary spread, so it gets the full protection.
         var chanMax = new double[3];
-        foreach (double[] m in perFrameMax)
-            for (int c = 0; c < 3; c++) if (m[c] > chanMax[c]) chanMax[c] = m[c];
+        bool pooled = perFrameMax.Count >= MinFramesForHeadroomPercentile;
+        for (int c = 0; c < 3; c++)
+        {
+            if (pooled)
+            {
+                var col = new double[perFrameMax.Count];
+                for (int i = 0; i < perFrameMax.Count; i++) col[i] = perFrameMax[i][c];
+                chanMax[c] = Percentile(col, HeadroomPercentile);
+            }
+            else
+            {
+                foreach (double[] m in perFrameMax) if (m[c] > chanMax[c]) chanMax[c] = m[c];
+            }
+        }
 
         // UNIFORM RESCALE SO NO CHANNEL CLIPS.
         //
@@ -589,8 +693,8 @@ public static class FilmBase
     }
 
     /// <summary>
-    /// Which frame's highlight triple should stand for the roll: the one whose CHANNEL RATIOS sit
-    /// closest to the roll's centre.
+    /// Which frame's highlight triple should stand for the roll: the one whose highlight is
+    /// closest to being a NEUTRAL SUBJECT, judged after the roll's own exposure trend is removed.
     ///
     /// Two properties of a triple matter and they are independent. Its ratios say what COLOUR the
     /// highlight is — and because the endpoints are per-channel divisors applied to every frame,
@@ -603,27 +707,60 @@ public static class FilmBase
     /// strong channel inflates the total. So whichever frame depth favours is systematically the
     /// one least representative in colour. Measured on an expired Superia 200 roll of eleven
     /// frames, DSC_9239 was both the deepest (5.520 against a 4.67 median) and by far the worst
-    /// colour match (ratio offset 0.102 against a 0.037 median) — depth handed the roll to the
-    /// one frame nobody would have chosen.
+    /// colour match — depth handed the roll to the one frame nobody would have chosen.
     ///
-    /// A depth FLOOR did not fix it either, only moved it: at 95% the roll went to DSC_9237
-    /// (offset 0.056), at 90% to DSC_9234 (0.038), and the frames that actually match the roll's
-    /// colour — DSC_9232 at 0.009 and DSC_9229 at 0.015 — sit 15-18% shallower and are excluded
-    /// at every floor worth setting. Any floor that admits them admits nearly everything, at
-    /// which point it is not a floor.
+    /// WHY THE ROLL'S MEDIAN IS NOT THE ANSWER EITHER. Ranking by distance from the per-axis
+    /// median — what this did before — assumes the frames scatter randomly about a common colour,
+    /// so that the middle of the scatter is the film. On a real roll they do not. Measured on the
+    /// 除碳5219 roll (32 frames), R/G and B/G are strongly ANTI-correlated (−0.63) and both track
+    /// highlight depth: R/G rises with green depth (+0.34) while B/G falls (−0.51). The frames lie
+    /// along a LINE, not around a point, and that line is an exposure trend — a deeper highlight
+    /// is a brighter subject, and a brighter subject contributes more of its OWN colour to the
+    /// measurement. Taking the median of a trend just selects the middle of the roll's exposure
+    /// distribution, which is a scene statistic, not a film one. It picked DSCF5654, whose
+    /// highlight is an ordinary coloured subject; the frame with a genuinely neutral highlight,
+    /// DSCF5642, ranked 28th of 32 — very nearly the worst the criterion could do.
+    ///
+    /// WHAT IS ACTUALLY WANTED is the frame whose highlight subject is closest to neutral,
+    /// because only such a frame reports the FILM's highlight colour rather than its subject's.
+    /// The trend is what makes that findable without knowing any frame's content: it says the
+    /// contamination grows with depth, so extrapolating it back to the shallow end gives the
+    /// colour a highlight would have if it contributed nothing of its own. On the 除碳5219 roll the
+    /// frames with a confirmed neutral highlight (DSCF5642 and its neighbours) sit at the shallow
+    /// end, while the deep frames drift away from them on both axes.
+    ///
+    /// HOW WELL THIS WORKS, MEASURED, AND WHERE IT STOPS. On that roll the pick moved from
+    /// DSCF5654 to DSCF5645, cutting the distance to the confirmed-neutral colour by 39% — from
+    /// 0.097 to 0.059 in summed relative ratio offset, 5th closest of the 32 frames. The two axes
+    /// do NOT improve equally, and the reason is visible in the data: B/G, whose trend against
+    /// depth is strong (−0.51), closes 78% of the gap (1.4014 → 1.4607 against 1.4772); R/G, whose
+    /// trend is weak (+0.34), barely moves (0.8156 → 0.8173 against 0.7801). A trend can only
+    /// correct the part of the scatter that IS the trend. The rest of R/G's spread is subject
+    /// colour that this roll gives no way to separate — the target frame holds the roll's single
+    /// lowest R/G, and no consensus statistic selects the extreme of its own population.
+    ///
+    /// That residue is left uncorrected on purpose rather than tuned away. Reaching it would mean
+    /// biasing every roll's red endpoint toward one roll's answer, which is how a calibration
+    /// stops being a measurement.
+    ///
+    /// So the ranking is: fit the roll's ratio-versus-depth trend, evaluate it at the SHALLOW end,
+    /// and pick the frame closest to that extrapolated colour. Depth still does not admit or
+    /// exclude anyone — it is used only to model the contamination, never to rank.
     ///
     /// WHY DEPTH CAN BE GIVEN UP. The no-clip rescale afterwards lifts the chosen triple until it
-    /// clears the roll-wide per-channel maximum, so a shallower winner is not a clipping risk —
-    /// it is simply lifted (1.22× for DSC_9232 on that roll). The lift is ONE factor on all three
-    /// channels, so it moves the placement without touching the ratios the frame was chosen for.
-    /// Depth is recoverable; a cast baked into a per-channel divisor is not.
+    /// clears the roll's headroom, so a shallower winner is not a clipping risk — it is simply
+    /// lifted. The lift is ONE factor on all three channels, so it moves the placement without
+    /// touching the ratios the frame was chosen for. Depth is recoverable; a cast baked into a
+    /// per-channel divisor is not.
     ///
     /// The result is still ONE frame's co-sited measurement — nothing about the triple is
     /// synthetic, which is the property the whole reduction exists to preserve.
     ///
     /// WHAT THIS COSTS: 整卷 no longer reproduces 单张 on any single frame. See the caller.
     ///
-    /// Fewer than three frames has no centre to speak of, so it falls back to the densest.
+    /// Fewer than <see cref="MinFramesForTrendFit"/> frames cannot support a trend fit — the
+    /// slope would be noise — so those fall back to the roll's median direction, which is the
+    /// best available answer when the roll is too short to show a trend at all.
     /// </summary>
     private static int PickRepresentativeFrame(List<double[]> perFrame)
     {
@@ -640,16 +777,31 @@ public static class FilmBase
         // Ratios against green, the channel a negative's highlight varies least in.
         var rg = new double[perFrame.Count];
         var bg = new double[perFrame.Count];
+        var depth = new double[perFrame.Count];
         for (int i = 0; i < perFrame.Count; i++)
         {
             double g = Math.Max(perFrame[i][1], 1e-9);
             rg[i] = perFrame[i][0] / g;
             bg[i] = perFrame[i][2] / g;
+            // Green depth, not the total: the total mixes in the very ratio differences being
+            // modelled, so it would correlate with the response by construction.
+            depth[i] = perFrame[i][1];
         }
-        // Median, not mean: the off-colour frames this exists to avoid would drag a mean toward
-        // themselves, which is exactly backwards.
-        double medRg = Median((double[])rg.Clone());
-        double medBg = Median((double[])bg.Clone());
+
+        // The target colour: the trend extrapolated to the shallow end, or the plain median when
+        // the roll is too short for a trend to mean anything.
+        double targetRg, targetBg;
+        if (perFrame.Count >= MinFramesForTrendFit)
+        {
+            double shallow = Percentile((double[])depth.Clone(), ShallowHighlightPercentile);
+            targetRg = TrendAt(depth, rg, shallow);
+            targetBg = TrendAt(depth, bg, shallow);
+        }
+        else
+        {
+            targetRg = Median((double[])rg.Clone());
+            targetBg = Median((double[])bg.Clone());
+        }
 
         int best = 0;
         double bestOffset = double.PositiveInfinity;
@@ -657,11 +809,43 @@ public static class FilmBase
         {
             // Relative offsets, summed: the two axes have different scales, so absolute
             // differences would silently weight B/G more heavily than R/G.
-            double offset = Math.Abs(rg[i] - medRg) / Math.Max(medRg, 1e-9)
-                          + Math.Abs(bg[i] - medBg) / Math.Max(medBg, 1e-9);
+            double offset = Math.Abs(rg[i] - targetRg) / Math.Max(Math.Abs(targetRg), 1e-9)
+                          + Math.Abs(bg[i] - targetBg) / Math.Max(Math.Abs(targetBg), 1e-9);
             if (offset < bestOffset) { bestOffset = offset; best = i; }
         }
         return best;
+    }
+
+    /// <summary>
+    /// Least-squares line through (x, y) evaluated at <paramref name="at"/> — the roll's ratio
+    /// trend, read off at a chosen depth.
+    ///
+    /// Falls back to the mean of y when x has no spread, which is the correct degenerate answer:
+    /// with every frame at one depth there is no trend to follow and no extrapolation to make.
+    /// The result is clamped to the observed range of y so a near-flat slope over a short lever
+    /// arm cannot extrapolate to a colour no frame on the roll exhibits.
+    /// </summary>
+    private static double TrendAt(double[] x, double[] y, double at)
+    {
+        int n = x.Length;
+        double mx = 0, my = 0;
+        for (int i = 0; i < n; i++) { mx += x[i]; my += y[i]; }
+        mx /= n; my /= n;
+
+        double sxy = 0, sxx = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double dx = x[i] - mx;
+            sxy += dx * (y[i] - my);
+            sxx += dx * dx;
+        }
+        if (sxx <= 1e-12) return my;
+
+        double predicted = my + sxy / sxx * (at - mx);
+
+        double lo = y[0], hi = y[0];
+        for (int i = 1; i < n; i++) { if (y[i] < lo) lo = y[i]; if (y[i] > hi) hi = y[i]; }
+        return Math.Clamp(predicted, lo, hi);
     }
 
     /// <summary>

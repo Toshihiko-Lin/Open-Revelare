@@ -193,6 +193,94 @@ public class EndpointRobustnessTests
         Assert.Equal(2.40 / 2.16, answer[0] / answer[1], 2);
     }
 
+    /// <summary>
+    /// ONE DEEP FRAME MUST NOT SET THE ROLL'S EXPOSURE THROUGH THE NO-CLIP LIFT.
+    ///
+    /// The companion to <see cref="The_rolls_colour_comes_from_the_most_representative_frame"/>,
+    /// closing the same hole at the other end of the reduction. Choosing the triple on colour
+    /// stops an outlier from setting the roll's BALANCE, but the lift that follows was pooled by
+    /// a plain maximum — decided, by construction, by a single frame. So the outlier kept the
+    /// roll anyway: not through its ratios, through its depth.
+    ///
+    /// Measured on the 除碳5219 roll, DSCF5657 set all three channels of that pool alone and
+    /// lifted the endpoint 1.197× above the frame the colour pick had chosen. Every ordinary
+    /// frame then divided by a number ~20% above its own highlight and rendered flat and dark,
+    /// with roughly a sixth of the highlight range unreachable.
+    ///
+    /// Pooling by an upper percentile instead keeps the lift where the roll actually is. The
+    /// frames at or below the percentile still keep full headroom — that is the clipping this
+    /// rescale exists to prevent, and it is still prevented.
+    /// </summary>
+    [Fact]
+    public void One_deep_frame_does_not_inflate_the_rolls_endpoint()
+    {
+        // Twenty frames agreeing closely, plus one markedly deeper — the shape of a real roll
+        // with a single dense frame on it.
+        var roll = new ImageBuffer[21];
+        for (int i = 0; i < 20; i++)
+        {
+            double d = 2.00 + i * 0.002;   // a tight, ordinary spread
+            roll[i] = Frame((d, d, d, 40));
+        }
+        roll[20] = Frame((2.60, 2.60, 2.60, 40));   // the lone deep frame
+
+        double[] answer = FilmBase.DetectDMaxPerChannelFromRoll(
+            roll, new[] { 1.0, 1.0, 1.0 }, 90.0, roll, null, edgeInset: 0.0)!;
+
+        // The deep frame must not drag the endpoint up to itself.
+        Assert.True(answer[1] < 2.30,
+            $"the lone deep frame set the roll's endpoint: {answer[1]:F4}");
+
+        // It still clears the ordinary frames — the clipping guard is intact for the roll proper.
+        Assert.True(answer[1] >= 2.038 - 1e-6,
+            $"the ordinary frames would clip: 2.038 against {answer[1]:F4}");
+
+        // And the lift stays uniform, so the colour is untouched.
+        Assert.Equal(1.0, answer[0] / answer[1], 2);
+        Assert.Equal(1.0, answer[2] / answer[1], 2);
+    }
+
+    /// <summary>
+    /// A ROLL-WIDE EXPOSURE TREND MUST NOT BE MISTAKEN FOR THE FILM'S COLOUR.
+    ///
+    /// The frames of a real roll do not scatter randomly about one colour — their highlight
+    /// ratios drift with highlight DEPTH, because a deeper highlight is a brighter subject and a
+    /// brighter subject contributes more of its own colour to the measurement. Measured on the
+    /// 除碳5219 roll, R/G and B/G are anti-correlated (−0.63) and both track depth.
+    ///
+    /// Against a trend, a median picks the middle of the roll's EXPOSURE distribution, which is a
+    /// scene statistic, not a film one. The frame with a genuinely neutral highlight ranked 28th
+    /// of 32 under that criterion. Extrapolating the trend to the shallow end — where a highlight
+    /// barely clears the base and so carries least of its subject — is what makes the neutral end
+    /// of the roll reachable.
+    ///
+    /// The roll here is built with an explicit trend and a clean neutral frame at the shallow end,
+    /// which a median would pass over because it sits at the edge of the distribution.
+    /// </summary>
+    [Fact]
+    public void The_rolls_colour_is_read_at_the_shallow_end_of_its_exposure_trend()
+    {
+        // Sixteen frames whose ratios drift with depth: the deep ones progressively redder in
+        // R/G and weaker in B/G, the shallow ones near neutral — the shape of a real roll.
+        var roll = new ImageBuffer[16];
+        for (int i = 0; i < 16; i++)
+        {
+            double g = 1.40 + i * 0.03;          // green depth, shallow -> deep
+            double drift = i * 0.004;            // contamination grows with depth
+            roll[i] = Frame((g * (0.80 + drift), g, g * (1.50 - drift), 40));
+        }
+
+        double[] answer = FilmBase.DetectDMaxPerChannelFromRoll(
+            roll, new[] { 1.0, 1.0, 1.0 }, 90.0, roll, null, edgeInset: 0.0)!;
+
+        double rg = answer[0] / answer[1], bg = answer[2] / answer[1];
+
+        // The shallow end of the trend is R/G 0.80 / B/G 1.50; the roll's MEDIAN frame sits near
+        // 0.83 / 1.47. The answer must land nearer the shallow end than the median.
+        Assert.True(rg < 0.818, $"R/G followed the roll's median instead of its shallow end: {rg:F4}");
+        Assert.True(bg > 1.482, $"B/G followed the roll's median instead of its shallow end: {bg:F4}");
+    }
+
     // ── 2. The board shoulder is measured, not assumed ──────────────────────────────
 
     /// <summary>
