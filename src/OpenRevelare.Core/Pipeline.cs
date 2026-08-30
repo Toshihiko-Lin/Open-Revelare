@@ -1,3 +1,5 @@
+using OpenRevelare.ColorManagement;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -14,6 +16,71 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Pipeline
 {
+    /// <summary>
+    /// Typed render boundary for new callers. M1 deliberately delegates the pixel math to the
+    /// frozen v1 implementation below; it adds truthful identity and diagnostics without changing
+    /// a single sample. M2 replaces the legacy print-LUT compatibility profile with a real CMM
+    /// conversion and computes a versioned fingerprint.
+    /// </summary>
+    public static RenderedFrame Render(WorkingFrame source, FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(cal);
+
+        ImageBuffer pixels = ProcessFrame(source.Pixels, cal);
+        ColorProfileRef requested;
+        ColorProfileRef actual;
+        ColorReference reference;
+        TransferState transfer;
+        NumericRange range;
+        string gamutPolicy;
+        bool mismatch;
+
+        if (cal.OutputIntent == OutputIntent.None)
+        {
+            requested = actual = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Output);
+            reference = ColorReference.SceneReferred;
+            transfer = TransferState.LinearInProfilePrimaries;
+            range = NumericRange.Extended;
+            gamutPolicy = "none (scene-linear ACEScg)";
+            mismatch = false;
+        }
+        else
+        {
+            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+            requested = BuiltInColorProfiles.For(selected, ProfileRole.Output);
+            bool hasPrintLut = PrintLuts.Resolve(cal.PrintLut) is not null;
+            actual = hasPrintLut
+                ? BuiltInColorProfiles.LegacyPrintLutOutput(selected)
+                : requested;
+            reference = ColorReference.DisplayReferred;
+            transfer = TransferState.ProfileEncoded;
+            range = NumericRange.Normalized;
+            gamutPolicy = hasPrintLut ? "print-LUT v1 primaries-only exit" : "legacy explicit gamut policy";
+            mismatch = actual.Identity != requested.Identity;
+        }
+
+        var encoding = new CharacterizedPixelEncoding(
+            actual,
+            reference,
+            transfer,
+            range);
+        var recipe = new OutputRecipe(
+            ColorPipelineVersion.LegacyV1,
+            requested,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            gamutPolicy,
+            cal.PrintLut ?? string.Empty,
+            mismatch);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            new RenderFingerprint.Unavailable(
+                FingerprintUnavailableReason.LegacyPipelineHasNoVersionedRecipe));
+    }
+
     /// <summary>
     /// Which chroma matrix the inversion should use.
     ///

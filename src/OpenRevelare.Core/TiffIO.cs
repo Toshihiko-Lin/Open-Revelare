@@ -1,4 +1,5 @@
 using BitMiracle.LibTiff.Classic;
+using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -246,6 +247,89 @@ public static class TiffIO
         return codeStep;
     }
 
+    /// <summary>
+    /// M1 typed decode boundary. Pixel math intentionally remains the frozen v1 implementation;
+    /// the wrapper preserves the exact embedded profile (or an explicit Uncharacterized reason)
+    /// after admission to the working pipeline. M2 replaces the legacy split ICC parser with one
+    /// atomic LittleCMS transform.
+    /// </summary>
+    public static WorkingFrame LoadWorkingFrame(string path, bool inputIsSrgb)
+    {
+        SuppressLibTiffWarnings();
+        string stableId = FrameSourceIds.ForPath(path);
+        PixelEncoding original;
+        WorkingAdmission admission;
+        string decodeRecipe;
+
+        using (Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF: {path}"))
+        {
+            int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+            byte[]? embedded = inputIsSrgb ? null : ReadIccBytes(tif);
+            if (inputIsSrgb)
+            {
+                var profile = BuiltInColorProfiles.Srgb(ProfileRole.Input);
+                original = new CharacterizedPixelEncoding(
+                    profile,
+                    ColorReference.DisplayReferred,
+                    TransferState.ProfileEncoded,
+                    NumericRange.Normalized);
+                admission = WorkingAdmission.ConvertedFromCharacterized;
+                decodeRecipe = "explicit sRGB override -> legacy linear working admission";
+            }
+            else if (embedded is not null)
+            {
+                var profile = ColorProfileRef.Create(
+                    embedded,
+                    $"Embedded TIFF profile ({Path.GetFileName(path)})",
+                    ProfileRole.Input,
+                    new ProfileSource.Embedded(stableId, "TIFF"));
+                original = new CharacterizedPixelEncoding(
+                    profile,
+                    ColorReference.SceneReferred,
+                    TransferState.ProfileEncoded,
+                    NumericRange.Normalized);
+                admission = WorkingAdmission.LegacyPartialIccTransform;
+                decodeRecipe = "v1 split ICC TRC/matrix parser (M2 migration required)";
+            }
+            else
+            {
+                FlextightMeta.Settings flextight = FlextightMeta.Read(path);
+                bool vendorGamma = flextight.HasEncodingGamma;
+                CaptureKind kind = vendorGamma
+                    ? CaptureKind.ScannerVendorDeclaredWithoutPrimaries
+                    : bps == 8 ? CaptureKind.TiffUntagged8Bit : CaptureKind.TiffUntagged16Bit;
+                CompatibilityPolicy policy = vendorGamma || bps == 8
+                    ? CompatibilityPolicy.LegacyDecodeSrgbTransferThenTreatAsWorking
+                    : CompatibilityPolicy.LegacyTreatNumbersAsWorking;
+                original = new UncharacterizedPixelEncoding(
+                    kind,
+                    stableId,
+                    policy,
+                    TransferState.Unknown,
+                    NumericRange.Normalized);
+                admission = WorkingAdmission.LegacyUncharacterizedPassthrough;
+                decodeRecipe = vendorGamma
+                    ? "vendor gamma decoded; primaries uncharacterized; v1 working passthrough"
+                    : bps == 8
+                        ? "untagged TIFF8 legacy sRGB-TRC guess; v1 working passthrough"
+                        : "untagged TIFF16 legacy linear guess; v1 working passthrough";
+            }
+        }
+
+        ImageBuffer pixels = LoadTiff(path, inputIsSrgb);
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            decodeRecipe);
+        return new WorkingFrame(
+            pixels,
+            WorkingSpaceId.LinearAcesCgV1,
+            admission,
+            source);
+    }
+
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
     {
@@ -450,7 +534,7 @@ public static class TiffIO
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode = CompressionMode.Lzw,
                                     ColorSpace? iccSpace = null, string? description = null)
         => ExportFile.Write(path, target => WriteTiff16(img, target,
-               mode, iccSpace is ColorSpace c ? Legacy(c) : null, description));
+               mode, ProfileBytes(iccSpace is ColorSpace c ? Legacy(c) : null), description));
 
     /// <summary>
     /// As above, embedding the profile of any registered space. The caller is responsible for
@@ -459,14 +543,34 @@ public static class TiffIO
     /// </summary>
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode,
                                     ColorSpaceDef? iccSpace, string? description = null)
-        => ExportFile.Write(path, target => WriteTiff16(img, target, mode, iccSpace, description));
+        => ExportFile.Write(path, target => WriteTiff16(
+               img, target, mode, ProfileBytes(iccSpace), description));
+
+    /// <summary>
+    /// Typed exporter: quantizes the rendered pixels and embeds the exact immutable profile bytes
+    /// that travelled with them. It has no overload accepting a profile name or a second profile.
+    /// </summary>
+    public static void ExportTiff16(
+        RenderedFrame frame,
+        string path,
+        CompressionMode mode = CompressionMode.Lzw,
+        string? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        byte[] profileBytes = frame.OutputProfile.IccBytes.ToArray();
+        ExportFile.Write(path, target => WriteTiff16(
+            frame.Pixels, target, mode, profileBytes, description));
+    }
 
     /// <summary>Bridges the two-value legacy enum onto the registry.</summary>
     internal static ColorSpaceDef Legacy(ColorSpace c) =>
         c == ColorSpace.AdobeRgb ? ColorSpaces.AdobeRgb : ColorSpaces.Srgb;
 
+    private static byte[]? ProfileBytes(ColorSpaceDef? space) =>
+        space is ColorSpaceDef value ? IccProfiles.Build(value) : null;
+
     private static void WriteTiff16(ImageBuffer img, string path, CompressionMode mode,
-                                    ColorSpaceDef? iccSpace, string? description)
+                                    byte[]? iccBytes, string? description)
     {
         Compression compression = mode switch
         {
@@ -493,10 +597,9 @@ public static class TiffIO
             tif.SetField(TiffTag.PREDICTOR, Predictor.HORIZONTAL); // improves 16-bit compression
         tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
 
-        if (iccSpace is ColorSpaceDef cs)
+        if (iccBytes is { Length: > 0 })
         {
-            byte[] icc = IccProfiles.Build(cs);
-            tif.SetField(TiffTag.ICCPROFILE, icc.Length, icc);
+            tif.SetField(TiffTag.ICCPROFILE, iccBytes.Length, iccBytes);
         }
         if (description is not null)
         {
