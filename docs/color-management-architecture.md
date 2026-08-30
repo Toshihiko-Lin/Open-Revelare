@@ -662,7 +662,7 @@ compositor。
 | ID | 状态 | 内容 | Exit gate |
 |---|---|---|---|
 | A0 | **完成** | 本架构、远端 fork 基线 | 文档进入仓库并由后续 session 引用 |
-| M0 | 未开始 | 冻结复现文件、ICC、synthetic patches、旧项目 fixtures；让现有 null-destination false-positive 测试失败 | Win11+艺卓案例有可重复数值；现状错误被测试钉住 |
+| M0 | **完成** | 冻结复现文件、ICC、synthetic patches、旧项目 fixtures；让现有 null-destination false-positive 测试失败 | Win11+艺卓案例有可重复数值；现状错误被测试钉住 |
 | M1 | 未开始 | typed frames/profile identity；锁定并打包 LittleCMS；transform cache/diagnostics skeleton | 无裸 `ImageBuffer` 穿越色彩边界；三平台 canonical fixture 相同 |
 | M2 | 未开始 | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | TIFF16 export round-trip 等价；embedded bytes 为 exact profile；golden 迁移审阅完成 |
 | M3 | 未开始 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | 主图/patch/masks/crop 单一合成；主 preview 前无 8-bit/clamp；D-011/D-012 关闭 |
@@ -788,6 +788,7 @@ latency。只比较共享实现；不得以“平台 shader 更快”为由把�
 | 日期 | 基线/结果 | 完成内容 | 验证 | 下一步 |
 |---|---|---|---|---|
 | 2026-08-30 | `b7cd46d` + 文档工作区改动 | 建立 A0 架构基线；未修改产品代码 | 代码只读审计、远端/fork 验证 | M0：加入失败用例、fixture 与诊断基线 |
+| 2026-08-30 | `480a702`、`7af8dc9` | 完成 M0：冻结 built-in ICC exact bytes/hash、canonical extended-range patches、Win11/EIZO WCG reproduction TIFF、legacy missing/false fixtures；钉住 null-destination 与 print-LUT profile mismatch；未修改产品代码 | M0 fixture tests 12/12 通过；characterization tests 8 项中 sRGB/Rec709 controls 2 项通过，目标错误 6 项按预期失败 | M1：引入 profile identity、typed frames、LittleCMS 与 transform diagnostics |
 
 ---
 
