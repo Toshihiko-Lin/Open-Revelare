@@ -6,53 +6,39 @@
 
 - **印样可以选版面比例了**。印样窗口新增「版面比例」：自动（1:1 ~ 4:3）、1:1、4:3、3:2，各自还能选**横或竖**。
 
-  
-  「自动」取加白边最少、空格最少的一种，
-
 **修复**
 
-- **修复了片基较透的胶卷识别不出齿孔的问题**。片基越透，透光越接近灯板本身，两者在直方图上挨得越近、余量越窄（蓝凤凰这样的片基只有 2.0 倍，彩负隔着橙色罩是 2.9-4.4 倍），画面被判成「没有齿孔」，齿孔遮罩静默关闭。现改为在全分辨率上估一次。
+- **修复了片基较透的胶卷识别不出齿孔的问题**。
 
 - **修复了裁切工具开着时裁切会被清掉的问题**。
 
-- **修复了竖构图印样超出尺寸上限的问题**。缩到上限内时只缩了格子、没算行间距，整页会比上限高出百分之几。
+- **修复了竖构图印样超出尺寸上限的问题**。
 
-**内部**
+- **修复了整卷自动标定被单张偏色画面带偏**。
 
-- **给「结果可复现」这句话加了机制**。整条管线的输出现在被逐像素钉住，任何改动若无意中动了画面，构建就会红；这套回归测试也从只在本机跑改成了每次提交与发版都跑，测试不绿就不出包。
+- **修复了整卷标定被灯板边缘带偏**，同时不再多切画面。
 
-- **补齐了开源协作所需的文档**：贡献指南、安全策略、问题反馈模板。
-
-- **主界面代码按职责拆分**。纯搬运，功能与画面输出均未改变。
-
-- **补了标定实验的索引**（`docs/calibration/`）。
+- **修复了大片同色区域（未剪净的片框、纯黑天空）抢占白端**。
 
 ---
 
 **Added**
 
-- **The contact sheet's page proportion is now a choice.** 印样 window → 版面比例: auto (1:1 – 4:3), 1:1, 4:3, 3:2, each of them wide or tall.
-
-  
-
-  Auto takes whatever needs the least added margin and leaves the fewest empty cells.
+- **The contact sheet's page proportion is now a choice.** Contact sheet window → Page proportion: auto (1:1 – 4:3), 1:1, 4:3, 3:2, each of them wide or tall.
 
 **Fixed**
 
-- **Fixed sprocket holes going undetected on films with a clear base.** The clearer the base, the closer its transmission is to the light board itself, and the less room there is between the two in the histogram (a base like 蓝凤凰's leaves a factor of 2.0, against 2.9-4.4 for colour negative seen through its orange mask), so the frame was read as "no sprockets" and the mask silently switched off. It is now measured once at full resolution.
+- **Fixed sprocket holes going undetected on films with a clear base.**
 
-- **Fixed the crop being erased while the crop tool is open.** 
-- **Fixed portrait contact sheets overrunning the size cap.** Fitting a too-tall grid scaled the cells but not the row gaps, leaving the page a few per cent past the ceiling.
+- **Fixed the crop being erased while the crop tool is open.**
 
-**Internal**
+- **Fixed portrait contact sheets overrunning the size cap.**
 
-- **Put a mechanism behind "reproducible results".** The pipeline's output is now pinned pixel for pixel, so any change that alters the picture unintentionally turns the build red; that regression suite also went from running only on the author's machine to running on every commit and every release, and no packages are built unless it is green.
+- **Fixed roll calibration being thrown off by one off-colour frame.**
 
-- **Added the documentation open-source collaboration needs**: a contributing guide, a security policy, and issue templates.
+- **Fixed roll calibration being pulled off by the edge of the light board**, and it no longer cuts away more of the picture than it needs to.
 
-- **Split the main window's code by responsibility.** A pure move: behaviour and rendered output are unchanged.
-
-- **Indexed the calibration experiments** (`docs/calibration/`).
+- **Fixed large flat areas — an uncropped film edge, a solid black sky — capturing the white end.**
 
 ---
 
@@ -189,7 +175,7 @@ new, along with a batch of related fixes.
 
 - **New: film look.** Pick a print stock beside "output space", or import your own film print LUT. Rec709 Kodak 2383 D65 and Rec709 Fujifilm 3513DI D65 are built in and ready to use.
 
-- **New: a LUT folder.** Copy `.cube` files into it and they appear in 【胶片风格】 on the next start, instead of being picked one at a time. Help → "打开 LUT 文件夹" creates and opens it.
+- **New: a LUT folder.** Copy `.cube` files into it and they appear under film look on the next start, instead of being picked one at a time. Help → "Open LUT folder" creates and opens it.
 
 - **Scan splitting now recognises two-column scans.** A flatbed holder takes several strips at once — a 6×12 sheet is two columns of six — and every strip is now detected and split on its own.
 

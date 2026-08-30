@@ -372,7 +372,16 @@ public static class FilmBase
         // below the tail, so that channel's own density exceeds the endpoint it will be divided
         // by, and it clips. These maxima are what the uniform rescale after the reduction uses to
         // guarantee it cannot.
-        var chanMax = new double[3];
+        //
+        // PER FRAME, paired with that frame's own triplet — NOT pooled across the roll. The
+        // reduction below picks ONE frame's endpoint, so the no-clip lift has to be that same
+        // frame's maximum or the two describe different negatives. Pooling made the roll's answer
+        // depend on frames it did not choose: a single dense frame elsewhere on the strip lifted
+        // the winner's triplet, and 单张 on the winning frame — which sees only its own maximum —
+        // then disagreed with 整卷 even though both had picked the same highlight. That broke the
+        // invariant the two buttons are supposed to share, and it is why every frame came back
+        // different.
+        var perFrameMax = new List<double[]>();
         for (int i = 0; i < images.Count; i++)
         {
             ImageBuffer img = images[i];
@@ -430,9 +439,6 @@ public static class FilmBase
                 double d2 = FrameParams.DensityOf(t2);
                 if (!IsEndpointSample(d0, d1, d2)) continue;
                 dens[0][k] = d0; dens[1][k] = d1; dens[2][k] = d2;
-                if (d0 > chanMax[0]) chanMax[0] = d0;
-                if (d1 > chanMax[1]) chanMax[1] = d1;
-                if (d2 > chanMax[2]) chanMax[2] = d2;
                 k++;
             }
             if (k == 0) continue;
@@ -452,6 +458,13 @@ public static class FilmBase
             //
             // The tail is averaged rather than a single extremum taken, so grain and dust cannot
             // define the white point — the same reasoning behind the percentile it replaces.
+            //
+            // 0.1% of the kept pixels, matching the 99.9th percentile this replaces, floored so a
+            // small frame still averages something and clamped so it cannot swallow the frame.
+            const double tailFraction = 0.001;
+            int tail = Math.Clamp((int)Math.Ceiling(k * tailFraction), 1, Math.Max(1, k / 2));
+            var (spike, guard) = SpikeThresholds(k, tailFraction);
+
             var order = new int[k];
             var total = new double[k];
             for (int q = 0; q < k; q++)
@@ -461,22 +474,40 @@ public static class FilmBase
             }
             Array.Sort(total, order);   // ascending by total density; densest at the end
 
-            // 0.1% of the kept pixels, matching the 99.9th percentile this replaces, floored so a
-            // small frame still averages something and clamped so it cannot swallow the frame.
-            int tail = Math.Clamp((int)Math.Ceiling(k * 0.001), 1, Math.Max(1, k / 2));
+            // Unguarded retry on total rejection: a plateau-contaminated endpoint still beats
+            // dropping the frame.
+            int[] tailIdx = DenseTailIndices(total, order, k, tail, spike, guard)
+                         ?? DenseTailIndices(total, order, k, tail, double.PositiveInfinity, 0.0)!;
+
             var res = new double[3];
-            for (int q = k - tail; q < k; q++)
-            {
-                int src = order[q];
+            foreach (int src in tailIdx)
                 for (int c = 0; c < 3; c++) res[c] += dens[c][src];
-            }
-            bool ok = true;
+            for (int c = 0; c < 3; c++) res[c] /= tailIdx.Length;
+
+            // The no-clip maximum is guarded BY THE SAME RULE as the tail above. Without that the
+            // guard achieves nothing: a plateau kept out of the tail still sets chanMax, and
+            // RescaleToClearChannelMax then lifts the endpoint back onto it — measured, a
+            // 200-pixel flat block at 2.80 was correctly excluded from the tail and the rescale
+            // pulled the endpoint from the picture's 2.60 up to 2.80 regardless. The two
+            // populations must agree; see MaxChannelDensityFromRoll, which mirrors this exactly.
+            var frameMax = new double[3];
             for (int c = 0; c < 3; c++)
             {
-                res[c] /= tail;
-                if (!double.IsFinite(res[c]) || res[c] <= 0) { ok = false; break; }
+                var mkeys = new double[k];
+                Array.Copy(dens[c], mkeys, k);
+                var morder = new int[k];
+                for (int q = 0; q < k; q++) morder[q] = q;
+                Array.Sort(mkeys, morder);
+
+                int[] midx = DenseTailIndices(mkeys, morder, k, 1, spike, guard)
+                          ?? DenseTailIndices(mkeys, morder, k, 1, double.PositiveInfinity, 0.0)!;
+                frameMax[c] = dens[c][midx[0]];
             }
-            if (ok) perFrame.Add(res);
+
+            bool ok = true;
+            for (int c = 0; c < 3; c++)
+                if (!double.IsFinite(res[c]) || res[c] <= 0) { ok = false; break; }
+            if (ok) { perFrame.Add(res); perFrameMax.Add(frameMax); }
         }
         if (perFrame.Count == 0) return null;
 
@@ -492,18 +523,48 @@ public static class FilmBase
         // maximum. The frames' own endpoints were consistent to within 10%; the pooled one was
         // further from any of them than they were from each other.
         //
-        // Taking the densest frame keeps the triplet co-sited all the way through: it is one
-        // physical highlight, on one piece of film, measured under one exposure. That is the same
-        // choice <see cref="AutoWbHighFromRoll"/> makes for the same quantity, and it is what
-        // makes the two agree. <paramref name="rollPercentile"/> is retained for API
-        // compatibility but no longer selects between frames.
-        double[] best = perFrame[0];
-        double bestTotal = best[0] + best[1] + best[2];
-        foreach (double[] cand in perFrame)
-        {
-            double t = cand[0] + cand[1] + cand[2];
-            if (t > bestTotal) { bestTotal = t; best = cand; }
-        }
+        // Taking ONE frame keeps the triplet co-sited all the way through: it is one physical
+        // highlight, on one piece of film, measured under one exposure. That is the same choice
+        // <see cref="AutoWbHighFromRoll"/> makes for the same quantity, and it is what makes the
+        // two agree. <paramref name="rollPercentile"/> is retained for API compatibility but no
+        // longer selects between frames.
+        //
+        // WHICH frame is a second question, and "the densest" is the wrong answer to it on its
+        // own. Density decides how DEEP the endpoint sits; the ratios between the three channels
+        // decide the roll's HIGHLIGHT COLOUR — and those ratios are then applied to every frame,
+        // because the endpoints are per-channel divisors. A single frame whose brightest subject
+        // is strongly coloured (a sunset, a neon sign, a red wall) can top the roll on total
+        // density while its ratios describe that subject rather than the film. Picking it hands
+        // its cast to the whole roll, and no Stage-2 control can take it back out.
+        //
+        // So depth admits and colour decides — see PickRepresentativeFrame for why that order,
+        // and not the reverse, is what a real roll requires.
+        //
+        // NOTE these triples are PRE-RESCALE: the no-clip lift below is applied to the winner
+        // only. The lift is one factor on all three channels, so it cannot change any frame's
+        // RATIOS — the colour comparison is unaffected — but it does change totals, so a frame's
+        // depth here is not the same number a single-frame solve reports for it.
+        int bestIdx = PickRepresentativeFrame(perFrame);
+        double[] best = perFrame[bestIdx];
+
+        // ROLL-WIDE maximum, deliberately — not the winner's own.
+        //
+        // The winner is now chosen for its COLOUR, so it can be a frame of ordinary depth while
+        // other frames on the roll go deeper. Its own maximum only clears its own pixels; every
+        // deeper frame would then exceed the endpoint it is divided by and clip its highlight,
+        // which is an unrecoverable loss of picture. Pooling the maxima is what lifts the chosen
+        // triple clear of the WHOLE roll, and because the lift is one factor on all three
+        // channels it cannot disturb the colour the frame was chosen for.
+        //
+        // THE COST, STATED PLAINLY: 整卷 no longer equals 单张 on any one frame. Those two now
+        // answer different questions — 单张 measures one negative, 整卷 measures a roll and must
+        // fit every frame in it — so a roll whose frames differ in depth will not reproduce its
+        // answer from any single frame. That is a deliberate trade of a checkable invariant for a
+        // correct colour, taken because the invariant was costing the roll its highlight balance:
+        // ranking on depth handed an expired Superia 200 roll to its most off-colour frame.
+        var chanMax = new double[3];
+        foreach (double[] m in perFrameMax)
+            for (int c = 0; c < 3; c++) if (m[c] > chanMax[c]) chanMax[c] = m[c];
 
         // UNIFORM RESCALE SO NO CHANNEL CLIPS.
         //
@@ -525,6 +586,82 @@ public static class FilmBase
         // It returns a fresh array rather than scaling in place — `best` still aliases an entry in
         // perFrame, and mutating it would leave that list holding a value it never measured.
         return RescaleToClearChannelMax(best, chanMax);
+    }
+
+    /// <summary>
+    /// Which frame's highlight triple should stand for the roll: the one whose CHANNEL RATIOS sit
+    /// closest to the roll's centre.
+    ///
+    /// Two properties of a triple matter and they are independent. Its ratios say what COLOUR the
+    /// highlight is — and because the endpoints are per-channel divisors applied to every frame,
+    /// that colour becomes the whole roll's. Its total density says how DEEP it is — but depth is
+    /// repairable and colour is not, which is what settles the ordering between them.
+    ///
+    /// DEPTH IS NOT PART OF THE CHOICE. It used to be, in two forms — first as the ranking, then
+    /// as an admission floor — and both let depth decide the roll's colour. That fails because
+    /// the two are CORRELATED: a frame whose highlight is off-neutral reads as denser, since its
+    /// strong channel inflates the total. So whichever frame depth favours is systematically the
+    /// one least representative in colour. Measured on an expired Superia 200 roll of eleven
+    /// frames, DSC_9239 was both the deepest (5.520 against a 4.67 median) and by far the worst
+    /// colour match (ratio offset 0.102 against a 0.037 median) — depth handed the roll to the
+    /// one frame nobody would have chosen.
+    ///
+    /// A depth FLOOR did not fix it either, only moved it: at 95% the roll went to DSC_9237
+    /// (offset 0.056), at 90% to DSC_9234 (0.038), and the frames that actually match the roll's
+    /// colour — DSC_9232 at 0.009 and DSC_9229 at 0.015 — sit 15-18% shallower and are excluded
+    /// at every floor worth setting. Any floor that admits them admits nearly everything, at
+    /// which point it is not a floor.
+    ///
+    /// WHY DEPTH CAN BE GIVEN UP. The no-clip rescale afterwards lifts the chosen triple until it
+    /// clears the roll-wide per-channel maximum, so a shallower winner is not a clipping risk —
+    /// it is simply lifted (1.22× for DSC_9232 on that roll). The lift is ONE factor on all three
+    /// channels, so it moves the placement without touching the ratios the frame was chosen for.
+    /// Depth is recoverable; a cast baked into a per-channel divisor is not.
+    ///
+    /// The result is still ONE frame's co-sited measurement — nothing about the triple is
+    /// synthetic, which is the property the whole reduction exists to preserve.
+    ///
+    /// WHAT THIS COSTS: 整卷 no longer reproduces 单张 on any single frame. See the caller.
+    ///
+    /// Fewer than three frames has no centre to speak of, so it falls back to the densest.
+    /// </summary>
+    private static int PickRepresentativeFrame(List<double[]> perFrame)
+    {
+        static double Total(double[] t) => t[0] + t[1] + t[2];
+
+        int densest = 0;
+        for (int i = 1; i < perFrame.Count; i++)
+            if (Total(perFrame[i]) > Total(perFrame[densest])) densest = i;
+
+        // Under three frames a "median" is just an average of two, and one odd frame out of two
+        // is indistinguishable from one out of one. Depth alone is the honest answer.
+        if (perFrame.Count < 3) return densest;
+
+        // Ratios against green, the channel a negative's highlight varies least in.
+        var rg = new double[perFrame.Count];
+        var bg = new double[perFrame.Count];
+        for (int i = 0; i < perFrame.Count; i++)
+        {
+            double g = Math.Max(perFrame[i][1], 1e-9);
+            rg[i] = perFrame[i][0] / g;
+            bg[i] = perFrame[i][2] / g;
+        }
+        // Median, not mean: the off-colour frames this exists to avoid would drag a mean toward
+        // themselves, which is exactly backwards.
+        double medRg = Median((double[])rg.Clone());
+        double medBg = Median((double[])bg.Clone());
+
+        int best = 0;
+        double bestOffset = double.PositiveInfinity;
+        for (int i = 0; i < perFrame.Count; i++)
+        {
+            // Relative offsets, summed: the two axes have different scales, so absolute
+            // differences would silently weight B/G more heavily than R/G.
+            double offset = Math.Abs(rg[i] - medRg) / Math.Max(medRg, 1e-9)
+                          + Math.Abs(bg[i] - medBg) / Math.Max(medBg, 1e-9);
+            if (offset < bestOffset) { bestOffset = offset; best = i; }
+        }
+        return best;
     }
 
     /// <summary>
@@ -596,6 +733,18 @@ public static class FilmBase
 
             bool[] keep = HighDensityKeepMask(mask, sprocketThreshold);
             int n = img.PixelCount;
+
+            // The plateau guard has to run HERE TOO, on the same population and by the same rule.
+            // The rescale lifts the detector's endpoint until it clears this maximum, so a flat
+            // block excluded from the endpoint's tail but still counted here is re-admitted
+            // through the back door: measured, a 200-pixel block at 2.80 was correctly kept out
+            // of the tail, and the rescale then pulled the endpoint from the picture's 2.60 up to
+            // 2.80 anyway — the guard bought exactly nothing. The two populations must agree,
+            // which is the invariant the IsEndpointSample comments below already state for the
+            // per-sample tests; the plateau rule is now part of it.
+            var chanDens = new double[3][];
+            for (int c = 0; c < 3; c++) chanDens[c] = new double[n];
+            int kept = 0;
             // Same resolution test as the detector, and it MUST stay the same — see the ceiling
             // note below for why this maximum and that endpoint have to be drawn from one and the
             // same population.
@@ -619,13 +768,40 @@ public static class FilmBase
                 // never allowed to see — which is precisely how a clamped blue channel dragged the
                 // whole triple up by 1.75x.
                 if (!IsEndpointSample(d0, d1, d2)) continue;
-                if (d0 > chanMax[0]) chanMax[0] = d0;
-                if (d1 > chanMax[1]) chanMax[1] = d1;
-                if (d2 > chanMax[2]) chanMax[2] = d2;
+                chanDens[0][kept] = d0; chanDens[1][kept] = d1; chanDens[2][kept] = d2;
+                kept++;
+            }
+            if (kept == 0) continue;
+
+            // The guarded maximum is the densest sample that is not part of a skipped plateau —
+            // a tail of one, walked by the same rule as the endpoint's tail.
+            var (spike, guard) = SpikeThresholds(kept, MaxChannelTailFraction);
+            for (int c = 0; c < 3; c++)
+            {
+                var keys = new double[kept];
+                Array.Copy(chanDens[c], keys, kept);
+                var order = new int[kept];
+                for (int q = 0; q < kept; q++) order[q] = q;
+                Array.Sort(keys, order);
+
+                int[] idx = DenseTailIndices(keys, order, kept, 1, spike, guard)
+                         ?? DenseTailIndices(keys, order, kept, 1, double.PositiveInfinity, 0.0)!;
+                double d = chanDens[c][idx[0]];
+                if (d > chanMax[c]) chanMax[c] = d;
             }
         }
         return chanMax;
     }
+
+    /// <summary>
+    /// The tail depth the no-clip maximum's plateau guard is scaled against.
+    ///
+    /// It matches <see cref="DetectDMaxPerChannelFromRoll"/>'s 0.1%, deliberately: the two
+    /// measurements are compared against each other by the rescale, so they must call the same
+    /// thing a plateau. The maximum itself is still a single sample — only the threshold is
+    /// borrowed.
+    /// </summary>
+    private const double MaxChannelTailFraction = 0.001;
 
     /// <summary>
     /// Pixels admissible when measuring the HIGH-density end: everything except the light board /
@@ -780,8 +956,9 @@ public static class FilmBase
             if (est < Sprocket.NoBoard) bright = est;
         }
 
-        // Bright end: light board / sprockets, dilated ~5% to swallow the soft transition ring
-        // between the transmissive core and the opaque frame edge.
+        // Bright end: light board / sprockets, dilated outward to swallow the soft transition
+        // ring between the transmissive core and the opaque frame edge. The RING IS MEASURED,
+        // not assumed — see BoardShoulderRadius.
         if (bright is double thr)
         {
             var board = new bool[n];
@@ -789,8 +966,7 @@ public static class FilmBase
             for (int p = 0; p < n; p++) if (luma[p] > thr) { board[p] = true; any = true; }
             if (any)
             {
-                int radius = Math.Max(1, RoundHalfEven(Math.Min(h, w) * 0.05));
-                board = Dilate(board, w, h, radius);
+                board = Dilate(board, w, h, BoardShoulderRadius(maskFrame, board, w, h));
                 for (int p = 0; p < n; p++) if (board[p]) keep[p] = false;
             }
         }
@@ -860,7 +1036,7 @@ public static class FilmBase
         if (n == 0) return 0.0;
         var used = new double[n];
         Array.Copy(density, used, n);
-        return Percentile(used, 99.9);
+        return GuardedHighPercentile(used, 99.9);
     }
 
     /// <summary>
@@ -920,7 +1096,7 @@ public static class FilmBase
             if (k == 0) return DetectDMaxPerChannel(image);   // all masked out → measure everything
             var used = new double[k];
             Array.Copy(col, used, k);
-            res[c] = Percentile(used, 99.9);
+            res[c] = GuardedHighPercentile(used, 99.9);
         }
         return res;
     }
@@ -1189,6 +1365,141 @@ public static class FilmBase
     private static long QuantiseLuma(double luma) => (long)(Math.Clamp(luma, 0.0, 1.0) * 65535.0);
 
     /// <summary>
+    /// The DENSE end's plateau guard — <see cref="BrightTailMean"/>'s rule pointed the other way.
+    ///
+    /// Walks a density-sorted order downward from the densest sample and returns the indices of
+    /// the tail, SKIPPING any plateau of identical quantised density that alone supplies more
+    /// than <paramref name="spike"/> samples while fewer than <paramref name="guard"/> have been
+    /// passed. Skipped plateaus contribute to neither the tail nor the passed count.
+    ///
+    /// WHY THE HIGHLIGHT ENDPOINT NEEDS THIS. The film base end is bounded from above by the
+    /// light board, so <see cref="BrightTailMean"/>'s guard is what stops the board's clipped
+    /// plateau from BEING the tail. The highlight end has the mirror problem and no equivalent
+    /// bound: an opaque sprocket edge, a blocking card, or any region crushed to code 0 lands on
+    /// one density level — <see cref="FrameParams.DensityCeiling"/> or near it — and a single
+    /// such plateau clears a 0.1% tail on its own. The existing defences each miss a case the
+    /// other covers: <see cref="IsEndpointSample"/>'s ceiling test rejects only what reaches
+    /// <see cref="FrameParams.RealDensityCeiling"/>, and the luma cuts need a cleanly bimodal
+    /// histogram. A flat region sitting BELOW the ceiling but above the picture — an
+    /// under-illuminated corner, a partially transmissive card, a scanner surround — passes both
+    /// and then defines the roll's white point.
+    ///
+    /// Real picture tone carries grain and an illumination gradient, so it spreads across levels
+    /// and survives; a synthetic flat fill does not, which is the discrimination being made.
+    ///
+    /// Returns null when the guard consumed everything — callers retry unguarded rather than lose
+    /// the frame, matching <see cref="CoSitedFilmBase"/>.
+    /// </summary>
+    /// <param name="sortedKeys">Ranking values, ASCENDING (densest last).</param>
+    /// <param name="order">Sample indices permuted alongside <paramref name="sortedKeys"/>.</param>
+    /// <param name="count">Number of valid entries in both arrays.</param>
+    /// <param name="tailCount">How many samples the tail should hold.</param>
+    /// <param name="spike">Plateau size above which a level is skipped.</param>
+    /// <param name="guard">Passed-sample count beyond which skipping stops.</param>
+    private static int[]? DenseTailIndices(double[] sortedKeys, int[] order, int count,
+                                           int tailCount, double spike, double guard)
+    {
+        var taken = new int[tailCount];
+        int n = 0;
+        double passed = 0;
+        int i = count - 1;
+        while (i >= 0 && n < tailCount)
+        {
+            long level = QuantiseDensity(sortedKeys[i]);
+            int j = i;
+            while (j >= 0 && QuantiseDensity(sortedKeys[j]) == level) j--;
+            int run = i - j;                              // the plateau occupies (j, i]
+
+            if (run > spike && passed < guard) { i = j; continue; }
+
+            for (int k = i; k > j && n < tailCount; k--) taken[n++] = order[k];
+            passed += run;
+            i = j;
+        }
+        if (n == 0) return null;
+        if (n < tailCount) Array.Resize(ref taken, n);
+        return taken;
+    }
+
+    /// <summary>
+    /// Density levels at the granularity a 16-bit scan can actually distinguish, so "identical
+    /// value" means the same thing here as <see cref="QuantiseLuma"/> means at the other end.
+    ///
+    /// Density is unbounded above where luma is not, so the scale is fixed to
+    /// <see cref="FrameParams.DensityCeiling"/> rather than to 1.0: everything at or above the
+    /// ceiling — every fully light-blocking pixel — collapses into the top level, which is
+    /// precisely the plateau the guard exists to drop.
+    /// </summary>
+    private static long QuantiseDensity(double density)
+        => (long)(Math.Clamp(density / FrameParams.DensityCeiling, 0.0, 1.0) * 65535.0);
+
+    /// <summary>
+    /// The plateau-size and release thresholds for a tail of <paramref name="tailFraction"/> of
+    /// <paramref name="count"/> samples.
+    ///
+    /// THE THRESHOLD IS THE TAIL ITSELF, not a fixed share of the frame. What makes a plateau
+    /// dangerous is that it can fill the tail ALONE — at which point it is the entire measurement
+    /// and the picture never gets a vote. That condition is "bigger than the tail", so that is
+    /// what is tested, with a 2× margin so an ordinary tone that merely happens to be tail-sized
+    /// is not mistaken for a flat fill.
+    ///
+    /// NexFilm's published constants (skip a bin holding &gt;10% of samples while under 20%
+    /// accumulated) are stated against their 1% tail, where 10% of the frame IS ten tails. Read
+    /// as a share of the FRAME the rule does not transfer: our highlight tail is 0.1%, so a fixed
+    /// 10% would ignore any block up to a hundred times the tail's size — measured, a 300-pixel
+    /// flat block against a 40-pixel tail sailed through and took the endpoint (2.80 against the
+    /// picture's true 2.60). Read as a share of the TAIL it transfers exactly, which is the form
+    /// used here and the one <see cref="CoSitedFilmBase"/> already relies on for its 0.01%
+    /// no-board branch.
+    ///
+    /// The release threshold stays 2× the skip threshold, preserving the ratio NexFilm's 10/20
+    /// pair encodes: once enough samples have been passed that the tail is no longer at the
+    /// mercy of one level, stop skipping — otherwise a genuinely flat subject could be skipped
+    /// indefinitely and the walk would run off the end of the picture.
+    /// </summary>
+    private static (double Spike, double Guard) SpikeThresholds(int count, double tailFraction)
+    {
+        double tail = count * tailFraction;
+        return (tail * 2.0, tail * 4.0);
+    }
+
+    /// <summary>
+    /// A high percentile of <paramref name="vals"/> with <see cref="DenseTailIndices"/>' plateau
+    /// guard applied — the single-array form of the guarded tail, for the callers that measure
+    /// one pooled population rather than co-sited triples.
+    ///
+    /// Equivalent to <c>Percentile(vals, q)</c> once the guard has nothing to skip, so a frame
+    /// with no flat block reads exactly as it did before. The returned value is the guarded
+    /// tail's LEAST-dense member, which is where the percentile itself sits: the tail holds the
+    /// top (100−q)% and the percentile is its lower boundary.
+    /// </summary>
+    /// <param name="vals">Densities. Not mutated.</param>
+    /// <param name="q">Percentile in [0,100], intended for the dense end.</param>
+    private static double GuardedHighPercentile(double[] vals, double q)
+    {
+        int n = vals.Length;
+        if (n == 0) return 0.0;
+
+        double tailFraction = Math.Max(100.0 - q, 0.0) / 100.0;
+        int tail = Math.Clamp((int)Math.Ceiling(n * tailFraction), 1, Math.Max(1, n / 2));
+
+        var keys = (double[])vals.Clone();
+        var order = new int[n];
+        for (int i = 0; i < n; i++) order[i] = i;
+        Array.Sort(keys, order);
+
+        var (spike, guard) = SpikeThresholds(n, tailFraction);
+        int[]? idx = DenseTailIndices(keys, order, n, tail, spike, guard);
+        // Guard ate everything (a frame that is one flat level end to end): fall back to the
+        // plain percentile rather than report a density nothing in the frame has.
+        if (idx is null || idx.Length == 0) return Percentile(vals, q);
+
+        double least = double.PositiveInfinity;
+        foreach (int i in idx) if (vals[i] < least) least = vals[i];
+        return least;
+    }
+
+    /// <summary>
     /// Auto-estimate the per-channel HIGHLIGHT ENDPOINT by finding the roll's brightest
     /// highlight — the negative's DENSEST (darkest) real picture pixel — and taking that point's
     /// three densities as the white end. Physics: on a negative the densest pixel is the scene's
@@ -1257,8 +1568,8 @@ public static class FilmBase
         var tb = new double[3];
         for (int c = 0; c < 3; c++) tb[c] = Math.Max(tBase[c], 1e-10);
 
-        double[]? bestDensity = null;
-        double bestMeanD = double.NegativeInfinity;
+        // Every frame's highlight triple; the choice between them happens after the loop.
+        var candidates = new List<double[]>();
 
         int frames = Math.Min(images.Count, valImages.Count);
         for (int f = 0; f < frames; f++)
@@ -1388,13 +1699,18 @@ public static class FilmBase
                          ?? MeanOfRowsAtOrAbove(dens, totalD, keptCount, Percentile(totalD, highlightPct - 1.0));
             if (hiD is null) continue;
 
-            double meanD = (hiD[0] + hiD[1] + hiD[2]) / 3.0;
-            if (meanD > bestMeanD) { bestMeanD = meanD; bestDensity = hiD; }
+            candidates.Add(hiD);
         }
 
-        if (bestDensity is null)
+        if (candidates.Count == 0)
             throw new ArgumentException("AutoWbHighFromRoll: all pixels were masked out");
-        return bestDensity;
+
+        // Same choice, same reasoning, same helper as DetectDMaxPerChannelFromRoll: the densest
+        // frame whose highlight COLOUR agrees with the roll. Picking on density alone let one
+        // frame with a strongly coloured highlight set the whole roll's channel ratios. These two
+        // estimators answer the same question and feed the same field, so they must not disagree
+        // about which frame speaks for the roll.
+        return candidates[PickRepresentativeFrame(candidates)];
     }
 
     /// <summary>Per-channel mean of the rows whose total density is &gt;= thresh; null if none.</summary>
@@ -1427,7 +1743,107 @@ public static class FilmBase
     /// Computed as an exact city-block distance transform (two chamfer passes, O(n)) rather
     /// than N dilation passes, which would be O(n·N).
     /// </summary>
-    private static bool[] Dilate(bool[] mask, int w, int h, int radius)
+    /// <summary>
+    /// How far the light board's contaminated band actually reaches, in pixels, MEASURED off this
+    /// frame rather than assumed.
+    ///
+    /// WHY THIS REPLACED A CONSTANT. The dilation used to be a flat 5% of the short edge — a
+    /// guess about an optical property, tied to a quantity (the frame's pixel dimensions) that the
+    /// property does not depend on. The same physical scan therefore dilated differently at
+    /// preview and full resolution. Measuring makes it resolution-correct for free.
+    ///
+    /// WHAT IS BEING MEASURED, AND WHY IT IS NOT BRIGHTNESS. The first version of this walked
+    /// outward watching the median LUMA settle, on the reasoning that the penumbra is a
+    /// brightness gradient. That reads the wrong quantity and stops far too early. Measured on
+    /// 图像 001a at 873×1120, per distance ring:
+    ///
+    /// <code>
+    ///   ring   median luma   max density
+    ///      1        0.095        1.78
+    ///      2        0.038        2.61      ← luma already looks like film
+    ///      3        0.039        2.91
+    ///      4        0.043        2.68
+    ///      5        0.045        2.97
+    ///      6        0.047        1.44      ← density finally drops to the film's own level
+    ///     48        0.046        1.48
+    /// </code>
+    ///
+    /// Rings 2–5 have the luma of film and the density of the opaque frame edge. A median cannot
+    /// see that: the contaminating pixels are a small minority of each ring, so they never move
+    /// its centre, and the luma test declared the shoulder over at 2 px. The endpoint solve then
+    /// took its highlight from those rings and the frame's white end moved from 1.63 to 2.97 —
+    /// set by the edge of the film holder rather than by any photograph.
+    ///
+    /// So the ring is judged by its DENSITY EXTREME, which is exactly what the endpoint consumes:
+    /// walk outward until a ring's peak density comes back down to what the far field reaches.
+    /// The transition is sharp — 2.97 to 1.44 between rings 5 and 6 — so the stopping point is
+    /// not sensitive to the tolerance.
+    ///
+    /// A minimum of 1 keeps the immediate boundary pixel out regardless, and the cap keeps a
+    /// pathological frame from dilating half the picture away.
+    /// </summary>
+    /// <param name="frame">The frame the densities are read from.</param>
+    /// <param name="board">Board mask — true where luma cleared the bright cut.</param>
+    private static int BoardShoulderRadius(ImageBuffer frame, bool[] board, int w, int h)
+    {
+        int n = w * h;
+        int[] dist = DistanceFrom(board, w, h);
+
+        // Bucket every pixel's DENSITY EXTREME by its ring, in ONE pass. Scanning the frame once
+        // per candidate radius is O(n·maxR) — on a 24 MP frame with a 5% cap that is billions of
+        // comparisons, and this runs inside the interactive auto-calibrate.
+        //
+        // Density, not luma, and the ring's MAXIMUM, not its median — see the remarks.
+        int maxR = Math.Max(1, (int)(Math.Min(w, h) * MaxShoulderFraction));
+        var peak = new double[maxR + 1];
+        var seen = new bool[maxR + 1];
+        float[] d = frame.Data;
+        for (int p = 0; p < n; p++)
+        {
+            int r = dist[p];
+            if (r < 1 || r > maxR) continue;
+            seen[r] = true;
+            for (int c = 0; c < 3; c++)
+            {
+                double density = FrameParams.DensityOf(d[p * 3 + c]);
+                if (density > peak[r]) peak[r] = density;
+            }
+        }
+
+        // The far field's own peak: what an uncontaminated ring of this frame looks like. Taken
+        // from the outermost rings the cap allows, which are past any plausible penumbra.
+        double reference = 0;
+        int refFrom = Math.Max(1, maxR - maxR / 4);
+        for (int r = refFrom; r <= maxR; r++) if (seen[r] && peak[r] > reference) reference = peak[r];
+        if (reference <= 0) return 1;
+
+        // Walk outward and stop at the first ring whose peak has come down to what the far field
+        // reaches. Everything before it is still carrying the opaque edge.
+        for (int r = 1; r <= maxR; r++)
+        {
+            if (!seen[r]) break;                          // ran out of frame
+            if (peak[r] <= reference * (1.0 + ShoulderSettleTolerance))
+                return Math.Max(1, r - 1);
+        }
+        return maxR;
+    }
+
+    /// <summary>
+    /// How far above the far field's own density peak a ring may still reach and count as clean,
+    /// as a fraction of that peak. The contaminated rings on 图像 001a peak at 2.6–3.0 against a
+    /// far field of ~1.48 — 75% to 100% above it — while clean rings sit within a couple of
+    /// percent of each other all the way out. 15% separates them with a wide margin on both
+    /// sides.
+    /// </summary>
+    private const double ShoulderSettleTolerance = 0.15;
+
+    /// <summary>Ceiling on the measured shoulder, as a fraction of the short edge — the old fixed
+    /// rule, kept only as a backstop for a frame whose luma never settles.</summary>
+    private const double MaxShoulderFraction = 0.05;
+
+    /// <summary>Chebyshev distance to the nearest true pixel — the two-pass transform
+    /// <see cref="Dilate"/> already used, split out so both can share it.</summary>
+    private static int[] DistanceFrom(bool[] mask, int w, int h)
     {
         const int Inf = int.MaxValue / 4;
         var dist = new int[w * h];
@@ -1447,7 +1863,12 @@ public static class FilmBase
                 if (y < h - 1) dist[i] = Math.Min(dist[i], dist[i + w] + 1);
                 if (x < w - 1) dist[i] = Math.Min(dist[i], dist[i + 1] + 1);
             }
+        return dist;
+    }
 
+    private static bool[] Dilate(bool[] mask, int w, int h, int radius)
+    {
+        int[] dist = DistanceFrom(mask, w, h);
         var outMask = new bool[w * h];
         for (int i = 0; i < outMask.Length; i++) outMask[i] = dist[i] <= radius;
         return outMask;
