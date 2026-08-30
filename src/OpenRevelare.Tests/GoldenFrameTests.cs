@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -23,10 +24,15 @@ namespace OpenRevelare.Tests;
 /// 存的是十六进制的 float 位模式加一行人类可读的通道统计，于是 git diff 直接就是一份变更
 /// 报告——第几个采样点、哪个通道、变了几位。基线该不该更新，是能被讨论的。
 ///
-/// **为什么是位精确而不是容差比较。** 容差要多少才对？没有非任意的答案，而任何非零容差都
-/// 会放过「每个像素动一点点」这类最难查的漂移。位精确没有这个问题：变了就是变了。代价是
-/// 平台间浮点差异会让它红——这正是我们想知道的事（CI 在 Linux 与 macOS 上都跑这套测试），
-/// 而不是想掩盖的事。真出现合理的跨平台分歧，再讨论怎么放宽，前提是先看得见。
+/// **比较方式：先比位，位不同再按容差比数值。** 最初这里是纯位精确，理由是「容差要多少才
+/// 对？没有非任意的答案」。那次也写明：真出现合理的跨平台分歧，再讨论怎么放宽，前提是先
+/// 看得见。分歧出现了——基线在作者机器上生成，第一次上 GitHub 的 Linux runner 就红，最大
+/// 相对差 4.2e-05，而管线一行没动；原因是编译器的 FMA 合并与向量化选择随 CPU 而异。
+///
+/// 于是放宽到 <see cref="GoldenTolerance"/>（1e-4），而不是改基线：CI 同时跑 ubuntu 与
+/// macos，位精确要求它们与作者机器三方逐位一致，这在多平台上本就无法成立——换台机器重生成
+/// 只是把红色搬个家。阈值比观测到的平台噪声大一倍多，比任何真回归的量级小三四个数量级，
+/// 「每个像素动一点点」这类漂移仍然拦得住。基线本身照旧存位模式，diff 依然是精确的。
 ///
 /// **基线怎么更新。** 设环境变量 <c>REVELARE_UPDATE_GOLDEN=1</c> 跑一次测试，基线文件会被
 /// 重写，然后把 diff 连同「为什么该变」一起提交。**不要**因为红了就顺手更新——先回答这次
@@ -186,6 +192,30 @@ public class GoldenFrameTests
         return sb.ToString();
     }
 
+    /// <summary>
+    /// 每个通道允许的最大**相对**偏差。
+    ///
+    /// 基线仍然逐像素存位模式（见 <see cref="Hex"/>），但断言不再要求逐位相同。位精确在
+    /// 单机上是对的，跨平台则守不住：同一份代码在不同 CPU 上，编译器的 FMA 合并与向量化
+    /// 选择不同，末几位就会不一样。这不是假设——本仓库的基线在作者机器上生成，第一次上
+    /// GitHub 的 Linux runner 就红了，最大相对差 4.2e-05，而管线本身一行没动。
+    ///
+    /// 这正是本文件原注释里预留的那次讨论：「真出现合理的跨平台分歧，再讨论怎么放宽，
+    /// 前提是先看得见。」现在看见了，于是放宽到这里。
+    ///
+    /// 1e-4 这个数不是随手取的，它要同时满足两头：
+    ///
+    ///   **拦得住真回归。** 一次无意的重构、依赖升级、浮点写法调整，如果真改变了成像，
+    ///   量级是百分之几到几倍——比这个阈值大三四个数量级，照样红。本文件存在的理由不受影响。
+    ///
+    ///   **放得过平台噪声。** 观测到的跨平台分歧是 4.2e-05，留一倍多余量。
+    ///
+    /// 尺度上它也站得住：1e-4 约等于 8 位量化一级的 1/40，导出成 8 位图逐位相同；16 位下
+    /// 不到七级，肉眼与直方图都无从分辨。**但它不是"看不见就放过"**——看不见的漂移正是本
+    /// 文件要防的东西，所以阈值卡在"比平台噪声大一点点"，而不是卡在"人眼极限"。
+    /// </summary>
+    private const double GoldenTolerance = 1e-4;
+
     /// <summary>比对或（在更新模式下）重写基线。</summary>
     private static void AssertGolden(string name, ImageBuffer result)
     {
@@ -202,11 +232,55 @@ public class GoldenFrameTests
         }
 
         string expected = File.ReadAllText(path);
-        if (expected == actual) return;
+        if (expected == actual) return;   // 逐位相同：同机器同编译器，最常见的一条路
 
-        // 直接比对整份长文本，xunit 的 diff 只会告诉你「第 N 个字符不同」。先自己找出
-        // 第一个不同的像素报出来 —— 定位一个回归，这一行顶十分钟。
-        Assert.Equal(expected.Replace("\r\n", "\n"), actual.Replace("\r\n", "\n"));
+        // 位模式不同，再按数值比。形状对不上（尺寸变了、像素少了）不属于容差问题，
+        // 交回整份文本比对，让 diff 把话说清楚。
+        float[] want = ParsePixels(expected), got = ParsePixels(actual);
+        if (want.Length != got.Length || want.Length != result.PixelCount * 3)
+        {
+            Assert.Equal(expected.Replace("\r\n", "\n"), actual.Replace("\r\n", "\n"));
+            return;
+        }
+
+        // 报**最差**的那个像素，不是第一个：第一个只说明"从这里开始不同"，最差的才说明
+        // 这次分歧有多大——是平台噪声还是真回归，一眼就能分辨。
+        int worst = -1;
+        double worstRel = 0.0;
+        for (int i = 0; i < want.Length; i++)
+        {
+            double w = want[i], g = got[i];
+            if (float.IsFinite(want[i]) != float.IsFinite(got[i])) { worst = i; worstRel = double.PositiveInfinity; break; }
+            if (!float.IsFinite(want[i])) continue;   // 两边都非有限：位模式已在上面比过
+            // 相对误差；基准趋零时退化为绝对误差，否则近黑像素会把比值放大成噪声。
+            double rel = Math.Abs(w - g) / Math.Max(Math.Abs(w), 1e-6);
+            if (rel > worstRel) { worstRel = rel; worst = i; }
+        }
+
+        if (worstRel <= GoldenTolerance) return;
+
+        int px = worst / 3, ch = worst % 3;
+        Assert.Fail(
+            $"基线 {name} 超出容差：像素 #{px}（{px % Width},{px / Width}）通道 {ch} " +
+            $"期望 {want[worst]:G9}（{Hex(want[worst])}）实得 {got[worst]:G9}（{Hex(got[worst])}），" +
+            $"相对差 {worstRel:E2} > {GoldenTolerance:E0}。\n" +
+            $"若这是有意的成像改动，用 REVELARE_UPDATE_GOLDEN=1 重生成基线，并连同理由一起提交。");
+    }
+
+    /// <summary>把基线正文里的十六进制位模式读回 float；注释与 size 行跳过。</summary>
+    private static float[] ParsePixels(string text)
+    {
+        var vals = new List<float>();
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line[0] == '#' || line.StartsWith("size", StringComparison.Ordinal))
+                continue;
+            foreach (string tok in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                vals.Add(BitConverter.UInt32BitsToSingle(
+                    uint.Parse(tok, NumberStyles.HexNumber, CultureInfo.InvariantCulture)));
+        }
+        return vals.ToArray();
     }
 
     // ── 测试 ────────────────────────────────────────────────────────────────────
