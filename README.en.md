@@ -304,6 +304,14 @@ likely changed every photograph without meaning to.
 
 The calibration experiments behind the physical claims live in [`docs/calibration/`](docs/calibration/).
 
+### Development documentation
+
+- [Colour-management pipeline architecture](docs/color-management-architecture.md) — the normative
+  Chinese design record for input, working/output profiles, Windows/macOS presentation contracts,
+  invariants and staged implementation.
+- [macOS audit](docs/macos-audit.md) — the audit record for existing macOS behaviour and its
+  verification boundaries (Chinese).
+
 Command-line front-end (no GUI, same Core):
 
 ```bash

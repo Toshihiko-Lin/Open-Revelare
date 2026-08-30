@@ -296,6 +296,12 @@ dotnet run --project src/OpenRevelare.Gui
 
 各项物理结论背后的标定实验在 [`docs/calibration/`](docs/calibration/)。
 
+### 开发文档
+
+- [色彩管理链路修复架构](docs/color-management-architecture.md)——输入、工作空间、输出 ICC、
+  Windows/macOS 呈现契约与分阶段实施计划的规范记录。
+- [macOS 专项检测报告](docs/macos-audit.md)——现有 macOS 行为、修复与验证边界的审计记录。
+
 命令行前端（无 GUI，同一个 Core）：
 
 ```bash
