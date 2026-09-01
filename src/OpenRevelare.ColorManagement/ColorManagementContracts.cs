@@ -169,8 +169,27 @@ public interface IColorManagementEngine : IDisposable
     CmmDiagnosticsSnapshot GetDiagnostics();
 }
 
-public sealed class ColorManagementException : Exception
+public class ColorManagementException : Exception
 {
     public ColorManagementException(string message) : base(message) { }
     public ColorManagementException(string message, Exception innerException) : base(message, innerException) { }
+}
+
+/// <summary>
+/// The CMM could not build a transform out of profiles that were themselves valid.
+///
+/// <para>
+/// This is an engine or environment fault, not a statement about the file, and input admission
+/// must therefore NOT answer it by substituting a fallback profile. Doing so would render the
+/// picture through a space nobody chose, in response to a failure that says nothing about the
+/// file's colorimetry. A profile the CMM *rejected* is the opposite case and does fall back —
+/// there, the file really is the thing that cannot be trusted.
+/// </para>
+/// </summary>
+public sealed class ColorTransformCreationException : ColorManagementException
+{
+    public ColorTransformCreationException(string message) : base(message) { }
+
+    public ColorTransformCreationException(string message, Exception innerException)
+        : base(message, innerException) { }
 }

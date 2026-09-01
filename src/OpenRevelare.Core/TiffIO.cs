@@ -434,7 +434,11 @@ public static class TiffIO
                     colorManagement);
             }
             catch (Exception ex)
+                // A transform-creation failure is deliberately NOT caught here: the embedded
+                // profile was valid, so falling back would hide an engine fault behind a silent
+                // change of colour space.
                 when (ex is not OperationCanceledException and not OutOfMemoryException
+                    and not ColorTransformCreationException
                     && TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption))
             {
                 fallbackDiagnostic = OneLine(ex.Message);
@@ -591,7 +595,7 @@ public static class TiffIO
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
-            throw new ColorManagementException(
+            throw new ColorTransformCreationException(
                 $"Managed TIFF input could not create the complete ICC transform for " +
                 $"'{Path.GetFileName(path)}' ({sourceProfile.Identity} -> {workingProfile.Identity}).",
                 ex);

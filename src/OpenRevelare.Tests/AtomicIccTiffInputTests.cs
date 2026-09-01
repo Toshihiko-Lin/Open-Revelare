@@ -148,7 +148,9 @@ public class AtomicIccTiffInputTests
             validate: Valid,
             lease: _ => throw new ColorManagementException("synthetic transform creation failure"));
 
-        ColorManagementException error = Assert.Throws<ColorManagementException>(() =>
+        // A valid profile that the CMM cannot build a transform from is an engine fault, so it
+        // stays fatal instead of quietly becoming a different colour space.
+        ColorTransformCreationException error = Assert.Throws<ColorTransformCreationException>(() =>
             TiffIO.LoadWorkingFrame(
                 AdobeRgbTiff,
                 inputIsSrgb: false,
