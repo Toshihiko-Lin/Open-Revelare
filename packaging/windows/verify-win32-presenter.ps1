@@ -1,3 +1,8 @@
+# CI runs these under pwsh 7, but a contributor's Windows box has Windows PowerShell 5.1 and
+# nothing says which one they were written for. They currently work on both; this pins the floor
+# so a future 7-only construct fails with a clear message instead of a parse error.
+#Requires -Version 5.1
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
