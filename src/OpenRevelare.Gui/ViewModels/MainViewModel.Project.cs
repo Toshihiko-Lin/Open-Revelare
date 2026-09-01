@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -440,10 +440,8 @@ public partial class MainViewModel
         try { await LoadRollAsync(cfg.Paths); }
         finally { _configLoad = false; }
 
-        // The frames are in place now, so the detector has something to read. This is also what
-        // decides whether the correctable notice appears.
-        _tiffInputNoticeDismissed = false;
-        RefreshTiffInputDetection();
+        // Detection is not repeated here: LoadRollAsync above owns it for every entry point, and
+        // SetTiffInputAssumption ran before the load, so it has already seen this roll's choice.
 
         // After the load, not before: a new roll resets its notes, which would wipe whatever the
         // import dialog just collected. Blank fields are left alone rather than written through,
@@ -629,6 +627,19 @@ public partial class MainViewModel
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
+
+        // HERE, not in the callers. Every way of opening a roll lands in this method, and the
+        // detection is the ONLY thing that tells a user their untagged TIFF was assumed sRGB —
+        // the forced import question that used to ask it is gone. It lived in
+        // LoadRollWithConfigAsync alone, so the import dialog disclosed and the two paths that
+        // bypass it (command line, double-click, 添加图像) silently did not: the roll was assumed
+        // sRGB with no notice and no way to correct it. The dismissal resets with the roll for the
+        // same reason — dismissing one roll's notice must not suppress the next roll's.
+        //
+        // Frames must already be populated: the detector reads the first non-virtual, non-RAW
+        // frame off disk. Cheap — header tags only, no pixels.
+        _tiffInputNoticeDismissed = false;
+        RefreshTiffInputDetection();
 
         // Fire and forget: the import must return as soon as frame 1 is on screen. Awaiting the
         // roll here is what made importing feel like it hung — it did not come back until every
