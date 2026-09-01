@@ -107,7 +107,7 @@ public class AtomicIccTiffInputTests
     }
 
     [Fact]
-    public void Truncated_embedded_profile_is_rejected_without_legacy_guess_or_transform()
+    public void Truncated_embedded_profile_never_reaches_a_transform_and_falls_back_to_detection()
     {
         string path = WriteTinyTiff(embeddedProfile: Enumerable.Repeat((byte)0xA5, 64).ToArray());
         try
@@ -121,19 +121,31 @@ public class AtomicIccTiffInputTests
                 validate: profile => profile.IccBytes.Length < 128
                     ? Invalid(profile, $"ICC payload is truncated ({profile.IccBytes.Length} bytes).")
                     : Valid(profile),
-                lease: _ => throw new InvalidOperationException("a rejected profile must not reach Lease"));
+                lease: request =>
+                {
+                    Assert.True(
+                        request.Source.IccBytes.Length >= 128,
+                        "a rejected profile must not reach Lease");
+                    return new IdentityLease(request);
+                });
 
-            ColorManagementException error = Assert.Throws<ColorManagementException>(() =>
-                TiffIO.LoadWorkingFrame(
-                    path,
-                    inputIsSrgb: false,
-                    ColorPipelineVersion.ManagedV2,
-                    engine));
+            // The file's own profile is unusable, so admission falls through to detection rather
+            // than refusing to open the picture — but the rejection reason has to survive into the
+            // recipe, or the substitution would be invisible.
+            WorkingFrame detected = TiffIO.LoadWorkingFrame(
+                path,
+                inputIsSrgb: false,
+                ColorPipelineVersion.ManagedV2,
+                engine);
 
-            Assert.Contains("rejected", error.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("truncated", error.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(1, engine.ValidationCalls);
-            Assert.Equal(0, engine.LeaseCalls);
+            Assert.Contains(
+                "embedded ICC unavailable", detected.Source.DecodeRecipe, StringComparison.Ordinal);
+            Assert.Contains("rejected", detected.Source.DecodeRecipe, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("truncated", detected.Source.DecodeRecipe, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("detected input", detected.Source.DecodeRecipe, StringComparison.Ordinal);
+            // The truncated profile, then the substituted source and the working destination.
+            Assert.Equal(3, engine.ValidationCalls);
+            Assert.Equal(1, engine.LeaseCalls);
         }
         finally
         {
@@ -301,6 +313,25 @@ public class AtomicIccTiffInputTests
         null,
         null,
         message);
+
+    /// <summary>A lease that copies its input through untouched, for stubs that only need one.</summary>
+    private sealed class IdentityLease : IColorTransformLease
+    {
+        public IdentityLease(ColorTransformRequest request) =>
+            Key = ColorTransformKey.From(
+                request,
+                new CmmBuildIdentity(
+                    "test CMM", "test", 0, "test", "test", CmmTransformFlags.None,
+                    new string('0', 64), new string('0', 64), "{}", "test"),
+                CmmTransformFlags.None);
+
+        public ColorTransformKey Key { get; }
+
+        public void Apply(ReadOnlySpan<float> source, Span<float> destination, int pixelCount) =>
+            source[..checked(pixelCount * 3)].CopyTo(destination);
+
+        public void Dispose() { }
+    }
 
     private sealed class StubEngine : IColorManagementEngine
     {

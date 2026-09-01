@@ -14,7 +14,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
     [Theory]
     [InlineData(8, 128)]
     [InlineData(16, 32768)]
-    public void Managed_v2_untagged_input_requires_and_records_an_explicit_choice(
+    public void Managed_v2_untagged_input_is_detected_and_an_explicit_choice_still_overrides(
         int bitsPerSample,
         int sample)
     {
@@ -22,19 +22,26 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         try
         {
             using var engine = new LittleCmsEngine();
-            ColorManagementException error = Assert.Throws<ColorManagementException>(() =>
-                TiffIO.LoadWorkingFrame(
-                    path,
-                    TiffInputAssumption.Unspecified,
-                    ColorPipelineVersion.ManagedV2,
-                    engine));
-            Assert.Contains("explicit roll-level Linear or sRGB", error.Message, StringComparison.Ordinal);
-            Assert.Contains("bit depth is not", error.Message, StringComparison.Ordinal);
-            Assert.Throws<ColorManagementException>(() => TiffIO.LoadWorkingFrame(
+            // This file declares nothing at all, so detection lands on the labelled convention
+            // instead of refusing to open it.
+            WorkingFrame detected = TiffIO.LoadWorkingFrame(
+                path,
+                TiffInputAssumption.Unspecified,
+                ColorPipelineVersion.ManagedV2,
+                engine);
+            Assert.Contains("detected input", detected.Source.DecodeRecipe, StringComparison.Ordinal);
+            Assert.Contains(
+                nameof(TiffInputEvidence.ConventionalDefault),
+                detected.Source.DecodeRecipe,
+                StringComparison.Ordinal);
+
+            // The pre-typed boolean overload rides the same route rather than throwing.
+            WorkingFrame viaBooleanOverload = TiffIO.LoadWorkingFrame(
                 path,
                 inputIsSrgb: false,
                 ColorPipelineVersion.ManagedV2,
-                engine));
+                engine);
+            Assert.Equal(detected.Source.DecodeRecipe, viaBooleanOverload.Source.DecodeRecipe);
 
             WorkingFrame linear = TiffIO.LoadWorkingFrame(
                 path,
@@ -63,6 +70,11 @@ public sealed class ManagedUntaggedTiffAssumptionTests
             Assert.Equal(ColorReference.DisplayReferred, characterized.Reference);
             Assert.Contains("explicit roll fallback sRGB", srgb.Source.DecodeRecipe, StringComparison.Ordinal);
             Assert.NotEqual(linear.Pixels.Data[0], srgb.Pixels.Data[0]);
+
+            // The convention IS sRGB, so detection and the explicit sRGB override agree on pixels
+            // while staying distinguishable in the recipe.
+            Assert.Equal(srgb.Pixels.Data, detected.Pixels.Data);
+            Assert.NotEqual(srgb.Source.DecodeRecipe, detected.Source.DecodeRecipe);
         }
         finally
         {
@@ -80,11 +92,13 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         try
         {
             using var engine = new LittleCmsEngine();
-            Assert.Throws<ColorManagementException>(() => TiffIO.LoadWorkingFrame(
+            WorkingFrame detected = TiffIO.LoadWorkingFrame(
                 path,
                 TiffInputAssumption.Unspecified,
                 ColorPipelineVersion.ManagedV2,
-                engine));
+                engine);
+            Assert.Contains("embedded ICC unavailable", detected.Source.DecodeRecipe, StringComparison.Ordinal);
+            Assert.Contains("detected input", detected.Source.DecodeRecipe, StringComparison.Ordinal);
 
             WorkingFrame linear = TiffIO.LoadWorkingFrame(
                 path,
@@ -113,19 +127,22 @@ public sealed class ManagedUntaggedTiffAssumptionTests
     }
 
     [Fact]
-    public void Flextight_gamma_does_not_bypass_explicit_managed_v2_admission()
+    public void Flextight_gamma_is_honoured_without_an_explicit_choice()
     {
         string path = WriteFlextightTiff();
         try
         {
             using var engine = new LittleCmsEngine();
-            ColorManagementException error = Assert.Throws<ColorManagementException>(() =>
-                TiffIO.LoadWorkingFrame(
-                    path,
-                    TiffInputAssumption.Unspecified,
-                    ColorPipelineVersion.ManagedV2,
-                    engine));
-            Assert.Contains("explicit roll-level Linear or sRGB", error.Message, StringComparison.Ordinal);
+            // A vendor gamma declaration outranks anything the detector could infer, so it applies
+            // without the user having been asked.
+            WorkingFrame detected = TiffIO.LoadWorkingFrame(
+                path,
+                TiffInputAssumption.Unspecified,
+                ColorPipelineVersion.ManagedV2,
+                engine);
+            Assert.Contains(
+                "scanner-vendor gamma declaration", detected.Source.DecodeRecipe, StringComparison.Ordinal);
+            Assert.InRange(detected.Pixels.Data[0], 0.24f, 0.26f);
 
             WorkingFrame admitted = TiffIO.LoadWorkingFrame(
                 path,
@@ -142,19 +159,96 @@ public sealed class ManagedUntaggedTiffAssumptionTests
     }
 
     [Fact]
-    public async Task Programmatic_new_tiff_roll_without_choice_is_rejected_before_adoption()
+    public async Task Programmatic_new_tiff_roll_opens_without_an_upfront_choice()
     {
-        using var vm = new MainViewModel();
-        string originalDiagnostic = vm.ColorPipelineDiagnostic;
-        var config = new ImportConfig();
-        config.Paths.Add(Path.Combine(Path.GetTempPath(), "not-opened-because-admission-fails.tif"));
+        string path = WriteTiff(8, new[] { 206, 138, 81 });
+        try
+        {
+            using var vm = new MainViewModel();
+            var config = new ImportConfig();
+            config.Paths.Add(path);
 
-        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
-            vm.LoadRollWithConfigAsync(config));
+            await vm.LoadRollWithConfigAsync(config);
 
-        Assert.Contains("must explicitly select Linear or sRGB", error.Message, StringComparison.Ordinal);
-        Assert.Empty(vm.Frames);
-        Assert.Equal(originalDiagnostic, vm.ColorPipelineDiagnostic);
+            Assert.Single(vm.Frames);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task A_guessed_roll_shows_a_correctable_notice_and_the_correction_re_decodes()
+    {
+        // Nothing in this file declares a colour space, so the roll opens on the convention and
+        // must say so. That notice is the whole replacement for the old blocking question.
+        string path = WriteTiff(16, new[] { 32768, 24000, 16000 });
+        try
+        {
+            using var vm = new MainViewModel();
+            var config = new ImportConfig();
+            config.Paths.Add(path);
+            await vm.LoadRollWithConfigAsync(config);
+
+            Assert.True(vm.ShowTiffInputNotice);
+            Assert.Contains("sRGB", vm.TiffInputNoticeText, StringComparison.Ordinal);
+            Assert.Contains("auto(", vm.ColorPipelineDiagnostic, StringComparison.Ordinal);
+
+            await vm.SetTiffInputAssumptionAsync(TiffInputAssumption.Linear);
+
+            // An override is no longer a guess, so the notice retires itself.
+            Assert.False(vm.ShowTiffInputNotice);
+            Assert.Contains("Linear", vm.ColorPipelineDiagnostic, StringComparison.Ordinal);
+            Assert.DoesNotContain("auto(", vm.ColorPipelineDiagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task A_roll_that_declared_itself_is_not_nagged_about()
+    {
+        string path = WriteTiff(16, new[] { 32768, 24000, 16000 }, software: "VueScan 9.8.11");
+        try
+        {
+            using var vm = new MainViewModel();
+            var config = new ImportConfig();
+            config.Paths.Add(path);
+            await vm.LoadRollWithConfigAsync(config);
+
+            Assert.False(vm.ShowTiffInputNotice);
+            Assert.Contains("ScannerSoftware", vm.ColorPipelineDiagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task The_notice_can_be_dismissed_without_changing_the_admission()
+    {
+        string path = WriteTiff(16, new[] { 32768, 24000, 16000 });
+        try
+        {
+            using var vm = new MainViewModel();
+            var config = new ImportConfig();
+            config.Paths.Add(path);
+            await vm.LoadRollWithConfigAsync(config);
+            string before = vm.ColorPipelineDiagnostic;
+
+            vm.DismissTiffInputNotice();
+
+            Assert.False(vm.ShowTiffInputNotice);
+            Assert.Equal(before, vm.ColorPipelineDiagnostic);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Theory]
@@ -224,7 +318,8 @@ public sealed class ManagedUntaggedTiffAssumptionTests
             Assert.Equal(persistedFlag, reopened.Meta.TiffIsLinear);
             Assert.Equal(
                 assumption,
-                TiffInputAssumptionPolicy.FromPersistedLinearFlag(reopened.Meta.TiffIsLinear));
+                TiffInputAssumptionPolicy.FromPersistedLinearFlag(
+                    reopened.Meta.TiffIsLinear, ColorPipelineVersion.ManagedV2));
         }
         finally
         {
@@ -234,11 +329,17 @@ public sealed class ManagedUntaggedTiffAssumptionTests
     }
 
     [Fact]
-    public void Missing_project_field_and_legacy_selector_are_explicit_compatibility_only()
+    public void Missing_project_field_means_legacy_compatibility_or_detection_by_version()
     {
+        // The same absent field means different things either side of the pipeline version: a
+        // pre-v2 project must keep the frozen by-bit-depth route, while a v2 project never wrote
+        // null before detection existed, so null there is the detector's state.
         Assert.Equal(
             TiffInputAssumption.LegacyByBitDepthCompatibility,
-            TiffInputAssumptionPolicy.FromPersistedLinearFlag(null));
+            TiffInputAssumptionPolicy.FromPersistedLinearFlag(null, ColorPipelineVersion.LegacyV1));
+        Assert.Equal(
+            TiffInputAssumption.Unspecified,
+            TiffInputAssumptionPolicy.FromPersistedLinearFlag(null, ColorPipelineVersion.ManagedV2));
         Assert.Throws<ArgumentException>(() =>
             TiffInputAssumptionPolicy.FromExplicitChoice(linear: true, srgb: true));
         Assert.Equal(
@@ -246,7 +347,11 @@ public sealed class ManagedUntaggedTiffAssumptionTests
             TiffInputAssumptionPolicy.FromExplicitChoice(linear: false, srgb: false));
     }
 
-    private static string WriteTiff(int bitsPerSample, int[] samples, byte[]? embeddedIcc = null)
+    private static string WriteTiff(
+        int bitsPerSample,
+        int[] samples,
+        byte[]? embeddedIcc = null,
+        string? software = null)
     {
         int samplesPerPixel = 3;
         int width = samples.Length / samplesPerPixel;
@@ -264,6 +369,8 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         tif.SetField(TiffTag.ROWSPERSTRIP, 1);
         if (embeddedIcc is not null)
             tif.SetField(TiffTag.ICCPROFILE, embeddedIcc.Length, embeddedIcc);
+        if (software is not null)
+            tif.SetField(TiffTag.SOFTWARE, software);
 
         byte[] row = new byte[samples.Length * (bitsPerSample / 8)];
         for (int index = 0; index < samples.Length; index++)

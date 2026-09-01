@@ -344,8 +344,8 @@ public static class TiffIO
 
     /// <summary>
     /// Compatibility overload for callers that predate the typed TIFF assumption. In ManagedV2,
-    /// <c>false</c> now means "no fallback selected", not "guess from bit depth"; a usable embedded
-    /// ICC can still open, while an untagged input must use the typed overload below. LegacyV1
+    /// <c>false</c> means "no explicit override", which resolves through <see cref="TiffInputDetector"/>
+    /// rather than guessing from bit depth; a usable embedded ICC still wins outright. LegacyV1
     /// retains the frozen boolean behaviour byte-for-byte.
     /// </summary>
     public static WorkingFrame LoadWorkingFrame(
@@ -411,7 +411,7 @@ public static class TiffIO
             }
         }
         catch (ColorManagementException ex)
-            when (TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption))
+            when (TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption))
         {
             fallbackDiagnostic = OneLine(ex.Message);
         }
@@ -439,7 +439,7 @@ public static class TiffIO
                 // change of colour space.
                 when (ex is not OperationCanceledException and not OutOfMemoryException
                     and not ColorTransformCreationException
-                    && TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption))
+                    && TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption))
             {
                 fallbackDiagnostic = OneLine(ex.Message);
             }
@@ -449,7 +449,7 @@ public static class TiffIO
         // before consulting the selected fallback; its primaries remain explicitly unknown.
         // The declaration does not, however, waive managed-v2 admission: an untagged scanner
         // file still needs either a deliberate fallback choice or the frozen legacy policy.
-        bool fallbackAdmitted = TiffInputAssumptionPolicy.IsExplicitFallback(inputAssumption)
+        bool fallbackAdmitted = TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption)
             || inputAssumption == TiffInputAssumption.LegacyByBitDepthCompatibility;
         if (fallbackAdmitted
             && fallbackDiagnostic is null
@@ -461,29 +461,77 @@ public static class TiffIO
         return inputAssumption switch
         {
             TiffInputAssumption.Linear => DecodeManagedLinearAssumption(
-                path, stableId, fallbackDiagnostic),
+                path, stableId, ExplicitPrefix("linear", fallbackDiagnostic)),
             TiffInputAssumption.Srgb => DecodeManagedSrgbAssumption(
-                path, stableId, fallbackDiagnostic, colorManagement),
+                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement),
             TiffInputAssumption.LegacyByBitDepthCompatibility when fallbackDiagnostic is null =>
                 LoadManagedCompatibility(
                     path,
                     "managed v2 versioned legacy-by-bit-depth compatibility"),
-            TiffInputAssumption.Unspecified => throw MissingTiffInputAssumption(path, fallbackDiagnostic),
+            TiffInputAssumption.Unspecified => DecodeManagedDetected(
+                path, stableId, fallbackDiagnostic, colorManagement),
             TiffInputAssumption.LegacyByBitDepthCompatibility =>
                 throw MissingTiffInputAssumption(path, fallbackDiagnostic),
             _ => throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null),
         };
     }
 
-    private static WorkingFrame DecodeManagedSrgbAssumption(
+    /// <summary>
+    /// Resolves an untagged file from what it actually carries. A file that characterized itself
+    /// through TIFF 6.0 or Exif tags gets an exact profile built from those tags — a better answer
+    /// than the two-way Linear/sRGB question could ever produce. Everything else lands on one of
+    /// the two assumption routes below, carrying the detector's reason into the decode recipe so
+    /// the choice stays auditable.
+    /// </summary>
+    private static WorkingFrame DecodeManagedDetected(
         string path,
         string stableId,
         string? fallbackDiagnostic,
         IColorManagementEngine colorManagement)
     {
+        TiffInputDetection detection = TiffInputDetector.Detect(path);
         string prefix = fallbackDiagnostic is null
-            ? "managed v2 explicit roll fallback sRGB"
-            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); explicit roll fallback sRGB";
+            ? "managed v2 detected input"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); detected input";
+        string reason = $"{detection.Evidence}: {detection.Diagnostic}";
+
+        if (detection.CharacterizedSpace is ColorSpaceDef characterized)
+        {
+            var profile = ColorProfileRef.Create(
+                IccProfiles.Build(characterized),
+                $"Detected TIFF input ({characterized.Name})",
+                ProfileRole.Input,
+                new ProfileSource.Generated(
+                    "OpenRevelare.TiffInputDetector", detection.Evidence.ToString()));
+            return DecodeManagedWithProfile(
+                path,
+                stableId,
+                profile,
+                characterized.Transfer == TransferFunction.Linear
+                    ? ColorReference.SceneReferred
+                    : ColorReference.DisplayReferred,
+                $"{prefix} [{reason}] -> exact profile from file tags -> LittleCMS -> linear ACEScg",
+                colorManagement);
+        }
+
+        return detection.Assumption == TiffInputAssumption.Linear
+            ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]")
+            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement);
+    }
+
+    /// <summary>Recipe wording for a user-selected roll override.</summary>
+    private static string ExplicitPrefix(string kind, string? fallbackDiagnostic) =>
+        fallbackDiagnostic is null
+            ? $"managed v2 explicit roll fallback {kind}"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); " +
+              $"explicit roll fallback {kind}";
+
+    private static WorkingFrame DecodeManagedSrgbAssumption(
+        string path,
+        string stableId,
+        string prefix,
+        IColorManagementEngine colorManagement)
+    {
         return DecodeManagedWithProfile(
             path,
             stableId,
@@ -496,7 +544,7 @@ public static class TiffIO
     private static WorkingFrame DecodeManagedLinearAssumption(
         string path,
         string stableId,
-        string? fallbackDiagnostic)
+        string prefix)
     {
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
@@ -518,9 +566,6 @@ public static class TiffIO
             CompatibilityPolicy.None,
             TransferState.LinearInProfilePrimaries,
             range);
-        string prefix = fallbackDiagnostic is null
-            ? "managed v2 explicit roll fallback linear"
-            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); explicit roll fallback linear";
         var source = new SourceDescriptor(
             stableId,
             Path.GetFileName(path),

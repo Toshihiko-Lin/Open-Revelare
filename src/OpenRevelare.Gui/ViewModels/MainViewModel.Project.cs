@@ -27,7 +27,92 @@ public partial class MainViewModel
     public string ColorPipelineDiagnostic =>
         (_colorPipelineVersion == ColorPipelineVersion.LegacyV1
             ? "LegacyV1 (explicit compatibility)"
-            : "ManagedV2 (exact ICC)") + $" · TIFF fallback={_tiffInputAssumption}";
+            : "ManagedV2 (exact ICC)") + $" · TIFF input={DescribeTiffInput()}";
+
+    /// <summary>
+    /// "Unspecified" is an implementation word for "the user set no override", which is the normal
+    /// state now that files are read rather than interrogated. The diagnostic says what actually
+    /// happened instead, including the evidence when detection has run.
+    /// </summary>
+    private string DescribeTiffInput()
+    {
+        if (_tiffInputAssumption != TiffInputAssumption.Unspecified)
+            return _tiffInputAssumption.ToString();
+        return _tiffInputDetection is { } detection
+            ? $"auto({detection.Evidence} -> {detection.Assumption})"
+            : "auto";
+    }
+
+    /// <summary>Detection for the open roll, refreshed whenever the roll or the override changes.</summary>
+    private TiffInputDetection? _tiffInputDetection;
+
+    private bool _tiffInputNoticeDismissed;
+
+    /// <summary>
+    /// Shown only when detection had to fall back on convention — that is, when the answer was NOT
+    /// read out of the file. A file that declared itself needs no prompt, and nagging about those
+    /// would train the user to dismiss the one case that matters.
+    /// </summary>
+    public bool ShowTiffInputNotice =>
+        _colorPipelineVersion == ColorPipelineVersion.ManagedV2
+        && _tiffInputAssumption == TiffInputAssumption.Unspecified
+        && _tiffInputDetection is { IsConclusive: false }
+        && !_tiffInputNoticeDismissed;
+
+    public string TiffInputNoticeText => _tiffInputDetection is { } detection
+        ? Loc.F($"这卷 TIFF 没有可用的色彩声明，已按 sRGB 处理。{detection.Diagnostic}。看着不对就改为线性。")
+        : string.Empty;
+
+    public void DismissTiffInputNotice()
+    {
+        if (_tiffInputNoticeDismissed) return;
+        _tiffInputNoticeDismissed = true;
+        OnPropertyChanged(nameof(ShowTiffInputNotice));
+    }
+
+    /// <summary>
+    /// Re-reads the open roll's first frame and republishes the notice. Cheap: one file open for
+    /// tags only, no pixels. RAW rolls and legacy projects short-circuit to no detection at all.
+    /// </summary>
+    private void RefreshTiffInputDetection()
+    {
+        TiffInputDetection? detection = null;
+        if (_colorPipelineVersion == ColorPipelineVersion.ManagedV2
+            && _tiffInputAssumption == TiffInputAssumption.Unspecified)
+        {
+            string? path = Frames
+                .FirstOrDefault(frame => !frame.IsVirtual && !RawDecode.IsRawExtension(frame.Path))
+                ?.Path;
+            if (path is not null && File.Exists(path))
+                detection = TiffInputDetector.Detect(path);
+        }
+
+        _tiffInputDetection = detection;
+        OnPropertyChanged(nameof(ShowTiffInputNotice));
+        OnPropertyChanged(nameof(TiffInputNoticeText));
+        OnPropertyChanged(nameof(ColorPipelineDiagnostic));
+    }
+
+    /// <summary>
+    /// Applies a roll-level override after the fact — the correction path that replaces the old
+    /// upfront question. The user is deciding here with the picture in front of them, which is the
+    /// only point at which "linear or sRGB" is answerable by looking.
+    /// </summary>
+    public async Task SetTiffInputAssumptionAsync(TiffInputAssumption assumption)
+    {
+        if (assumption is not (TiffInputAssumption.Linear or TiffInputAssumption.Srgb))
+            throw new ArgumentOutOfRangeException(nameof(assumption), assumption, null);
+        if (_tiffInputAssumption == assumption) return;
+
+        CommitLiveParams(CurrentFrame);
+        SetTiffInputAssumption(assumption);
+        _tiffInputNoticeDismissed = false;
+        await InvalidateColourStateAndReloadAsync();
+        RefreshTiffInputDetection();
+        string label = assumption == TiffInputAssumption.Linear ? Loc.T("线性") : "sRGB";
+        StatusText = Loc.F($"整卷 TIFF 输入已改为 {label}，全卷已重新解码。");
+    }
+
 
     private void SetColorPipelineVersion(ColorPipelineVersion value)
     {
@@ -60,6 +145,20 @@ public partial class MainViewModel
         Project.Data migration = BuildProjectData();
         Project.MigrateColorPipelineToV2(migration);
 
+        SetColorPipelineVersion(migration.ColorPipelineVersion);
+        await InvalidateColourStateAndReloadAsync();
+        RefreshTiffInputDetection();
+        StatusText = Loc.T("已迁移到色彩管理版（v2）；工程将以新版本保存，外观变化不会自动回退。");
+    }
+
+    /// <summary>
+    /// Drops every decoded artefact whose meaning depends on the colour admission, then re-decodes
+    /// the current frame and restarts the roll's background work. Shared by the pipeline migration
+    /// and by a roll-level TIFF input change: both invalidate exactly the same things, and letting
+    /// them drift apart would leave one of the two showing pixels from the previous admission.
+    /// </summary>
+    private async Task InvalidateColourStateAndReloadAsync()
+    {
         _renderCts?.Cancel();
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
@@ -67,7 +166,6 @@ public partial class MainViewModel
         _switchToken++;
         ClearSharpPatch();
 
-        SetColorPipelineVersion(migration.ColorPipelineVersion);
         _previews.Clear();
         ClearTiles();
         _negativeWb.Clear();
@@ -87,7 +185,6 @@ public partial class MainViewModel
 
         RestartThumbnails();
         StartRollWarmUp();
-        StatusText = Loc.T("已迁移到色彩管理版（v2）；工程将以新版本保存，外观变化不会自动回退。");
     }
 
     // ── Project save / load (.ncproj, schema-compatible with Python) ────────────
@@ -124,7 +221,8 @@ public partial class MainViewModel
         // new project's semantics into the old project's file.
         ColorPipelineVersion incomingPipelineVersion = data.ColorPipelineVersion;
         TiffInputAssumption incomingTiffInputAssumption =
-            TiffInputAssumptionPolicy.FromPersistedLinearFlag(data.Meta.TiffIsLinear);
+            TiffInputAssumptionPolicy.FromPersistedLinearFlag(
+                data.Meta.TiffIsLinear, incomingPipelineVersion);
         string? incomingCalSourceDir = data.Meta.CalSourcePath;
         string[]? incomingCalRgbPaths = data.Meta.CalRgbPaths is { } r && r.ContainsKey("R")
             ? new[] { r["R"], r.GetValueOrDefault("G", ""), r.GetValueOrDefault("B", "") }
@@ -252,6 +350,7 @@ public partial class MainViewModel
         AdoptProject(path);
         if (relinked) MarkRollDirty();   // the repaired paths, written back on the next idle pause
 
+        RefreshTiffInputDetection();
         StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
@@ -263,14 +362,12 @@ public partial class MainViewModel
     {
         if (cfg.Paths.Count == 0) return;
 
-        bool pureScannerRoll = cfg.Paths.All(path => !RawDecode.IsRawExtension(path));
-        if (pureScannerRoll
-            && cfg.TiffInputAssumption is not (TiffInputAssumption.Linear or TiffInputAssumption.Srgb))
-        {
-            throw new ArgumentException(
-                "A new TIFF roll must explicitly select Linear or sRGB as its untagged/unusable-ICC fallback.",
-                nameof(cfg));
-        }
+        // No admission gate here any more. A TIFF that carries no usable ICC is resolved by
+        // TiffInputDetector from the colorimetry the file itself declares, and only falls back to a
+        // labelled convention when it declares none. Demanding an upfront Linear/sRGB answer taxed
+        // every import to cover a minority of files, and asked at the one moment the user cannot
+        // judge it — before a single pixel is on screen. cfg.TiffInputAssumption still carries an
+        // explicit override when the user set one; the roll can also be re-decided afterwards.
 
         // Save the outgoing roll while all of its own colour state is still installed. The
         // incoming assumption is adopted only after preparation succeeds, so a bad calibration
@@ -342,6 +439,11 @@ public partial class MainViewModel
         _configLoad = true;
         try { await LoadRollAsync(cfg.Paths); }
         finally { _configLoad = false; }
+
+        // The frames are in place now, so the detector has something to read. This is also what
+        // decides whether the correctable notice appears.
+        _tiffInputNoticeDismissed = false;
+        RefreshTiffInputDetection();
 
         // After the load, not before: a new roll resets its notes, which would wipe whatever the
         // import dialog just collected. Blank fields are left alone rather than written through,

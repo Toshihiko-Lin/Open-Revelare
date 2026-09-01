@@ -100,17 +100,26 @@ Selecting several files puts you in roll mode.
 **Copying light source (camera RAW only)**: choose "Broad-spectrum (white light) — Path B" or
 "Narrow-band (RGB) — Path A". The latter also wants a calibration folder.
 
-**TIFF input assumption (whole roll)**
+**TIFF colour space is worked out for you**
 
-A TIFF-only roll must explicitly choose either "samples are already linear" or "samples are sRGB
-encoded" before import can start. The choice is stored in `.ncproj`; full decode, preview, strip
-splitting, calibration and export all use the same assumption.
+Import asks no colour questions. A usable embedded ICC always takes priority; without one, the
+application reads what the file itself declares, in order of trust:
 
-A usable embedded ICC always takes priority. The roll-level choice is only a fallback when a file
-has no usable profile. Linear keeps the primaries uncharacterized and passes the working-space
-numbers through; sRGB uses the exact sRGB profile for a complete LittleCMS transform. Check the
-scanner application's output settings if unsure: bit depth alone does not declare an encoding.
-Only old projects with no stored choice retain the historical bit-depth compatibility route.
+1. a floating-point `SampleFormat` — float samples are scene data, so they are linear;
+2. the TIFF 6.0 white point / primaries / `TransferFunction` tags — these exist precisely to
+   declare colorimetry without an ICC, and yield an exact profile, which is far more specific than
+   any "linear or sRGB" answer;
+3. Exif `ColorSpace` — sRGB or Adobe RGB;
+4. the `Software` tag — the fixed untagged output of a known scanner application.
+
+Only when all four say nothing does the roll fall back on the convention for untagged scans, sRGB,
+**and a notice above the preview says so** and offers to read the roll as linear instead. By then
+the picture is on screen, which is the only point at which that question is answerable by looking.
+Changing it re-decodes the roll, and the choice is saved in `.ncproj`.
+
+Linear keeps the primaries uncharacterized and passes the working-space numbers through; sRGB uses
+the exact sRGB profile for a complete LittleCMS transform. Only old projects with no stored choice
+retain the historical bit-depth compatibility route.
 
 **Auto-analyse the roll and remove the mask**
 

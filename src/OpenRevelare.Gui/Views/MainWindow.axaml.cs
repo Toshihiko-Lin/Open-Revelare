@@ -873,6 +873,23 @@ public partial class MainWindow : Window
     private void OnDismissRollAnalysisNoticeClick(object? sender, RoutedEventArgs e)
         => Vm?.DismissRollAnalysisNotice();
 
+    // Changing the roll's TIFF admission re-decodes everything, so both buttons go through the
+    // same view-model path as the pipeline migration rather than poking at state from here.
+    private async void OnTiffInputLinearClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null) return;
+        await Vm.SetTiffInputAssumptionAsync(TiffInputAssumption.Linear);
+    }
+
+    private async void OnTiffInputSrgbClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null) return;
+        await Vm.SetTiffInputAssumptionAsync(TiffInputAssumption.Srgb);
+    }
+
+    private void OnDismissTiffInputNoticeClick(object? sender, RoutedEventArgs e)
+        => Vm?.DismissTiffInputNotice();
+
     private void OnBannerCloseClick(object? sender, RoutedEventArgs e)
     {
         _bannerHintDismissed = true;

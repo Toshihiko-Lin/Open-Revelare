@@ -452,6 +452,33 @@
                         </Button>
                     </StackPanel>
 
+                    <!-- Replaces the old mandatory import question. It appears only when the
+                         detector had to fall back on convention, and it is answerable here because
+                         the picture it is about is on screen behind it. -->
+                    <Border IsVisible="{Binding ShowTiffInputNotice}"
+                            HorizontalAlignment="Center" Margin="0,0,0,4"
+                            CornerRadius="8" Padding="12,8" MaxWidth="680"
+                            Background="{DynamicResource ChromeBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                        <Grid ColumnDefinitions="*,8,Auto,6,Auto,8,Auto">
+                            <TextBlock Grid.Column="0" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       FontSize="12" Foreground="{DynamicResource TextBrush}"
+                                       Text="{Binding TiffInputNoticeText}" />
+                            <Button Grid.Column="2" Content="{i18n:T '改为线性'}" Padding="8,3"
+                                    Click="OnTiffInputLinearClick" />
+                            <Button Grid.Column="4" Content="{i18n:T '确认 sRGB'}" Padding="8,3"
+                                    Click="OnTiffInputSrgbClick" />
+                            <Button Grid.Column="6" Classes="icon" Width="24" Height="24"
+                                    MinHeight="24" CornerRadius="12" VerticalAlignment="Center"
+                                    Click="OnDismissTiffInputNoticeClick"
+                                    Background="{DynamicResource ChromeBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
                     <Border IsVisible="{Binding ShowRollAnalysisNotice}"
                             HorizontalAlignment="Center" Margin="0,0,0,4"
                             CornerRadius="8" Padding="12,8" MaxWidth="620"

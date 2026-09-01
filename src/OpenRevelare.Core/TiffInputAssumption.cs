@@ -6,7 +6,19 @@ namespace OpenRevelare.Core;
 /// </summary>
 public enum TiffInputAssumption
 {
-    /// <summary>No fallback was selected. Managed input must reject an untagged/unusable file.</summary>
+    /// <summary>
+    /// No explicit user choice. Managed input resolves each file through
+    /// <see cref="TiffInputDetector"/>, which reads the colorimetry the file already carries and
+    /// falls back to a labelled conventional default when it carries none.
+    ///
+    /// <para>
+    /// This deliberately does NOT reject the file. Demanding an upfront Linear/sRGB answer put the
+    /// question at the moment the user knows least — before any pixel is on screen — to cover a
+    /// minority of files, while the majority declare themselves through TIFF 6.0 or Exif tags that
+    /// simply were not being read. The choice below remains available as an override, and the roll
+    /// can be re-decided after the picture is visible.
+    /// </para>
+    /// </summary>
     Unspecified = 0,
 
     /// <summary>
@@ -39,14 +51,26 @@ public static class TiffInputAssumptionPolicy
     }
 
     /// <summary>
-    /// Recover the historical <c>roll_meta.tiff_is_linear</c> field. Missing/null means the
-    /// versioned compatibility route, which preserves projects saved before the field was used.
+    /// Recover the historical <c>roll_meta.tiff_is_linear</c> field.
+    ///
+    /// <para>
+    /// A missing/null field means different things either side of the pipeline version, and the
+    /// version is the only thing that can tell them apart. Under <see cref="ColorPipelineVersion.LegacyV1"/>
+    /// it is a project saved before the field carried meaning, which must keep the frozen
+    /// by-bit-depth route. Under <see cref="ColorPipelineVersion.ManagedV2"/> it cannot be a legacy
+    /// project at all — v2 never wrote null before automatic detection existed — so it is the
+    /// detector's state.
+    /// </para>
     /// </summary>
-    public static TiffInputAssumption FromPersistedLinearFlag(bool? tiffIsLinear) =>
+    public static TiffInputAssumption FromPersistedLinearFlag(
+        bool? tiffIsLinear,
+        ColorPipelineVersion pipelineVersion) =>
         tiffIsLinear switch
         {
             true => TiffInputAssumption.Linear,
             false => TiffInputAssumption.Srgb,
+            null when pipelineVersion == ColorPipelineVersion.ManagedV2 =>
+                TiffInputAssumption.Unspecified,
             null => TiffInputAssumption.LegacyByBitDepthCompatibility,
         };
 
@@ -56,11 +80,19 @@ public static class TiffInputAssumptionPolicy
         TiffInputAssumption.Linear => true,
         TiffInputAssumption.Srgb => false,
         TiffInputAssumption.LegacyByBitDepthCompatibility => null,
-        TiffInputAssumption.Unspecified => throw new InvalidOperationException(
-            "A new TIFF roll cannot be saved without an explicit input assumption."),
+        // Automatic detection is the absence of a stored override, which is what null already
+        // meant. Reusing it keeps the project schema unchanged.
+        TiffInputAssumption.Unspecified => null,
         _ => throw new ArgumentOutOfRangeException(nameof(assumption), assumption, null),
     };
 
     internal static bool IsExplicitFallback(TiffInputAssumption assumption) =>
         assumption is TiffInputAssumption.Linear or TiffInputAssumption.Srgb;
+
+    /// <summary>
+    /// Whether managed admission has somewhere to go when the embedded profile turns out to be
+    /// absent or broken. Automatic detection counts: it always resolves to a usable answer.
+    /// </summary>
+    internal static bool AdmitsFallback(TiffInputAssumption assumption) =>
+        IsExplicitFallback(assumption) || assumption == TiffInputAssumption.Unspecified;
 }

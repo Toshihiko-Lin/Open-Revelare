@@ -639,9 +639,12 @@ static void PrintUsage()
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
         "  -o, --output <path>         output TIFF (normalized: uint16; scene-linear: float32)\n" +
-        "  --input-linear              untagged/unusable-ICC fallback: samples are linear\n" +
-        "  --input-srgb                untagged/unusable-ICC fallback: exact sRGB profile\n" +
-        "                              (mutually exclusive; usable embedded ICC always wins)\n" +
+        "  --input-linear              OVERRIDE the detected untagged/unusable-ICC input:\n" +
+        "                              samples are linear\n" +
+        "  --input-srgb                OVERRIDE it with the exact sRGB profile\n" +
+        "                              (mutually exclusive, both optional; omitting them detects\n" +
+        "                              from SampleFormat / TIFF 6.0 chromaticity / Exif / Software,\n" +
+        "                              and a usable embedded ICC always wins outright)\n" +
         "                              --decode-only/--dump-preinv keep the legacy decoder\n" +
         "                              and reject --input-linear\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +

@@ -333,7 +333,7 @@ CLUT 插值的细微差异会破坏跨平台可复现性。ColorSync/DWM 只在�
 | TIFF + 有效 matrix/TRC ICC | `Characterized` | LittleCMS 完整转换为 linear ACEScg | profile 无法建立 transform 时阻止“已表征”路径并报告原因 |
 | TIFF + A2B/CLUT ICC | `Characterized` | LittleCMS 使用 profile LUT；不拆成半个 TRC + 半个 matrix | transform 失败则显式错误/override，不静默猜 sRGB |
 | malformed ICC | `Uncharacterized` 或用户明确指定的 `Characterized` | 不执行半次转换；只有已选择的 roll fallback 可接管，并在 decode recipe 记录拒绝原因 | 无显式 fallback 时拒绝；不得静默忽略坏 profile |
-| untagged 8/16/32-bit TIFF | `UncharacterizedCapture` 或用户明确指定的 sRGB | 新项目强制选择并记录 linear/sRGB 输入假设；旧项目走 versioned compatibility | 不按位深偷偷决定原色；现有 8-bit inverse-sRGB 行为仅可留在 legacy route |
+| untagged 8/16/32-bit TIFF | `UncharacterizedCapture`、检测出的 exact profile，或用户显式覆盖 | `TiffInputDetector` 依次读 SampleFormat、TIFF 6.0 色度标签、Exif ColorSpace、Software；都问不出才落到有标注的 sRGB 惯例；旧项目走 versioned compatibility | 不按位深偷偷决定原色；也不把「文件已经声明过的事」当成必须问用户的问题；惯例回退必须可见且可事后改判 |
 | RAW negative | `CameraNativeUncharacterized` | UniWB、linear、camera-native 解码保持不变；等待 rig/film 联合表征 | 不自动套普通场景相机 ColorMatrix，不贴 ACEScg/sRGB |
 | RAW + 经验证的 rig/film calibration | `CharacterizedCapture` | 使用与 `t_base`/endpoints 联合求得的输入变换 | calibration identity 随 roll 保存 |
 | 用户指定 capture profile | `Characterized` | 保存 exact bytes/hash；重新建立依赖该输入的 roll calibration | profile 变化显式使相关 calibration stale |
@@ -345,7 +345,7 @@ ColorMatrix。
 Windows/GUI 的新 TIFF 卷即使当前文件带 ICC，也必须选定无/坏 ICC 时的整卷 fallback；有效嵌入 ICC
 始终优先。选择存入 `roll_meta.tiff_is_linear`，并进入 full/preview/region/calibration/split 的 decode
 cache identity。linear fallback 保持原色未表征并只作数值透传；sRGB fallback 使用 exact built-in sRGB
-经一次完整 LittleCMS transform。CLI 用互斥的 `--input-linear` / `--input-srgb` 表达同一选择；无可用
+经一次完整 LittleCMS transform。CLI 的互斥 `--input-linear` / `--input-srgb` 现在是**覆盖开关**而非必填项；两个都不给即为自动检测。无可用
 ICC 且两者都未给出时 fail closed。缺字段的旧工程才使用按位深的冻结兼容路径。
 
 ---
