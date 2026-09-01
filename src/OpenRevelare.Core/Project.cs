@@ -15,7 +15,24 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Project
 {
-    private const int FormatVersion = 2;
+    // Bumped to 3 by the managed colour pipeline. The schema itself gained only one key, so
+    // this is not about parsing: a build that predates `color_pipeline_version` reads a v2 file's
+    // absent key as "legacy", which is right, but would read a NEW file's key as absent too and
+    // render it through the v1 pipeline without a word. Refusing to open is the only honest
+    // answer an old build can give, and it can only give it if the version says so.
+    private const int FormatVersion = 3;
+
+    /// <summary>Oldest schema this build still reads. v2 files have no colour-pipeline key.</summary>
+    private const int MinimumSupportedFormatVersion = 2;
+
+    /// <summary>
+    /// Only a managed-pipeline project needs the newer floor. A legacy-pipeline project is still
+    /// rendered correctly by a pre-v3 build — that build ignores the colour key and falls back to
+    /// v1, which is exactly what the file asks for — so locking it out would cost compatibility
+    /// and buy nothing.
+    /// </summary>
+    private static int FormatVersionFor(ColorPipelineVersion pipeline) =>
+        pipeline == ColorPipelineVersion.ManagedV2 ? FormatVersion : MinimumSupportedFormatVersion;
     private const ColorPipelineVersion CurrentColorPipelineVersion = ColorPipelineVersion.ManagedV2;
 
     // ── Public data model ───────────────────────────────────────────────────────
@@ -71,7 +88,7 @@ public static class Project
             d.ColorPipelineVersion);
         var root = new JsonObject
         {
-            ["version"] = FormatVersion,
+            ["version"] = FormatVersionFor(colorPipelineVersion),
             ["color_pipeline_version"] = (int)colorPipelineVersion,
             ["created"] = DateTime.Now.ToString("yyyy-MM-dd"),
             ["roll_meta"] = SerRollMeta(d.Meta),
@@ -109,8 +126,11 @@ public static class Project
         JsonNode root = JsonNode.Parse(File.ReadAllText(path))
                         ?? throw new InvalidDataException(CoreText.T("空的工程文件"));
         int version = (int?)root["version"] ?? 1;
-        if (version != FormatVersion)
-            throw new InvalidDataException(CoreText.F($"不支持的 .ncproj 版本 {version}（本版本支持 {FormatVersion}）"));
+        if (version < MinimumSupportedFormatVersion || version > FormatVersion)
+        {
+            throw new InvalidDataException(CoreText.F(
+                $"不支持的 .ncproj 版本 {version}（本版本支持 {MinimumSupportedFormatVersion}–{FormatVersion}）"));
+        }
 
         var d = new Data
         {
