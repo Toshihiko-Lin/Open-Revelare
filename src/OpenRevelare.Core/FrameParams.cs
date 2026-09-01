@@ -1,4 +1,4 @@
-namespace OpenRevelare.Core;
+﻿namespace OpenRevelare.Core;
 
 /// <summary>
 /// Per-frame parameters. Port of the Stage-1 (FilmBase) fields of Python's
@@ -278,7 +278,20 @@ public sealed class FrameParams
     /// </summary>
     public double[,]? InputPrimaries { get; set; }
 
-    /// <summary>White point of <see cref="InputPrimaries"/> as CIE xy; null = D65.</summary>
+    /// <summary>
+    /// White point of <see cref="InputPrimaries"/> as CIE xy.
+    ///
+    /// Null means NO CHROMATIC ADAPTATION, which is only the same thing as "the working space's
+    /// own white" — ACEScg's ~D60, not D65. <see cref="InputTransform.ToWorking"/> is where that
+    /// is implemented, and it is the correct default: an absent declaration is the file declining
+    /// to say, and adapting from an assumed D65 would apply a real Bradford transform to data
+    /// nobody claimed was D65.
+    ///
+    /// This comment used to read "null = D65" while the implementation used the working white.
+    /// The two never disagreed in practice because <see cref="InputPrimaries"/> is null on every
+    /// roll, so the white point is never read — but a project file can carry a declared pair in,
+    /// and then the comment would have been the only description of a transform it got wrong.
+    /// </summary>
     public double[]? InputWhitePoint { get; set; }
 
     /// <summary>Path-A decouple matrix applied to the linear RAW before inversion (row-major

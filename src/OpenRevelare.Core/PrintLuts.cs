@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace OpenRevelare.Core;
 
@@ -62,12 +62,13 @@ public static class PrintLuts
             ?? throw new InvalidDataException($"内置 LUT 缺失：{name}");
         using var reader = new StreamReader(stream);
         string fallback = Builtins.First(b => b.Id == id).Name;
-        // No out-of-band characterization passed on purpose. These two assets declare
-        // "Display: ITU-Rec.709, Gamma 2.4" in their own headers, and CubeLut now reads that, so
-        // hard-coding the answer here would make the built-ins a whitelist the parser never
-        // exercises — and would let a parsing regression go unnoticed until a user's cube hit it.
-        // BuiltIns_declare_their_own_Rec709_output pins that these files really do say it.
-        return CubeLut.Parse(reader, fallback, LutInputEncoding.Cineon);
+        // No out-of-band characterization passed on purpose, on EITHER end. These two assets
+        // declare "Input: Cineon Log" and "Display: ITU-Rec.709, Gamma 2.4" in their own headers,
+        // and CubeLut now reads both, so hard-coding either answer here would make the built-ins a
+        // whitelist the parser never exercises — and would let a parsing regression go unnoticed
+        // until a user's cube hit it. BuiltIns_declare_their_own_Rec709_output and
+        // BuiltIns_declare_their_own_Cineon_input pin that these files really do say it.
+        return CubeLut.Parse(reader, fallback);
     }
 
     /// <summary>

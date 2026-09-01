@@ -136,7 +136,7 @@ RenderedFrame(float32 + exact OutputProfile + OutputRecipe)
 | `Core/TiffIO.cs` untagged 路径 | 8-bit inverse-sRGB 或 16-bit 原样即可进入 working | 8-bit 只解 TRC、没有 sRGB→ACEScg primaries transform；16-bit 原色仍未知，两者随后都可能被当 ACEScg |
 | `FrameParams.InputWhitePoint` / `InputTransform` | 缺省白点约定一致 | 注释写 D65，实现使用 working white（约 D60）；这是 null/implicit semantics 已漂移的实例 |
 | `Core/ColorPipeline.ToOutputSpaceVia` | 保留 print cube 的 Rec709 数值，再嵌目标 ICC 就能保留 look | 像素仍带 Rec709 TRC，而 sRGB/P3/Adobe RGB profile 声明另一条 TRC；像素/profile 不匹配，Stage 2 的 decode 也可能用错曲线 |
-| `CubeLut` / `PrintLuts` | 任意用户 `.cube` 都可按 Cineon→Rec709 使用 | `.cube` 的**语法**没有这两个字段，但 Resolve 导出会把 output 写进头部注释（两个内置资产即如此），而解析器把注释丢掉了；当前 UI 接受任意 LUT 却套同一个隐含合同。output 已由 D-018 改为读取文件自述；input 的 Cineon 假设仍未显式化 |
+| `CubeLut` / `PrintLuts` | 任意用户 `.cube` 都可按 Cineon→Rec709 使用 | `.cube` 的**语法**没有这两个字段，但 Resolve 导出会把 output 写进头部注释（两个内置资产即如此），而解析器把注释丢掉了；当前 UI 接受任意 LUT 却套同一个隐含合同。output 已由 D-018 改为读取文件自述；input 由 D-019 同法处理：声明为非 Cineon 的直接拒绝，未声明的仍按 Cineon 但标注为惯例 |
 | legacy `DisplayReferredStage2=false` | 最后加目标 TRC 就是目标空间 | 路径没有完整的 primaries/display render，却仍可能嵌目标 ICC；旧项目需要明确兼容与迁移策略 |
 | CLI JPEG export | GUI/CLI 导出契约相同 | CLI 当前调用默认无 ICC overload；wide-gamut JPEG 即使像素正确也会成为未标记文件 |
 | 用户文档 `THEORY/GUIDE` | “预览数值原样提交，OS 根据已注册显示器 ICC 统一转换” | 对当前无标签 Avalonia surface 不成立；实现完成前这些段落必须视为已知过时说明 |
@@ -740,6 +740,7 @@ compositor。
 | D-015 | Accepted | 首期支持标准 RGB 与声明为 Rec709 output 的内置 print LUT；ManagedV2 对 output encoding 未知的任意外部 LUT fail closed | 没有可靠 output profile 就不能把像素冒充成用户选择的 ICC；后续 CLUT 支持需独立资产描述与对照测试 |
 | D-016 | Accepted | typed `Extended` TIFF 导出必须为 32-bit IEEE float 并嵌 exact profile；TIFF16 只接收 `Normalized` | 16-bit unsigned 会静默丢掉负值和 `>1` scene-linear headroom，违反 I1/I4 |
 | D-018 | Accepted | 「声明为 Rec709 output」由解析 cube 头部注释认定，而非内置白名单；读不到声明的仍按 D-015 fail closed | 两个内置资产的 Rec709 原本来自人工阅读同一行注释再硬编码，而解析器对所有其他文件丢弃了这行——用户从 Resolve 导出的 LUT 写着与内置完全相同的话却被拒。读取它不放宽 D-015 的判据，只是让判据可以被文件自己满足；内置资产随之走同一条路径，解析回归会在测试中立刻暴露而不是等用户撞上 |
+| D-019 | Accepted | LUT 的 input encoding 同样由 cube 头部注释认定：声明为非 Cineon 的 cube 在解析时即拒绝，未声明的仍按 Cineon 渲染但记为 `ConventionalDefault` | D-018 只修了 output 一端，而 input 才是无声失败的那一端——ACEScct / Log-C 的 cube 被按 Cineon 喂进去不会报错，只会给出一张看起来正常、颜色是错的图。同一份 Resolve 头部在 `# Display:` 上一行就写着 `#   Input: Cineon Log`，解析器同样把它丢了。拒绝而不是放宽：判据与 D-015 一致，只是让文件能自己推翻一个原本不可见的假设。未声明的不收紧，因为那样会让今天能用的 cube 全部失效，而并没有获得任何新信息——判定刻意从严（注释须以 `input` 开头且紧跟冒号），漏判退回原行为是安全的，误判则是回归 |
 | D-017 | Accepted | ManagedV2 的无/坏 ICC TIFF 使用 roll 级显式 fallback：linear 保持原色未表征并数值透传，sRGB 作为用户指定 exact profile；有效嵌入 ICC 永远优先 | 位深不是色彩声明；选择必须随工程与所有 decode cache 传播，旧项目才保留按位深 compatibility |
 
 ### 17.1 拒绝的替代方案

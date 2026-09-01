@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace OpenRevelare.Core;
 
@@ -15,6 +15,12 @@ namespace OpenRevelare.Core;
 ///
 /// Only Cineon is implemented today. The enum exists so that adding another is a new case in
 /// <see cref="LogEncoding"/> rather than a rethink of where the encoding decision lives.
+///
+/// <para>
+/// A cube that declares a DIFFERENT input in its header is refused at parse time rather than
+/// admitted as Cineon — see <see cref="CubeLut.NoteDeclaredInput"/>. That is the same fail-closed
+/// rule D-015 applies to the output side, applied to the end where the silent failure lives.
+/// </para>
 /// </summary>
 public enum LutInputEncoding
 {
@@ -24,6 +30,32 @@ public enum LutInputEncoding
     /// is what makes the encoding an affine map off the density domain rather than a conversion.
     /// </summary>
     Cineon,
+}
+
+/// <summary>
+/// Where a cube's <see cref="CubeLut.InputEncoding"/> came from.
+///
+/// <para>
+/// The distinction is the whole point of reading the header. A cube that SAYS "Input: Cineon Log"
+/// and a cube that says nothing are both rendered as Cineon, but only the first one is evidence;
+/// the second is this application's convention standing in for an answer. Collapsing them, which
+/// is what the code did before, is what let a Log-C cube render as a plausible wrong picture.
+/// </para>
+/// </summary>
+public enum LutInputEncodingSource
+{
+    /// <summary>
+    /// The file declared nothing about its input, so <see cref="LutInputEncoding.Cineon"/> is
+    /// assumed. Unchanged behaviour, and the only assumption still being made — but now it is
+    /// reportable rather than invisible.
+    /// </summary>
+    ConventionalDefault,
+
+    /// <summary>The file's own header names the encoding, and it is one this build implements.</summary>
+    Declared,
+
+    /// <summary>Supplied out of band by a caller that knows the stock; outranks the file.</summary>
+    CallerSpecified,
 }
 
 /// <summary>
@@ -81,6 +113,13 @@ public sealed class CubeLut
     public LutInputEncoding InputEncoding { get; }
 
     /// <summary>
+    /// How <see cref="InputEncoding"/> was arrived at. Only
+    /// <see cref="LutInputEncodingSource.ConventionalDefault"/> is an assumption; the other two
+    /// are statements by the file or by the caller.
+    /// </summary>
+    public LutInputEncodingSource InputEncodingSource { get; }
+
+    /// <summary>
     /// The characterized encoding produced by the cube. External files default to
     /// <see cref="LutOutputEncoding.Unknown"/> because the file format cannot prove it.
     /// </summary>
@@ -90,13 +129,15 @@ public sealed class CubeLut
     public string Title { get; }
 
     private CubeLut(int size, float[] data, float[] domainMin, float[] domainMax,
-                    LutInputEncoding encoding, LutOutputEncoding outputEncoding, string title)
+                    LutInputEncoding encoding, LutInputEncodingSource encodingSource,
+                    LutOutputEncoding outputEncoding, string title)
     {
         Size = size;
         _data = data;
         DomainMin = domainMin;
         DomainMax = domainMax;
         InputEncoding = encoding;
+        InputEncodingSource = encodingSource;
         OutputEncoding = outputEncoding;
         Title = title;
     }
@@ -105,14 +146,14 @@ public sealed class CubeLut
     /// Parses a <c>.cube</c> file. Throws <see cref="InvalidDataException"/> with a specific
     /// reason when the file is malformed — these messages reach the user, who picked the file.
     /// </summary>
-    /// <param name="encoding">What the cube's input is authored against. Not discoverable from
-    /// the file: .cube carries no encoding declaration, so it has to be stated by whoever knows
-    /// which stock this is.</param>
+    /// <param name="encoding">Out-of-band characterization from a caller that knows the stock.
+    /// Null — the normal case — reads the file's own header, falling back to the Cineon
+    /// convention only when the file declares nothing.</param>
     /// <param name="outputEncoding">Out-of-band characterization from a trusted asset manifest.
     /// Leave unknown to use whatever the file's own header declares, which is the normal case.</param>
     public static CubeLut Load(
         string path,
-        LutInputEncoding encoding = LutInputEncoding.Cineon,
+        LutInputEncoding? encoding = null,
         LutOutputEncoding outputEncoding = LutOutputEncoding.Unknown)
     {
         using var reader = new StreamReader(path);
@@ -127,16 +168,19 @@ public sealed class CubeLut
     /// </summary>
     /// <param name="fallbackTitle">Used when the cube declares no TITLE, in place of the
     /// filename <see cref="Load"/> would have taken it from.</param>
+    /// <param name="encoding">Trusted out-of-band input characterization; null reads the file.</param>
     /// <param name="outputEncoding">Trusted out-of-band characterization. When left unknown, the
     /// file's own header declaration is used if it has one.</param>
     public static CubeLut Parse(
         TextReader reader,
         string fallbackTitle,
-        LutInputEncoding encoding = LutInputEncoding.Cineon,
+        LutInputEncoding? encoding = null,
         LutOutputEncoding outputEncoding = LutOutputEncoding.Unknown)
     {
         if (!Enum.IsDefined(outputEncoding))
             throw new ArgumentOutOfRangeException(nameof(outputEncoding));
+        if (encoding is { } caller && !Enum.IsDefined(caller))
+            throw new ArgumentOutOfRangeException(nameof(encoding));
         int size = -1;
         string title = fallbackTitle;
         float[] domainMin = { 0f, 0f, 0f };
@@ -145,6 +189,7 @@ public sealed class CubeLut
         int written = 0;
         LutOutputEncoding declaredOutput = LutOutputEncoding.Unknown;
         bool outputDeclarationSeen = false;
+        string? declaredInput = null;
 
         for (string? raw = reader.ReadLine(); raw is not null; raw = reader.ReadLine())
         {
@@ -153,9 +198,11 @@ public sealed class CubeLut
             int hash = line.IndexOf('#');
             if (hash >= 0)
             {
-                // Read the comment before discarding it: the output characterization lives there
-                // and nowhere else.
-                NoteDeclaredOutput(line[(hash + 1)..], ref declaredOutput, ref outputDeclarationSeen);
+                // Read the comment before discarding it: BOTH characterizations live there and
+                // nowhere else.
+                string comment = line[(hash + 1)..];
+                NoteDeclaredOutput(comment, ref declaredOutput, ref outputDeclarationSeen);
+                NoteDeclaredInput(comment, ref declaredInput);
                 line = line[..hash];
             }
             line = line.Trim();
@@ -241,7 +288,10 @@ public sealed class CubeLut
         LutOutputEncoding resolvedOutput = outputEncoding != LutOutputEncoding.Unknown
             ? outputEncoding
             : declaredOutput;
-        return new CubeLut(size, data, domainMin, domainMax, encoding, resolvedOutput, title);
+
+        (LutInputEncoding input, LutInputEncodingSource inputSource) = ResolveInput(encoding, declaredInput);
+
+        return new CubeLut(size, data, domainMin, domainMax, input, inputSource, resolvedOutput, title);
     }
 
     /// <summary>
@@ -285,6 +335,72 @@ public sealed class CubeLut
         {
             declared = LutOutputEncoding.Rec709;
         }
+    }
+
+    /// <summary>
+    /// Records the cube's declared input encoding from a header comment, e.g. Resolve's
+    /// <c>"#   Input: Cineon Log"</c>. The raw text is kept rather than a parsed enum so that
+    /// <see cref="ResolveInput"/> can quote the file back to the user when it names something
+    /// this build cannot honour.
+    ///
+    /// <para>
+    /// DELIBERATELY STRICT about what counts as a declaration: the comment must begin with the
+    /// word "input" and the very next non-space character must be a colon. Print-film cubes are
+    /// full of comments that merely mention the word — "Input range", "generated from input.dpx" —
+    /// and treating one of those as a declaration would reject a cube that works today. A missed
+    /// declaration is safe (it falls back to the same Cineon convention as before); a false one is
+    /// a regression, so the asymmetry is resolved in favour of missing.
+    /// </para>
+    ///
+    /// <para>The first declaration DECIDES, for the reason spelled out on
+    /// <see cref="NoteDeclaredOutput"/>: a later comment must not override what the file plainly
+    /// said first.</para>
+    /// </summary>
+    private static void NoteDeclaredInput(string comment, ref string? declared)
+    {
+        if (declared is not null) return;
+
+        string text = comment.TrimStart();
+        if (!text.StartsWith("input", StringComparison.OrdinalIgnoreCase)) return;
+
+        string rest = text[5..].TrimStart();
+        if (rest.Length == 0 || rest[0] != ':') return;
+
+        declared = rest[1..].Trim();
+    }
+
+    /// <summary>
+    /// Decides the cube's input encoding from the caller's claim, then the file's, then
+    /// convention — and refuses the file outright when it declares an encoding this build does
+    /// not implement.
+    ///
+    /// <para>
+    /// REFUSING IS THE POINT. Before this, every cube was fed Cineon-encoded data no matter what
+    /// it was authored against, and an ACEScct or Log-C cube therefore produced a picture that was
+    /// wrong but entirely plausible — nothing errored, nothing looked broken, and the only symptom
+    /// was colour the user had no way to attribute. <see cref="LutInputEncoding"/> has warned about
+    /// exactly this since it was written; the file was saying so all along and the parser was
+    /// throwing the line away. A cube whose declared input cannot be honoured is as unusable as a
+    /// 1D LUT, and is rejected the same way, with the file's own words in the message.
+    /// </para>
+    /// </summary>
+    private static (LutInputEncoding Encoding, LutInputEncodingSource Source) ResolveInput(
+        LutInputEncoding? caller,
+        string? declared)
+    {
+        // Out-of-band knowledge outranks the file, exactly as it does for the output side: a
+        // caller passing this in is asserting it knows which stock this is.
+        if (caller is { } known) return (known, LutInputEncodingSource.CallerSpecified);
+
+        if (declared is null) return (LutInputEncoding.Cineon, LutInputEncodingSource.ConventionalDefault);
+
+        if (declared.Contains("cineon", StringComparison.OrdinalIgnoreCase))
+            return (LutInputEncoding.Cineon, LutInputEncodingSource.Declared);
+
+        throw new InvalidDataException(
+            CoreText.F($"这个 LUT 的文件头声明它的输入是「{declared}」，而本程序只能提供 Cineon 编码的输入。")
+            + CoreText.T("按 Cineon 喂给它会得到一张看起来正常、但颜色是错的图，所以这里直接拒绝。"
+                         + "请改用为 Cineon 输入制作的 LUT（例如内置的胶片风格）。"));
     }
 
     private static void ReadTriple(string[] tok, string line, float[] into)

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
@@ -195,7 +195,13 @@ static int Run(string[] args)
         try
         {
             CubeLut lut = PrintLuts.Validate(lutPath);
-            Console.WriteLine($"print LUT: {lut.Title} ({lut.Size}^3, {lut.InputEncoding} in)");
+            // Say WHERE the input encoding came from, not just what it is: "Cineon (assumed)" is
+            // the one case a batch operator can act on, by checking the cube really is a Cineon
+            // stock before trusting a few hundred exports to it.
+            string inSource = lut.InputEncodingSource == LutInputEncodingSource.ConventionalDefault
+                ? "assumed" : "declared";
+            Console.WriteLine(
+                $"print LUT: {lut.Title} ({lut.Size}^3, {lut.InputEncoding} in [{inSource}])");
             cal.PrintLut = lutPath;
         }
         catch (Exception ex)
