@@ -62,14 +62,12 @@ public static class PrintLuts
             ?? throw new InvalidDataException($"内置 LUT 缺失：{name}");
         using var reader = new StreamReader(stream);
         string fallback = Builtins.First(b => b.Id == id).Name;
-        // These two embedded Resolve assets declare "Display: ITU-Rec.709, Gamma 2.4" in their
-        // shipped headers. Generic user .cube files have no equivalent machine-readable contract
-        // and therefore retain CubeLut's fail-closed Unknown output characterization.
-        return CubeLut.Parse(
-            reader,
-            fallback,
-            LutInputEncoding.Cineon,
-            LutOutputEncoding.Rec709);
+        // No out-of-band characterization passed on purpose. These two assets declare
+        // "Display: ITU-Rec.709, Gamma 2.4" in their own headers, and CubeLut now reads that, so
+        // hard-coding the answer here would make the built-ins a whitelist the parser never
+        // exercises — and would let a parsing regression go unnoticed until a user's cube hit it.
+        // BuiltIns_declare_their_own_Rec709_output pins that these files really do say it.
+        return CubeLut.Parse(reader, fallback, LutInputEncoding.Cineon);
     }
 
     /// <summary>

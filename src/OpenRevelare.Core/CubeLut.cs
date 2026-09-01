@@ -27,10 +27,15 @@ public enum LutInputEncoding
 }
 
 /// <summary>
-/// What the cube's output numbers are characterized as. Unlike the input domain, the generic
-/// <c>.cube</c> format does not carry this fact, so an arbitrary file is unknown until a trusted
-/// asset descriptor supplies it. Managed colour conversion must fail closed for <see cref="Unknown"/>
-/// rather than silently treating every user cube as Rec709.
+/// What the cube's output numbers are characterized as.
+///
+/// <para>
+/// The <c>.cube</c> grammar has no field for this, but that is not the same as the file being
+/// silent: Resolve's film-look exports state it in the header comment, which is exactly where the
+/// two built-in stocks say it. So a cube is Unknown only when it genuinely declares nothing —
+/// not merely because the format lacks a keyword. Managed colour conversion still fails closed
+/// for <see cref="Unknown"/> rather than treating an undeclared cube as Rec709.
+/// </para>
 /// </summary>
 public enum LutOutputEncoding
 {
@@ -103,8 +108,8 @@ public sealed class CubeLut
     /// <param name="encoding">What the cube's input is authored against. Not discoverable from
     /// the file: .cube carries no encoding declaration, so it has to be stated by whoever knows
     /// which stock this is.</param>
-    /// <param name="outputEncoding">What the cube produces. Also not discoverable from a generic
-    /// .cube file; leave this unknown unless a trusted asset manifest states it.</param>
+    /// <param name="outputEncoding">Out-of-band characterization from a trusted asset manifest.
+    /// Leave unknown to use whatever the file's own header declares, which is the normal case.</param>
     public static CubeLut Load(
         string path,
         LutInputEncoding encoding = LutInputEncoding.Cineon,
@@ -122,8 +127,8 @@ public sealed class CubeLut
     /// </summary>
     /// <param name="fallbackTitle">Used when the cube declares no TITLE, in place of the
     /// filename <see cref="Load"/> would have taken it from.</param>
-    /// <param name="outputEncoding">Trusted native-output characterization, or unknown for a
-    /// generic/user-provided cube.</param>
+    /// <param name="outputEncoding">Trusted out-of-band characterization. When left unknown, the
+    /// file's own header declaration is used if it has one.</param>
     public static CubeLut Parse(
         TextReader reader,
         string fallbackTitle,
@@ -138,13 +143,21 @@ public sealed class CubeLut
         float[] domainMax = { 1f, 1f, 1f };
         float[]? data = null;
         int written = 0;
+        LutOutputEncoding declaredOutput = LutOutputEncoding.Unknown;
+        bool outputDeclarationSeen = false;
 
         for (string? raw = reader.ReadLine(); raw is not null; raw = reader.ReadLine())
         {
             // '#' starts a comment anywhere on the line; the spec allows trailing comments.
             string line = raw;
             int hash = line.IndexOf('#');
-            if (hash >= 0) line = line[..hash];
+            if (hash >= 0)
+            {
+                // Read the comment before discarding it: the output characterization lives there
+                // and nowhere else.
+                NoteDeclaredOutput(line[(hash + 1)..], ref declaredOutput, ref outputDeclarationSeen);
+                line = line[..hash];
+            }
             line = line.Trim();
             if (line.Length == 0) continue;
 
@@ -223,7 +236,55 @@ public sealed class CubeLut
             if (!(domainMax[c] > domainMin[c]))
                 throw new InvalidDataException("DOMAIN_MAX 必须大于 DOMAIN_MIN。");
 
-        return new CubeLut(size, data, domainMin, domainMax, encoding, outputEncoding, title);
+        // An explicit argument is out-of-band knowledge from a trusted manifest and outranks the
+        // file; otherwise the file speaks for itself.
+        LutOutputEncoding resolvedOutput = outputEncoding != LutOutputEncoding.Unknown
+            ? outputEncoding
+            : declaredOutput;
+        return new CubeLut(size, data, domainMin, domainMax, encoding, resolvedOutput, title);
+    }
+
+    /// <summary>
+    /// Reads a header comment for the cube's declared display encoding, e.g. Resolve's
+    /// <c>"# Display: ITU-Rec.709, Gamma 2.4"</c>.
+    ///
+    /// <para>
+    /// This is the whole reason a user's Resolve-exported film look was rejected while the two
+    /// built-in stocks were accepted: the built-ins were characterized by a human reading this
+    /// very line and hard-coding the answer, while the parser threw the identical line away for
+    /// everyone else. Reading it makes the built-ins ordinary rather than special.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately narrow. <see cref="LutOutputEncoding.Rec709"/> means the 709 primaries AND a
+    /// 2.4 display gamma, so both have to be named. A header that names 709 with some other curve
+    /// is evidence AGAINST that pair, not for it, and correctly leaves the cube unknown.
+    /// </para>
+    ///
+    /// <para>
+    /// The first display line DECIDES, whether or not it matches. Continuing to scan after a
+    /// non-matching declaration would let an unrelated later comment that happens to mention 709
+    /// and 2.4 override a file that plainly said it was something else — the opposite of reading
+    /// what the file declares.
+    /// </para>
+    /// </summary>
+    private static void NoteDeclaredOutput(
+        string comment,
+        ref LutOutputEncoding declared,
+        ref bool seen)
+    {
+        if (seen) return;
+
+        string text = comment.ToLowerInvariant();
+        if (!text.Contains("display", StringComparison.Ordinal)) return;
+
+        seen = true;
+        if (text.Contains("709", StringComparison.Ordinal)
+            && text.Contains("gamma", StringComparison.Ordinal)
+            && text.Contains("2.4", StringComparison.Ordinal))
+        {
+            declared = LutOutputEncoding.Rec709;
+        }
     }
 
     private static void ReadTriple(string[] tok, string line, float[] into)
