@@ -87,10 +87,11 @@ public partial class App : Application
             else if (startFiles.Count > 0)
                 Dispatcher.UIThread.Post(async () =>
                 {
-                    // A command-line/double-click import is still a NEW roll. Route it through
-                    // the same dialog so a TIFF cannot bypass the mandatory roll-level fallback
-                    // choice and so that choice is persisted before the first decode.
-                    await ((MainWindow)desktop.MainWindow).ImportNewRollAsync(startFiles);
+                    // Straight in, no dialog. The roll-level TIFF question that used to have to
+                    // be answered first is gone: TiffInputDetector reads what the file declares,
+                    // and the preview offers a correction if it had to fall back on convention.
+                    await vm.LoadRollAsync(startFiles);
+                    vm.EnterDevelop();
                 });
             else
                 Dispatcher.UIThread.Post(async () => await vm.EnterLibraryAsync());
