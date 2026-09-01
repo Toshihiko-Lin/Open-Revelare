@@ -370,17 +370,32 @@ public partial class MainViewModel
         string? path = await PickFileAsync();
         if (string.IsNullOrWhiteSpace(path)) return;
 
+        CubeLut lut;
         try
         {
             PrintLuts.Forget(path);
-            CubeLut lut = PrintLuts.Validate(path);
-            StatusText = Loc.F($"已载入胶片风格：{lut.Title}（{lut.Size}³）。");
+            lut = PrintLuts.Validate(path);
         }
         catch (Exception ex)
         {
             StatusText = Loc.F($"无法载入 LUT：{ex.Message}");
             return;
         }
+
+        // The managed pipeline cannot render through a cube whose output space is unproven, and
+        // the render path's way of saying so is an exception three layers down that surfaces as a
+        // status line after the picture has already gone stale. Say it here instead, where the
+        // person who chose the file is standing, and do not adopt a cube that cannot be used.
+        if (_colorPipelineVersion == ColorPipelineVersion.ManagedV2
+            && lut.OutputEncoding == LutOutputEncoding.Unknown)
+        {
+            StatusText =
+                Loc.F($"「{lut.Title}」的文件头没有声明输出色彩空间，色彩管理版没有采用它。")
+                + Loc.T("Resolve 导出的胶片 LUT 会在头部写明「Display: ITU-Rec.709, Gamma 2.4」；若这个文件的注释被删过，用原始导出重试，否则请改用内置的胶片风格。");
+            return;
+        }
+
+        StatusText = Loc.F($"已载入胶片风格：{lut.Title}（{lut.Size}³）。");
 
         // Not remembered anywhere: the picker lists the built-ins and the LUT folder, and a
         // one-off pick is exactly that. The roll itself stores the path it uses, so this cube

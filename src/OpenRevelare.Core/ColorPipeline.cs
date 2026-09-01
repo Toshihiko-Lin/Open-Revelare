@@ -362,9 +362,8 @@ public static class ColorPipeline
             ToOutputSpaceVia(data, lut, output, pipelineVersion, colorManagement);
         else if (!string.IsNullOrWhiteSpace(cal.PrintLut))
         {
-            throw new NotSupportedException(
-                $"ManagedV2 cannot use configured print LUT '{cal.PrintLut}' because it could " +
-                "not be loaded and its native output encoding therefore cannot be proven.");
+            throw new NotSupportedException(CoreText.F(
+                $"无法载入胶片 LUT「{cal.PrintLut}」，因此无法确定它渲染到哪个色彩空间。"));
         }
         else
             ToOutputSpace(data, output);
@@ -479,9 +478,8 @@ public static class ColorPipeline
         if (lut.OutputEncoding != LutOutputEncoding.Rec709)
         {
             throw new NotSupportedException(
-                $"ManagedV2 cannot use print LUT '{lut.Title}' because its output profile is " +
-                "unknown. Select one of the characterized built-in Rec709 LUTs or supply an " +
-                "asset descriptor that proves the cube's native output encoding.");
+                CoreText.F($"胶片 LUT「{lut.Title}」的文件头没有声明输出色彩空间，无法确定它渲染到哪个空间。")
+                + CoreText.T("请改用内置的胶片风格，或使用头部完整的原始导出文件。"));
         }
 
         // Render only into the cube's declared native output. The legacy overload's manual

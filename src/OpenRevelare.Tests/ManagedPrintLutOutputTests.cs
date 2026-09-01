@@ -457,7 +457,9 @@ public sealed class ManagedPrintLutOutputTests
                 ColorPipelineVersion.ManagedV2,
                 neverCalled));
 
-            Assert.Contains("output profile is unknown", error.Message, StringComparison.Ordinal);
+            // The message is user-facing and translated, so it is matched on the fact it states
+            // rather than on internal vocabulary the user would have had no way to act on.
+            Assert.Contains("没有声明输出色彩空间", error.Message, StringComparison.Ordinal);
             AssertFloatBitsEqual(sourceSnapshot, sourcePixels.Data, "uncharacterized LUT source");
             Assert.Equal(0, neverCalled.LeaseCalls);
         }
@@ -499,7 +501,7 @@ public sealed class ManagedPrintLutOutputTests
                 ColorPipelineVersion.ManagedV2,
                 neverCalled));
 
-            Assert.Contains("could not be loaded", error.Message, StringComparison.Ordinal);
+            Assert.Contains("无法载入", error.Message, StringComparison.Ordinal);
             AssertFloatBitsEqual(sourceSnapshot, sourcePixels.Data, "missing LUT source");
             Assert.Equal(0, neverCalled.LeaseCalls);
         }
