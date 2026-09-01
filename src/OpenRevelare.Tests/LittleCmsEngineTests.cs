@@ -245,11 +245,44 @@ public class LittleCmsEngineTests
         float[] destination = new float[3];
 
         lease.Apply(source, destination, pixelCount: 1);
+        // A dedicated thread, not Task.Run: awaiting returns this test's pool thread to the pool,
+        // which is then free to run the queued delegate on that SAME managed thread. The affinity
+        // check compares managed thread ids, so that reuse makes the call legal and the assertion
+        // fail. It only shows up under load, which is why the full suite flaked and a solo run
+        // did not.
         InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => Task.Run(() => lease.Apply(source, destination, pixelCount: 1)));
+            () => RunOnDedicatedThreadAsync(
+                () => lease.Apply(source, destination, pixelCount: 1)));
 
         Assert.Contains("thread-affine", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("acquired", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on a thread that is guaranteed to differ from the caller's,
+    /// and rethrows whatever it threw. The thread pool cannot make that guarantee.
+    /// </summary>
+    private static Task RunOnDedicatedThreadAsync(Action action)
+    {
+        var completion = new TaskCompletionSource();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                action();
+                completion.SetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "lease-affinity-probe",
+        };
+        thread.Start();
+        return completion.Task;
     }
 
     [Fact]
