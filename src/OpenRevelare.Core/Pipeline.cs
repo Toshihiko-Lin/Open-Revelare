@@ -175,7 +175,7 @@ public static class Pipeline
             pixels,
             encoding,
             recipe,
-            RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
+            () => RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
     }
 
     /// <summary>

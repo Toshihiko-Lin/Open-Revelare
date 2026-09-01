@@ -297,26 +297,77 @@ public abstract record RenderFingerprint
 /// <summary>Immutable semantic handoff produced by the render boundary.</summary>
 public sealed class RenderedFrame
 {
+    private readonly Func<RenderFingerprint>? _deferredFingerprint;
+    private readonly RenderFingerprint? _eagerFingerprint;
+    private RenderFingerprint? _fingerprint;
+
     public ImageBuffer Pixels { get; }
     public CharacterizedPixelEncoding Encoding { get; }
     public ColorProfileRef OutputProfile => Encoding.Profile;
     public OutputRecipe Recipe { get; }
-    public RenderFingerprint Fingerprint { get; }
+
+    /// <summary>
+    /// The render's stable identity, computed on first read.
+    ///
+    /// <para>
+    /// DEFERRED ON PURPOSE. Computing it hashes every sample, which is not a rounding error:
+    /// measured on a 5600X at ~2.06 GB/s, that is 2.3 ms for one drag frame, 9.3 ms for a 1600 px
+    /// preview and 130 ms for a 24 MP export frame. Rendering paid all of it eagerly — including
+    /// inline on the UI thread in the drag path, and a second time for the thumbnail copy — while
+    /// the only consumer in the application is one line of the colour-diagnostics panel, which
+    /// nobody reads on most renders. A diagnostic must not cost a fifth of a drag frame's budget.
+    /// </para>
+    ///
+    /// <para>
+    /// The value therefore describes the pixels as they are when first read, not as they were the
+    /// instant the render returned. Rendered pixels are final by contract — every consumer either
+    /// reads them or produces a new buffer — so the two coincide.
+    /// </para>
+    /// </summary>
+    public RenderFingerprint Fingerprint =>
+        _fingerprint ??= _eagerFingerprint ?? _deferredFingerprint!();
+
+    /// <summary>
+    /// Whether this frame carries a real fingerprint, answered WITHOUT computing one. Callers that
+    /// only need to propagate the distinction must use this rather than testing
+    /// <see cref="Fingerprint"/>, which would force the very work being deferred.
+    /// </summary>
+    public bool HasComputedFingerprint =>
+        _deferredFingerprint is not null || _eagerFingerprint is RenderFingerprint.Computed;
 
     public RenderedFrame(
         ImageBuffer pixels,
         CharacterizedPixelEncoding encoding,
         OutputRecipe recipe,
         RenderFingerprint fingerprint)
+        : this(pixels, encoding, recipe)
+    {
+        ArgumentNullException.ThrowIfNull(fingerprint);
+        _eagerFingerprint = fingerprint;
+    }
+
+    internal RenderedFrame(
+        ImageBuffer pixels,
+        CharacterizedPixelEncoding encoding,
+        OutputRecipe recipe,
+        Func<RenderFingerprint> deferredFingerprint)
+        : this(pixels, encoding, recipe)
+    {
+        ArgumentNullException.ThrowIfNull(deferredFingerprint);
+        _deferredFingerprint = deferredFingerprint;
+    }
+
+    private RenderedFrame(
+        ImageBuffer pixels,
+        CharacterizedPixelEncoding encoding,
+        OutputRecipe recipe)
     {
         ArgumentNullException.ThrowIfNull(pixels);
         ArgumentNullException.ThrowIfNull(encoding);
         ArgumentNullException.ThrowIfNull(recipe);
-        ArgumentNullException.ThrowIfNull(fingerprint);
         Pixels = pixels;
         Encoding = encoding;
         Recipe = recipe;
-        Fingerprint = fingerprint;
     }
 
     /// <summary>
@@ -326,10 +377,16 @@ public sealed class RenderedFrame
     public RenderedFrame WithPixels(ImageBuffer pixels)
     {
         ArgumentNullException.ThrowIfNull(pixels);
-        RenderFingerprint fingerprint = Fingerprint is RenderFingerprint.Computed
-            ? RenderFingerprint.ComputeManaged(pixels, Encoding, Recipe)
-            : Fingerprint;
-        return new RenderedFrame(pixels, Encoding, Recipe, fingerprint);
+        // HasComputedFingerprint, not Fingerprint: the export path calls this for every
+        // downsampled frame, and testing the value would hash the ORIGINAL buffer just to decide
+        // whether the new one deserves a hash.
+        return HasComputedFingerprint
+            ? new RenderedFrame(
+                pixels,
+                Encoding,
+                Recipe,
+                () => RenderFingerprint.ComputeManaged(pixels, Encoding, Recipe))
+            : new RenderedFrame(pixels, Encoding, Recipe, Fingerprint);
     }
 }
 

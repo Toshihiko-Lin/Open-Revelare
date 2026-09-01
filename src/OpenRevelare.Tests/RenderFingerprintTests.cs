@@ -123,6 +123,86 @@ public sealed class RenderFingerprintTests
         Assert.Equal(FingerprintUnavailableReason.LegacyPipelineHasNoVersionedRecipe, unavailable.Reason);
     }
 
+    [Fact]
+    public void A_managed_render_does_not_hash_its_pixels_until_the_fingerprint_is_read()
+    {
+        // Hashing every sample costs ~9 ms for a preview and ~130 ms for a 24 MP export frame,
+        // and the only consumer is the diagnostics panel. Mutating the buffer after the render and
+        // seeing the change in the fingerprint is direct evidence the work was not done up front —
+        // an eager hash would still describe the pre-mutation pixels.
+        var pixels = new ImageBuffer(2, 1, new[] { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f });
+        RenderedFrame rendered = Pipeline.Render(
+            WorkingFrameFor(pixels),
+            ManagedParams(),
+            ColorPipelineVersion.ManagedV2,
+            new LittleCmsEngine());
+
+        Assert.True(rendered.HasComputedFingerprint);
+        rendered.Pixels.Data[0] = 0.9f;
+
+        var computed = Assert.IsType<RenderFingerprint.Computed>(rendered.Fingerprint);
+        Assert.Equal(
+            RenderFingerprint.ComputeManaged(rendered.Pixels, rendered.Encoding, rendered.Recipe)
+                .Sha256Hex,
+            computed.Sha256Hex);
+    }
+
+    [Fact]
+    public void The_fingerprint_is_computed_once_and_then_stable()
+    {
+        var pixels = new ImageBuffer(1, 1, new[] { 0.1f, 0.2f, 0.3f });
+        RenderedFrame rendered = Pipeline.Render(
+            WorkingFrameFor(pixels),
+            ManagedParams(),
+            ColorPipelineVersion.ManagedV2,
+            new LittleCmsEngine());
+
+        string first = Assert.IsType<RenderFingerprint.Computed>(rendered.Fingerprint).Sha256Hex;
+        rendered.Pixels.Data[0] = 0.9f;
+
+        // Already materialized, so a later mutation cannot retroactively change what was reported.
+        Assert.Equal(first, Assert.IsType<RenderFingerprint.Computed>(rendered.Fingerprint).Sha256Hex);
+    }
+
+    [Fact]
+    public void WithPixels_fingerprints_the_new_buffer_without_hashing_the_old_one()
+    {
+        var pixels = new ImageBuffer(2, 1, new[] { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f });
+        RenderedFrame rendered = Pipeline.Render(
+            WorkingFrameFor(pixels),
+            ManagedParams(),
+            ColorPipelineVersion.ManagedV2,
+            new LittleCmsEngine());
+
+        var replacement = new ImageBuffer(1, 1, new[] { 0.7f, 0.8f, 0.9f });
+        RenderedFrame downsampled = rendered.WithPixels(replacement);
+
+        Assert.True(downsampled.HasComputedFingerprint);
+        Assert.Equal(
+            RenderFingerprint.ComputeManaged(replacement, rendered.Encoding, rendered.Recipe)
+                .Sha256Hex,
+            Assert.IsType<RenderFingerprint.Computed>(downsampled.Fingerprint).Sha256Hex);
+    }
+
+    [Fact]
+    public void A_legacy_render_still_reports_no_fingerprint_through_WithPixels()
+    {
+        var pixels = new ImageBuffer(2, 1, new[] { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f });
+        RenderedFrame legacy = Pipeline.Render(WorkingFrameFor(pixels), ManagedParams());
+
+        Assert.False(legacy.HasComputedFingerprint);
+        RenderedFrame downsampled = legacy.WithPixels(new ImageBuffer(1, 1, new[] { 0.7f, 0.8f, 0.9f }));
+
+        Assert.IsType<RenderFingerprint.Unavailable>(downsampled.Fingerprint);
+        Assert.False(downsampled.HasComputedFingerprint);
+    }
+
+    private static FrameParams ManagedParams() => new()
+    {
+        OutputSpace = "sRGB",
+        DisplayReferredStage2 = true,
+    };
+
     private static RenderedFrame Frame(
         ImageBuffer pixels,
         ColorProfileRef profile,
