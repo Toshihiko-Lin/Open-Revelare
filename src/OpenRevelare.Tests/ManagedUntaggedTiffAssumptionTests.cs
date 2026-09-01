@@ -1,4 +1,4 @@
-using BitMiracle.LibTiff.Classic;
+﻿using BitMiracle.LibTiff.Classic;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Models;
@@ -205,6 +205,55 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task A_roll_opened_without_the_import_dialog_still_gets_the_notice()
+    {
+        // Every other test here goes through LoadRollWithConfigAsync — the import-dialog path —
+        // and that is exactly how the bug this pins survived: the disclosure was wired to that
+        // path alone, so command line, double-click and 添加图像 opened a roll, assumed sRGB, and
+        // said nothing. The path that deliberately does NOT ask must still tell.
+        string path = WriteTiff(16, new[] { 32768, 24000, 16000 });
+        try
+        {
+            using var vm = new MainViewModel();
+
+            await vm.LoadRollAsync(new[] { path });
+
+            Assert.True(vm.ShowTiffInputNotice);
+            Assert.Contains("sRGB", vm.TiffInputNoticeText, StringComparison.Ordinal);
+            Assert.Contains("auto(", vm.ColorPipelineDiagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Dismissing_one_rolls_notice_does_not_silence_the_next_roll()
+    {
+        // The dismissal is about ONE roll's guess. Letting it persist would mean a user who
+        // dismissed it once never hears about any later roll — a silence they never chose.
+        string first = WriteTiff(16, new[] { 32768, 24000, 16000 });
+        string second = WriteTiff(16, new[] { 30000, 22000, 15000 });
+        try
+        {
+            using var vm = new MainViewModel();
+            await vm.LoadRollAsync(new[] { first });
+            vm.DismissTiffInputNotice();
+            Assert.False(vm.ShowTiffInputNotice);
+
+            await vm.LoadRollAsync(new[] { second });
+
+            Assert.True(vm.ShowTiffInputNotice);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
         }
     }
 
