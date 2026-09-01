@@ -399,6 +399,21 @@ public static class RegionRender
             new RenderFingerprint.Unavailable(FingerprintUnavailableReason.TransientPreview));
     }
 
+    /// <summary>
+    /// The managed sharp patch, built on the frozen regional renderer rather than a second copy
+    /// of it.
+    ///
+    /// <para>
+    /// Everything up to step 4 — slice narrowing, lens corrections, the sprocket mask, the input
+    /// transform, decouple, the inversion and the geometry map — is identical for both pipeline
+    /// versions, and only the exit differs. Running the frozen path through its existing
+    /// <see cref="OutputIntent.None"/> gate and then taking the managed exit is exactly what
+    /// <c>Pipeline.Render</c> does for the whole frame. Re-implementing the operator sequence here
+    /// would leave the patch with a private copy that has to be kept in step by hand: add a
+    /// Stage 1 operator and forget this file, and the sharp patch silently stops matching the
+    /// preview it is composited onto.
+    /// </para>
+    /// </summary>
     private static (ImageBuffer Image, Roi Realised) RenderManagedPositiveFromSlice(
         ImageBuffer source,
         int sourceX0,
@@ -409,76 +424,24 @@ public static class RegionRender
         Roi roi,
         IColorManagementEngine colorManagement)
     {
-        var (rect, realised) = Realise(frameW, frameH, cal, roi);
-        var bounds = SourceBounds(frameW, frameH, cal, rect);
-
-        int sliceWidth = bounds.X1 - bounds.X0;
-        int sliceHeight = bounds.Y1 - bounds.Y0;
-        var slice = new ImageBuffer(sliceWidth, sliceHeight);
-        for (int y = 0; y < sliceHeight; y++)
-        {
-            int sourceY = bounds.Y0 + y - sourceY0;
-            int sourceX = bounds.X0 - sourceX0;
-            Array.Copy(
-                source.Data,
-                (sourceY * source.Width + sourceX) * 3,
-                slice.Data,
-                y * sliceWidth * 3,
-                sliceWidth * 3);
-        }
-
-        var region = new FrameRegion(bounds.X0, bounds.Y0, frameW, frameH);
-        if (cal.DistortionK1 != 0.0)
-            slice = LensCorrections.ApplyDistortion(slice, cal.DistortionK1, region);
-        if (cal.LccFlatField != null)
-            Lcc.Apply(slice.Data, sliceWidth, sliceHeight, cal.LccFlatField, region);
-        if (cal.VignetteAmount != 0.0)
-        {
-            LensCorrections.ApplyVignette(
-                slice.Data,
-                sliceWidth,
-                sliceHeight,
-                cal.VignetteAmount,
-                cal.VignetteFalloff,
-                region);
-        }
-
-        bool[]? mask = null;
-        if (cal.SprocketEnabled && cal.SprocketThreshold is double threshold)
-            mask = Sprocket.MakeMask(slice.Data, slice.PixelCount, (float)threshold);
-
-        if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputMatrix)
-            InputTransform.Apply(slice.Data, inputMatrix);
-        if (cal.DecoupleMatrix != null)
-            Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
-
-        ImageBuffer inverted = Inversion.Invert(
-            slice,
-            cal,
-            cal.DecoupleChromaAmp,
-            Pipeline.ResolveChromaMatrix(cal));
-        if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);
-
-        ImageBuffer output = MapGeometry(
-            inverted,
-            bounds.X0,
-            bounds.Y0,
-            frameW,
-            frameH,
-            cal,
-            rect);
+        // The geometry helpers never read OutputIntent, so the realised ROI is unaffected by the
+        // gate being closed here.
+        FrameParams scene = cal.Clone();
+        scene.OutputIntent = OutputIntent.None;
+        var (pixels, realised) = RenderFromSlice(
+            source, sourceX0, sourceY0, frameW, frameH, scene, roi);
 
         if (cal.OutputIntent == OutputIntent.Basic)
         {
             ColorPipeline.ToOutputSpaceFor(
-                output.Data,
+                pixels.Data,
                 cal,
                 ColorPipelineVersion.ManagedV2,
                 colorManagement);
-            Stage2.ApplyManagedAfterTargetEncoding(output.Data, cal, cal.ResolvedOutputSpace);
+            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, cal.ResolvedOutputSpace);
         }
 
-        return (output, realised);
+        return (pixels, realised);
     }
 
     // ── request → whole displayed pixels ─────────────────────────────────────────
