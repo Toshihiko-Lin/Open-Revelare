@@ -570,5 +570,6 @@
   "现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。": "Wide gamut for modern screens (Apple devices, most recent monitors); same encoding curve as sRGB.",
   "网页与大多数屏幕的通用选择。不确定就选它。": "The general-purpose choice for the web and most screens. Pick this if unsure.",
   "标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。": "The step-4 target of the standard Cineon workflow, gamma 2.4. Same gamut as sRGB, slightly higher contrast.",
-  "色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。": "Wider than sRGB, most visibly toward cyan-green; suited to print or further retouching. Looks washed out in software without colour management."
+  "色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。": "Wider than sRGB, most visibly toward cyan-green; suited to print or further retouching. Looks washed out in software without colour management.",
+  "（显示端）": " (display hop)"
 }

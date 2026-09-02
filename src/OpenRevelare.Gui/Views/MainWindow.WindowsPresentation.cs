@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -437,6 +437,17 @@ public partial class MainWindow
             WindowsPreview.IsPresenterAvailable)
             ? "WYSIWYG"
             : "unmanaged";
+        // The guarantee above is about the LAST hop only. On a roll whose input was never
+        // characterized — RAW today — an unqualified "WYSIWYG" is read as a claim about the whole
+        // chain, while the full diagnostics one click away say "Input encoding: Uncharacterized".
+        // Both are true; only one of them is on screen. D-009 asks the visible one to be honest.
+        // Kept SHORT on purpose. This TextBlock is capped at MaxWidth 560 with CharacterEllipsis,
+        // and the badge's fixed prefix already spends most of it — a fuller sentence here gets
+        // trimmed mid-qualifier, which reads worse than the unqualified word it was meant to fix.
+        // Scoping the claim is what matters; "why" is one hover (the tooltip) or one click
+        // (复制色彩诊断) away, where it says "Input encoding: Uncharacterized" in full.
+        if (Vm?.InputIsUncharacterized == true)
+            guarantee += Services.Loc.T("（显示端）");
         ColorDiagnosticText.Text = string.IsNullOrWhiteSpace(warning)
             ? $"{contract.DiagnosticName} · {contract.Encoding} · {monitor} · {guarantee}"
             : $"{contract.DiagnosticName} · {contract.Encoding} · WARNING: {warning}";

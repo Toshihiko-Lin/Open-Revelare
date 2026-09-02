@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.InfoDialog"
@@ -22,7 +22,12 @@
              rightmost as buttons appear. -->
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
                     HorizontalAlignment="Right" Margin="0,10,0,0">
-            <Button Name="CloseButton" Content="{i18n:T '关闭'}" Click="OnCloseClick" />
+            <!-- IsCancel so Esc closes the dialog. Without it the only way out of a modal
+                 with an action button was to hit the mouse target — and the one dialog where
+                 that matters is the one-way colour-pipeline migration, where the keyboard
+                 offered Enter (do it) and no way to say no. Closing never runs the action. -->
+            <Button Name="CloseButton" Content="{i18n:T '关闭'}" IsCancel="True"
+                    Click="OnCloseClick" />
             <Button Name="SecondaryActionButton" IsVisible="False" Click="OnSecondaryActionClick" />
             <Button Name="ActionButton" IsVisible="False" Click="OnActionClick" />
         </StackPanel>

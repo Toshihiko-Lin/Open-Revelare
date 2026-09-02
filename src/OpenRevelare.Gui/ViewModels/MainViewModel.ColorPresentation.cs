@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OpenRevelare.ColorManagement;
@@ -265,6 +265,29 @@ public partial class MainViewModel
         PresentationScene finalOpaqueScene,
         DisplayContract contract) =>
         PresentationBufferBuilder.Build(finalOpaqueScene, contract, ColorManagement);
+
+    /// <summary>
+    /// True when the roll's pixels entered the working space WITHOUT a colour characterization —
+    /// today that means RAW, which is admitted as camera-native numbers under
+    /// <see cref="CompatibilityPolicy.LegacyTreatNumbersAsWorking"/>.
+    ///
+    /// <para>
+    /// Exposed for the status badge, and the reason is D-009's "诊断必须诚实". The badge's other
+    /// half reports the DISPLAY guarantee, and on a RAW roll it can honestly say WYSIWYG — the
+    /// last hop really is exact — while the INPUT hop was never characterized at all. Both
+    /// statements are true and the full diagnostics say both, but the badge is the only one most
+    /// people read, and unqualified "WYSIWYG" there reads as a claim about the whole chain.
+    /// </para>
+    ///
+    /// <para>
+    /// This is NOT a defect waiting on a wire-up. Characterizing a negative is not the camera's
+    /// ColorMatrix — see <see cref="FrameParams.InputPrimaries"/>, which records three separate
+    /// attempts that failed on real film. Until a chart photographed onto the film is solved
+    /// jointly with t_base, saying so is the honest thing available.
+    /// </para>
+    /// </summary>
+    public bool InputIsUncharacterized =>
+        _previewWorking?.Source.OriginalEncoding is UncharacterizedPixelEncoding;
 
     /// <summary>Render/input/CMM half of the user-copyable color diagnostics.</summary>
     internal string BuildRenderColorDiagnostics()

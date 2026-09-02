@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -1950,7 +1950,9 @@ public partial class MainWindow : Window
         await new InfoDialog(
                 Loc.T("迁移色彩管线"),
                 Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。画面和之后的导出可能变化；工程保存后不会自动退回 v1。"))
-            .WithAction(Loc.T("迁移并重新渲染"), Loc.T("取消"), () => confirmed = true)
+            // isDefault: false — this migration is one-way (the body text says so), so Enter
+            // must not perform it. Esc still cancels, via CloseButton.IsCancel.
+            .WithAction(Loc.T("迁移并重新渲染"), Loc.T("取消"), () => confirmed = true, isDefault: false)
             .ShowDialog(this);
         if (confirmed) await Vm.MigrateColorPipelineToV2Async();
     }
