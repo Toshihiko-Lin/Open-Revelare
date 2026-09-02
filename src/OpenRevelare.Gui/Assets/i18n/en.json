@@ -571,5 +571,14 @@
   "网页与大多数屏幕的通用选择。不确定就选它。": "The general-purpose choice for the web and most screens. Pick this if unsure.",
   "标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。": "The step-4 target of the standard Cineon workflow, gamma 2.4. Same gamut as sRGB, slightly higher contrast.",
   "色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。": "Wider than sRGB, most visibly toward cyan-green; suited to print or further retouching. Looks washed out in software without colour management.",
-  "（显示端）": " (display hop)"
+  "（显示端）": " (display hop)",
+  "色彩引擎不可用，预览已回退：": "The colour engine is unavailable; the preview fell back: ",
+  "迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。工程保存后不会自动退回 v1。": "Migrating switches this project from legacy compatibility rendering to v2: TIFFs with an embedded ICC are fully converted, a print LUT is converted into the selected exact output profile, and curves run in the target encoding. Saving the project will not revert it to v1.",
+  "这一卷没有用胶片 LUT、没有曲线，迁移后画面不会有任何变化——只有导出会带上准确的 ICC。": "This roll uses no film LUT and no curves, so migrating changes nothing on screen — only the export gains an accurate ICC profile.",
+  "这一卷用到了：{0}，迁移后画面会变化。": "This roll uses {0}, so migrating will change how it looks.",
+  "变的方向是修正——旧版在这些环节上做的事和它自己声称的不一致——但这是你已经调好的观感。": " The change is a correction — in each of these the old pipeline did something other than what it declared — but this is a look you have already graded.",
+  "旧的第 2 步渲染方式（变化最大）": "the legacy step-2 rendering (the largest change)",
+  "曲线": "tone curves",
+  "胶片 LUT": "a film LUT",
+  "、": ", "
 }

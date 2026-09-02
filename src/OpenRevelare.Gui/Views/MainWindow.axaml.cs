@@ -36,8 +36,28 @@ public partial class MainWindow : Window
         {
             if (DataContext is MainViewModel vm)
             {
+                // The engine behind PresentationColorManagement is Lazy ON PURPOSE, and this
+                // line is what defeated it: touching it here constructed LittleCMS during window
+                // construction, so a missing, quarantined or SHA-mismatched lcms2 threw out of
+                // OnFrameworkInitializationCompleted — an unhandled exception with no window, no
+                // message and no exit code the user could act on. "双击了没反应".
+                //
+                // Nothing is added to the UI to explain it. The app now simply starts: the Windows
+                // presenter stays unavailable and the managed ColorManagedImage path draws
+                // instead (the same fallback an unsupported display already uses), and the first
+                // ManagedV2 render reports the real reason through the status bar it already has.
+                // LegacyV1 projects never touch the CMM at all and keep working entirely.
                 if (OperatingSystem.IsWindows())
-                    WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
+                {
+                    try
+                    {
+                        WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
+                    }
+                    catch (OpenRevelare.ColorManagement.ColorManagementException ex)
+                    {
+                        vm.StatusText = Loc.T("色彩引擎不可用，预览已回退：") + ex.Message;
+                    }
+                }
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
                 vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
@@ -872,6 +892,9 @@ public partial class MainWindow : Window
     /// takes the card off the picture, and it comes back for the NEXT analysis.</summary>
     private void OnDismissRollAnalysisNoticeClick(object? sender, RoutedEventArgs e)
         => Vm?.DismissRollAnalysisNotice();
+
+    private void OnDismissLegacyColorPipelineNoticeClick(object? sender, RoutedEventArgs e)
+        => Vm?.DismissLegacyColorPipelineNotice();
 
     // Changing the roll's TIFF admission re-decodes everything, so both buttons go through the
     // same view-model path as the pipeline migration rather than poking at state from here.
@@ -1947,9 +1970,9 @@ public partial class MainWindow : Window
     {
         if (Vm is null || !Vm.UsesLegacyColorPipeline) return;
         bool confirmed = false;
-        await new InfoDialog(
-                Loc.T("迁移色彩管线"),
-                Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。画面和之后的导出可能变化；工程保存后不会自动退回 v1。"))
+        // The body is computed from THIS roll rather than fixed: "画面可能变化" is true of every
+        // project and actionable for none. See MainViewModel.DescribeMigrationEffect.
+        await new InfoDialog(Loc.T("迁移色彩管线"), Vm.MigrationDialogText)
             // isDefault: false — this migration is one-way (the body text says so), so Enter
             // must not perform it. Esc still cancels, via CloseButton.IsCancel.
             .WithAction(Loc.T("迁移并重新渲染"), Loc.T("取消"), () => confirmed = true, isDefault: false)

@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         xmlns:vm="using:OpenRevelare.Gui.ViewModels"
@@ -388,11 +388,15 @@
 
                         <!-- Outside the native-preview airspace: legacy projects retain their
                              v1 look until this explicit L2 migration is confirmed. -->
-                        <Border Grid.Column="1" IsVisible="{Binding UsesLegacyColorPipeline}"
+                        <!-- Closable, like every other notice in this window. It was the one
+                             exception, so a roll deliberately kept on v1 wore this bar for the
+                             life of the project. Dismissal is per roll and per session: reopening
+                             the project offers the migration again. -->
+                        <Border Grid.Column="1" IsVisible="{Binding ShowLegacyColorPipelineNotice}"
                                 Margin="10,0" Padding="8,3" CornerRadius="4"
                                 Background="{DynamicResource AccentSoftBrush}"
                                 BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
-                            <Grid ColumnDefinitions="*,Auto">
+                            <Grid ColumnDefinitions="*,Auto,Auto">
                                 <TextBlock Text="{Binding LegacyColorPipelineNotice}"
                                            FontSize="11" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis"
@@ -400,6 +404,13 @@
                                 <Button Grid.Column="1" Content="{i18n:T '迁移到色彩管理版…'}"
                                         Margin="8,0,0,0" Padding="8,3"
                                         Click="OnMigrateColorPipelineClick" />
+                                <Button Grid.Column="2" Classes="icon" Width="22" Height="22"
+                                        MinHeight="22" CornerRadius="11" Margin="6,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Click="OnDismissLegacyColorPipelineNoticeClick"
+                                        ToolTip.Tip="{i18n:T '关闭提示'}">
+                                    <ctl:Icon Data="{StaticResource IcoClose}" />
+                                </Button>
                             </Grid>
                         </Border>
 

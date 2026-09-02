@@ -21,6 +21,71 @@ public partial class MainViewModel
     public bool UsesLegacyColorPipeline =>
         _colorPipelineVersion == ColorPipelineVersion.LegacyV1;
 
+    private bool _legacyNoticeDismissed;
+
+    /// <summary>
+    /// The banner is informational, so it must be closable — it was the ONLY notice in the window
+    /// that was not. A user who deliberately keeps old rolls on v1 (which D-013 exists to let them
+    /// do) had this bar occupying the top of the preview for the life of the project, with no way
+    /// to acknowledge it. Dismissal is per roll and per session, exactly like
+    /// <see cref="ShowTiffInputNotice"/>: reopening the roll offers the migration again, so
+    /// closing it forfeits nothing.
+    /// </summary>
+    public bool ShowLegacyColorPipelineNotice =>
+        UsesLegacyColorPipeline && !_legacyNoticeDismissed;
+
+    public void DismissLegacyColorPipelineNotice()
+    {
+        if (_legacyNoticeDismissed) return;
+        _legacyNoticeDismissed = true;
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
+    }
+
+    /// <summary>
+    /// What migrating THIS project will actually do to the picture, worked out from the roll
+    /// rather than left for the user to guess.
+    ///
+    /// <para>
+    /// The dialog used to say only "画面和之后的导出可能变化", which is true of every project and
+    /// therefore useful for none: someone deciding whether to touch a finished roll cannot act on
+    /// "可能". The three conditions below are the complete set of things that differ between the
+    /// pipelines, measured in LegacyVersusManagedRenderTests — outside them the two renders are
+    /// bit-identical, so the honest answer is that nothing will change.
+    /// </para>
+    /// </summary>
+    private string DescribeMigrationEffect()
+    {
+        bool anyLut = false, anyCurve = false, anyLegacyStage2 = false;
+        foreach (RollFrame frame in Frames)
+        {
+            FrameParams p = frame.Params;
+            anyLut |= !string.IsNullOrWhiteSpace(p.PrintLut);
+            anyCurve |= p.CurvePointsM.Count > 0 || p.CurvePointsR.Count > 0
+                        || p.CurvePointsG.Count > 0 || p.CurvePointsB.Count > 0;
+            anyLegacyStage2 |= !p.DisplayReferredStage2;
+        }
+
+        if (!anyLut && !anyCurve && !anyLegacyStage2)
+            return Loc.T("这一卷没有用胶片 LUT、没有曲线，迁移后画面不会有任何变化——只有导出会带上准确的 ICC。");
+
+        var reasons = new List<string>();
+        if (anyLegacyStage2) reasons.Add(Loc.T("旧的第 2 步渲染方式（变化最大）"));
+        if (anyCurve) reasons.Add(Loc.T("曲线"));
+        if (anyLut) reasons.Add(Loc.T("胶片 LUT"));
+        // The closing sentence must be true of ALL three, and "旧版贴错了 profile" is not: that
+        // describes the first two, whose PixelProfileMismatch really is set, but NOT the curve
+        // case — there v1 reports no mismatch at all and the difference is the private gamma
+        // round-trip Stage 2's comment claimed to have removed. LegacyVersusManagedRenderTests
+        // pins exactly that distinction, so the wording has to stay above it.
+        return Loc.F($"这一卷用到了：{string.Join(Loc.T("、"), reasons)}，迁移后画面会变化。")
+               + Loc.T("变的方向是修正——旧版在这些环节上做的事和它自己声称的不一致——但这是你已经调好的观感。");
+    }
+
+    /// <summary>The migration dialog's body: what it does, then what it does to THIS roll.</summary>
+    public string MigrationDialogText =>
+        Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。工程保存后不会自动退回 v1。")
+        + "\n\n" + DescribeMigrationEffect();
+
     public string LegacyColorPipelineNotice => Loc.T(
         "此工程仍使用旧版色彩管线。画面保持原样，但输出会嵌入准确的兼容 ICC；迁移到色彩管理版会重新渲染并可能改变外观。");
 
@@ -119,6 +184,7 @@ public partial class MainViewModel
         if (_colorPipelineVersion == value) return;
         _colorPipelineVersion = value;
         OnPropertyChanged(nameof(UsesLegacyColorPipeline));
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
         OnPropertyChanged(nameof(ColorPipelineDiagnostic));
     }
@@ -349,6 +415,12 @@ public partial class MainViewModel
         _autoSave.Discard();
         AdoptProject(path);
         if (relinked) MarkRollDirty();   // the repaired paths, written back on the next idle pause
+
+        // Opening a DIFFERENT project must offer its own migration again — the dismissal is about
+        // one roll, not about the session. (This is the path a legacy project actually arrives by;
+        // LoadRollAsync only ever creates ManagedV2 rolls, which have no banner to dismiss.)
+        _legacyNoticeDismissed = false;
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
 
         RefreshTiffInputDetection();
         StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
@@ -639,6 +711,7 @@ public partial class MainViewModel
         // Frames must already be populated: the detector reads the first non-virtual, non-RAW
         // frame off disk. Cheap — header tags only, no pixels.
         _tiffInputNoticeDismissed = false;
+        _legacyNoticeDismissed = false;
         RefreshTiffInputDetection();
 
         // Fire and forget: the import must return as soon as frame 1 is on screen. Awaiting the
