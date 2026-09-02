@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenRevelare.Core;
 
@@ -125,12 +125,42 @@ public static class Settings
         public Models.ExportOptions Export { get; set; } = new();
     }
 
+    /// <summary>
+    /// Environment overrides for the two per-user directories, honoured before the platform
+    /// defaults below.
+    ///
+    /// <para>
+    /// THE REASON THEY EXIST is that a test run is otherwise indistinguishable from the real
+    /// application. Anything that constructs a <c>MainViewModel</c> and opens a roll reaches
+    /// <c>RegisterRoll</c> → <c>Catalog.Upsert</c>, which writes
+    /// <c>%APPDATA%\OpenRevelare\catalog.json</c> — the developer's OWN photo library. The rolls
+    /// land there titled after the temp folder their fixtures were written in, the fixture files
+    /// are deleted when the test finishes, and what is left is a permanent "文件缺失" card in a
+    /// real person's library, one per test per run. Measured on this machine: 123 of 124 catalog
+    /// entries were that residue.
+    /// </para>
+    ///
+    /// <para>
+    /// Read once into <c>static readonly</c> fields, so a process must set them BEFORE anything
+    /// touches <see cref="Settings"/>. The test assembly does that from a
+    /// <c>[ModuleInitializer]</c>, which runs before any test body.
+    /// </para>
+    /// </summary>
+    private const string ConfigDirVariable = "OPENREVELARE_CONFIG_DIR";
+    private const string DataDirVariable = "OPENREVELARE_DATA_DIR";
+
+    private static string? Override(string variable)
+    {
+        string? value = Environment.GetEnvironmentVariable(variable);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
     /// <summary>Per-user config directory — settings and the roll catalog both live here,
     /// and the installer touches none of it, so an upgrade keeps them.</summary>
-    public static readonly string ConfigDir = OperatingSystem.IsWindows()
+    public static readonly string ConfigDir = Override(ConfigDirVariable) ?? (OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenRevelare")
         : Path.Combine(Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
-              ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"), "OpenRevelare");
+              ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"), "OpenRevelare"));
     /// <summary>
     /// Per-user data directory — regenerable markers, i.e. things that are not settings but
     /// must survive an upgrade. Same folder as %LOCALAPPDATA%\OpenRevelare on Windows and
@@ -140,10 +170,10 @@ public static class Settings
     /// .NET maps that to ~/Library/Application Support on macOS — which would scatter this app's
     /// state across a third location while the config sits under XDG paths.
     /// </summary>
-    public static readonly string DataDir = OperatingSystem.IsWindows()
+    public static readonly string DataDir = Override(DataDirVariable) ?? (OperatingSystem.IsWindows()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenRevelare")
         : Path.Combine(Environment.GetEnvironmentVariable("XDG_DATA_HOME")
-              ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share"), "OpenRevelare");
+              ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share"), "OpenRevelare"));
 
     /// <summary>
     /// Drop-in folder for print LUTs: any .cube copied here is offered in 【胶片风格】 on the next
