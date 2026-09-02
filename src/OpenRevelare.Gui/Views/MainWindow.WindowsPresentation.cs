@@ -33,6 +33,7 @@ public partial class MainWindow
         bool enabled = OperatingSystem.IsWindows();
         WindowsPreview.IsVisible = enabled;
         ColorDiagnosticStatus.IsVisible = enabled;
+        CopyColorDiagnosticsMenuItem.IsVisible = enabled;
         if (!enabled) return;
 
         WindowsPreview.ContractChanged += OnWindowsDisplayContractChanged;
@@ -187,10 +188,20 @@ public partial class MainWindow
     private void ReportWindowsCompositionFailure(long epoch, Exception error)
     {
         if (_windowsPresentationClosed || epoch != _windowsPresentationEpoch) return;
+        // The exception's own message is developer text; it stays in the diagnostics ("Composition
+        // error: …") rather than becoming the sentence the user is handed.
         _lastWindowsColorDiagnostics = BuildWindowsColorDiagnostics(error);
-        ColorDiagnosticText.Text = $"Windows preview unavailable · {error.Message}";
+        ColorDiagnosticText.Text = ColorDiagnosticBadge.Format(
+            string.Empty,
+            default,
+            string.Empty,
+            string.Empty,
+            hasWarning: true,
+            colorManagementUnavailable: false);
         ColorDiagnosticText.Foreground = Brushes.OrangeRed;
-        ToolTip.SetTip(ColorDiagnosticStatus, _lastWindowsColorDiagnostics);
+        ToolTip.SetTip(
+            ColorDiagnosticStatus,
+            ColorDiagnosticBadge.FormatTooltip(hasWarning: true, colorManagementUnavailable: false));
     }
 
     private WindowsPresentationSnapshot? CaptureWindowsPresentationSnapshot()
@@ -426,6 +437,8 @@ public partial class MainWindow
         {
             ColorDiagnosticText.Text = "Windows preview · probing display contract…";
             ColorDiagnosticText.Foreground = Brushes.Orange;
+            // Transient, and not a fault: do not leave a stale hover behind.
+            ToolTip.SetTip(ColorDiagnosticStatus, null);
             return;
         }
 
@@ -448,14 +461,22 @@ public partial class MainWindow
         // (复制色彩诊断) away, where it says "Input encoding: Uncharacterized" in full.
         if (Vm?.InputIsUncharacterized == true)
             guarantee += Services.Loc.T("（显示端）");
-        ColorDiagnosticText.Text = string.IsNullOrWhiteSpace(warning)
-            ? $"{contract.DiagnosticName} · {contract.Encoding} · {monitor} · {guarantee}"
-            : $"{contract.DiagnosticName} · {contract.Encoding} · WARNING: {warning}";
-        ColorDiagnosticText.Foreground = string.IsNullOrWhiteSpace(warning)
-            ? Brushes.Gray
-            : Brushes.OrangeRed;
+        bool hasWarning = !string.IsNullOrWhiteSpace(warning);
+        // Which advice applies is decided by the typed owner, not by the warning text; see
+        // ColorDiagnosticBadge.
+        bool colorManagementUnavailable = contract.TransformOwner == FinalTransformOwner.None;
+        ColorDiagnosticText.Text = ColorDiagnosticBadge.Format(
+            contract.DiagnosticName,
+            contract.Encoding,
+            monitor,
+            guarantee,
+            hasWarning,
+            colorManagementUnavailable);
+        ColorDiagnosticText.Foreground = hasWarning ? Brushes.OrangeRed : Brushes.Gray;
         _lastWindowsColorDiagnostics = BuildWindowsColorDiagnostics();
-        ToolTip.SetTip(ColorDiagnosticStatus, _lastWindowsColorDiagnostics);
+        ToolTip.SetTip(
+            ColorDiagnosticStatus,
+            ColorDiagnosticBadge.FormatTooltip(hasWarning, colorManagementUnavailable));
     }
 
     private string BuildWindowsColorDiagnostics(Exception? compositionError = null)

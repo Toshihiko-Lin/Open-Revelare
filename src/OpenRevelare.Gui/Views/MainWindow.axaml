@@ -189,6 +189,11 @@
                         <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
+                        <!-- 诊断入口常驻在此，而不是跟着状态栏的告警出现：颜色报告多数发生在
+                             显示链路一切正常的时候（「导出偏色」「这张不对」），那时状态栏不该
+                             出现任何诊断字样，但报告通道必须仍然存在。 -->
+                        <MenuItem Name="CopyColorDiagnosticsMenuItem" Header="{i18n:T '复制色彩诊断'}"
+                                  Click="OnCopyColorDiagnosticsClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '关于 OpenRevelare'}" Click="OnAboutClick" />
                     </MenuItem>
@@ -242,13 +247,9 @@
                 <Border Name="ColorDiagnosticStatus" IsVisible="False"
                         Background="{DynamicResource AccentSoftBrush}" CornerRadius="4" Padding="7,1"
                         VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                        <TextBlock Name="ColorDiagnosticText" VerticalAlignment="Center"
-                                   FontSize="11" Foreground="{DynamicResource TextDimBrush}"
-                                   TextTrimming="CharacterEllipsis" MaxWidth="560" />
-                        <Button Content="{i18n:T '复制色彩诊断'}" Padding="6,1"
-                                Click="OnCopyColorDiagnosticsClick" />
-                    </StackPanel>
+                    <TextBlock Name="ColorDiagnosticText" VerticalAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource TextDimBrush}"
+                               TextTrimming="CharacterEllipsis" MaxWidth="560" />
                 </Border>
             </StackPanel>
         </Border>
