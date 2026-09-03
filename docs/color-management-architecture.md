@@ -714,6 +714,19 @@ compositor。
 | 未表征 RAW 被“顺手修成”普通 camera ColorMatrix | explicit `UncharacterizedCapture`；input policy/golden/product decision |
 | HDR/EDR 改变 SDR 亮度 | reference-white contract；D-011/D-012 spike；首期不做 HDR grading |
 | 外部 profile 文件被替换 | exact bytes/hash 随项目或内容寻址保存 |
+| **进程里已存在同名 lcms2，app-owned 那份被加载器去重掉** | 见下方附注：目前靠**同名覆盖**成立，不是靠隔离 |
+
+**附注（D-002 的执行边界，三平台不等强）。** `LittleCmsBundle` 校验的是**磁盘文件的字节**，
+而不是最终被映射进进程的那份镜像。Linux 的 `dlopen` 按 SONAME、macOS 的 dyld 按 install name
+去重：若进程里已经存在同名的 lcms2，按全路径加载会拿回**已加载的那一份**，校验照样通过。
+这不是假想——`Sdcb.LibRaw.runtime.linux64` 包里自带 `liblcms2.so`，win64 包里自带 `lcms2.dll`，
+macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制进 `native/<rid>`。
+
+目前是安全的：三条流水线都用同名覆盖（`install` / `Copy-Item` / 顺序排在 `bundle-libraw.sh`
+之后）把它们统一成 app-owned 的那一份，全进程只有一份字节。**但这是靠覆盖而不是靠隔离**——
+一旦 LibRaw 改用带版本后缀的私有依赖、或换成静态链接自己的 CMM，这条保证会静默失效而不会
+有任何测试变红。真要收紧，得让运行时能证明「加载到的就是我校验的那份」（例如比对已加载模块
+的路径），而不是只证明磁盘上那份是对的。
 
 ---
 
