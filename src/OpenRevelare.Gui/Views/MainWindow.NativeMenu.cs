@@ -185,6 +185,10 @@ public partial class MainWindow
                 Item(Loc.T("快捷键…"), OnHelpClick),
                 new NativeMenuItemSeparator(),
                 Item(Loc.T("检查更新…"), OnCheckUpdateClick),
+                // 「与窗口内菜单逐条对齐」这条约定在这一项上断过：【复制色彩诊断】只加进了
+                // MainWindow.axaml 的 帮助 栏。mac 上窗口内菜单条是隐藏的，于是这里少一项
+                // 就等于这台机器上根本没有这个入口 —— 而它是色彩问题唯一的报告通道。
+                Item(Loc.T("复制色彩诊断"), OnCopyColorDiagnosticsClick),
             },
         };
 

@@ -32,9 +32,19 @@ public partial class MainWindow
     {
         bool enabled = OperatingSystem.IsWindows();
         WindowsPreview.IsVisible = enabled;
-        ColorDiagnosticStatus.IsVisible = enabled;
-        CopyColorDiagnosticsMenuItem.IsVisible = enabled;
-        if (!enabled) return;
+        // 徽章和【帮助 → 复制色彩诊断】原本跟着 WindowsPreview 一起关掉。但它们承载的是两件事，
+        // 只有「显示链路契约」是 Windows 概念；「这一卷走的是哪条色彩管线、TIFF 输入按什么假设」
+        // 三平台同样成立，而这两个出口是它**唯一**的去处 —— ColorPipelineDiagnostic 在整个 GUI
+        // 里没有第二个消费者。于是 mac/Linux 用户既看不到自己这一卷按什么渲染，出了色彩问题也
+        // 没有诊断可交。测试断言的是 VM 属性而不是 UI，所以三平台全绿也照不出这一条。
+        CopyColorDiagnosticsMenuItem.IsVisible = true;
+        if (!enabled)
+        {
+            UpdateColorPipelineOnlyStatus();
+            return;
+        }
+
+        ColorDiagnosticStatus.IsVisible = true;
 
         WindowsPreview.ContractChanged += OnWindowsDisplayContractChanged;
         WindowsPreview.PresentationFailed += OnWindowsPresentationFailed;
@@ -58,7 +68,16 @@ public partial class MainWindow
         MainViewModel viewModel,
         string? propertyName)
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            // 非 Windows 只关心两件事：徽章内容本身，以及「有没有打开卷」这个可见性条件。
+            if (propertyName is nameof(MainViewModel.ColorPipelineDiagnostic)
+                             or nameof(MainViewModel.HasImage))
+            {
+                UpdateColorPipelineOnlyStatus();
+            }
+            return;
+        }
         if (propertyName == nameof(MainViewModel.PresentationRevision))
         {
             QueueWindowsPresentation();
@@ -429,6 +448,31 @@ public partial class MainWindow
         catch (FormatException) { return Color.Parse("#5E5E5E"); }
     }
 
+    /// <summary>
+    /// 非 Windows 平台的徽章内容：只有与平台无关的那一半 —— 色彩管线版本与 TIFF 输入假设。
+    ///
+    /// 显示链路那一半（contract / encoding / monitor / WYSIWYG）是 Windows 概念，这里没有，
+    /// 也不该编一个出来：mac/Linux 的最后一跳目前封顶在 sRGB，声称 WYSIWYG 会是假话。
+    /// 那半截属于能力对齐（M5/M6），不属于这条披露。
+    ///
+    /// 没有打开卷时整条徽章隐藏 —— 这条信息是按卷成立的，空着显示一个默认值只会误导。
+    /// </summary>
+    private void UpdateColorPipelineOnlyStatus()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        if (Vm is not { HasImage: true } vm)
+        {
+            ColorDiagnosticStatus.IsVisible = false;
+            return;
+        }
+
+        ColorDiagnosticStatus.IsVisible = true;
+        ColorDiagnosticText.Text = vm.ColorPipelineDiagnostic;
+        ColorDiagnosticText.Foreground = Brushes.Gray;
+        // 这一半没有告警态：它报告的是「按什么渲染的」，不是「哪里坏了」。
+        ToolTip.SetTip(ColorDiagnosticStatus, null);
+    }
+
     private void UpdateWindowsColorStatus()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -485,6 +529,17 @@ public partial class MainWindow
         text.AppendLine("OpenRevelare color diagnostics");
         text.AppendLine($"Generated: {DateTimeOffset.Now:O}");
         text.AppendLine(Vm?.BuildRenderColorDiagnostics() ?? "Rendered frame: unavailable");
+
+        // 报告在三平台都能出，但只有 render/input/CMM 这一半是三平台共有的。下面每一段读的都是
+        // Windows presenter 的状态，在别的平台上全是默认值 —— 打印出来不是「诊断信息不足」，
+        // 而是一串看着像结论的空值。说清楚它为什么不在，比留一堆 unavailable 诚实。
+        if (!OperatingSystem.IsWindows())
+        {
+            text.AppendLine(
+                "Presenter contract: not applicable — the display-contract half of these " +
+                "diagnostics is Windows-only. Everything above applies on every platform.");
+            return text.ToString().TrimEnd();
+        }
 
         DisplayContract? contract = WindowsPreview.CurrentContract;
         if (contract is null)
