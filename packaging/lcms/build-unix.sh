@@ -107,6 +107,58 @@ if [ "$OS" = "Darwin" ]; then
   codesign --verify "$DEST/$ALIAS"
 fi
 
+# ── glibc 符号下限（Linux only）────────────────────────────────────────────────
+#
+# 在本脚本出现之前，Linux 产物里没有任何「在 CI runner 上编出来的」原生库：.NET 运行时是
+# 微软构建的，LibRaw 来自 NuGet 预编译包。现在 lcms2 是现编的，于是产物能跑在哪些发行版上
+# 变成了跟着 runner 镜像走 —— 而 README 的支持矩阵写着一个具体数字。两者之间原本没有任何
+# 东西守着，镜像哪天从 22.04 滚到 24.04 再滚到 26.04，承诺会静默作废。
+#
+# 这条断言不替谁做决定，只把「产物到底要求多新的 glibc」从未知变成 CI 里的一个事实。
+# 真红了，三个方向都在 PR4-HANDOFF §8.4：钉镜像 / 调低使用面 / 改 README。
+GLIBC_FLOOR="2.35"      # 与 README.md 与 README.en.md 的支持矩阵同源，改一处必须改三处
+if [ "$OS" = "Linux" ]; then
+  echo "==> 校验 glibc 符号下限（承诺 ≤ $GLIBC_FLOOR）"
+  # 能走到这里说明 autotools 刚刚成功链接过一次，binutils 必然在场，所以硬失败是安全的：
+  # 找不到工具意味着环境不对，而不是「这台机器不方便检查」。
+  if command -v readelf >/dev/null 2>&1; then
+    SYMBOL_DUMP="readelf --version-info --wide"
+  elif command -v objdump >/dev/null 2>&1; then
+    SYMBOL_DUMP="objdump -T"
+  else
+    echo "错误：找不到 readelf / objdump，无法校验 glibc 下限" >&2
+    echo "      安装 binutils 后重跑；不要跳过这一步" >&2
+    exit 1
+  fi
+
+  # 版本号按 major/minor/patch 归一成可比整数：2.35 → 2035000，2.2.5 → 2002005。
+  # 缺省字段在 awk 里是空串，%d 取 0，正是想要的。
+  glibc_key() { echo "$1" | awk -F. '{ printf "%d%03d%03d\n", $1, $2, $3 }'; }
+
+  REQUIRED_VERSIONS="$($SYMBOL_DUMP "$DEST/$CANONICAL" 2>/dev/null \
+    | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sed 's/\.$//' | sort -u || true)"
+  if [ -z "$REQUIRED_VERSIONS" ]; then
+    # 没有任何带版本的 glibc 符号并不必然是错的，但它不该悄悄发生：要么是静态链接，
+    # 要么是符号表被 strip 过头，两种都值得看一眼再放行。
+    echo "    警告：$CANONICAL 里没有任何 GLIBC_ 版本符号，跳过下限校验" >&2
+  else
+    WORST_VERSION="$(printf '%s\n' "$REQUIRED_VERSIONS" \
+      | awk -F. '{ k = $1*1000000 + $2*1000 + $3; if (k > best) { best = k; v = $0 } }
+                 END { if (v != "") print v }')"
+    echo "    需要的 glibc 版本：$(printf '%s' "$REQUIRED_VERSIONS" | tr '\n' ' ')"
+    echo "    其中最高：$WORST_VERSION"
+    if [ "$(glibc_key "$WORST_VERSION")" -gt "$(glibc_key "$GLIBC_FLOOR")" ]; then
+      echo "错误：$CANONICAL 要求 glibc $WORST_VERSION，高于 README 承诺的 $GLIBC_FLOOR" >&2
+      echo "      这份 AppImage 在 Ubuntu 22.04 / Debian 12 上会加载失败。" >&2
+      echo "      三个方向（见 PR4-HANDOFF §8.4）：" >&2
+      echo "        1. 把 release 的 linux job 钉到与承诺相符的 runner 镜像；" >&2
+      echo "        2. 降低使用面，让产物不再需要这么新的符号；" >&2
+      echo "        3. 改 README 的支持矩阵，明确降级承诺。" >&2
+      exit 1
+    fi
+  fi
+fi
+
 CANONICAL_HASH="$(hash_file "$DEST/$CANONICAL")"
 ALIAS_HASH="$(hash_file "$DEST/$ALIAS")"
 MANIFEST="$DEST/lcms2.manifest.json"
