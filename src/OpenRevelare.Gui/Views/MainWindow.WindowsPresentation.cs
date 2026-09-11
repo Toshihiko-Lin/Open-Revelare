@@ -293,6 +293,24 @@ public partial class MainWindow
         double renderScaling)
     {
         if (_mode != SampleMode.Crop || _cropDraft is not { } crop) return;
+
+        // A crop draft is legitimately degenerate for part of its life: pointer-down on a fresh
+        // rectangle seeds it as (x, y, 0, 0), and ApplyCropDrag keeps a zero side for as long as
+        // the drag stays on one axis — free aspect does not correct it, and the pointer is clamped
+        // to [0,1], so dragging along an image edge holds it at zero. OnOverlayReleased discards
+        // such a draft afterwards, which is the same admission.
+        //
+        // RenderCropFrame calls QueueWindowsPresentation unconditionally, so that state reaches
+        // here mid-drag, and PreviewRect REJECTS a non-positive side. Nothing between this method
+        // and Avalonia's pointer dispatch catches it — and per OnOverlayReleased's own comment,
+        // what escapes pointer dispatch "unwinds past the message loop and kills the process".
+        // The Avalonia renderer never had the problem: RenderCropFrame clamps with Math.Max(0, w)
+        // and a zero-sized Rectangle simply draws nothing.
+        //
+        // AddTransientSelectionPrimitives already guards its own rect this way; this is the same
+        // guard on the path that was missing it.
+        if (crop.W <= 0d || crop.H <= 0d) return;
+
         PreviewRect image = geometry.DisplayedImagePhysical;
         PreviewRect frame = geometry.NormalizedToPhysical(
             new PreviewRect(crop.X, crop.Y, crop.W, crop.H));
