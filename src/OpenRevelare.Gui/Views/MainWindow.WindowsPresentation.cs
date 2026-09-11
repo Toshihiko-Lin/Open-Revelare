@@ -32,6 +32,7 @@ public partial class MainWindow
     {
         bool enabled = OperatingSystem.IsWindows();
         WindowsPreview.IsVisible = enabled;
+        UpdateNoticeStripPlacement();
         // 徽章和【帮助 → 复制色彩诊断】原本跟着 WindowsPreview 一起关掉。但它们承载的是两件事，
         // 只有「显示链路契约」是 Windows 概念；「这一卷走的是哪条色彩管线、TIFF 输入按什么假设」
         // 三平台同样成立，而这两个出口是它**唯一**的去处 —— ColorPipelineDiagnostic 在整个 GUI
@@ -60,8 +61,40 @@ public partial class MainWindow
             {
                 UpdateWindowsColorStatus();
             }
+
+            if (args.Property == WindowsPreviewHost.IsPresenterAvailableProperty)
+                UpdateNoticeStripPlacement();
         };
         Opened += (_, _) => QueueWindowsPresentation();
+    }
+
+    /// <summary>
+    /// Puts the notice strip back over the viewer wherever nothing occludes it.
+    ///
+    /// <para>
+    /// Before the native presenter existed, the crop banner floated inside the viewer
+    /// (<c>VerticalAlignment=Top</c>, no layout height of its own). Avalonia cannot draw over the
+    /// Windows child HWND, so the strip was given a row of its own — but that row was applied
+    /// unconditionally, and it costs real preview height: 58 px measured, enough to re-scale a
+    /// portrait frame mid-edit, on macOS and Linux which have no airspace problem at all. The
+    /// three cards are independent siblings, so the cost can be three rows.
+    /// </para>
+    /// </summary>
+    private void UpdateNoticeStripPlacement()
+    {
+        // Row 1 is the strip's own Auto row; row 2 is the viewer. An empty Auto row collapses to
+        // zero height, so moving the strip into the viewer's cell hands that height back to the
+        // preview without any conditional markup. ZIndex is required there because a Grid paints
+        // in child order and the viewer Border is declared after the strip.
+        bool childWindowCoversViewport =
+            OperatingSystem.IsWindows() && WindowsPreview.IsPresenterAvailable;
+
+        Grid.SetRow(NoticeStrip, childWindowCoversViewport ? 1 : 2);
+        NoticeStrip.ZIndex = childWindowCoversViewport ? 0 : 1;
+        // Matches the viewer Border's own padding so a floating card is not flush to the edge.
+        NoticeStrip.Margin = childWindowCoversViewport
+            ? default
+            : new Thickness(10, 10, 10, 0);
     }
 
     private void OnWindowsPresentationViewModelPropertyChanged(
@@ -315,20 +348,20 @@ public partial class MainWindow
         PreviewRect frame = geometry.NormalizedToPhysical(
             new PreviewRect(crop.X, crop.Y, crop.W, crop.H));
 
-        PremultipliedLinearRgba dim = SrgbPremultiplied("#99101214");
+        PremultipliedLinearRgba dim = SrgbPremultiplied(PreviewOverlayStyle.CropDim);
         AddSolid(primitives, image.X, image.Y, image.Width, frame.Y - image.Y, dim);
         AddSolid(primitives, image.X, frame.Bottom, image.Width, image.Bottom - frame.Bottom, dim);
         AddSolid(primitives, image.X, frame.Y, frame.X - image.X, frame.Height, dim);
         AddSolid(primitives, frame.Right, frame.Y, image.Right - frame.Right, frame.Height, dim);
 
-        double frameStroke = 1.5d * renderScaling;
+        double frameStroke = PreviewOverlayStyle.FrameStrokeThickness * renderScaling;
         primitives.Add(new PresentationRectOutline(
             frame,
             frameStroke,
-            SrgbPremultiplied("#E6E9EC")));
+            SrgbPremultiplied(PreviewOverlayStyle.Marquee)));
 
-        PremultipliedLinearRgba guide = SrgbPremultiplied("#66E6E9EC");
-        double guideStroke = renderScaling;
+        PremultipliedLinearRgba guide = SrgbPremultiplied(PreviewOverlayStyle.Guide);
+        double guideStroke = PreviewOverlayStyle.GuideStrokeThickness * renderScaling;
         double x1 = frame.X + frame.Width / 3d;
         double x2 = frame.X + frame.Width * 2d / 3d;
         double y1 = frame.Y + frame.Height / 3d;
@@ -347,11 +380,11 @@ public partial class MainWindow
         foreach (PreviewPoint center in CropHandleCenters(frame))
         {
             var bounds = new PreviewRect(center.X - half, center.Y - half, handle, handle);
-            primitives.Add(new PresentationSolidRect(bounds, SrgbPremultiplied("#F2F5F7")));
+            primitives.Add(new PresentationSolidRect(bounds, SrgbPremultiplied(PreviewOverlayStyle.HandleFill)));
             primitives.Add(new PresentationRectOutline(
                 bounds,
-                renderScaling,
-                SrgbPremultiplied("#1C1E20")));
+                PreviewOverlayStyle.HandleOutlineThickness * renderScaling,
+                SrgbPremultiplied(PreviewOverlayStyle.HandleOutline)));
         }
     }
 
@@ -367,11 +400,11 @@ public partial class MainWindow
                 SelRect.Width,
                 SelRect.Height,
                 renderScaling);
-            primitives.Add(new PresentationSolidRect(bounds, SrgbPremultiplied("#22E6E9EC")));
+            primitives.Add(new PresentationSolidRect(bounds, SrgbPremultiplied(PreviewOverlayStyle.MarqueeFill)));
             primitives.Add(new PresentationRectOutline(
                 bounds,
-                1.5d * renderScaling,
-                SrgbPremultiplied("#E6E9EC")));
+                PreviewOverlayStyle.FrameStrokeThickness * renderScaling,
+                SrgbPremultiplied(PreviewOverlayStyle.Marquee)));
         }
 
         if (SelLine.IsVisible)
@@ -379,8 +412,8 @@ public partial class MainWindow
             primitives.Add(new PresentationLine(
                 TransformOverlayPoint(SelLine.StartPoint, renderScaling),
                 TransformOverlayPoint(SelLine.EndPoint, renderScaling),
-                2d * renderScaling,
-                SrgbPremultiplied("#FF5A50")));
+                PreviewOverlayStyle.StraightenStrokeThickness * renderScaling,
+                SrgbPremultiplied(PreviewOverlayStyle.Straighten)));
         }
     }
 
@@ -425,9 +458,8 @@ public partial class MainWindow
         primitives.Add(new PresentationSolidRect(new PreviewRect(x, y, width, height), color));
     }
 
-    private static PremultipliedLinearRgba SrgbPremultiplied(string value)
+    private static PremultipliedLinearRgba SrgbPremultiplied(Color color)
     {
-        Color color = Color.Parse(value);
         float alpha = color.A / 255f;
         return new PremultipliedLinearRgba(
             DecodeSrgb(color.R / 255f) * alpha,

@@ -433,7 +433,13 @@
 
                 <!-- Native HWND airspace cannot be covered by Avalonia controls. Keep every
                      interactive/status card in its own shell row outside the preview surface. -->
-                <StackPanel Grid.Row="1" Spacing="4" HorizontalAlignment="Stretch">
+                <!-- Notice strip: crop banner + TIFF-input and roll-analysis cards.
+                     Grid.Row and ZIndex are decided at runtime by UpdateNoticeStripPlacement(),
+                     not here: the strip floats over the viewer — the placement the crop banner
+                     had before the native presenter existed — unless the Windows child HWND is
+                     actually covering the viewport, which would hide it. -->
+                <StackPanel Name="NoticeStrip" Grid.Row="1" Spacing="4"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Top">
                     <StackPanel Orientation="Horizontal" Spacing="6"
                                 HorizontalAlignment="Center" Margin="0,4,0,0">
                         <Border Name="Banner" IsVisible="False" CornerRadius="8"
@@ -654,8 +660,10 @@
                                     PointerMoved="OnOverlayMoved"
                                     PointerReleased="OnOverlayReleased">
                                 <Rectangle Name="SelRect" IsVisible="False"
-                                           Stroke="#E6E9EC" StrokeThickness="1.5"
-                                           StrokeDashArray="4,2" Fill="#22E6E9EC" />
+                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}"
+                                           StrokeDashArray="{x:Static views:PreviewOverlayStyle.MarqueeDash}"
+                                           Fill="{x:Static views:PreviewOverlayStyle.MarqueeFillBrush}" />
                                 <!-- Editable crop frame. Four dim bands rather than one
                                      even-odd path: the bands are plain rectangles the layout
                                      can position directly, and what is outside the crop wants
@@ -663,22 +671,28 @@
                                      are re-sized by 1/zoom in code so they stay a constant size
                                      on screen — everything here lives inside ZoomGrid and would
                                      otherwise grow with the picture. -->
-                                <Rectangle Name="CropDimT" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimB" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimL" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimR" IsVisible="False" Fill="#99101214" />
+                                <Rectangle Name="CropDimT" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimB" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimL" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimR" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
                                 <Rectangle Name="CropFrame" IsVisible="False"
-                                           Stroke="#E6E9EC" StrokeThickness="1.5" />
+                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}" />
                                 <!-- Thirds guides: a crop frame without them is a box; with them
                                      it is a composition tool. -->
-                                <Line Name="CropV1" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropV2" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropH1" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropH2" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
+                                <Line Name="CropV1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropV2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropH1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropH2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
                                 <!-- Straighten reference line. Warm, not the neutral marquee grey:
                                      it is a transient guide laid over the picture, not a selection. -->
                                 <Line Name="SelLine" IsVisible="False"
-                                      Stroke="#FF5A50" StrokeThickness="2" />
+                                      Stroke="{x:Static views:PreviewOverlayStyle.StraightenBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.StraightenStrokeThickness}" />
                             </Canvas>
                         </Grid>
                     </Grid>

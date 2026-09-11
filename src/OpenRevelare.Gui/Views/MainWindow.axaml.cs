@@ -134,9 +134,9 @@ public partial class MainWindow : Window
             var r = new Rectangle
             {
                 IsVisible = false,
-                Fill = new SolidColorBrush(Color.Parse("#F2F5F7")),
-                Stroke = new SolidColorBrush(Color.Parse("#1C1E20")),
-                StrokeThickness = 1,
+                Fill = PreviewOverlayStyle.HandleFillBrush,
+                Stroke = PreviewOverlayStyle.HandleOutlineBrush,
+                StrokeThickness = PreviewOverlayStyle.HandleOutlineThickness,
             };
             _cropHandleShapes[i] = r;
             Overlay.Children.Add(r);
