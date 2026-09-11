@@ -72,6 +72,60 @@ public sealed class WindowsDisplayEnvironmentTests
     }
 
     [Fact]
+    public void Moving_to_a_second_display_publishes_a_contract_bound_to_that_display()
+    {
+        // The hardware half of this — dragging the window between two physically different
+        // monitors — needs a second screen (PR4-HANDOFF §4.5 item 3). The state-machine half does
+        // not, and used to rest on nothing but "DisplayId happens to be a member of
+        // WindowsDisplaySemanticKey": no test changed it. This pins both halves of the contract
+        // that a second monitor would otherwise be needed to observe — a new revision bound to the
+        // new display, and the old display's buffers ceasing to validate.
+        byte[] firstProfile = [1, 2, 3, 4];
+        var probe = new FakeProbe(LegacySnapshot(firstProfile));
+        using var environment = CreateEnvironment(probe);
+        DisplayContract initial = environment.Current;
+        DisplayContract? published = null;
+        environment.ContractChanged += (_, contract) => published = contract;
+
+        const string secondDisplayId = "win32:DISPLAY#OTHER|adapter:00000000:00010F21|target:9001";
+        byte[] secondProfile = [9, 8, 7, 6, 5];
+        probe.Current = LegacySnapshot(secondProfile) with
+        {
+            DisplayId = secondDisplayId,
+            GdiDeviceName = @"\\.\DISPLAY3",
+            MonitorFriendlyName = "Second Screen",
+            MonitorProfile = new MonitorProfileData(
+                secondProfile, "Second sRGB", "second.icc", "CurrentUser"),
+        };
+
+        Assert.True(environment.Refresh());
+
+        DisplayContract moved = environment.Current;
+        Assert.Same(moved, published);
+        Assert.Equal(2, moved.Revision);
+        Assert.Equal(secondDisplayId, moved.DisplayId);
+        Assert.NotEqual(initial.DisplayId, moved.DisplayId);
+        Assert.Equal(ProfileIdentity.FromIcc(secondProfile), moved.DeviceProfile!.Identity);
+        Assert.Equal(secondDisplayId, environment.Diagnostics.DisplayId);
+        Assert.Equal("Second Screen", environment.Diagnostics.MonitorFriendlyName);
+
+        // A frame prepared for the display we just left must be refused, not presented on the new
+        // one. Both the id and the revision have moved, so this is the invariant that keeps the
+        // previous monitor's colours off the current monitor.
+        var stale = new PresentationBuffer(
+            new byte[4],
+            new PixelSize(1, 1),
+            initial.Encoding,
+            initial.DisplayId,
+            initial.Revision,
+            initial.DeviceProfile!.Identity,
+            initial.SdrReferenceWhite,
+            initial.ReferenceWhiteScale,
+            applicationMonitorTransformCount: 1);
+        Assert.Throws<PresentationContractException>(() => moved.Validate(stale));
+    }
+
+    [Fact]
     public void Window_dpi_change_increments_contract_revision()
     {
         var probe = new FakeProbe(LegacySnapshot([1, 2, 3, 4]));

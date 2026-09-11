@@ -7,6 +7,16 @@ namespace OpenRevelare.Presentation.Win32;
 
 internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
 {
+    // Guards the monitor-profile cache below. WindowsDisplayEnvironment already serializes probes
+    // behind its refresh gate; the lock keeps that from being a load-bearing assumption of a type
+    // whose interface says nothing about threading.
+    private readonly object _monitorProfileGate = new();
+    private MonitorProfileData? _cachedMonitorProfile;
+    private string? _cachedMonitorProfilePath;
+    private string? _cachedMonitorProfileScope;
+    private long _cachedMonitorProfileLength;
+    private DateTime _cachedMonitorProfileWrittenUtc;
+
     public WindowsDisplayProbeSnapshot Probe(nint windowHwnd)
     {
         if (windowHwnd == nint.Zero) throw new ArgumentException("Window HWND is null.", nameof(windowHwnd));
@@ -292,7 +302,7 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         return (white.SdrWhiteLevel, white.SdrWhiteLevel / 1000f * 80f, null);
     }
 
-    private static (MonitorProfileData? Profile, string? Failure) ReadMonitorProfile(
+    private (MonitorProfileData? Profile, string? Failure) ReadMonitorProfile(
         ActiveDisplayPath path)
     {
         int scopeResult;
@@ -343,14 +353,54 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         try
         {
             string profilePath = ResolveProfilePath(profileName);
+            string scopeName = scope.ToString();
+
+            // Every probe used to re-read the whole ICC and re-hash it. A probe happens on each
+            // refresh, refreshes are driven by WM_MOVE/WM_WINDOWPOSCHANGED, and the drain that
+            // runs them is on the UI thread — so dragging the window used to pay one file read,
+            // one array copy and one SHA-256 of the entire profile per dispatcher turn. That is
+            // nothing for the 3 KB stock sRGB profile and real work for a calibrated one, which
+            // is routinely megabytes.
+            //
+            // The cache key is the identity Windows itself would change: the resolved path, the
+            // scope, and the file's length and last-write time. The stamp is taken BEFORE the
+            // read, so a profile rewritten while we read it lands under the old stamp and the
+            // next probe re-reads rather than serving the torn copy forever.
+            var info = new FileInfo(profilePath);
+            long length = info.Length;
+            DateTime writtenUtc = info.LastWriteTimeUtc;
+
+            lock (_monitorProfileGate)
+            {
+                if (_cachedMonitorProfile is { } cached &&
+                    _cachedMonitorProfileLength == length &&
+                    _cachedMonitorProfileWrittenUtc == writtenUtc &&
+                    string.Equals(_cachedMonitorProfilePath, profilePath, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(_cachedMonitorProfileScope, scopeName, StringComparison.Ordinal))
+                {
+                    return (cached, null);
+                }
+            }
+
             byte[] bytes = File.ReadAllBytes(profilePath);
             if (bytes.Length == 0) return (null, $"Active monitor profile is empty: {profilePath}.");
             string fileName = Path.GetFileName(profilePath);
-            return (new MonitorProfileData(
+            var profile = new MonitorProfileData(
                 bytes,
                 Path.GetFileNameWithoutExtension(fileName),
                 fileName,
-                scope.ToString()), null);
+                scopeName);
+
+            lock (_monitorProfileGate)
+            {
+                _cachedMonitorProfile = profile;
+                _cachedMonitorProfilePath = profilePath;
+                _cachedMonitorProfileScope = scopeName;
+                _cachedMonitorProfileLength = length;
+                _cachedMonitorProfileWrittenUtc = writtenUtc;
+            }
+
+            return (profile, null);
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
