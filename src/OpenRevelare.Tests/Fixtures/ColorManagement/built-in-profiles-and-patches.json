@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "profileHashAlgorithm": "SHA-256",
+  "profiles": [
+    {
+      "name": "sRGB",
+      "file": "profiles/srgb.icc",
+      "iccSha256": "83d79da24e59ef91f912ccf1afaef88a01139dee9d252c424583083c39f85334",
+      "red": [0.64, 0.33],
+      "green": [0.3, 0.6],
+      "blue": [0.15, 0.06],
+      "white": [0.3127, 0.329],
+      "transfer": "SrgbPiecewise",
+      "gamma": 2.2
+    },
+    {
+      "name": "DisplayP3",
+      "file": "profiles/display-p3.icc",
+      "iccSha256": "25dce2ac08fd9e9a0e0a9ff1b0c3b2b79e13efd722a159e645a5e0f1362506ec",
+      "red": [0.68, 0.32],
+      "green": [0.265, 0.69],
+      "blue": [0.15, 0.06],
+      "white": [0.3127, 0.329],
+      "transfer": "SrgbPiecewise",
+      "gamma": 2.2
+    },
+    {
+      "name": "AdobeRGB",
+      "file": "profiles/adobe-rgb.icc",
+      "iccSha256": "fbd482e5e6d4ce34006581ae4db88d33d682d6a9a31e930a30cd5d7c1573a406",
+      "red": [0.64, 0.33],
+      "green": [0.21, 0.71],
+      "blue": [0.15, 0.06],
+      "white": [0.3127, 0.329],
+      "transfer": "Power",
+      "gamma": 2.19921875
+    },
+    {
+      "name": "Rec709",
+      "file": "profiles/rec709.icc",
+      "iccSha256": "20a9a64d0df813794c4b1fbfa1245bf275e9d30d7fbbc04c88b8092bbe155043",
+      "red": [0.64, 0.33],
+      "green": [0.3, 0.6],
+      "blue": [0.15, 0.06],
+      "white": [0.3127, 0.329],
+      "transfer": "Power",
+      "gamma": 2.4
+    },
+    {
+      "name": "ACEScg",
+      "file": "profiles/linear-acescg.icc",
+      "iccSha256": "7ce7452a6123db84f4a3ffdb9796bab6da34c576afff7724f77f85244811beb8",
+      "red": [0.713, 0.293],
+      "green": [0.165, 0.83],
+      "blue": [0.128, 0.044],
+      "white": [0.32168, 0.33767],
+      "transfer": "Linear",
+      "gamma": 2.2
+    }
+  ],
+  "canonicalEncoding": "linear extended-sRGB D65 RGBA float32",
+  "syntheticPatches": [
+    {
+      "id": "neutral-018",
+      "description": "18 percent scene-linear neutral",
+      "rgba": [0.18, 0.18, 0.18, 1.0]
+    },
+    {
+      "id": "neutral-100",
+      "description": "Reference-white neutral",
+      "rgba": [1.0, 1.0, 1.0, 1.0]
+    },
+    {
+      "id": "display-p3-red",
+      "description": "Display P3 red primary expressed in unclipped canonical linear extended-sRGB",
+      "rgba": [1.2249402, -0.042056955, -0.019637555, 1.0]
+    },
+    {
+      "id": "negative-component",
+      "description": "Synthetic canonical patch that must retain a negative component",
+      "rgba": [-0.125, 0.25, 0.5, 1.0]
+    },
+    {
+      "id": "extended-over-one",
+      "description": "Synthetic canonical patch that must retain a component above one",
+      "rgba": [1.25, 0.5, 0.125, 1.0]
+    }
+  ]
+}

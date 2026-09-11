@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "M0a-win11-eizo-null-destination",
+  "host": {
+    "edition": "Windows 11 Pro",
+    "version": "10.0.26200",
+    "build": 26200
+  },
+  "monitor": {
+    "manufacturer": "EIZO",
+    "model": "CG2700X",
+    "deviceId": "DISPLAY\\ENC3292",
+    "serialNumber": "<redacted-before-publication>"
+  },
+  "monitorProfile": {
+    "colorSpace": "Adobe RGB",
+    "fileName": "CG2700X(<serial-redacted>)07Adobe RGB.icc",
+    "hashAlgorithm": "SHA-256",
+    "sha256": "5C021BC82247BA6F897EF4B78DEBF0AC11D685262B02DA97438170790BFBDE2A",
+    "bytesIncluded": false,
+    "profileBytesRelativePath": "CG2700X(<serial-redacted>)07Adobe RGB.icc",
+    "notDistributedReason": "This is a device-specific, machine-local calibration artifact. It is intentionally not committed; the file name and SHA-256 retain exact provenance without redistributing the reporter's profile bytes."
+  },
+  "advancedColor": {
+    "probeStatus": "measured-on-device",
+    "probeApi": "QueryDisplayConfig / DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2",
+    "gdiDeviceName": "\\\\.\\DISPLAY2",
+    "monitorDevicePath": "\\\\?\\DISPLAY#ENC3292#5&2ace3e61&0&UID4357#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}",
+    "adapterLuid": "0x0:10f21",
+    "targetId": 4357,
+    "advancedColorInfo2Raw": "0xD7",
+    "advancedColorSupported": true,
+    "advancedColorActive": true,
+    "hdrSupported": true,
+    "hdrUserEnabled": false,
+    "wideColorSupported": true,
+    "wideColorUserEnabled": true,
+    "activeMode": "WCG",
+    "colorEncoding": "RGB",
+    "bitsPerColorChannel": 10,
+    "sdrWhiteLevelRaw": 1000,
+    "sdrWhiteLevelNits": 80.0
+  },
+  "reproduction": {
+    "caseId": "M0a",
+    "patchEncoding": "encoded RGB in each source color space",
+    "patch": [0.75, 0.25, 0.20],
+    "referenceDestination": "sRGB",
+    "referenceImplementation": "OutputRender.Decode + OutputRender.Convert(Clip) + OutputRender.Encode",
+    "captureImplementation": "source-tagged Skia RGBA8888 drawn to a null-color-space destination",
+    "actualQuantization": "round to nearest RGBA8888 code value, then divide by 255",
+    "patchTiff": {
+      "relativePath": "adobe-rgb-patches.tif",
+      "sha256": "087F1EC24F5338C3C4CDC92F4736BDD28F572BD297EB7A97F4B4CBFA1258DCF4",
+      "width": 5,
+      "height": 1,
+      "bitsPerSample": 16,
+      "samplesPerPixel": 3,
+      "embeddedIccColorSpace": "AdobeRGB",
+      "embeddedIccSha256": "FBD482E5E6D4CE34006581AE4DB88D33D682D6A9A31E930A30CD5D7C1573A406"
+    },
+    "results": [
+      {
+        "sourceSpace": "DisplayP3",
+        "expectedSrgb": [0.8144505023956299, 0.19323793053627014, 0.16046437621116638],
+        "nullDestinationActual": [0.7490196078431373, 0.25098039215686274, 0.2]
+      },
+      {
+        "sourceSpace": "AdobeRGB",
+        "expectedSrgb": [0.8671007752418518, 0.2412026971578598, 0.18367554247379303],
+        "nullDestinationActual": [0.7490196078431373, 0.25098039215686274, 0.2]
+      },
+      {
+        "sourceSpace": "Rec709",
+        "expectedSrgb": [0.7362456917762756, 0.20872671902179718, 0.15599770843982697],
+        "nullDestinationActual": [0.7490196078431373, 0.25098039215686274, 0.2]
+      }
+    ]
+  }
+}

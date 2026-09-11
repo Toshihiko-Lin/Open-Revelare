@@ -14,7 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
     <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation.Win32\OpenRevelare.Presentation.Win32.csproj" />
     <!-- For the pure view-model rules only (OpenRevelare.Gui.ViewModels.LiveParams). Nothing here
          starts Avalonia; referencing the app assembly is what lets a rule that lives on the UI
          side of the line still be pinned by a test. -->
@@ -28,6 +31,11 @@
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.9" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.9" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Fixtures\**\*" />
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

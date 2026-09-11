@@ -7,6 +7,7 @@ using OpenRevelare.Core;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
+using OpenRevelare.Presentation;
 
 namespace OpenRevelare.Gui.ViewModels;
 
@@ -29,7 +30,21 @@ public partial class MainViewModel
             // format came from the options dialog rather than being guessed from the extension.
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             FrameParams ep = ForExport(p, opt);
-            await Task.Run(() => WriteExport(Pipeline.ProcessFrame(LoadFullLinear(srcPath), ep), path, ep, opt));
+            ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+            TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
+            await Task.Run(() =>
+            {
+                WorkingFrame working = LoadFullWorking(
+                    srcPath,
+                    pipelineVersion,
+                    tiffInputAssumption);
+                RenderedFrame rendered = Pipeline.Render(
+                    working,
+                    ep,
+                    pipelineVersion,
+                    ColorManagement);
+                WriteExport(rendered, path, opt);
+            });
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
         }
         catch (Exception ex)
@@ -53,7 +68,14 @@ public partial class MainViewModel
     // realised one lands the patch fractionally off, where it shimmers against the preview.
 
     /// <summary>A rendered patch and the normalised rect of the displayed frame it covers.</summary>
-    public sealed record SharpPatch(Bitmap Image, double X, double Y, double W, double H);
+    public sealed record SharpPatch(
+        Bitmap Image,
+        RenderedFrame Frame,
+        PresentationScene Scene,
+        double X,
+        double Y,
+        double W,
+        double H);
 
     // Property is `Patch`, not `SharpPatch` — a generated property may not share its name
     // with the type it holds.
@@ -63,6 +85,15 @@ public partial class MainViewModel
     {
         if (!ReferenceEquals(oldValue?.Image, newValue?.Image)) Retire(oldValue?.Image);
     }
+
+    partial void OnPatchChanged(SharpPatch? value) => InvalidatePresentation();
+
+    /// <summary>
+    /// Preview-resolution diagnostic masks cannot truthfully describe the full-resolution patch.
+    /// Keep the typed patch cached, but do not composite it until those diagnostics are hidden.
+    /// </summary>
+    internal static bool ShouldPresentSharpPatch(bool showClipping, bool showSprocketMask) =>
+        !showClipping && !showSprocketMask;
 
     private CancellationTokenSource? _patchCts;
     private int _patchToken;
@@ -83,7 +114,15 @@ public partial class MainViewModel
 
     /// <summary>The decoded source rectangle the last patches were built from, kept so a small
     /// pan does not re-decode. Frame-space origin + the pixels.</summary>
-    private sealed record RegionSlot(string Path, ImageBuffer Buf, int X0, int Y0, int X1, int Y1);
+    private sealed record RegionSlot(
+        string Path,
+        ColorPipelineVersion PipelineVersion,
+        TiffInputAssumption TiffInputAssumption,
+        WorkingFrame Working,
+        int X0,
+        int Y0,
+        int X1,
+        int Y1);
     private RegionSlot? _regionSlot;
 
     /// <summary>
@@ -100,22 +139,46 @@ public partial class MainViewModel
     /// Runs on the patch worker thread; the slot is only touched from there and from the
     /// UI-thread invalidation points, which never overlap because patches are single-flight.
     /// </summary>
-    private ImageBuffer? RegionSliceFor(string path, (int X0, int Y0, int X1, int Y1) need,
-                                        int frameW, int frameH)
+    private WorkingFrame? RegionSliceFor(
+        string path,
+        (int X0, int Y0, int X1, int Y1) need,
+        int frameW,
+        int frameH,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
     {
         if (_regionSlot is { } s && string.Equals(s.Path, path, StringComparison.OrdinalIgnoreCase)
+            && s.PipelineVersion == pipelineVersion
+            && s.TiffInputAssumption == tiffInputAssumption
             && s.X0 <= need.X0 && s.Y0 <= need.Y0 && s.X1 >= need.X1 && s.Y1 >= need.Y1)
-            return s.Buf;
+            return s.Working;
 
         int mw = (int)((need.X1 - need.X0) * RegionPanMargin);
         int mh = (int)((need.Y1 - need.Y0) * RegionPanMargin);
         int x0 = Math.Max(0, need.X0 - mw), y0 = Math.Max(0, need.Y0 - mh);
         int x1 = Math.Min(frameW, need.X1 + mw), y1 = Math.Min(frameH, need.Y1 + mh);
 
-        var dec = ImageIo.LoadRegion(path, x0, y0, x1 - x0, y1 - y0, frameW, frameH);
-        if (dec is not ({ } buf, int gx, int gy)) return null;
-        _regionSlot = new RegionSlot(path, buf, gx, gy, gx + buf.Width, gy + buf.Height);
-        return buf;
+        var decoded = ImageIo.LoadWorkingRegion(
+            path,
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            frameW,
+            frameH,
+            pipelineVersion,
+            ColorManagement);
+        if (decoded is not ({ } working, int gx, int gy)) return null;
+        _regionSlot = new RegionSlot(
+            path,
+            pipelineVersion,
+            tiffInputAssumption,
+            working,
+            gx,
+            gy,
+            gx + working.Pixels.Width,
+            gy + working.Pixels.Height);
+        return working;
     }
 
     // True once a patch has actually been rendered, i.e. there is something to clean up. Editing
@@ -220,14 +283,18 @@ public partial class MainViewModel
         _patchCts = cts;
         int tok = ++_patchToken;
 
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+        TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
         bool needsDecode = _fullSlot is null
+                           || _fullSlot.PipelineVersion != pipelineVersion
+                           || _fullSlot.TiffInputAssumption != tiffInputAssumption
                            || !string.Equals(_fullSlot.Path, srcPath, StringComparison.OrdinalIgnoreCase);
         if (needsDecode) ReportBackground(Loc.T("载入全分辨率 …"));
         try
         {
             var result = await Task.Run(() =>
             {
-                ImageBuffer img; RegionRender.Roi realised;
+                RenderedRegion region;
                 // Same bounds either way — the two views now share a geometry chain, so they
                 // read the same rectangle of the same file. Kept as the named call because it
                 // states which view is being asked for, and because getting this wrong is silent:
@@ -235,25 +302,59 @@ public partial class MainViewModel
                 var need = negative
                     ? RegionRender.RequiredSourceBoundsNegative(frameW, frameH, p, roi)
                     : RegionRender.RequiredSourceBounds(frameW, frameH, p, roi);
-                ImageBuffer? slice = RegionSliceFor(srcPath, need, frameW, frameH);
+                WorkingFrame? slice = RegionSliceFor(
+                    srcPath,
+                    need,
+                    frameW,
+                    frameH,
+                    pipelineVersion,
+                    tiffInputAssumption);
                 cts.Token.ThrowIfCancellationRequested();
                 if (slice is not null)
                 {
                     RegionSlot s = _regionSlot!;
-                    (img, realised) = RegionRender.RenderFromSlice(slice, s.X0, s.Y0, frameW, frameH,
-                                                                   p, roi, negative, negativeWb);
+                    region = RegionRender.RenderFromSlice(
+                        slice,
+                        s.X0,
+                        s.Y0,
+                        frameW,
+                        frameH,
+                        p,
+                        roi,
+                        pipelineVersion,
+                        ColorManagement,
+                        negative,
+                        negativeWb);
                 }
                 else
                 {
                     // TIFF, or the DNG-Converter backend — neither can region-decode. Fall back
                     // to the whole frame, which is what this path always used to do.
-                    ImageBuffer full = LoadFullLinear(srcPath);
+                    WorkingFrame full = LoadFullWorking(
+                        srcPath,
+                        pipelineVersion,
+                        tiffInputAssumption);
                     cts.Token.ThrowIfCancellationRequested();
-                    (img, realised) = RegionRender.Render(full, p, roi, negative, negativeWb);
+                    region = RegionRender.Render(
+                        full,
+                        p,
+                        roi,
+                        pipelineVersion,
+                        ColorManagement,
+                        negative,
+                        negativeWb);
                 }
                 cts.Token.ThrowIfCancellationRequested();
-                return new SharpPatch((Bitmap)BitmapConvert.ToBitmap(img, p.ResolvedOutputSpace),
-                                      realised.X, realised.Y, realised.W, realised.H);
+                PresentationScene scene = ConvertPreviewScene(region.Frame);
+                RegionRender.Roi realised = region.Realised;
+                return new SharpPatch(
+                    BuildFallbackBitmap(region.Frame, scene),
+                    region.Frame,
+                    scene,
+                    realised.X,
+                    realised.Y,
+                    realised.W,
+                    realised.H);
             }, cts.Token);
 
             if (tok != _patchToken || cts.IsCancellationRequested) { result?.Image.Dispose(); return; }

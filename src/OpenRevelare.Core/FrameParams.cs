@@ -1,4 +1,4 @@
-namespace OpenRevelare.Core;
+﻿namespace OpenRevelare.Core;
 
 /// <summary>
 /// Per-frame parameters. Port of the Stage-1 (FilmBase) fields of Python's
@@ -278,7 +278,20 @@ public sealed class FrameParams
     /// </summary>
     public double[,]? InputPrimaries { get; set; }
 
-    /// <summary>White point of <see cref="InputPrimaries"/> as CIE xy; null = D65.</summary>
+    /// <summary>
+    /// White point of <see cref="InputPrimaries"/> as CIE xy.
+    ///
+    /// Null means NO CHROMATIC ADAPTATION, which is only the same thing as "the working space's
+    /// own white" — ACEScg's ~D60, not D65. <see cref="InputTransform.ToWorking"/> is where that
+    /// is implemented, and it is the correct default: an absent declaration is the file declining
+    /// to say, and adapting from an assumed D65 would apply a real Bradford transform to data
+    /// nobody claimed was D65.
+    ///
+    /// This comment used to read "null = D65" while the implementation used the working white.
+    /// The two never disagreed in practice because <see cref="InputPrimaries"/> is null on every
+    /// roll, so the white point is never read — but a project file can carry a declared pair in,
+    /// and then the comment would have been the only description of a transform it got wrong.
+    /// </summary>
     public double[]? InputWhitePoint { get; set; }
 
     /// <summary>Path-A decouple matrix applied to the linear RAW before inversion (row-major
@@ -333,8 +346,9 @@ public sealed class FrameParams
     /// <summary>Dedicated chroma scale (factor 1+sat). 0 = pass-through.</summary>
     public double Saturation { get; set; } = 0.0;
 
-    // Per-channel tone curves in gamma-2.2 domain: control points (x,y) in [0,1].
-    // Empty = identity. Master (M) applies first, then R/G/B.
+    // Per-channel tone curves: control points (x,y) in [0,1]. LegacyV1 preserves its historical
+    // private gamma-2.2 interpretation; ManagedV2 samples these coordinates directly in the exact
+    // target-profile encoding. Empty = identity. Master (M) applies first, then R/G/B.
     public List<(double X, double Y)> CurvePointsM { get; set; } = new();
     public List<(double X, double Y)> CurvePointsR { get; set; } = new();
     public List<(double X, double Y)> CurvePointsG { get; set; } = new();

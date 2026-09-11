@@ -81,13 +81,26 @@ public static class Stage2
     public static void ApplyChain(float[] d, FrameParams cal, ColorSpaceDef output,
                                   bool encodeExit = false)
     {
-        // Display-referred chain: scale light in linear, then encode, then do everything
-        // perceptual in the encoded space where its definitions actually hold.
+        // This route is frozen for legacy projects. In particular, its display-referred wrapper
+        // historically fed already encoded values back through the old curve companding path.
+        // ManagedV2 uses ApplyManagedAfterTargetEncoding below, which states that boundary
+        // explicitly and does not apply the private curve gamma a second time.
         if (cal.DisplayReferredStage2)
         {
             ApplyDisplayReferred(d, cal, output);
             return;
         }
+
+        ApplyOperationChain(d, cal, output, encodeExit, curvesAlreadyEncoded: false);
+    }
+
+    private static void ApplyOperationChain(
+        float[] d,
+        FrameParams cal,
+        ColorSpaceDef output,
+        bool encodeExit,
+        bool curvesAlreadyEncoded)
+    {
 
         Luma luma = Luma.For(output);
 
@@ -197,7 +210,8 @@ public static class Stage2
                     r *= scale; g *= scale; bl *= scale;
                 }
 
-                // 6 — tone curves, in gamma-2.2 encoded space.
+                // 6 — tone curves. Legacy enters a private gamma-2.2 domain; ManagedV2 enters
+                // with curvesAlreadyEncoded because its values are already target-profile encoded.
                 //
                 // Values outside [0,1] are carried THROUGH rather than truncated. The curve is only
                 // defined on [0,1], so out-of-range samples keep their original value and rejoin
@@ -210,9 +224,15 @@ public static class Stage2
                 if (doCurves)
                 {
                     float kr = r > 1.0f ? r : 0.0f, kg = g > 1.0f ? g : 0.0f, kb = bl > 1.0f ? bl : 0.0f;
-                    float cr = (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
-                    float cg = (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
-                    float cb = (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
+                    float cr = curvesAlreadyEncoded
+                        ? Math.Clamp(r, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
+                    float cg = curvesAlreadyEncoded
+                        ? Math.Clamp(g, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
+                    float cb = curvesAlreadyEncoded
+                        ? Math.Clamp(bl, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
 
                     if (lutM != null)
                     {
@@ -236,9 +256,15 @@ public static class Stage2
 
                     // Restore anything that was above 1.0 on the way in: the curve had nothing to
                     // say about it, so it passes through untouched rather than being flattened.
-                    r = kr > 0.0f ? kr : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
-                    g = kg > 0.0f ? kg : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
-                    bl = kb > 0.0f ? kb : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
+                    r = kr > 0.0f ? kr : curvesAlreadyEncoded
+                        ? Math.Max(cr, 0.0f)
+                        : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
+                    g = kg > 0.0f ? kg : curvesAlreadyEncoded
+                        ? Math.Max(cg, 0.0f)
+                        : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
+                    bl = kb > 0.0f ? kb : curvesAlreadyEncoded
+                        ? Math.Max(cb, 0.0f)
+                        : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
                 }
 
                 // 7 — saturation
@@ -276,6 +302,78 @@ public static class Stage2
      || space.Name.Equals("DisplayP3", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// ManagedV2 Stage 2 boundary for pixels already encoded by the exact target profile.
+    /// White balance and exposure retain their light-scaling semantics through one target
+    /// decode/encode round trip. Perceptual controls then operate directly on encoded values;
+    /// most importantly, authored curve coordinates are sampled without the legacy private
+    /// gamma round trip. The final display-referred result is normalized exactly once here.
+    /// </summary>
+    internal static void ApplyManagedAfterTargetEncoding(
+        float[] d,
+        FrameParams cal,
+        ColorSpaceDef output)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+        ArgumentNullException.ThrowIfNull(cal);
+
+        static bool AllOne(double[] values) =>
+            values.All(value => Math.Abs(value - 1.0) <= 1e-8 + 1e-5);
+
+        bool doWhiteBalance = !AllOne(cal.WbGains);
+        bool doExposure = cal.ExposureEv != 0.0;
+        if (doWhiteBalance || doExposure)
+        {
+            OutputRender.Decode(d, output);
+            float redGain = (float)cal.WbGains[0];
+            float greenGain = (float)cal.WbGains[1];
+            float blueGain = (float)cal.WbGains[2];
+            float exposureGain = (float)Math.Pow(2.0, cal.ExposureEv);
+            ParallelSweep.OverPixels(d.Length / 3, (from, to) =>
+            {
+                for (int index = from; index < to; index += 3)
+                {
+                    float red = d[index];
+                    float green = d[index + 1];
+                    float blue = d[index + 2];
+                    if (doWhiteBalance)
+                    {
+                        red *= redGain;
+                        green *= greenGain;
+                        blue *= blueGain;
+                    }
+                    if (doExposure)
+                    {
+                        red *= exposureGain;
+                        green *= exposureGain;
+                        blue *= exposureGain;
+                    }
+                    d[index] = red < 0.0f ? 0.0f : red;
+                    d[index + 1] = green < 0.0f ? 0.0f : green;
+                    d[index + 2] = blue < 0.0f ? 0.0f : blue;
+                }
+            });
+            OutputRender.Encode(d, output);
+        }
+
+        FrameParams perceptual = cal.Clone();
+        perceptual.WbGains = new[] { 1.0, 1.0, 1.0 };
+        perceptual.ExposureEv = 0.0;
+        perceptual.DisplayReferredStage2 = false;
+        ApplyOperationChain(
+            d,
+            perceptual,
+            output,
+            encodeExit: false,
+            curvesAlreadyEncoded: true);
+
+        ParallelSweep.Over(d.Length, (from, to) =>
+        {
+            for (int index = from; index < to; index++)
+                d[index] = Math.Clamp(d[index], 0.0f, 1.0f);
+        });
+    }
+
+    /// <summary>
     /// The display-referred chain: step 4 first, then the light-scaling ops around a linear
     /// round trip, then the perceptual operations — all after the render.
     ///
@@ -289,10 +387,10 @@ public static class Stage2
     ///     pivots on 0.5 meaning mid-grey; in linear light 0.5 is 73.5% display brightness, so
     ///     that chain rotated about a point well above mid-grey and crushed the shadows.
     ///
-    /// Encoding once, up front, also removes the private gamma the curve step used to apply and
-    /// undo around itself — the data is already in the right space when the curve sees it, so the
-    /// curve simply samples it. That private round trip existed only because the encoding
-    /// happened too late.
+    /// ManagedV2 removes the private gamma the curve step used to apply and undo around itself:
+    /// the data is already in the exact target encoding when the curve sees it, so the curve
+    /// samples those coordinates directly. LegacyV1 deliberately retains the historical private
+    /// round trip so existing project pixels stay bit-compatible.
     ///
     /// STEP 4 COMES FIRST, ahead of every Stage-2 op including the light-scaling pair. Stage 2 is
     /// display-referred by definition, so it belongs after the print-film LUT or the standard

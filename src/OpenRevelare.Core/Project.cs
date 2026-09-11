@@ -15,7 +15,25 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Project
 {
-    private const int FormatVersion = 2;
+    // Bumped to 3 by the managed colour pipeline. The schema itself gained only one key, so
+    // this is not about parsing: a build that predates `color_pipeline_version` reads a v2 file's
+    // absent key as "legacy", which is right, but would read a NEW file's key as absent too and
+    // render it through the v1 pipeline without a word. Refusing to open is the only honest
+    // answer an old build can give, and it can only give it if the version says so.
+    private const int FormatVersion = 3;
+
+    /// <summary>Oldest schema this build still reads. v2 files have no colour-pipeline key.</summary>
+    private const int MinimumSupportedFormatVersion = 2;
+
+    /// <summary>
+    /// Only a managed-pipeline project needs the newer floor. A legacy-pipeline project is still
+    /// rendered correctly by a pre-v3 build — that build ignores the colour key and falls back to
+    /// v1, which is exactly what the file asks for — so locking it out would cost compatibility
+    /// and buy nothing.
+    /// </summary>
+    private static int FormatVersionFor(ColorPipelineVersion pipeline) =>
+        pipeline == ColorPipelineVersion.ManagedV2 ? FormatVersion : MinimumSupportedFormatVersion;
+    private const ColorPipelineVersion CurrentColorPipelineVersion = ColorPipelineVersion.ManagedV2;
 
     // ── Public data model ───────────────────────────────────────────────────────
     public sealed class RollMeta
@@ -45,6 +63,13 @@ public static class Project
 
     public sealed class Data
     {
+        /// <summary>
+        /// Version of the colour-rendering semantics, independent of the project-file schema.
+        /// New projects use the managed pipeline; <see cref="Load"/> assigns legacy v1 when the
+        /// top-level key is absent so merely opening and autosaving an old roll cannot change it.
+        /// </summary>
+        public ColorPipelineVersion ColorPipelineVersion = CurrentColorPipelineVersion;
+
         public RollMeta Meta = new();
         public List<Frame> Frames = new();
 
@@ -58,9 +83,13 @@ public static class Project
     // ── Save ────────────────────────────────────────────────────────────────────
     public static void Save(string path, Data d)
     {
+        ArgumentNullException.ThrowIfNull(d);
+        ColorPipelineVersion colorPipelineVersion = RequireSupportedColorPipelineVersion(
+            d.ColorPipelineVersion);
         var root = new JsonObject
         {
-            ["version"] = FormatVersion,
+            ["version"] = FormatVersionFor(colorPipelineVersion),
+            ["color_pipeline_version"] = (int)colorPipelineVersion,
             ["created"] = DateTime.Now.ToString("yyyy-MM-dd"),
             ["roll_meta"] = SerRollMeta(d.Meta),
             ["frames"] = new JsonArray(d.Frames.Select(SerFrame).ToArray()),
@@ -97,10 +126,17 @@ public static class Project
         JsonNode root = JsonNode.Parse(File.ReadAllText(path))
                         ?? throw new InvalidDataException(CoreText.T("空的工程文件"));
         int version = (int?)root["version"] ?? 1;
-        if (version != FormatVersion)
-            throw new InvalidDataException(CoreText.F($"不支持的 .ncproj 版本 {version}（本版本支持 {FormatVersion}）"));
+        if (version < MinimumSupportedFormatVersion || version > FormatVersion)
+        {
+            throw new InvalidDataException(CoreText.F(
+                $"不支持的 .ncproj 版本 {version}（本版本支持 {MinimumSupportedFormatVersion}–{FormatVersion}）"));
+        }
 
-        var d = new Data { Meta = DesRollMeta(root["roll_meta"]?.AsObject()) };
+        var d = new Data
+        {
+            ColorPipelineVersion = DesColorPipelineVersion(root["color_pipeline_version"]),
+            Meta = DesRollMeta(root["roll_meta"]?.AsObject()),
+        };
         if (root["frames"] is JsonArray frames)
             foreach (JsonNode? f in frames)
                 if (f is JsonObject fo)
@@ -111,6 +147,37 @@ public static class Project
                 }
         return d;
     }
+
+    /// <summary>
+    /// Explicitly opts a loaded legacy project into the current colour-rendering semantics.
+    /// Loading and saving deliberately never call this method: callers must make the migration
+    /// decision at an interaction boundary where the possible appearance change can be disclosed.
+    /// </summary>
+    public static void MigrateColorPipelineToV2(Data data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        _ = RequireSupportedColorPipelineVersion(data.ColorPipelineVersion);
+        data.ColorPipelineVersion = CurrentColorPipelineVersion;
+    }
+
+    private static ColorPipelineVersion DesColorPipelineVersion(JsonNode? node)
+    {
+        // Projects written before this independent version existed are the frozen v1 pipeline.
+        if (node is null) return ColorPipelineVersion.LegacyV1;
+        if (node is not JsonValue value || !value.TryGetValue(out int raw))
+            throw new InvalidDataException(CoreText.T(
+                "color_pipeline_version 必须是整数 1（旧版）或 2（色彩管理版）"));
+        return RequireSupportedColorPipelineVersion((ColorPipelineVersion)raw);
+    }
+
+    private static ColorPipelineVersion RequireSupportedColorPipelineVersion(
+        ColorPipelineVersion version) => version switch
+        {
+            ColorPipelineVersion.LegacyV1 => version,
+            ColorPipelineVersion.ManagedV2 => version,
+            _ => throw new InvalidDataException(CoreText.F(
+                $"不支持的 color_pipeline_version {(int)version}（本版本支持 1 和 2）")),
+        };
 
     // ── Relink ──────────────────────────────────────────────────────────────────
 

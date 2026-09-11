@@ -1,11 +1,17 @@
 namespace OpenRevelare.Core;
 
 /// <summary>
-/// Linear-light RGB image, float32, interleaved HWC (<c>[r,g,b, r,g,b, ...]</c>).
+/// RGB numeric storage, float32, interleaved HWC (<c>[r,g,b, r,g,b, ...]</c>).
 ///
 /// Mirrors the Python <c>PipelineImage.data</c> (H, W, 3) float32 array. The flat
 /// interleaved layout (base = pixelIndex * 3) keeps the per-pixel address arithmetic to one
 /// multiply, which is what lets the hot loops stay simple index walks.
+///
+/// This type deliberately carries no colour meaning. A buffer can contain source-encoded,
+/// working-linear, rendered, or monitor-device values; public colour boundaries must wrap it in
+/// <see cref="SourceFrame"/>, <see cref="WorkingFrame"/>, or <see cref="RenderedFrame"/> so the
+/// encoding cannot be separated from the pixels. Bare buffers remain useful inside hot loops and
+/// encoding-preserving geometry.
 /// </summary>
 public sealed class ImageBuffer
 {

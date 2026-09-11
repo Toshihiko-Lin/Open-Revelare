@@ -128,29 +128,22 @@ $$\text{chroma\_amp} = \frac{\text{std}(D_\text{chroma,\ after})}{\text{std}(D_\
 
 反相首步 $D = -\log_{10}(T)$ 要求输入为线性透射率。对数对小值敏感度较高，gamma 偏差在暗部的放大量大于亮部，表现为反转后的色彩漂移。
 
-扫描仪的 gamma 来源为扫描软件施加的输出 TRC 曲线，并写入 ICC Profile；传感器（CCD/CMOS）本身线性。此路径为三条中唯一携带色彩声明者，分两步读取。
+扫描仪软件可能向样本施加输出 TRC，并把完整的设备色彩描述写入 ICC Profile。ManagedV2 不再把 Profile 拆成手工 TRC 与矩阵两段，也不根据标签形状猜测线性状态；它把有效嵌入 ICC 作为一个不可分割的输入声明，由应用固定版本的 LittleCMS 一次变换到 linear ACEScg。矩阵/TRC Profile 与 A2B/CLUT Profile 因而遵循同一条路径，文件自带的有效 ICC 始终优先于任何 fallback 选择。
 
-#### 2.3.1 Step 1：TRC 逆变换
+#### 2.3.1 有效嵌入 ICC
 
-读取 Profile 的 `rTRC`/`gTRC`/`bTRC` 标签（支持 `curv` 采样曲线与 `para` 参数曲线），依文件自带曲线构建逆映射，逐通道还原为线性。三通道分别处理，因扫描仪三通道的光谱响应与增益不同，曲线存在差异（Flextight X5 实测 $\gamma_R \approx 1.62,\ \gamma_G \approx 1.51,\ \gamma_B \approx 1.56$）。查找表取样密度使最大误差低于半个 16-bit 码值。
+解码器先严格读取并验证完整 ICC payload，再以精确 payload 建立输入 Profile。LittleCMS 同时处理曲线、设备原色、PCS 适配及 Profile 内的 LUT；成功后，`WorkingFrame` 被声明为 linear ACEScg，诊断信息记录 Profile 身份、变换策略与解码配方。Profile 缺少矩阵标签并不意味着可以绕过色彩变换。
 
-曲线偏离对角线的最大量小于 0.004（约一个 8-bit 量化步，对应 γ≈1.01）且三通道均满足时，判定为线性并保留原值。该判定逐通道进行。
+#### 2.3.2 无 ICC 或 ICC 不可用时的显式 fallback
 
-文件无 ICC 或无可用 TRC 标签时，样本按线性处理。
+新建 TIFF 卷必须在导入时明确选择一种卷级假设：
 
-#### 2.3.2 Step 2：设备原色矩阵
+- **Linear**：数值原样进入工作缓冲区，传递函数声明为线性，但原色明确标记为未表征；这不是“文件是 ACEScg”的声明。
+- **sRGB**：使用应用内置的精确 sRGB Profile，经 LittleCMS 转换到 linear ACEScg。
 
-TRC 逆变换处理编码非线性。三通道 gamma 不同使逆变换后各通道的相对增益不同，单次 TRC 后三通道仍非同一物理光谱量的等比缩放，在不同亮度区域产生方向相反的色偏，线性白平衡无法校正。
+没有选择时 ManagedV2 关闭失败，不再从 8/16 bit 深度猜测编码。选择会写入项目，并进入完整图、预览、区域读取与缓存身份；若嵌入 ICC 损坏，只有显式选择的 fallback 才能接管，拒绝原因同时写入解码配方。旧项目缺少该字段时才保留按位深度判断的版本化兼容路径。
 
-该现象源于扫描仪三通道光谱响应与增益的不对称，属设备原色范畴。ICC 规范分别记录两层：TRC 描述编码曲线，rXYZ/gXYZ/bXYZ 描述设备原色至 D50 CIE XYZ 的映射。完整线性化为两步：
-
-$$\text{device RGB}_\text{linear} \xrightarrow{M = M_\text{D50}\to\text{working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{working RGB}_\text{linear}$$
-
-即：线性设备 RGB 经矩阵 $M$ 送入工作空间（ACEScg）线性 RGB。
-
-矩阵目标端为工作空间。专业扫描仪的设备原色通常宽于 sRGB（某台实测基色三角面积约为 sRGB 的 1.6 倍），目标端色域须足够宽，超出部分的染料方能进入密度运算。矩阵含两级：先以 Bradford 将 D50 的 PCS 适配至工作空间白点（ACEScg 位于 ~D60），再作 XYZ → 工作空间 RGB。目标端跟随 `ColorPipeline.Working` 推导。
-
-LUT-only Profile 缺少上述标签时 Step 2 跳过，文件保持设备原生原色。
+Flextight 文件中的厂商 gamma 元数据属于扫描仪明确声明，并非位深度猜测；在显式 fallback 或旧项目兼容已经授权 admission、且没有损坏 ICC 的情况下仍优先使用，但其设备原色保持“未表征”。没有任何授权时同样关闭失败。
 
 TIFF 采用白光模型，不含 RGB 解耦。
 
@@ -158,13 +151,15 @@ TIFF 采用白光模型，不含 RGB 解耦。
 
 | 前端 | 进入密度域时所在原色 |
 |---|---|
-| TIFF，ICC 含 rXYZ/gXYZ/bXYZ | 工作空间 ACEScg，由设备原色矩阵送入 |
-| TIFF，LUT-only 或无 ICC | 设备原生原色 |
+| TIFF，有效嵌入 ICC（矩阵/TRC 或 A2B/CLUT） | linear ACEScg，由完整 ICC 经 LittleCMS 一次送入 |
+| TIFF，无/坏 ICC，显式 sRGB fallback | linear ACEScg，由精确内置 sRGB Profile 送入 |
+| TIFF，无/坏 ICC，显式 Linear fallback | 数值原样进入工作缓冲区；原色未表征 |
+| TIFF，Flextight 厂商 gamma 声明 | 已按厂商 gamma 线性化；原色未表征 |
 | Path A / Path B（RAW） | 相机原生原色 |
 
-仅第一种位于管线声明的工作空间。其余按工作空间处理：`InputTransform`（将声明的输入原色送入 ACEScg）以 `FrameParams.InputPrimaries` 为启用条件，该量当前无设置入口。
+前两种具有完整的工作空间声明。显式 Linear、Flextight 厂商 gamma 与未标定 RAW 则保留“原色未表征”的事实；它们进入密度运算是明确的兼容/用户选择，而不是隐式声称输入原色等于 ACEScg。
 
-此状态不影响密度反相。反相为 $D = -\log_{10}(T/T_\text{base})$，$T_\text{base}$ 与各通道端点取自同一缓冲区，密度为自参照比值，不依赖色彩空间假设。影响位于输出侧，步骤 4 按 ACEScg 解释缓冲区。量级见第 3 节。
+对未表征路径，密度反相仍为 $D = -\log_{10}(T/T_\text{base})$，$T_\text{base}$ 与各通道端点取自同一缓冲区，密度是自参照比值；剩余风险位于输出侧，因为步骤 4 必须按工作空间解释缓冲区。量级见第 3 节。
 
 ---
 
@@ -368,9 +363,11 @@ datasheet 的作用为：定义目标刻度，并提供 $D_\text{min}$ / $D_\tex
 
 ### 6.6 导出与预览
 
-Stage 2 在目标空间中完成，导出不含额外转换，仅为文件附加对应 ICC，屏幕像素与文件像素一致。容器为 16-bit TIFF 或 8-bit JPEG。
+Stage 2 在目标空间中完成。标准输出不再按空间名称重建 profile，而是从唯一的 `RenderedFrame` 取得像素和 exact ICC：容器为 16-bit TIFF 或 8-bit JPEG。默认嵌入该 exact profile；只有 exact display-referred sRGB 可由用户明确省略，其他输出强制嵌入。场景线性 ACEScg 使用 32-bit IEEE 浮点 TIFF 与 deterministic linear ACEScg ICC，负值和大于 1 的通道不得量化或钳制。GUI 与 CLI 共用同一 exporter。
 
-预览位图不附 profile 直接提交合成器，数值原样送至面板。屏幕观感的准确性由操作系统层处理：以校色仪实测生成 ICC（含该面板的逐通道 TRC、真实原色与白点），注册为系统显示器配置文件，由操作系统统一转换。
+预览从同一 `RenderedFrame` 分支，但不是把文件编码值原样送到面板。它先按 exact output ICC 转到 D65 linear extended-sRGB，保留负值和大于 1 的分量，再与 patch、mask、crop 和 selection 在共享 FP16 scene 中合成。
+
+Windows Advanced Color presenter 上传 `R16G16B16A16_FLOAT` scRGB surface，由 DWM 作唯一一次 monitor transform；传统 SDR presenter 用应用级 LittleCMS 转到当前显示器 ICC 后上传 BGRA8，应用作唯一一次 monitor transform。contract 属于 preview surface，窗口跨屏、profile、DPI 或 Advanced Color 状态变化只使 presentation revision 失效，不得改变 render/export fingerprint。无效 monitor ICC 或 presenter 故障必须显式降级为 emergency sRGB8 并显示诊断，不能冒充所见即所得。macOS 最后一跳保留给后续专用 presenter。
 
 ### 6.7 整卷一致性
 

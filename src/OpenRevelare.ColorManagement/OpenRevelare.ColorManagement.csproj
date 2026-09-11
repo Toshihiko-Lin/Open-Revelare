@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      This repository builds with -warnaserror, which turned "you have not built the pinned
+      LittleCMS yet" into a hard build failure on any fresh clone: a contributor could not compile
+      the solution at all before installing a C++ toolchain and building a CMM from source. The
+      warning is still worth emitting — it is the thing that tells them what to run — but it is a
+      workspace-state message, not a code defect, so it is exempted from the promotion. Nothing is
+      lost in CI: every workflow builds the artifact first and then verifies its presence in the
+      publish output by hand.
+    -->
+    <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);ORLCMS001</MSBuildWarningsNotAsErrors>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    The application owns one pinned LittleCMS build. packaging/lcms writes it under native/<rid>;
+    Content (not None) lets the native library and its hash manifest flow through project
+    references into tests, CLI and GUI output. Normal builds target the host architecture used by
+    this repository's CI/release matrix: Windows/Linux x64 and macOS arm64.
+  -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Include="..\..\native\win-x64\lcms2.dll"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\lcms2.dll')"
+             Link="lcms2.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\native\win-x64\lcms2.manifest.json"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\lcms2.manifest.json')"
+             Link="lcms2.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <Content Include="..\..\native\linux-x64\liblcms2.so*"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\linux-x64\liblcms2.so')"
+             Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\native\linux-x64\lcms2.manifest.json"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\linux-x64\lcms2.manifest.json')"
+             Link="lcms2.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Content Include="..\..\native\osx-arm64\liblcms2*.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\liblcms2.dylib')"
+             Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\native\osx-arm64\lcms2.manifest.json"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\lcms2.manifest.json')"
+             Link="lcms2.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingPinnedLittleCms" BeforeTargets="Build">
+    <Warning Code="ORLCMS001"
+             Condition="$([MSBuild]::IsOSPlatform('Windows')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\lcms2.dll')"
+             Text="Pinned LittleCMS native library is missing. Run packaging/lcms/build-windows.ps1." />
+    <Warning Code="ORLCMS001"
+             Condition="$([MSBuild]::IsOSPlatform('Linux')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\linux-x64\liblcms2.so')"
+             Text="Pinned LittleCMS native library is missing. Run packaging/lcms/build-unix.sh." />
+    <Warning Code="ORLCMS001"
+             Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\liblcms2.dylib')"
+             Text="Pinned LittleCMS native library is missing. Run packaging/lcms/build-unix.sh." />
+  </Target>
+
+</Project>

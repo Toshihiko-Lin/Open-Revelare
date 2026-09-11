@@ -22,3 +22,9 @@
 *.jpg   binary
 *.onnx  binary
 *.ico   binary
+# ICC 也是二进制,而且是被**逐字节断言**的那一种:ColorManagementFixtureTests 与
+# Win11EizoReproductionFixtureTests 钉的是这些文件的 SHA-256。上面的 `* text=auto`
+# 会把是否规范化交给 git 的 NUL 字节启发式 —— 这些 profile 里 NUL 很多,所以一直判对,
+# 但那是一次侥幸而不是一条保证:一旦某个 profile 前 8000 字节里恰好没有 NUL,
+# Windows 签出会变成 CRLF,而那两组测试只会在 Windows 上红。显式声明,不靠启发式。
+*.icc   binary

@@ -61,7 +61,12 @@ public partial class App : Application
             var vm = new MainViewModel();
             // Also flush the open roll here, not only in MainWindow.OnClosing: a shutdown driven
             // by the OS or by Exit() never closes the window through the normal path.
-            desktop.ShutdownRequested += (_, _) => { vm.FlushRollNow(); Services.DngCache.Cleanup(); };
+            desktop.ShutdownRequested += (_, _) =>
+            {
+                vm.FlushRollNow();
+                vm.Dispose();
+                Services.DngCache.Cleanup();
+            };
             desktop.MainWindow = new MainWindow { DataContext = vm };
 
             // Optional startup files: `OpenRevelare.Gui <path> [<path> …]` opens them as a roll
@@ -82,6 +87,9 @@ public partial class App : Application
             else if (startFiles.Count > 0)
                 Dispatcher.UIThread.Post(async () =>
                 {
+                    // Straight in, no dialog. The roll-level TIFF question that used to have to
+                    // be answered first is gone: TiffInputDetector reads what the file declares,
+                    // and the preview offers a correction if it had to fall back on convention.
                     await vm.LoadRollAsync(startFiles);
                     vm.EnterDevelop();
                 });

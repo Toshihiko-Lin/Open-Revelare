@@ -1,3 +1,4 @@
+using OpenRevelare.ColorManagement;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
@@ -24,7 +25,7 @@ public static class JpegIO
     public static void ExportJpeg(ImageBuffer img, string path, int quality = 95,
                                   string? description = null, ColorSpace? icc = null)
         => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description,
-               icc is ColorSpace c ? TiffIO.Legacy(c) : null));
+               ProfileBytes(icc is ColorSpace c ? TiffIO.Legacy(c) : null)));
 
     /// <summary>
     /// As above, embedding the profile of any registered space. The caller must have rendered the
@@ -32,10 +33,34 @@ public static class JpegIO
     /// </summary>
     public static void ExportJpeg(ImageBuffer img, string path, int quality,
                                   string? description, ColorSpaceDef? icc)
-        => ExportFile.Write(path, target => WriteJpeg(img, target, quality, description, icc));
+        => ExportFile.Write(path, target => WriteJpeg(
+               img, target, quality, description, ProfileBytes(icc)));
+
+    /// <summary>Typed JPEG export with the exact profile bytes carried by the pixels.</summary>
+    public static void ExportJpeg(
+        RenderedFrame frame,
+        string path,
+        int quality = 95,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Encoding.Reference != ColorReference.DisplayReferred
+            || frame.Encoding.Transfer != TransferState.ProfileEncoded
+            || frame.Encoding.Range != NumericRange.Normalized)
+        {
+            throw new NotSupportedException(
+                "JPEG export requires normalized, display-referred, profile-encoded pixels; " +
+                "scene-linear JPEG is not supported.");
+        }
+
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
+        ExportFile.Write(path, target => WriteJpeg(
+            frame.Pixels, target, quality, description, profileBytes));
+    }
 
     private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,
-                                  ColorSpaceDef? icc)
+                                  byte[]? iccBytes)
     {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;
@@ -54,9 +79,9 @@ public static class JpegIO
         image.Metadata.ExifProfile = exif;
         // Same profile the TIFF path embeds, from the same builder — an export dialog that offers
         // one "embed ICC" switch must mean the same thing in both containers.
-        if (icc is ColorSpaceDef cs)
+        if (iccBytes is { Length: > 0 })
             image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
-                IccProfiles.Build(cs));
+                iccBytes);
 
         image.ProcessPixelRows(accessor =>
         {
@@ -85,4 +110,7 @@ public static class JpegIO
         float c = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
         return (byte)(c * 255.0f + 0.5f);
     }
+
+    private static byte[]? ProfileBytes(ColorSpaceDef? space) =>
+        space is ColorSpaceDef value ? IccProfiles.Build(value) : null;
 }

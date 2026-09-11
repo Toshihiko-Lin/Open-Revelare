@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -36,6 +36,28 @@ public partial class MainWindow : Window
         {
             if (DataContext is MainViewModel vm)
             {
+                // The engine behind PresentationColorManagement is Lazy ON PURPOSE, and this
+                // line is what defeated it: touching it here constructed LittleCMS during window
+                // construction, so a missing, quarantined or SHA-mismatched lcms2 threw out of
+                // OnFrameworkInitializationCompleted — an unhandled exception with no window, no
+                // message and no exit code the user could act on. "双击了没反应".
+                //
+                // Nothing is added to the UI to explain it. The app now simply starts: the Windows
+                // presenter stays unavailable and the managed ColorManagedImage path draws
+                // instead (the same fallback an unsupported display already uses), and the first
+                // ManagedV2 render reports the real reason through the status bar it already has.
+                // LegacyV1 projects never touch the CMM at all and keep working entirely.
+                if (OperatingSystem.IsWindows())
+                {
+                    try
+                    {
+                        WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
+                    }
+                    catch (OpenRevelare.ColorManagement.ColorManagementException ex)
+                    {
+                        vm.StatusText = Loc.T("色彩引擎不可用，预览已回退：") + ex.Message;
+                    }
+                }
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
                 vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
@@ -44,8 +66,11 @@ public partial class MainWindow : Window
                         Curves.SetHistogram(vm.Histogram);
                     else if (args.PropertyName == nameof(MainViewModel.PreviewImage))
                         OnPreviewBitmapChanged();
-                    else if (args.PropertyName == nameof(MainViewModel.Patch))
+                    else if (args.PropertyName is nameof(MainViewModel.Patch) or
+                             nameof(MainViewModel.ShowClipping) or
+                             nameof(MainViewModel.ShowSprocketMask))
                         UpdatePatchLayout();
+                    OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>
                 {
@@ -109,15 +134,16 @@ public partial class MainWindow : Window
             var r = new Rectangle
             {
                 IsVisible = false,
-                Fill = new SolidColorBrush(Color.Parse("#F2F5F7")),
-                Stroke = new SolidColorBrush(Color.Parse("#1C1E20")),
-                StrokeThickness = 1,
+                Fill = PreviewOverlayStyle.HandleFillBrush,
+                Stroke = PreviewOverlayStyle.HandleOutlineBrush,
+                StrokeThickness = PreviewOverlayStyle.HandleOutlineThickness,
             };
             _cropHandleShapes[i] = r;
             Overlay.Children.Add(r);
         }
 
         SyncViewerBgChecks();
+        InitializeWindowsPresentation();
     }
 
     /// <summary>
@@ -314,6 +340,7 @@ public partial class MainWindow : Window
         UpdatePanCursor();
         UpdatePatchLayout();
         RenderCropFrame();
+        QueueWindowsPresentation();
     }
 
     private void ResetZoom() { _zoom = 1.0; _pan = default; ApplyTransform(); Vm?.ClearSharpPatch(); }
@@ -564,7 +591,11 @@ public partial class MainWindow : Window
                                               CropV1, CropV2, CropH1, CropH2 })
             c.IsVisible = show;
         foreach (Rectangle r in _cropHandleShapes) if (r is not null) r.IsVisible = show;
-        if (!show) return;
+        if (!show)
+        {
+            QueueWindowsPresentation();
+            return;
+        }
 
         var b = LetterboxRect()!.Value;
         var (cx, cy, cw, ch) = _cropDraft!.Value;
@@ -605,6 +636,7 @@ public partial class MainWindow : Window
             _cropHandleShapes[i].StrokeThickness = 1.0 * inv;
             Put(_cropHandleShapes[i], pos[i].X - half, pos[i].Y - half, hs, hs);
         }
+        QueueWindowsPresentation();
     }
 
     private void CommitCrop()
@@ -667,7 +699,9 @@ public partial class MainWindow : Window
     private void UpdatePatchLayout()
     {
         MainViewModel.SharpPatch? patch = Vm?.Patch;
-        if (patch is null || LetterboxRect() is not { } box)
+        if (patch is null ||
+            !MainViewModel.ShouldPresentSharpPatch(Vm?.ShowClipping == true, Vm?.ShowSprocketMask == true) ||
+            LetterboxRect() is not { } box)
         {
             PatchImg.Source = null;
             PatchImg.IsVisible = false;
@@ -859,6 +893,26 @@ public partial class MainWindow : Window
     private void OnDismissRollAnalysisNoticeClick(object? sender, RoutedEventArgs e)
         => Vm?.DismissRollAnalysisNotice();
 
+    private void OnDismissLegacyColorPipelineNoticeClick(object? sender, RoutedEventArgs e)
+        => Vm?.DismissLegacyColorPipelineNotice();
+
+    // Changing the roll's TIFF admission re-decodes everything, so both buttons go through the
+    // same view-model path as the pipeline migration rather than poking at state from here.
+    private async void OnTiffInputLinearClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null) return;
+        await Vm.SetTiffInputAssumptionAsync(TiffInputAssumption.Linear);
+    }
+
+    private async void OnTiffInputSrgbClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null) return;
+        await Vm.SetTiffInputAssumptionAsync(TiffInputAssumption.Srgb);
+    }
+
+    private void OnDismissTiffInputNoticeClick(object? sender, RoutedEventArgs e)
+        => Vm?.DismissTiffInputNotice();
+
     private void OnBannerCloseClick(object? sender, RoutedEventArgs e)
     {
         _bannerHintDismissed = true;
@@ -946,6 +1000,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         Vm?.FlushRollNow();
+        StopWindowsPresentation();
         // Loc.Changed 是静态事件，订阅方却是这个窗口：不摘掉就会把窗口钉在进程生命周期上。
         // 实际只有一个主窗口，但配对的 -= 是这个项目里其余订阅一贯的写法。
         TearDownNativeMenu();
@@ -1149,6 +1204,7 @@ public partial class MainWindow : Window
         Services.Settings.Save();
         App.ApplyViewerBackground(hex);
         SyncViewerBgChecks();
+        QueueWindowsPresentation();
     }
 
     /// <summary>Tick the swatch that matches the saved backdrop, in every copy of the menu
@@ -1511,11 +1567,17 @@ public partial class MainWindow : Window
 
         if (!_dragging) return;
         Point p = e.GetPosition(Overlay);
-        if (IsLineMode(_mode)) { SelLine.EndPoint = p; return; }
+        if (IsLineMode(_mode))
+        {
+            SelLine.EndPoint = p;
+            QueueWindowsPresentation();
+            return;
+        }
         Canvas.SetLeft(SelRect, Math.Min(p.X, _dragStart.X));
         Canvas.SetTop(SelRect, Math.Min(p.Y, _dragStart.Y));
         SelRect.Width = Math.Abs(p.X - _dragStart.X);
         SelRect.Height = Math.Abs(p.Y - _dragStart.Y);
+        QueueWindowsPresentation();
     }
 
     private void OnOverlayReleased(object? sender, PointerReleasedEventArgs e)
@@ -1656,10 +1718,15 @@ public partial class MainWindow : Window
 
     /// <summary>The single 新建卷 path — 文件 菜单, Ctrl+N, and the 图库's leading tile all land
     /// here. Ends in 修片, because importing a roll is a request to start working on it.</summary>
-    private async Task ImportNewRollAsync()
+    private Task ImportNewRollAsync() => ImportNewRollAsync(initialPaths: null);
+
+    internal async Task ImportNewRollAsync(IEnumerable<string>? initialPaths)
     {
         if (Vm is null) return;
         var dlg = new ImportDialog();
+        if (initialPaths is not null)
+            foreach (string path in initialPaths)
+                if (!dlg.Files.Contains(path)) dlg.Files.Add(path);
         bool ok = await dlg.ShowDialog<bool>(this);
         if (!ok || dlg.Result is not { } cfg) return;
 
@@ -1717,7 +1784,13 @@ public partial class MainWindow : Window
                 // Detection reads the same downsampled preview the dialog shows, so what the
                 // user sees and what was measured cannot drift apart. The rects are normalised,
                 // so they still apply at full resolution.
-                var (preview, _, _) = Services.ImageIo.LoadPreview(p, 1200);
+                var (working, _, _) = Services.ImageIo.LoadWorkingPreview(
+                    p,
+                    1200,
+                    OpenRevelare.Core.ColorPipelineVersion.ManagedV2,
+                    Vm.PresentationColorManagement,
+                    cfg.TiffInputAssumption);
+                OpenRevelare.Core.ImageBuffer preview = working.Pixels;
                 return Models.StripPlan.Detect(p, preview)
                                        .Select(plan => (Plan: plan, Preview: preview));
             }).ToList());
@@ -1749,13 +1822,10 @@ public partial class MainWindow : Window
         // dark to judge.
         foreach (var (plan, preview) in detected)
         {
-            var shown = new OpenRevelare.Core.ImageBuffer(
-                preview.Width, preview.Height, (float[])preview.Data.Clone());
             // A VIEWER transform, not step 4 — see NegativeView.ToDisplay. This strip is raw
             // un-inverted film with no calibration behind it, and step 4's display rendering
             // assumes a calibrated positive, which rendered the strip several stops hot.
-            OpenRevelare.Core.NegativeView.ToDisplay(shown.Data, Vm.CurrentOutputSpace);
-            plan.Preview = (Bitmap)Interop.BitmapConvert.ToBitmap(shown);
+            plan.Preview = Vm.BuildTransientNegativeFallback(preview);
         }
 
         var dlg = new SplitDialog(plans);
@@ -1896,6 +1966,20 @@ public partial class MainWindow : Window
         if (path != null) await Vm.SaveProjectAsync(path);
     }
 
+    private async void OnMigrateColorPipelineClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is null || !Vm.UsesLegacyColorPipeline) return;
+        bool confirmed = false;
+        // The body is computed from THIS roll rather than fixed: "画面可能变化" is true of every
+        // project and actionable for none. See MainViewModel.DescribeMigrationEffect.
+        await new InfoDialog(Loc.T("迁移色彩管线"), Vm.MigrationDialogText)
+            // isDefault: false — this migration is one-way (the body text says so), so Enter
+            // must not perform it. Esc still cancels, via CloseButton.IsCancel.
+            .WithAction(Loc.T("迁移并重新渲染"), Loc.T("取消"), () => confirmed = true, isDefault: false)
+            .ShowDialog(this);
+        if (confirmed) await Vm.MigrateColorPipelineToV2Async();
+    }
+
     // ── Roll management (add / virtual copy / remove) ───────────────────────────
     private async void OnAddImagesClick(object? sender, RoutedEventArgs e)
     {
@@ -1938,7 +2022,8 @@ public partial class MainWindow : Window
             {
                 jpeg
                     ? new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } }
-                    : new FilePickerFileType("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
+                    : new FilePickerFileType(opt.ExportLinear ? "32-bit float TIFF" : "16-bit TIFF")
+                        { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
         string? path = file?.TryGetLocalPath();

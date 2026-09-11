@@ -51,7 +51,7 @@
 
 **OpenRevelare** converts colour negatives — camera-scanned RAW or scanner TIFF — into positives by *computing* the orange mask away instead of eyeballing curves. Input is linearised, lens-corrected, moved into the log-density domain, white-balanced and inverted on top of the Cineon standard, and written out as a positive. Every parameter is named and physically meaningful, so the same roll produces the same result today, next year, or on a different machine.
 
-Built with C# / .NET 8 + Avalonia. **CPU only. Bilingual UI (Chinese/English)** — follows the system locale or can be locked manually. Local-first and non-destructive: source files are never modified, settings live in a `.ncproj` next to the images, and nothing requires an account or a network connection.
+Built with C# / .NET 8 + Avalonia. Image processing stays in the shared CPU Core; on Windows, D3D11 only uploads and presents the final colour-managed surface. **Bilingual UI (Chinese/English)** — follows the system locale or can be locked manually. Local-first and non-destructive: source files are never modified, settings live in a `.ncproj` next to the images, and nothing requires an account or a network connection.
 
 ## What it is
 
@@ -59,7 +59,7 @@ Colour negatives carry an orange base — the mask. Camera-copied or scanned, th
 
 Every parameter has a name and a physical meaning. The same roll gives the same result today, next year, or on a different machine — that is the difference between *computation* and *eyeballing curves*.
 
-Tech stack: C# / .NET 8 + Avalonia, **CPU only**, one codebase for Windows / Linux / macOS. Local-first and non-destructive: source files are never modified, parameters live in a `.ncproj` next to the images; no network, no account. The UI is bilingual (Chinese/English), following the system locale or locked manually.
+Tech stack: C# / .NET 8 + Avalonia, with image processing in one shared CPU Core for Windows / Linux / macOS. Windows uses D3D11 only to upload and present the final colour-managed surface, not as an image-processing backend. Local-first and non-destructive: source files are never modified, parameters live in a `.ncproj` next to the images; no network, no account. The UI is bilingual (Chinese/English), following the system locale or locked manually.
 
 ## Why this project
 
@@ -184,7 +184,7 @@ FUSE is bundled; no libfuse2 needed. If it still won't start, run with `--appima
 2. **Roll calibration** — calibrate the current frame: auto-calibration estimates base, white balance, grade, etc.; fix anything by hand
 3. **Apply to the roll** — sync these physical parameters to the whole roll
 4. **Frame edit** — per-frame aesthetic edits: colour temperature, exposure, contrast, saturation, curves
-5. **Export** — 8/16-bit TIFF or JPEG, with an optional embedded ICC profile
+5. **Export** — 16-bit photo TIFF, 8-bit JPEG, or 32-bit floating-point scene-linear ACEScg TIFF, with a matching ICC by default (only standard sRGB may explicitly omit it)
 
 There is no Save button — everything is written automatically to a `.ncproj` next to your images.
 
@@ -216,7 +216,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 | **RAW input** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ etc. (LibRaw) |
 | **Scanner input** | Hasselblad Flextight `.fff` (detected by content, linearised automatically) |
 | **Other input** | TIFF / JPEG / PNG |
-| **Export** | 16-bit TIFF, JPEG, three output colour spaces (plus a scene-linear ACEScg export); the embedded ICC matches the pixels |
+| **Export** | 16-bit TIFF, JPEG, three output colour spaces; plus a 32-bit floating-point scene-linear ACEScg TIFF that preserves extended range; a matching ICC is embedded by default, and only standard sRGB may explicitly omit it |
 
 ## How it works
 
@@ -304,10 +304,18 @@ likely changed every photograph without meaning to.
 
 The calibration experiments behind the physical claims live in [`docs/calibration/`](docs/calibration/).
 
+### Development documentation
+
+- [Colour-management pipeline architecture](docs/color-management-architecture.md) — the normative
+  Chinese design record for input, working/output profiles, Windows/macOS presentation contracts,
+  invariants and staged implementation.
+- [macOS audit](docs/macos-audit.md) — the audit record for existing macOS behaviour and its
+  verification boundaries (Chinese).
+
 Command-line front-end (no GUI, same Core):
 
 ```bash
-dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --grade 1.65 --d-max 2.0
+dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --grade 1.65 --d-max 2.0
 dotnet run --project src/OpenRevelare.Cli -- --help
 ```
 

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -18,6 +18,241 @@ namespace OpenRevelare.Gui.ViewModels;
 /// </summary>
 public partial class MainViewModel
 {
+    public bool UsesLegacyColorPipeline =>
+        _colorPipelineVersion == ColorPipelineVersion.LegacyV1;
+
+    private bool _legacyNoticeDismissed;
+
+    /// <summary>
+    /// The banner is informational, so it must be closable — it was the ONLY notice in the window
+    /// that was not. A user who deliberately keeps old rolls on v1 (which D-013 exists to let them
+    /// do) had this bar occupying the top of the preview for the life of the project, with no way
+    /// to acknowledge it. Dismissal is per roll and per session, exactly like
+    /// <see cref="ShowTiffInputNotice"/>: reopening the roll offers the migration again, so
+    /// closing it forfeits nothing.
+    /// </summary>
+    public bool ShowLegacyColorPipelineNotice =>
+        UsesLegacyColorPipeline && !_legacyNoticeDismissed;
+
+    public void DismissLegacyColorPipelineNotice()
+    {
+        if (_legacyNoticeDismissed) return;
+        _legacyNoticeDismissed = true;
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
+    }
+
+    /// <summary>
+    /// What migrating THIS project will actually do to the picture, worked out from the roll
+    /// rather than left for the user to guess.
+    ///
+    /// <para>
+    /// The dialog used to say only "画面和之后的导出可能变化", which is true of every project and
+    /// therefore useful for none: someone deciding whether to touch a finished roll cannot act on
+    /// "可能". The three conditions below are the complete set of things that differ between the
+    /// pipelines, measured in LegacyVersusManagedRenderTests — outside them the two renders are
+    /// bit-identical, so the honest answer is that nothing will change.
+    /// </para>
+    /// </summary>
+    private string DescribeMigrationEffect()
+    {
+        bool anyLut = false, anyCurve = false, anyLegacyStage2 = false;
+        foreach (RollFrame frame in Frames)
+        {
+            FrameParams p = frame.Params;
+            anyLut |= !string.IsNullOrWhiteSpace(p.PrintLut);
+            anyCurve |= p.CurvePointsM.Count > 0 || p.CurvePointsR.Count > 0
+                        || p.CurvePointsG.Count > 0 || p.CurvePointsB.Count > 0;
+            anyLegacyStage2 |= !p.DisplayReferredStage2;
+        }
+
+        if (!anyLut && !anyCurve && !anyLegacyStage2)
+            return Loc.T("这一卷没有用胶片 LUT、没有曲线，迁移后画面不会有任何变化——只有导出会带上准确的 ICC。");
+
+        var reasons = new List<string>();
+        if (anyLegacyStage2) reasons.Add(Loc.T("旧的第 2 步渲染方式（变化最大）"));
+        if (anyCurve) reasons.Add(Loc.T("曲线"));
+        if (anyLut) reasons.Add(Loc.T("胶片 LUT"));
+        // The closing sentence must be true of ALL three, and "旧版贴错了 profile" is not: that
+        // describes the first two, whose PixelProfileMismatch really is set, but NOT the curve
+        // case — there v1 reports no mismatch at all and the difference is the private gamma
+        // round-trip Stage 2's comment claimed to have removed. LegacyVersusManagedRenderTests
+        // pins exactly that distinction, so the wording has to stay above it.
+        return Loc.F($"这一卷用到了：{string.Join(Loc.T("、"), reasons)}，迁移后画面会变化。")
+               + Loc.T("变的方向是修正——旧版在这些环节上做的事和它自己声称的不一致——但这是你已经调好的观感。");
+    }
+
+    /// <summary>The migration dialog's body: what it does, then what it does to THIS roll.</summary>
+    public string MigrationDialogText =>
+        Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。工程保存后不会自动退回 v1。")
+        + "\n\n" + DescribeMigrationEffect();
+
+    public string LegacyColorPipelineNotice => Loc.T(
+        "此工程仍使用旧版色彩管线。画面保持原样，但输出会嵌入准确的兼容 ICC；迁移到色彩管理版会重新渲染并可能改变外观。");
+
+    public string ColorPipelineDiagnostic =>
+        (_colorPipelineVersion == ColorPipelineVersion.LegacyV1
+            ? "LegacyV1 (explicit compatibility)"
+            : "ManagedV2 (exact ICC)") + $" · TIFF input={DescribeTiffInput()}";
+
+    /// <summary>
+    /// "Unspecified" is an implementation word for "the user set no override", which is the normal
+    /// state now that files are read rather than interrogated. The diagnostic says what actually
+    /// happened instead, including the evidence when detection has run.
+    /// </summary>
+    private string DescribeTiffInput()
+    {
+        if (_tiffInputAssumption != TiffInputAssumption.Unspecified)
+            return _tiffInputAssumption.ToString();
+        return _tiffInputDetection is { } detection
+            ? $"auto({detection.Evidence} -> {detection.Assumption})"
+            : "auto";
+    }
+
+    /// <summary>Detection for the open roll, refreshed whenever the roll or the override changes.</summary>
+    private TiffInputDetection? _tiffInputDetection;
+
+    private bool _tiffInputNoticeDismissed;
+
+    /// <summary>
+    /// Shown only when detection had to fall back on convention — that is, when the answer was NOT
+    /// read out of the file. A file that declared itself needs no prompt, and nagging about those
+    /// would train the user to dismiss the one case that matters.
+    /// </summary>
+    public bool ShowTiffInputNotice =>
+        _colorPipelineVersion == ColorPipelineVersion.ManagedV2
+        && _tiffInputAssumption == TiffInputAssumption.Unspecified
+        && _tiffInputDetection is { IsConclusive: false }
+        && !_tiffInputNoticeDismissed;
+
+    public string TiffInputNoticeText => _tiffInputDetection is { } detection
+        ? Loc.F($"这卷 TIFF 没有可用的色彩声明，已按 sRGB 处理。{detection.Diagnostic}。看着不对就改为线性。")
+        : string.Empty;
+
+    public void DismissTiffInputNotice()
+    {
+        if (_tiffInputNoticeDismissed) return;
+        _tiffInputNoticeDismissed = true;
+        OnPropertyChanged(nameof(ShowTiffInputNotice));
+    }
+
+    /// <summary>
+    /// Re-reads the open roll's first frame and republishes the notice. Cheap: one file open for
+    /// tags only, no pixels. RAW rolls and legacy projects short-circuit to no detection at all.
+    /// </summary>
+    private void RefreshTiffInputDetection()
+    {
+        TiffInputDetection? detection = null;
+        if (_colorPipelineVersion == ColorPipelineVersion.ManagedV2
+            && _tiffInputAssumption == TiffInputAssumption.Unspecified)
+        {
+            string? path = Frames
+                .FirstOrDefault(frame => !frame.IsVirtual && !RawDecode.IsRawExtension(frame.Path))
+                ?.Path;
+            if (path is not null && File.Exists(path))
+                detection = TiffInputDetector.Detect(path);
+        }
+
+        _tiffInputDetection = detection;
+        OnPropertyChanged(nameof(ShowTiffInputNotice));
+        OnPropertyChanged(nameof(TiffInputNoticeText));
+        OnPropertyChanged(nameof(ColorPipelineDiagnostic));
+    }
+
+    /// <summary>
+    /// Applies a roll-level override after the fact — the correction path that replaces the old
+    /// upfront question. The user is deciding here with the picture in front of them, which is the
+    /// only point at which "linear or sRGB" is answerable by looking.
+    /// </summary>
+    public async Task SetTiffInputAssumptionAsync(TiffInputAssumption assumption)
+    {
+        if (assumption is not (TiffInputAssumption.Linear or TiffInputAssumption.Srgb))
+            throw new ArgumentOutOfRangeException(nameof(assumption), assumption, null);
+        if (_tiffInputAssumption == assumption) return;
+
+        CommitLiveParams(CurrentFrame);
+        SetTiffInputAssumption(assumption);
+        _tiffInputNoticeDismissed = false;
+        await InvalidateColourStateAndReloadAsync();
+        RefreshTiffInputDetection();
+        string label = assumption == TiffInputAssumption.Linear ? Loc.T("线性") : "sRGB";
+        StatusText = Loc.F($"整卷 TIFF 输入已改为 {label}，全卷已重新解码。");
+    }
+
+
+    private void SetColorPipelineVersion(ColorPipelineVersion value)
+    {
+        if (_colorPipelineVersion == value) return;
+        _colorPipelineVersion = value;
+        OnPropertyChanged(nameof(UsesLegacyColorPipeline));
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
+        OnPropertyChanged(nameof(LegacyColorPipelineNotice));
+        OnPropertyChanged(nameof(ColorPipelineDiagnostic));
+    }
+
+    private void SetTiffInputAssumption(TiffInputAssumption value)
+    {
+        if (!Enum.IsDefined(value))
+            throw new ArgumentOutOfRangeException(nameof(value), value, null);
+        if (_tiffInputAssumption == value) return;
+        _tiffInputAssumption = value;
+        OnPropertyChanged(nameof(ColorPipelineDiagnostic));
+    }
+
+    /// <summary>
+    /// Explicit L2 opt-in migration. The old project is never changed by load/save alone; this
+    /// interaction invalidates every decode/render cache whose meaning depends on the pipeline
+    /// version, then re-decodes the current frame before publishing v2 pixels.
+    /// </summary>
+    public async Task MigrateColorPipelineToV2Async()
+    {
+        if (!UsesLegacyColorPipeline) return;
+
+        CommitLiveParams(CurrentFrame);
+        Project.Data migration = BuildProjectData();
+        Project.MigrateColorPipelineToV2(migration);
+
+        SetColorPipelineVersion(migration.ColorPipelineVersion);
+        await InvalidateColourStateAndReloadAsync();
+        RefreshTiffInputDetection();
+        StatusText = Loc.T("已迁移到色彩管理版（v2）；工程将以新版本保存，外观变化不会自动回退。");
+    }
+
+    /// <summary>
+    /// Drops every decoded artefact whose meaning depends on the colour admission, then re-decodes
+    /// the current frame and restarts the roll's background work. Shared by the pipeline migration
+    /// and by a roll-level TIFF input change: both invalidate exactly the same things, and letting
+    /// them drift apart would leave one of the two showing pixels from the previous admission.
+    /// </summary>
+    private async Task InvalidateColourStateAndReloadAsync()
+    {
+        _renderCts?.Cancel();
+        _thumbCts?.Cancel();
+        _warmCts?.Cancel();
+        _patchCts?.Cancel();
+        _switchToken++;
+        ClearSharpPatch();
+
+        _previews.Clear();
+        ClearTiles();
+        _negativeWb.Clear();
+        lock (_decoding) _decoding.Clear();
+        lock (_fullSlotGate) _fullSlot = null;
+        _regionSlot = null;
+        _previewWorking = null;
+        _previewMargin = null;
+        foreach (RollFrame frame in Frames) SetThumbnail(frame, null);
+        PreviewImage = null;
+        HasImage = false;
+        MarkRollDirty();
+
+        RollFrame? current = CurrentFrame;
+        if (current is not null)
+            await SwitchFrameAsync(current);
+
+        RestartThumbnails();
+        StartRollWarmUp();
+    }
+
     // ── Project save / load (.ncproj, schema-compatible with Python) ────────────
     /// <summary>Write a COPY of the roll to an arbitrary path (「另存工程副本」). The open roll
     /// keeps autosaving to its own project file — this is for handing a roll to someone else or
@@ -46,23 +281,22 @@ public partial class MainViewModel
         catch (Exception ex) { StatusText = Loc.T("打开工程失败：") + ex.Message; IsBusy = false; return; }
         if (data.Frames.Count == 0) { StatusText = Loc.T("工程为空"); IsBusy = false; return; }
 
+        // Keep every incoming colour/calibration value local until all potentially long-running
+        // preparation is over. The roll currently on screen remains editable while the busy
+        // indicator is up; installing these values early would let its autosave serialize the
+        // new project's semantics into the old project's file.
+        ColorPipelineVersion incomingPipelineVersion = data.ColorPipelineVersion;
+        TiffInputAssumption incomingTiffInputAssumption =
+            TiffInputAssumptionPolicy.FromPersistedLinearFlag(
+                data.Meta.TiffIsLinear, incomingPipelineVersion);
+        string? incomingCalSourceDir = data.Meta.CalSourcePath;
+        string[]? incomingCalRgbPaths = data.Meta.CalRgbPaths is { } r && r.ContainsKey("R")
+            ? new[] { r["R"], r.GetValueOrDefault("G", ""), r.GetValueOrDefault("B", "") }
+            : null;
+        string? incomingLccSourcePath = data.Meta.LccPath;
+
         // Before anything reads pixels: the negatives may have moved since this was saved.
         bool relinked = await RelinkIfMissingAsync(data);
-
-        // 旧模型的工程载入后画面会变——面板顶部据此提示重跑标定。
-        NeedsRecalibration = data.NeedsRecalibration;
-
-        _calSourceDir = data.Meta.CalSourcePath;
-        _calRgbPaths = data.Meta.CalRgbPaths is { } r && r.ContainsKey("R")
-            ? new[] { r["R"], r.GetValueOrDefault("G", ""), r.GetValueOrDefault("B", "") } : null;
-        _lccSourcePath = data.Meta.LccPath;
-
-        // Drop the previous roll's pixels HERE, not further down: the calibration below caches the
-        // previews of every frame it decodes, and a later Clear() would throw that work away.
-        _thumbCts?.Cancel();
-        _warmCts?.Cancel();
-        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
-        lock (_decoding) _decoding.Clear();
 
         // Recompute the roll-level ops (never stored in the file) from their source paths.
         double[,]? dm = null, cm = null; ImageBuffer? lcc = null;
@@ -71,28 +305,43 @@ public partial class MainViewModel
             var contentPaths = data.Frames.Where(f => !f.IsVirtual).Select(f => f.SourcePath).ToList();
             await Task.Run(() =>
             {
-                string[]? rgb = _calRgbPaths is { Length: 3 } p && p.All(File.Exists) ? _calRgbPaths : null;
-                if (rgb is null && !string.IsNullOrEmpty(_calSourceDir) && Directory.Exists(_calSourceDir))
+                string[]? rgb = incomingCalRgbPaths is { Length: 3 } p && p.All(File.Exists)
+                    ? incomingCalRgbPaths
+                    : null;
+                if (rgb is null
+                    && !string.IsNullOrEmpty(incomingCalSourceDir)
+                    && Directory.Exists(incomingCalSourceDir))
                 {
-                    var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(_calSourceDir);
+                    var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(incomingCalSourceDir);
                     rgb = new[] { rp, gp, bp };
-                    _calRgbPaths = rgb;
+                    incomingCalRgbPaths = rgb;
                 }
                 if (rgb is not null)
-                    (dm, cm) = CalibratePathA(rgb, contentPaths);
-                if (!string.IsNullOrEmpty(_lccSourcePath) && File.Exists(_lccSourcePath))
+                    (dm, cm) = CalibratePathA(
+                        rgb,
+                        contentPaths,
+                        incomingPipelineVersion,
+                        incomingTiffInputAssumption,
+                        cachePreviews: false);
+                if (!string.IsNullOrEmpty(incomingLccSourcePath)
+                    && File.Exists(incomingLccSourcePath))
                 {
                     ReportBackground(Loc.T("载入平场校正 …"));
-                    lcc = Lcc.LoadFlatField(_lccSourcePath, tiffIsLinear: true);
+                    lcc = Lcc.LoadFlatField(incomingLccSourcePath, tiffIsLinear: true);
                 }
                 ReportBackground("");
             });
         }
         catch (Exception ex) { StatusText = Loc.T("工程标定重算失败（按无解耦打开）：") + ex.Message; }
 
-        _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
-        if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = Loc.T("已载入平场（工程）"); }
-        else { _lccFlatField = null; LccAvailable = false; LccStatus = Loc.T("未载入平场校正"); }
+        // Relink/calibration can leave the dialog up for a long time. Capture any edits made to
+        // the outgoing roll during that interval while all of its own state is still installed.
+        await FlushRollAsync();
+
+        _thumbCts?.Cancel();
+        _warmCts?.Cancel();
+        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
+        lock (_decoding) _decoding.Clear();
 
         // Detach from the outgoing roll BEFORE its state is replaced — same reason as in
         // LoadRollAsync. Assigning the notes below fires Notes.PropertyChanged → MarkRollDirty,
@@ -103,6 +352,17 @@ public partial class MainViewModel
         _rollDirty = false;
         _sheetDirty = false;
 
+        SetColorPipelineVersion(incomingPipelineVersion);
+        SetTiffInputAssumption(incomingTiffInputAssumption);
+        // 旧模型的工程载入后画面会变——面板顶部据此提示重跑标定。
+        NeedsRecalibration = data.NeedsRecalibration;
+        _calSourceDir = incomingCalSourceDir;
+        _calRgbPaths = incomingCalRgbPaths;
+        _lccSourcePath = incomingLccSourcePath;
+        _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
+        if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = Loc.T("已载入平场（工程）"); }
+        else { _lccFlatField = null; LccAvailable = false; LccStatus = Loc.T("未载入平场校正"); }
+
         // Roll notes.
         Notes.CameraBody = data.Meta.CameraBody; Notes.FilmStock = data.Meta.FilmStock;
         Notes.FilmIso = data.Meta.FilmIso; Notes.RollNumber = data.Meta.RollNumber;
@@ -110,7 +370,8 @@ public partial class MainViewModel
         Notes.DevDate = data.Meta.DevDate; Notes.Location = data.Meta.Location;
         Notes.RollNote = data.Meta.RollNote; Notes.Format = data.Meta.Format;
 
-        // Rebuild the roll (caches already cleared above, before calibration warmed them).
+        // Rebuild under the incoming colour state. Preparation deliberately did not populate
+        // shared caches, so no outgoing decode can be mistaken for one of these frames.
         _prevFrame = null;
         // Same guard LoadRollAsync raises, and for the same reason: rebuilding Frames pushes the
         // strip's two-way SelectedItem binding back into CurrentFrame, re-entering
@@ -155,6 +416,13 @@ public partial class MainViewModel
         AdoptProject(path);
         if (relinked) MarkRollDirty();   // the repaired paths, written back on the next idle pause
 
+        // Opening a DIFFERENT project must offer its own migration again — the dismissal is about
+        // one roll, not about the session. (This is the path a legacy project actually arrives by;
+        // LoadRollAsync only ever creates ManagedV2 rolls, which have no banner to dismiss.)
+        _legacyNoticeDismissed = false;
+        OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
+
+        RefreshTiffInputDetection();
         StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
@@ -165,12 +433,20 @@ public partial class MainViewModel
     public async Task LoadRollWithConfigAsync(ImportConfig cfg)
     {
         if (cfg.Paths.Count == 0) return;
+
+        // No admission gate here any more. A TIFF that carries no usable ICC is resolved by
+        // TiffInputDetector from the colorimetry the file itself declares, and only falls back to a
+        // labelled convention when it declares none. Demanding an upfront Linear/sRGB answer taxed
+        // every import to cover a minority of files, and asked at the one moment the user cannot
+        // judge it — before a single pixel is on screen. cfg.TiffInputAssumption still carries an
+        // explicit override when the user set one; the roll can also be re-decided afterwards.
+
+        // Save the outgoing roll while all of its own colour state is still installed. The
+        // incoming assumption is adopted only after preparation succeeds, so a bad calibration
+        // file cannot alter either the saved project or the live caches of the roll on screen.
+        await FlushRollAsync();
         IsBusy = true;
         StatusText = Loc.T("正在准备导入 …");
-        // The roll changes here, not in LoadRollAsync — the prep below already caches previews for
-        // the frames it decodes, and a later Clear() would throw that work away.
-        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
-        lock (_decoding) _decoding.Clear();
 
         double[,]? dm = null, cm = null;
         ImageBuffer? lccField = null; string lccName = "";
@@ -185,7 +461,12 @@ public partial class MainViewModel
                     var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(cfg.CalDir);
                     calRgb = new[] { rp, gp, bp };
 
-                    (dm, cm) = CalibratePathA(calRgb, cfg.Paths);
+                    (dm, cm) = CalibratePathA(
+                        calRgb,
+                        cfg.Paths,
+                        ColorPipelineVersion.ManagedV2,
+                        cfg.TiffInputAssumption,
+                        cachePreviews: false);
                 }
                 if (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath))
                 {
@@ -202,6 +483,16 @@ public partial class MainViewModel
             ReportBackground(""); IsBusy = false; return;
         }
 
+        // Preparation may be long and the busy indicator does not lock the old roll's controls.
+        // Flush once more while its pipeline/assumption are still installed, so edits made during
+        // calibration cannot be lost when adoption detaches it below.
+        await FlushRollAsync();
+
+        // Preparation was side-effect free. From this point onward the incoming roll is being
+        // adopted, so retire every cache whose pixels were decoded under the outgoing contract.
+        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
+        lock (_decoding) _decoding.Clear();
+
         // Retain calibration SOURCE paths so a saved .ncproj can recompute matrices on load.
         _calSourceDir = cfg.PathA ? cfg.CalDir : null;
         _calRgbPaths = calRgb;
@@ -214,11 +505,15 @@ public partial class MainViewModel
         _cfgAutoInvert = cfg.AutoInvert;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
         if (lccField is not null) { _lccFlatField = lccField; LccAvailable = true; LccStatus = Loc.T("已载入平场：") + lccName; }
+        SetTiffInputAssumption(cfg.TiffInputAssumption);
         IsBusy = false;
 
         _configLoad = true;
         try { await LoadRollAsync(cfg.Paths); }
         finally { _configLoad = false; }
+
+        // Detection is not repeated here: LoadRollAsync above owns it for every entry point, and
+        // SetTiffInputAssumption ran before the load, so it has already seen this roll's choice.
 
         // After the load, not before: a new roll resets its notes, which would wipe whatever the
         // import dialog just collected. Blank fields are left alone rather than written through,
@@ -269,7 +564,12 @@ public partial class MainViewModel
     /// Keeping nine ~288 MB buffers alive at once is what a naive "decode everything first" would
     /// cost; this way the peak is only what is in flight.
     /// </summary>
-    private (double[,] Dm, double[,] Cm) CalibratePathA(string[] calRgb, IReadOnlyList<string> paths)
+    private (double[,] Dm, double[,] Cm) CalibratePathA(
+        string[] calRgb,
+        IReadOnlyList<string> paths,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption,
+        bool cachePreviews)
     {
         int nF = Math.Min(6, paths.Count);
         var roi = new double[3][];                 // calibration ROI means
@@ -288,7 +588,11 @@ public partial class MainViewModel
                 // Full-quality decode: ComputeDecoupleMatrix only wants the centre-ROI mean, but
                 // that mean is what the entire Path A colour basis rests on — its precision is not
                 // negotiable. Streamed off the decoder, so the precision costs nothing in memory.
-                roi[i] = ImageIo.RoiMeanFull(calRgb[i]);
+                roi[i] = ImageIo.RoiMeanFull(
+                    calRgb[i],
+                    pipelineVersion,
+                    ColorManagement,
+                    tiffInputAssumption);
             }
             else
             {
@@ -296,9 +600,24 @@ public partial class MainViewModel
                 // Both sizes off ONE decode, neither of them via a full-resolution frame. These are
                 // the roll's first frames — exactly what the warm-up would decode next — so their
                 // previews go into the cache and that work is not paid for twice.
-                var (outs, srcW, srcH) = ImageIo.LoadPreviews(paths[fi], PreviewMaxEdge, 720);
-                _previews.Put(paths[fi], outs[0], srcW, srcH);
-                negs[fi] = outs[1];
+                var (outs, srcW, srcH) = ImageIo.LoadWorkingPreviews(
+                    paths[fi],
+                    pipelineVersion,
+                    ColorManagement,
+                    tiffInputAssumption,
+                    PreviewMaxEdge,
+                    720);
+                if (cachePreviews)
+                {
+                    string previewKey = PreviewKey(
+                        paths[fi],
+                        preCrop: null,
+                        pipelineVersion,
+                        tiffInputAssumption);
+                    _previews.Put(previewKey, outs[0], srcW, srcH);
+                    CaptureTile(previewKey, outs[0]);
+                }
+                negs[fi] = outs[1].Pixels;
             }
             ReportBackground(Loc.F($"解码校正图与内容帧 {Interlocked.Increment(ref done)}/{total} …"));
         });
@@ -331,13 +650,20 @@ public partial class MainViewModel
     public async Task LoadRollAsync(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return;
-        await FlushRollAsync();   // the outgoing roll's pending edit, before its frames are dropped
+        // Config imports flush before their potentially-failing preparation, while the outgoing
+        // roll's assumption is still active. Direct callers still flush here.
+        if (!_configLoad) await FlushRollAsync();
         _autoSave.Discard();
         // Detach from the outgoing roll BEFORE its frames are replaced: anything that dirties the
         // roll between here and RegisterRoll would otherwise be pointed at the old entry.
         _roll = null;
         _rollDirty = false;
         _sheetDirty = false;
+        SetColorPipelineVersion(ColorPipelineVersion.ManagedV2);
+        // Startup/automation can call this lower-level entry without the import dialog. It may
+        // open a profiled TIFF, but an untagged one must fail closed instead of inheriting the
+        // previous roll's choice. LoadRollWithConfigAsync sets the deliberate choice first.
+        if (!_configLoad) SetTiffInputAssumption(TiffInputAssumption.Unspecified);
         Notes.Reset();            // notes are per-roll; a new roll starts blank
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
@@ -373,6 +699,20 @@ public partial class MainViewModel
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
+
+        // HERE, not in the callers. Every way of opening a roll lands in this method, and the
+        // detection is the ONLY thing that tells a user their untagged TIFF was assumed sRGB —
+        // the forced import question that used to ask it is gone. It lived in
+        // LoadRollWithConfigAsync alone, so the import dialog disclosed and the two paths that
+        // bypass it (command line, double-click, 添加图像) silently did not: the roll was assumed
+        // sRGB with no notice and no way to correct it. The dismissal resets with the roll for the
+        // same reason — dismissing one roll's notice must not suppress the next roll's.
+        //
+        // Frames must already be populated: the detector reads the first non-virtual, non-RAW
+        // frame off disk. Cheap — header tags only, no pixels.
+        _tiffInputNoticeDismissed = false;
+        _legacyNoticeDismissed = false;
+        RefreshTiffInputDetection();
 
         // Fire and forget: the import must return as soon as frame 1 is on screen. Awaiting the
         // roll here is what made importing feel like it hung — it did not come back until every

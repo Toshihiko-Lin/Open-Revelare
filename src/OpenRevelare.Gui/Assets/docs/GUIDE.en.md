@@ -100,14 +100,26 @@ Selecting several files puts you in roll mode.
 **Copying light source (camera RAW only)**: choose "Broad-spectrum (white light) — Path B" or
 "Narrow-band (RGB) — Path A". The latter also wants a calibration folder.
 
-**Scanner output encoding (TIFF only)**
+**TIFF colour space is worked out for you**
 
-The software probes the first file and shows what it found — dimensions, bit depth, whether an ICC
-is embedded (and whether it carries a device-primaries matrix), the inferred gamma type and its
-fitted value (e.g. `γ≈1.56`) — then **pre-selects** accordingly. Usually you can leave it alone.
+Import asks no colour questions. A usable embedded ICC always takes priority; without one, the
+application reads what the file itself declares, in order of trust:
 
-> With no ICC the samples are **taken as already linear**, with no inverse applied and no warning.
-> If your file is in fact gamma-encoded but carries no profile, set the encoding here by hand.
+1. a floating-point `SampleFormat` — float samples are scene data, so they are linear;
+2. the TIFF 6.0 white point / primaries / `TransferFunction` tags — these exist precisely to
+   declare colorimetry without an ICC, and yield an exact profile, which is far more specific than
+   any "linear or sRGB" answer;
+3. Exif `ColorSpace` — sRGB or Adobe RGB;
+4. the `Software` tag — the fixed untagged output of a known scanner application.
+
+Only when all four say nothing does the roll fall back on the convention for untagged scans, sRGB,
+**and a notice above the preview says so** and offers to read the roll as linear instead. By then
+the picture is on screen, which is the only point at which that question is answerable by looking.
+Changing it re-decodes the roll, and the choice is saved in `.ncproj`.
+
+Linear keeps the primaries uncharacterized and passes the working-space numbers through; sRGB uses
+the exact sRGB profile for a complete LittleCMS transform. Only old projects with no stored choice
+retain the historical bit-depth compatibility route.
 
 **Auto-analyse the roll and remove the mask**
 
@@ -375,23 +387,29 @@ library…" re-registers `.ncproj` files that have been scattered around.
 sharing).
 
 **Colour space** is not in the export dialog — it is the "output space" in the main window's footer,
-as in section 6. The export writes out the pixels you are looking at and attaches the matching ICC;
-colours the target gamut cannot hold are pulled toward the luminance-matched neutral axis (hue and
-luminance preserved) rather than clipped per channel.
+as in section 6. Export branches from the same rendered result as preview and embeds the exact ICC
+that describes those pixels by default. Only exact display-referred sRGB may explicitly omit it;
+Display P3, Adobe RGB, Rec709 and scene-linear exports force the matching profile. Colours the
+target gamut cannot hold are pulled toward the luminance-matched neutral axis (hue and luminance
+preserved) rather than clipped per channel.
 
 **Export as scene-linear ACEScg**: skips step 4 and frame editing entirely and writes the
-scene-linear data straight out, for DaVinci, Nuke and the like. These files carry no ICC and will
-look dark and flat in a viewer that does no colour management — that is expected.
+scene-linear data straight out, for DaVinci, Nuke and the like. The file is a 32-bit IEEE floating-
+point TIFF, preserves negative and greater-than-one channels, and embeds a deterministic linear
+ACEScg ICC. It will still look dark and flat in an ordinary photo viewer — that is expected.
 
 **Contact sheet**: tiles the whole roll into one grid. Roll info on the right (camera / film / ISO /
 roll no. / lab / process / date / location / notes) is burned onto the foot of the sheet as one
 identification strip. Never written to EXIF.
 
-> **Want the screen to be accurate? Calibrate the display.** The preview does no display colour
-> management — the bitmap goes to the system as-is and the panel lights up in its own primaries. The
-> right fix is a colorimeter: measure the screen, generate an ICC and register it as the system
-> display profile, after which every application benefits. Then set the output space to what you are
-> actually delivering (sRGB for the web, Adobe RGB for some print work).
+> **Want the screen to be accurate? You still need to calibrate the display.** On Windows Advanced
+> Color, OpenRevelare submits a linear extended-sRGB FP16 surface and DWM performs the one display
+> transform. In legacy SDR, the application uses the same LittleCMS instance and the registered
+> monitor ICC for that one transform. Moving the window between displays, or changing a profile,
+> DPI, or Advanced Color state, rebuilds presentation automatically. A failure is exposed as an
+> emergency-sRGB warning in the status bar, with full diagnostics available to copy. Measure the
+> screen with a colorimeter and register the correct system profile, then choose the output space
+> you actually deliver. The dedicated macOS presenter is outside this Windows repair.
 
 ---
 

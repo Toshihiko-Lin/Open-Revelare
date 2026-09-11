@@ -1,4 +1,5 @@
 using BitMiracle.LibTiff.Classic;
+using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -7,13 +8,14 @@ namespace OpenRevelare.Core;
 /// proprietary product; guaranteed correct 16-bit output, which ImageSharp's TIFF
 /// encoder silently downgrades to 8-bit). Phase-1 stand-in for tifffile.
 ///
-/// Load: 8/16-bit, chunky (CONTIG) RGB or grey TIFF -&gt; linear-light f32 image.
+/// Load: 8/16-bit unsigned or 32-bit IEEE-float, chunky (CONTIG) RGB or grey TIFF
+/// -&gt; linear-light f32 image.
 /// <paramref name="inputIsSrgb"/> linearises a display-gamma scan; otherwise the
 /// encoding comes from the embedded ICC profile, and failing that from the bit
 /// depth (see <c>UntaggedTransform</c>): 8-bit untagged is sRGB by convention,
 /// 16-bit untagged is treated as already linear.
-/// Export: f32 image -&gt; 16-bit RGB TIFF (Deflate-compressed). The pipeline hands
-/// us data already in the target encoding (sRGB for BASIC, linear for NONE).
+/// Export: normalized frames -&gt; 16-bit RGB TIFF; extended frames -&gt; 32-bit float RGB TIFF.
+/// The pipeline hands us data already in the target encoding.
 /// </summary>
 public static class TiffIO
 {
@@ -189,7 +191,12 @@ public static class TiffIO
     }
 
     /// <summary>Apply the resolved ICC transform to one pixel, in place.</summary>
-    private static void ApplyIcc(in IccTransform t, ref float r, ref float g, ref float b)
+    private static void ApplyIcc(
+        in IccTransform t,
+        ref float r,
+        ref float g,
+        ref float b,
+        bool preserveExtendedRange)
     {
         if (t.Luts is { } luts)
         {
@@ -202,10 +209,12 @@ public static class TiffIO
             double nr = m[0, 0] * r + m[0, 1] * g + m[0, 2] * b;
             double ng = m[1, 0] * r + m[1, 1] * g + m[1, 2] * b;
             double nb = m[2, 0] * r + m[2, 1] * g + m[2, 2] * b;
-            // Out-of-gamut scanner primaries can send a channel negative; clip low only.
-            r = (float)Math.Max(nr, 0.0);
-            g = (float)Math.Max(ng, 0.0);
-            b = (float)Math.Max(nb, 0.0);
+            // Frozen integer scanner admission clips low-going matrix results. IEEE-float TIFF is
+            // explicitly an extended-range interchange, so applying that compatibility clamp to
+            // a linear ACEScg round-trip would silently destroy legitimate negative channels.
+            r = preserveExtendedRange ? (float)nr : (float)Math.Max(nr, 0.0);
+            g = preserveExtendedRange ? (float)ng : (float)Math.Max(ng, 0.0);
+            b = preserveExtendedRange ? (float)nb : (float)Math.Max(nb, 0.0);
         }
     }
 
@@ -246,6 +255,622 @@ public static class TiffIO
         return codeStep;
     }
 
+    /// <summary>
+    /// M1 typed decode boundary. Pixel math intentionally remains the frozen v1 implementation;
+    /// the wrapper preserves the exact embedded profile (or an explicit Uncharacterized reason)
+    /// after admission to the working pipeline. M2 replaces the legacy split ICC parser with one
+    /// atomic LittleCMS transform.
+    /// </summary>
+    public static WorkingFrame LoadWorkingFrame(string path, bool inputIsSrgb)
+    {
+        SuppressLibTiffWarnings();
+        string stableId = FrameSourceIds.ForPath(path);
+        PixelEncoding original;
+        WorkingAdmission admission;
+        string decodeRecipe;
+
+        using (Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF: {path}"))
+        {
+            int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+            byte[]? embedded = inputIsSrgb ? null : ReadIccBytes(tif);
+            if (inputIsSrgb)
+            {
+                var profile = BuiltInColorProfiles.Srgb(ProfileRole.Input);
+                original = new CharacterizedPixelEncoding(
+                    profile,
+                    ColorReference.DisplayReferred,
+                    TransferState.ProfileEncoded,
+                    bps == 32 ? NumericRange.Extended : NumericRange.Normalized);
+                admission = WorkingAdmission.ConvertedFromCharacterized;
+                decodeRecipe = "explicit sRGB override -> legacy linear working admission";
+            }
+            else if (embedded is not null)
+            {
+                var profile = ColorProfileRef.Create(
+                    embedded,
+                    $"Embedded TIFF profile ({Path.GetFileName(path)})",
+                    ProfileRole.Input,
+                    new ProfileSource.Embedded(stableId, "TIFF"));
+                original = new CharacterizedPixelEncoding(
+                    profile,
+                    ColorReference.SceneReferred,
+                    TransferState.ProfileEncoded,
+                    bps == 32 ? NumericRange.Extended : NumericRange.Normalized);
+                admission = WorkingAdmission.LegacyPartialIccTransform;
+                decodeRecipe = "v1 split ICC TRC/matrix parser (M2 migration required)";
+            }
+            else
+            {
+                FlextightMeta.Settings flextight = FlextightMeta.Read(path);
+                bool vendorGamma = flextight.HasEncodingGamma;
+                CaptureKind kind = vendorGamma
+                    ? CaptureKind.ScannerVendorDeclaredWithoutPrimaries
+                    : bps == 8 ? CaptureKind.TiffUntagged8Bit
+                    : bps == 16 ? CaptureKind.TiffUntagged16Bit
+                    : CaptureKind.Other;
+                CompatibilityPolicy policy = vendorGamma || bps == 8
+                    ? CompatibilityPolicy.LegacyDecodeSrgbTransferThenTreatAsWorking
+                    : CompatibilityPolicy.LegacyTreatNumbersAsWorking;
+                original = new UncharacterizedPixelEncoding(
+                    kind,
+                    stableId,
+                    policy,
+                    TransferState.Unknown,
+                    bps == 32 ? NumericRange.Extended : NumericRange.Normalized);
+                admission = WorkingAdmission.LegacyUncharacterizedPassthrough;
+                decodeRecipe = vendorGamma
+                    ? "vendor gamma decoded; primaries uncharacterized; v1 working passthrough"
+                    : bps == 8
+                        ? "untagged TIFF8 legacy sRGB-TRC guess; v1 working passthrough"
+                        : bps == 16
+                            ? "untagged TIFF16 legacy linear guess; v1 working passthrough"
+                            : "untagged TIFF32 float legacy linear guess; v1 working passthrough";
+            }
+        }
+
+        ImageBuffer pixels = LoadTiff(path, inputIsSrgb);
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            decodeRecipe);
+        return new WorkingFrame(
+            pixels,
+            WorkingSpaceId.LinearAcesCgV1,
+            admission,
+            source);
+    }
+
+    /// <summary>
+    /// Compatibility overload for callers that predate the typed TIFF assumption. In ManagedV2,
+    /// <c>false</c> means "no explicit override", which resolves through <see cref="TiffInputDetector"/>
+    /// rather than guessing from bit depth; a usable embedded ICC still wins outright. LegacyV1
+    /// retains the frozen boolean behaviour byte-for-byte.
+    /// </summary>
+    public static WorkingFrame LoadWorkingFrame(
+        string path,
+        bool inputIsSrgb,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+            return LoadWorkingFrame(path, inputIsSrgb);
+
+        return LoadWorkingFrame(
+            path,
+            inputIsSrgb ? TiffInputAssumption.Srgb : TiffInputAssumption.Unspecified,
+            pipelineVersion,
+            colorManagement);
+    }
+
+    /// <summary>
+    /// Versioned TIFF decode boundary. A usable embedded ICC always has priority. ManagedV2 uses
+    /// <paramref name="inputAssumption"/> only when that profile is absent or unusable, and records
+    /// the exact admission in <see cref="SourceDescriptor.DecodeRecipe"/>. The bit-depth policy is
+    /// reachable only through <see cref="TiffInputAssumption.LegacyByBitDepthCompatibility"/> for
+    /// old/missing-field projects.
+    /// </summary>
+    public static WorkingFrame LoadWorkingFrame(
+        string path,
+        TiffInputAssumption inputAssumption,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (!Enum.IsDefined(inputAssumption))
+            throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null);
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+        {
+            // Old projects used the bool as a transfer override. Unspecified/compatibility both
+            // select the historical per-bit-depth route, preserving their established look.
+            return LoadWorkingFrame(path, inputIsSrgb: inputAssumption == TiffInputAssumption.Srgb);
+        }
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement);
+    }
+
+    private static WorkingFrame LoadManagedWorkingFrame(
+        string path,
+        TiffInputAssumption inputAssumption,
+        IColorManagementEngine colorManagement)
+    {
+        SuppressLibTiffWarnings();
+        string stableId = FrameSourceIds.ForPath(path);
+
+        byte[]? embedded = null;
+        string? fallbackDiagnostic = null;
+        try
+        {
+            using (Tiff profileTif = Tiff.Open(path, "r")
+                ?? throw new IOException($"could not open TIFF: {path}"))
+            {
+                _ = TryReadIccPayloadStrict(profileTif, path, out embedded);
+            }
+        }
+        catch (ColorManagementException ex)
+            when (TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption))
+        {
+            fallbackDiagnostic = OneLine(ex.Message);
+        }
+
+        if (embedded is not null)
+        {
+            try
+            {
+                var embeddedProfile = ColorProfileRef.Create(
+                    embedded,
+                    $"Embedded TIFF profile ({Path.GetFileName(path)})",
+                    ProfileRole.Input,
+                    new ProfileSource.Embedded(stableId, "TIFF"));
+                return DecodeManagedWithProfile(
+                    path,
+                    stableId,
+                    embeddedProfile,
+                    ColorReference.SceneReferred,
+                    "managed v2 exact embedded ICC -> LittleCMS -> linear ACEScg",
+                    colorManagement);
+            }
+            catch (Exception ex)
+                // A transform-creation failure is deliberately NOT caught here: the embedded
+                // profile was valid, so falling back would hide an engine fault behind a silent
+                // change of colour space.
+                when (ex is not OperationCanceledException and not OutOfMemoryException
+                    and not ColorTransformCreationException
+                    && TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption))
+            {
+                fallbackDiagnostic = OneLine(ex.Message);
+            }
+        }
+
+        // Flextight metadata is a scanner declaration, not a bit-depth guess. Keep honouring it
+        // before consulting the selected fallback; its primaries remain explicitly unknown.
+        // The declaration does not, however, waive managed-v2 admission: an untagged scanner
+        // file still needs either a deliberate fallback choice or the frozen legacy policy.
+        bool fallbackAdmitted = TiffInputAssumptionPolicy.AdmitsFallback(inputAssumption)
+            || inputAssumption == TiffInputAssumption.LegacyByBitDepthCompatibility;
+        if (fallbackAdmitted
+            && fallbackDiagnostic is null
+            && FlextightMeta.Read(path).HasEncodingGamma)
+            return LoadManagedCompatibility(
+                path,
+                "managed v2 scanner-vendor gamma declaration; primaries uncharacterized");
+
+        return inputAssumption switch
+        {
+            TiffInputAssumption.Linear => DecodeManagedLinearAssumption(
+                path, stableId, ExplicitPrefix("linear", fallbackDiagnostic)),
+            TiffInputAssumption.Srgb => DecodeManagedSrgbAssumption(
+                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement),
+            TiffInputAssumption.LegacyByBitDepthCompatibility when fallbackDiagnostic is null =>
+                LoadManagedCompatibility(
+                    path,
+                    "managed v2 versioned legacy-by-bit-depth compatibility"),
+            TiffInputAssumption.Unspecified => DecodeManagedDetected(
+                path, stableId, fallbackDiagnostic, colorManagement),
+            TiffInputAssumption.LegacyByBitDepthCompatibility =>
+                throw MissingTiffInputAssumption(path, fallbackDiagnostic),
+            _ => throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null),
+        };
+    }
+
+    /// <summary>
+    /// Resolves an untagged file from what it actually carries. A file that characterized itself
+    /// through TIFF 6.0 or Exif tags gets an exact profile built from those tags — a better answer
+    /// than the two-way Linear/sRGB question could ever produce. Everything else lands on one of
+    /// the two assumption routes below, carrying the detector's reason into the decode recipe so
+    /// the choice stays auditable.
+    /// </summary>
+    private static WorkingFrame DecodeManagedDetected(
+        string path,
+        string stableId,
+        string? fallbackDiagnostic,
+        IColorManagementEngine colorManagement)
+    {
+        TiffInputDetection detection = TiffInputDetector.Detect(path);
+        string prefix = fallbackDiagnostic is null
+            ? "managed v2 detected input"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); detected input";
+        string reason = $"{detection.Evidence}: {detection.Diagnostic}";
+
+        if (detection.CharacterizedSpace is ColorSpaceDef characterized)
+        {
+            var profile = ColorProfileRef.Create(
+                IccProfiles.Build(characterized),
+                $"Detected TIFF input ({characterized.Name})",
+                ProfileRole.Input,
+                new ProfileSource.Generated(
+                    "OpenRevelare.TiffInputDetector", detection.Evidence.ToString()));
+            return DecodeManagedWithProfile(
+                path,
+                stableId,
+                profile,
+                characterized.Transfer == TransferFunction.Linear
+                    ? ColorReference.SceneReferred
+                    : ColorReference.DisplayReferred,
+                $"{prefix} [{reason}] -> exact profile from file tags -> LittleCMS -> linear ACEScg",
+                colorManagement);
+        }
+
+        return detection.Assumption == TiffInputAssumption.Linear
+            ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]")
+            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement);
+    }
+
+    /// <summary>Recipe wording for a user-selected roll override.</summary>
+    private static string ExplicitPrefix(string kind, string? fallbackDiagnostic) =>
+        fallbackDiagnostic is null
+            ? $"managed v2 explicit roll fallback {kind}"
+            : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); " +
+              $"explicit roll fallback {kind}";
+
+    private static WorkingFrame DecodeManagedSrgbAssumption(
+        string path,
+        string stableId,
+        string prefix,
+        IColorManagementEngine colorManagement)
+    {
+        return DecodeManagedWithProfile(
+            path,
+            stableId,
+            BuiltInColorProfiles.Srgb(ProfileRole.Input),
+            ColorReference.DisplayReferred,
+            $"{prefix} -> exact built-in sRGB -> LittleCMS -> linear ACEScg",
+            colorManagement);
+    }
+
+    private static WorkingFrame DecodeManagedLinearAssumption(
+        string path,
+        string stableId,
+        string prefix)
+    {
+        using Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
+        (int width, int height, int bitsPerSample, float[] encoded, float codeStep, NumericRange range) =
+            ReadTiffSamples(tif, path);
+        var pixels = new ImageBuffer(width, height, encoded)
+        {
+            SourceQuantisationStep = codeStep,
+        };
+        CaptureKind captureKind = bitsPerSample switch
+        {
+            8 => CaptureKind.TiffUntagged8Bit,
+            16 => CaptureKind.TiffUntagged16Bit,
+            _ => CaptureKind.Other,
+        };
+        var original = new UncharacterizedPixelEncoding(
+            captureKind,
+            stableId,
+            CompatibilityPolicy.None,
+            TransferState.LinearInProfilePrimaries,
+            range);
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            $"{prefix}; primaries uncharacterized; numeric working-space passthrough");
+        return new WorkingFrame(
+            pixels,
+            WorkingSpaceId.LinearAcesCgV1,
+            WorkingAdmission.ExplicitUncharacterizedPassthrough,
+            source);
+    }
+
+    private static WorkingFrame LoadManagedCompatibility(string path, string prefix)
+    {
+        WorkingFrame legacy = LoadWorkingFrame(path, inputIsSrgb: false);
+        var source = new SourceDescriptor(
+            legacy.Source.StableSourceId,
+            legacy.Source.DisplayName,
+            legacy.Source.OriginalEncoding,
+            $"{prefix} -> {legacy.Source.DecodeRecipe}");
+        return new WorkingFrame(
+            legacy.Pixels,
+            legacy.Space,
+            WorkingAdmission.LegacyUncharacterizedPassthrough,
+            source);
+    }
+
+    private static ColorManagementException MissingTiffInputAssumption(
+        string path,
+        string? fallbackDiagnostic)
+    {
+        string reason = fallbackDiagnostic is null
+            ? "has no embedded ICC profile"
+            : $"has no usable embedded ICC profile ({fallbackDiagnostic})";
+        return new ColorManagementException(
+            $"Managed TIFF input '{Path.GetFileName(path)}' {reason}. " +
+            "Select an explicit roll-level Linear or sRGB input assumption; " +
+            "bit depth is not a ManagedV2 colour policy.");
+    }
+
+    private static string OneLine(string text) =>
+        string.Join(" ", text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+
+    private static WorkingFrame DecodeManagedWithProfile(
+        string path,
+        string stableId,
+        ColorProfileRef sourceProfile,
+        ColorReference sourceReference,
+        string decodeRecipe,
+        IColorManagementEngine colorManagement)
+    {
+        ColorProfileRef workingProfile = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Working);
+
+        EnsureValidInputProfile(colorManagement, sourceProfile, path, "source");
+        EnsureValidInputProfile(colorManagement, workingProfile, path, "working destination");
+
+        var request = new ColorTransformRequest(
+            sourceProfile,
+            workingProfile,
+            TransformPurpose.InputToWorking,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            adaptationState: 1.0);
+
+        IColorTransformLease transform;
+        try
+        {
+            // Lease creation constructs the complete native transform. It happens before any
+            // scanline is decoded, so failure cannot leave a half-transformed frame to fall back
+            // into the legacy path.
+            transform = colorManagement.Lease(request);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorTransformCreationException(
+                $"Managed TIFF input could not create the complete ICC transform for " +
+                $"'{Path.GetFileName(path)}' ({sourceProfile.Identity} -> {workingProfile.Identity}).",
+                ex);
+        }
+
+        using (transform)
+        {
+            using Tiff tif = Tiff.Open(path, "r")
+                ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
+            var (width, height, _, encoded, codeStep, sourceRange) = ReadTiffSamples(tif, path);
+
+            // Four private probe pixels estimate the source lattice after the full colour
+            // conversion: black plus one code in each source primary. They travel through the
+            // same single Apply call as the image, avoiding a second transform path. Because a
+            // 3-D colour conversion has no exact scalar lattice, SourceQuantisationStep records
+            // the conservative largest first-code component in working-space units.
+            int imageFloatCount = encoded.Length;
+            float[] encodedWithProbes = new float[checked(imageFloatCount + 12)];
+            encoded.CopyTo(encodedWithProbes, 0);
+            int probe = imageFloatCount;
+            encodedWithProbes[probe + 3] = codeStep;
+            encodedWithProbes[probe + 7] = codeStep;
+            encodedWithProbes[probe + 11] = codeStep;
+
+            float[] convertedWithProbes = new float[encodedWithProbes.Length];
+            try
+            {
+                transform.Apply(
+                    encodedWithProbes,
+                    convertedWithProbes,
+                    checked(width * height + 4));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            {
+                throw new ColorManagementException(
+                    $"Managed TIFF input failed while applying the atomic ICC transform for " +
+                    $"'{Path.GetFileName(path)}'; no legacy or partial result was admitted.",
+                    ex);
+            }
+
+            float[] converted = convertedWithProbes.AsSpan(0, imageFloatCount).ToArray();
+            double quantisationStep = ManagedQuantisationStep(
+                convertedWithProbes.AsSpan(imageFloatCount, 12));
+            var pixels = new ImageBuffer(width, height, converted)
+            {
+                SourceQuantisationStep = quantisationStep,
+            };
+            var original = new CharacterizedPixelEncoding(
+                sourceProfile,
+                sourceReference,
+                TransferState.ProfileEncoded,
+                sourceRange);
+            var source = new SourceDescriptor(
+                stableId,
+                Path.GetFileName(path),
+                original,
+                decodeRecipe);
+            return new WorkingFrame(
+                pixels,
+                WorkingSpaceId.LinearAcesCgV1,
+                WorkingAdmission.ConvertedFromCharacterized,
+                source);
+        }
+    }
+
+    private static bool TryReadIccPayloadStrict(Tiff tif, string path, out byte[]? payload)
+    {
+        payload = null;
+        FieldValue[]? field;
+        try
+        {
+            field = tif.GetField(TiffTag.ICCPROFILE);
+        }
+        catch (Exception ex)
+            when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorManagementException(
+                $"TIFF ICC tag in '{Path.GetFileName(path)}' is present but unreadable.", ex);
+        }
+
+        if (field is null) return false;
+        if (field.Length < 2)
+        {
+            throw new ColorManagementException(
+                $"TIFF ICC tag in '{Path.GetFileName(path)}' has no profile payload.");
+        }
+
+        try
+        {
+            int declaredLength = field[0].ToInt();
+            byte[] bytes = field[1].ToByteArray();
+            if (declaredLength <= 0 || bytes.Length == 0)
+            {
+                throw new ColorManagementException(
+                    $"TIFF ICC tag in '{Path.GetFileName(path)}' contains an empty profile.");
+            }
+            if (declaredLength != bytes.Length)
+            {
+                throw new ColorManagementException(
+                    $"TIFF ICC tag in '{Path.GetFileName(path)}' declares {declaredLength} bytes " +
+                    $"but exposes {bytes.Length} bytes.");
+            }
+            payload = bytes;
+            return true;
+        }
+        catch (ColorManagementException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+            when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorManagementException(
+                $"TIFF ICC tag in '{Path.GetFileName(path)}' is malformed.", ex);
+        }
+    }
+
+    private static void EnsureValidInputProfile(
+        IColorManagementEngine colorManagement,
+        ColorProfileRef profile,
+        string path,
+        string role)
+    {
+        ProfileValidationResult validation;
+        try
+        {
+            validation = colorManagement.Validate(profile);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorManagementException(
+                $"Managed TIFF input could not validate the {role} ICC profile for " +
+                $"'{Path.GetFileName(path)}' ({profile.Identity}).",
+                ex);
+        }
+
+        if (!validation.IsValid)
+        {
+            throw new ColorManagementException(
+                $"Managed TIFF input rejected the {role} ICC profile for " +
+                $"'{Path.GetFileName(path)}' ({profile.Identity}): {validation.Message}");
+        }
+    }
+
+    private static (int Width, int Height, int BitsPerSample, float[] Encoded, float CodeStep, NumericRange Range)
+        ReadTiffSamples(Tiff tif, string path)
+    {
+        int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+        int h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+        int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+        int spp = tif.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt();
+
+        var planarField = tif.GetField(TiffTag.PLANARCONFIG);
+        var planar = planarField != null ? (PlanarConfig)planarField[0].ToInt() : PlanarConfig.CONTIG;
+        if (planar != PlanarConfig.CONTIG)
+            throw new NotSupportedException("only chunky (CONTIG) TIFF is supported in managed input");
+        bool isFloat = ValidateSampleStorage(tif, bps);
+        if (spp < 1)
+            throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
+
+        float codeStep = isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float sampleScale = isFloat ? 1.0f : codeStep;
+        float[] encoded = new float[checked(w * h * 3)];
+        byte[] scanline = new byte[tif.ScanlineSize()];
+        for (int y = 0; y < h; y++)
+        {
+            if (!tif.ReadScanline(scanline, y))
+                throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
+
+            int row = y * w * 3;
+            for (int x = 0; x < w; x++)
+            {
+                int destination = row + x * 3;
+                if (spp >= 3)
+                {
+                    encoded[destination] = Sample(scanline, x * spp, bps) * sampleScale;
+                    encoded[destination + 1] = Sample(scanline, x * spp + 1, bps) * sampleScale;
+                    encoded[destination + 2] = Sample(scanline, x * spp + 2, bps) * sampleScale;
+                }
+                else
+                {
+                    float grey = Sample(scanline, x * spp, bps) * sampleScale;
+                    encoded[destination] = grey;
+                    encoded[destination + 1] = grey;
+                    encoded[destination + 2] = grey;
+                }
+            }
+        }
+        return (w, h, bps, encoded, codeStep,
+            isFloat ? NumericRange.Extended : NumericRange.Normalized);
+    }
+
+    /// <summary>
+    /// Returns true for 32-bit IEEE-float storage and false for baseline unsigned integer
+    /// storage. Other sample layouts are rejected before any scanline is interpreted.
+    /// </summary>
+    private static bool ValidateSampleStorage(Tiff tif, int bitsPerSample)
+    {
+        FieldValue[]? field = tif.GetField(TiffTag.SAMPLEFORMAT);
+        SampleFormat? sampleFormat = field is { Length: > 0 }
+            ? (SampleFormat)field[0].ToInt()
+            : null;
+
+        if (bitsPerSample == 32 && sampleFormat == SampleFormat.IEEEFP)
+            return true;
+        if (bitsPerSample is 8 or 16
+            && (sampleFormat is null || sampleFormat == SampleFormat.UINT))
+            return false;
+
+        string describedFormat = sampleFormat?.ToString() ?? "default unsigned";
+        throw new NotSupportedException(
+            $"unsupported TIFF sample storage: BitsPerSample={bitsPerSample}, " +
+            $"SampleFormat={describedFormat} (need uint8, uint16, or IEEE-float32)");
+    }
+
+    private static double ManagedQuantisationStep(ReadOnlySpan<float> convertedProbes)
+    {
+        ReadOnlySpan<float> black = convertedProbes[..3];
+        double largest = 0.0;
+        for (int probe = 1; probe < 4; probe++)
+        {
+            for (int channel = 0; channel < 3; channel++)
+            {
+                double difference = Math.Abs(convertedProbes[probe * 3 + channel] - black[channel]);
+                if (double.IsFinite(difference)) largest = Math.Max(largest, difference);
+            }
+        }
+        return largest;
+    }
+
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
     {
@@ -262,8 +887,7 @@ public static class TiffIO
         var planar = planarField != null ? (PlanarConfig)planarField[0].ToInt() : PlanarConfig.CONTIG;
         if (planar != PlanarConfig.CONTIG)
             throw new NotSupportedException("only chunky (CONTIG) TIFF is supported in phase 1");
-        if (bps != 8 && bps != 16)
-            throw new NotSupportedException($"unsupported BitsPerSample {bps} (need 8 or 16)");
+        bool isFloat = ValidateSampleStorage(tif, bps);
         if (spp < 1)
             throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
 
@@ -272,7 +896,8 @@ public static class TiffIO
         var data = new float[w * h * 3];
         int scanlineSize = tif.ScanlineSize();
         byte[] buf = new byte[scanlineSize];
-        float inv = bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float codeStep = isFloat ? 0.0f : inv;
 
         for (int y = 0; y < h; y++)
         {
@@ -303,7 +928,7 @@ public static class TiffIO
                 }
                 else if (!icc.IsIdentity)
                 {
-                    ApplyIcc(icc, ref r, ref g, ref b);
+                    ApplyIcc(icc, ref r, ref g, ref b, preserveExtendedRange: isFloat);
                 }
 
                 int j = o + x * 3;
@@ -313,7 +938,10 @@ public static class TiffIO
 
         // Stamp the source lattice while the bit depth is still in scope; see
         // ImageBuffer.SourceQuantisationStep for why this cannot be recovered downstream.
-        return new ImageBuffer(w, h, data) { SourceQuantisationStep = ShadowStep(inv, icc, inputIsSrgb) };
+        return new ImageBuffer(w, h, data)
+        {
+            SourceQuantisationStep = ShadowStep(codeStep, icc, inputIsSrgb),
+        };
     }
 
     /// <summary>Pixel dimensions from the header alone — no image data is decoded.</summary>
@@ -358,8 +986,7 @@ public static class TiffIO
         var planar = planarField != null ? (PlanarConfig)planarField[0].ToInt() : PlanarConfig.CONTIG;
         if (planar != PlanarConfig.CONTIG)
             throw new NotSupportedException("only chunky (CONTIG) TIFF is supported");
-        if (bps != 8 && bps != 16)
-            throw new NotSupportedException($"unsupported BitsPerSample {bps} (need 8 or 16)");
+        bool isFloat = ValidateSampleStorage(tif, bps);
 
         int x0 = Math.Clamp((int)Math.Round(rect.X * w), 0, Math.Max(0, w - 1));
         int y0 = Math.Clamp((int)Math.Round(rect.Y * h), 0, Math.Max(0, h - 1));
@@ -380,7 +1007,8 @@ public static class TiffIO
         var counts = new int[outW * outH];
         int scanlineSize = tif.ScanlineSize();
         byte[] buf = new byte[scanlineSize];
-        float inv = bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float codeStep = isFloat ? 0.0f : inv;
 
         for (int y = y0; y < y1; y++)
         {
@@ -414,7 +1042,7 @@ public static class TiffIO
                 }
                 else if (!icc.IsIdentity)
                 {
-                    ApplyIcc(icc, ref r, ref g, ref b);
+                    ApplyIcc(icc, ref r, ref g, ref b, preserveExtendedRange: isFloat);
                 }
 
                 int p = oy * outW + ox, j = p * 3;
@@ -433,10 +1061,13 @@ public static class TiffIO
         // The SOURCE step, not the averaged one — the region loader box-averages internally, and
         // averaging changes the lattice without recovering information. See
         // ImageBuffer.SourceQuantisationStep.
-        return new ImageBuffer(outW, outH, acc) { SourceQuantisationStep = ShadowStep(inv, icc, inputIsSrgb) };
+        return new ImageBuffer(outW, outH, acc)
+        {
+            SourceQuantisationStep = ShadowStep(codeStep, icc, inputIsSrgb),
+        };
     }
 
-    /// <summary>Compression choice for 16-bit TIFF export.</summary>
+    /// <summary>Compression choice for integer and floating-point TIFF export.</summary>
     public enum CompressionMode { None, Lzw, Deflate }
 
     /// <summary>Write a 16-bit RGB TIFF. Data is quantised as-is (already encoded upstream).
@@ -450,7 +1081,7 @@ public static class TiffIO
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode = CompressionMode.Lzw,
                                     ColorSpace? iccSpace = null, string? description = null)
         => ExportFile.Write(path, target => WriteTiff16(img, target,
-               mode, iccSpace is ColorSpace c ? Legacy(c) : null, description));
+               mode, ProfileBytes(iccSpace is ColorSpace c ? Legacy(c) : null), description));
 
     /// <summary>
     /// As above, embedding the profile of any registered space. The caller is responsible for
@@ -459,14 +1090,81 @@ public static class TiffIO
     /// </summary>
     public static void ExportTiff16(ImageBuffer img, string path, CompressionMode mode,
                                     ColorSpaceDef? iccSpace, string? description = null)
-        => ExportFile.Write(path, target => WriteTiff16(img, target, mode, iccSpace, description));
+        => ExportFile.Write(path, target => WriteTiff16(
+               img, target, mode, ProfileBytes(iccSpace), description));
+
+    /// <summary>
+    /// Typed TIFF exporter. Normalized frames use unsigned 16-bit samples; extended frames use
+    /// IEEE-float32 so negative and greater-than-one values survive. Both variants embed the exact
+    /// immutable profile bytes that travelled with the pixels.
+    /// </summary>
+    public static void ExportTiff(
+        RenderedFrame frame,
+        string path,
+        CompressionMode mode = CompressionMode.Lzw,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Encoding.Range == NumericRange.Extended)
+        {
+            ExportTiffFloat32(frame, path, mode, description, profilePolicy);
+            return;
+        }
+
+        ExportTiff16(frame, path, mode, description, profilePolicy);
+    }
+
+    /// <summary>
+    /// Typed normalized TIFF16 exporter. Extended frames are rejected rather than silently
+    /// clipping them; use <see cref="ExportTiff"/> for automatic lossless storage selection.
+    /// </summary>
+    public static void ExportTiff16(
+        RenderedFrame frame,
+        string path,
+        CompressionMode mode = CompressionMode.Lzw,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Encoding.Range != NumericRange.Normalized)
+        {
+            throw new NotSupportedException(
+                "TIFF16 requires normalized pixels; use typed ExportTiff for extended float32 output.");
+        }
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
+        ExportFile.Write(path, target => WriteTiff16(
+            frame.Pixels, target, mode, profileBytes, description));
+    }
+
+    /// <summary>Typed IEEE-float32 TIFF exporter for extended-range pixels.</summary>
+    public static void ExportTiffFloat32(
+        RenderedFrame frame,
+        string path,
+        CompressionMode mode = CompressionMode.Lzw,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Encoding.Range != NumericRange.Extended)
+        {
+            throw new NotSupportedException(
+                "Float32 TIFF is reserved for frames whose typed numeric range is Extended.");
+        }
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
+        ExportFile.Write(path, target => WriteTiffFloat32(
+            frame.Pixels, target, mode, profileBytes, description));
+    }
 
     /// <summary>Bridges the two-value legacy enum onto the registry.</summary>
     internal static ColorSpaceDef Legacy(ColorSpace c) =>
         c == ColorSpace.AdobeRgb ? ColorSpaces.AdobeRgb : ColorSpaces.Srgb;
 
+    private static byte[]? ProfileBytes(ColorSpaceDef? space) =>
+        space is ColorSpaceDef value ? IccProfiles.Build(value) : null;
+
     private static void WriteTiff16(ImageBuffer img, string path, CompressionMode mode,
-                                    ColorSpaceDef? iccSpace, string? description)
+                                    byte[]? iccBytes, string? description)
     {
         Compression compression = mode switch
         {
@@ -493,10 +1191,9 @@ public static class TiffIO
             tif.SetField(TiffTag.PREDICTOR, Predictor.HORIZONTAL); // improves 16-bit compression
         tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
 
-        if (iccSpace is ColorSpaceDef cs)
+        if (iccBytes is { Length: > 0 })
         {
-            byte[] icc = IccProfiles.Build(cs);
-            tif.SetField(TiffTag.ICCPROFILE, icc.Length, icc);
+            tif.SetField(TiffTag.ICCPROFILE, iccBytes.Length, iccBytes);
         }
         if (description is not null)
         {
@@ -531,9 +1228,67 @@ public static class TiffIO
         tif.FlushData();
     }
 
-    /// <summary>Read one sample (8- or 16-bit) at sample index <paramref name="s"/> as a float count.</summary>
+    private static void WriteTiffFloat32(ImageBuffer img, string path, CompressionMode mode,
+                                         byte[]? iccBytes, string? description)
+    {
+        Compression compression = mode switch
+        {
+            CompressionMode.None => Compression.NONE,
+            CompressionMode.Deflate => Compression.DEFLATE,
+            _ => Compression.LZW,
+        };
+
+        if (description is not null) RegisterUserCommentTag();
+
+        int w = img.Width, h = img.Height;
+        using Tiff tif = Tiff.Open(path, "w")
+            ?? throw new IOException($"could not create TIFF: {path}");
+
+        tif.SetField(TiffTag.IMAGEWIDTH, w);
+        tif.SetField(TiffTag.IMAGELENGTH, h);
+        tif.SetField(TiffTag.SAMPLESPERPIXEL, 3);
+        tif.SetField(TiffTag.BITSPERSAMPLE, 32);
+        tif.SetField(TiffTag.SAMPLEFORMAT, SampleFormat.IEEEFP);
+        tif.SetField(TiffTag.ORIENTATION, Orientation.TOPLEFT);
+        tif.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
+        tif.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
+        tif.SetField(TiffTag.COMPRESSION, compression);
+        // Do not use the integer horizontal predictor here. Floating-point predictor support
+        // varies across TIFF readers, while raw LZW/Deflate float scanlines are portable.
+        tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
+
+        if (iccBytes is { Length: > 0 })
+            tif.SetField(TiffTag.ICCPROFILE, iccBytes.Length, iccBytes);
+        if (description is not null)
+        {
+            tif.SetField(TiffTag.IMAGEDESCRIPTION, ToAsciiSafe(description));
+            byte[] uc = System.Text.Encoding.ASCII.GetBytes("UNICODE\0")
+                .Concat(System.Text.Encoding.Unicode.GetBytes(description)).ToArray();
+            tif.SetField(ExifUserCommentTag, uc.Length, uc);
+        }
+        tif.SetField(TiffTag.SOFTWARE, SoftwareTag);
+
+        float[] src = img.Data;
+        byte[] row = new byte[checked(w * 3 * sizeof(float))];
+        for (int y = 0; y < h; y++)
+        {
+            int sourceOffset = checked(y * w * 3 * sizeof(float));
+            Buffer.BlockCopy(src, sourceOffset, row, 0, row.Length);
+            if (!tif.WriteScanline(row, y))
+                throw new IOException($"failed writing float TIFF scanline {y}");
+        }
+
+        tif.FlushData();
+    }
+
+    /// <summary>
+    /// Read one sample at sample index <paramref name="s"/>. Integer storage is returned as its
+    /// code value and scaled by the caller; IEEE-float32 is returned verbatim.
+    /// </summary>
     private static float Sample(byte[] buf, int s, int bps)
     {
+        if (bps == 32)
+            return BitConverter.ToSingle(buf, s * sizeof(float));
         if (bps == 16)
         {
             int b = s * 2;

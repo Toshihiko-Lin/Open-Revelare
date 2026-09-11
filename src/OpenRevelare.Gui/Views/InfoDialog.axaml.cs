@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 
@@ -33,14 +33,19 @@ public partial class InfoDialog : Window
     /// Adds a primary button beside 关闭 and relabels the latter — e.g. 前往下载 / 稍后再说 on the
     /// update notice, matching the Python dialog's two-button layout.
     /// </summary>
-    public InfoDialog WithAction(string label, string closeLabel, Action action)
+    /// <param name="isDefault">Whether Enter triggers the primary action. Pass FALSE for
+    /// anything the user cannot undo. The colour-pipeline migration is the case that forced this
+    /// parameter to exist: its own body text says "工程保存后不会自动退回 v1", and a dialog whose
+    /// Enter key performs a one-way conversion is one stray keypress away from doing it by
+    /// accident. Reversible actions (前往下载) keep the convenience.</param>
+    public InfoDialog WithAction(string label, string closeLabel, Action action, bool isDefault = true)
     {
         _action = action;
         ActionButton.Content = label;
         ActionButton.IsVisible = true;
         // Enter = the primary action, but only on dialogs that have one — a hidden default
         // button would otherwise swallow Enter on 快捷键 / 关于.
-        ActionButton.IsDefault = true;
+        ActionButton.IsDefault = isDefault;
         CloseButton.Content = closeLabel;
         return this;
     }

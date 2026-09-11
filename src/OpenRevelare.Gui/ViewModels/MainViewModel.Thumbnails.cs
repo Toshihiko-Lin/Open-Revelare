@@ -46,9 +46,9 @@ public partial class MainViewModel
                 // split scan the file holds several negatives, and the path-keyed lookups used to
                 // hand each frame the strip's first slice.
                 var pre = SplitCropOf(f);
-                ImageBuffer source = TileFor(f)
-                                     ?? _previews.Get(PreviewKey(f.Path, pre))?.Preview
-                                     ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Preview;
+                WorkingFrame source = TileFor(f)
+                                      ?? _previews.Get(PreviewKey(f.Path, pre))?.Working
+                                      ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Working;
                 await RenderThumbnailAsync(f, source, pre, ct);
             }
             catch (OperationCanceledException) { return; }
@@ -63,15 +63,17 @@ public partial class MainViewModel
     /// null if it is the whole file. The stored rect is normalised against the whole scan, so on a
     /// region decode it has to be re-expressed against the box — left alone it cuts a fraction of a
     /// fraction and the strip shows a sliver at the wrong aspect ratio.</param>
-    private async Task RenderThumbnailAsync(RollFrame f, ImageBuffer preview,
+    private async Task RenderThumbnailAsync(RollFrame f, WorkingFrame preview,
                                             (double X, double Y, double W, double H)? margin,
                                             CancellationToken ct)
     {
         FrameParams p = ForRegion(f.Params, f, margin);
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         Bitmap bmp = await Task.Run(() =>
         {
-            ImageBuffer small = Resample.Box(preview, ThumbMaxEdge);
-            return (Bitmap)BitmapConvert.ToBitmap(Pipeline.ProcessFrame(small, p), p.ResolvedOutputSpace);
+            WorkingFrame small = preview.WithPixels(Resample.Box(preview.Pixels, ThumbMaxEdge));
+            RenderedFrame rendered = Pipeline.Render(small, p, pipelineVersion, ColorManagement);
+            return BuildFallbackBitmap(rendered);
         }, ct);
         if (ct.IsCancellationRequested) { bmp.Dispose(); return; }
         await Dispatcher.UIThread.InvokeAsync(() => SetThumbnail(f, bmp));
@@ -80,11 +82,17 @@ public partial class MainViewModel
     /// <summary>Regenerate a frame's thumbnail from the in-memory preview (no re-decode).</summary>
     private void RefreshThumbnail(RollFrame frame)
     {
-        if (_previewLinear is null) return;
+        if (_previewWorking is null) return;
         // _previewLinear may be a region decode — same rule as RenderPreviewAsync.
         FrameParams p = ForRegion(frame.Params, frame, _previewMargin);
-        ImageBuffer prev = Resample.Box(_previewLinear, ThumbMaxEdge);
-        SetThumbnail(frame, BitmapConvert.ToBitmap(Pipeline.ProcessFrame(prev, p), p.ResolvedOutputSpace));
+        WorkingFrame preview = _previewWorking.WithPixels(
+            Resample.Box(_previewWorking.Pixels, ThumbMaxEdge));
+        RenderedFrame rendered = Pipeline.Render(
+            preview,
+            p,
+            _colorPipelineVersion,
+            ColorManagement);
+        SetThumbnail(frame, BuildFallbackBitmap(rendered));
     }
 
     private void RestartThumbnails()
@@ -158,7 +166,7 @@ public partial class MainViewModel
                 foreach (RollFrame f in targets)
                 {
                     if (token.IsCancellationRequested) return;
-                    try { await RenderThumbnailAsync(f, entry.Preview, pre, token); }
+                    try { await RenderThumbnailAsync(f, entry.Working, pre, token); }
                     catch (OperationCanceledException) { return; }
                     catch { /* one bad thumbnail must not stop the roll */ }
                 }

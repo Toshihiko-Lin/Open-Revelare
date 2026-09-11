@@ -174,48 +174,39 @@ The first step of the inversion, $D = -\log_{10}(T)$, requires linear transmitta
 logarithm is more sensitive at small values, so a gamma deviation is amplified more in the shadows
 than in the highlights, appearing as colour drift after inversion.
 
-Scanner gamma originates from an output TRC curve applied by the scanning software and written
-into the ICC profile; the sensor (CCD/CMOS) is itself linear. This is the only one of the three
-paths that carries a colour declaration, read in two steps.
+Scanner software may apply an output TRC and write a complete device-colour description into an
+ICC profile. ManagedV2 no longer splits that profile into hand-written TRC and matrix stages, nor
+does it infer linearity from tag shapes. A valid embedded ICC is treated as one atomic input
+declaration and transformed to linear ACEScg in a single operation by the app-pinned LittleCMS.
+Matrix/TRC and A2B/CLUT profiles therefore follow the same path, and a usable embedded ICC always
+wins over any fallback selection.
 
-#### 2.3.1 Step 1: TRC inversion
+#### 2.3.1 Valid embedded ICC
 
-The profile's `rTRC`/`gTRC`/`bTRC` tags are read (both `curv` sampled curves and `para` parametric
-curves are supported), an inverse mapping is built from the file's own curves, and each channel is
-restored to linear separately. The channels are handled separately because the scanner's three
-channels differ in spectral response and gain, so their curves differ (Flextight X5 measured at
-$\gamma_R \approx 1.62,\ \gamma_G \approx 1.51,\ \gamma_B \approx 1.56$). Lookup-table sampling
-density keeps the maximum error below half a 16-bit code level.
+The decoder first reads and validates the complete ICC payload, then constructs the input profile
+from those exact bytes. LittleCMS jointly evaluates curves, device primaries, PCS adaptation, and
+profile LUTs. On success the `WorkingFrame` is declared linear ACEScg, while diagnostics retain the
+profile identity, transform policy, and decode recipe. Missing matrix tags are not permission to
+bypass colour conversion.
 
-When a curve's maximum deviation from the diagonal is below 0.004 (about one 8-bit quantisation
-step, corresponding to γ≈1.01) and all three channels satisfy this, it is judged linear and the
-original values are retained. The judgement is made per channel.
+#### 2.3.2 Explicit fallback for a missing or unusable ICC
 
-When a file has no ICC profile, or no usable TRC tags, samples are treated as linear.
+A newly imported TIFF roll must select one roll-level assumption:
 
-#### 2.3.2 Step 2: device primaries matrix
+- **Linear** admits the numeric samples unchanged and declares a linear transfer function, while
+  explicitly leaving the primaries uncharacterized. It is not a claim that the file is ACEScg.
+- **sRGB** uses the exact app-built sRGB profile and LittleCMS to convert into linear ACEScg.
 
-The TRC inversion addresses encoding nonlinearity. Because the three gammas differ, the relative
-gain of each channel after inversion also differs, so after a single TRC the three channels are
-still not proportionally scaled versions of the same physical spectral quantity. This produces
-colour casts of opposite direction in different luminance regions, which linear white balance
-cannot correct.
+ManagedV2 fails closed when neither is selected; bit depth is no longer a colour-policy guess. The
+choice is persisted in the project and participates in full-image, preview, region, and cache
+identity. If an embedded ICC is malformed, only an explicit fallback may replace it, and the
+rejection reason is retained in the decode recipe. The versioned bit-depth compatibility path is
+reserved for old projects in which the field is absent.
 
-The cause is asymmetry in the scanner's own per-channel spectral response and gain, which belongs
-to device primaries. The ICC specification records the two layers separately: the TRC describes
-the encoding curve, and rXYZ/gXYZ/bXYZ describe the mapping from device primaries to D50 CIE XYZ.
-Complete linearisation is therefore two steps:
-
-$$\text{linear device RGB} \xrightarrow{M = M_\text{D50→working} \cdot [rXYZ \mid gXYZ \mid bXYZ]} \text{working-space linear RGB (ACEScg)}$$
-
-The matrix targets the working space. Professional scanners' device primaries are typically wider
-than sRGB (one unit measured at about 1.6× sRGB's primary-triangle area), so the target gamut must
-be wide enough for the excess dye to enter the density computation. The matrix has two stages:
-Bradford-adapt the D50 PCS to the working-space white point (ACEScg sits at ~D60), then convert
-XYZ → working-space RGB. The target is derived from `ColorPipeline.Working`.
-
-When a LUT-only profile lacks these tags, step 2 is skipped and the file retains its device native
-primaries.
+Flextight vendor gamma metadata is an explicit scanner declaration rather than a bit-depth guess.
+It remains authoritative when an explicit fallback or old-project compatibility has already
+authorized admission and there is no malformed ICC, but its device primaries stay uncharacterized.
+With no such authorization, it fails closed as well.
 
 TIFF uses the white-light model and contains no RGB decoupling.
 
@@ -223,18 +214,21 @@ TIFF uses the white-light model and contains no RGB decoupling.
 
 | Front end | Primaries on entry to the density domain |
 |---|---|
-| TIFF, ICC containing rXYZ/gXYZ/bXYZ | working space ACEScg, carried in by the device primaries matrix |
-| TIFF, LUT-only or no ICC | device native primaries |
+| TIFF, valid embedded ICC (matrix/TRC or A2B/CLUT) | linear ACEScg, carried in by the complete ICC through LittleCMS |
+| TIFF, missing/bad ICC with explicit sRGB fallback | linear ACEScg, carried in by the exact built-in sRGB profile |
+| TIFF, missing/bad ICC with explicit Linear fallback | numeric samples admitted unchanged; primaries uncharacterized |
+| TIFF, Flextight vendor gamma declaration | linearized by the vendor gamma; primaries uncharacterized |
 | Path A / Path B (RAW) | camera native primaries |
 
-Only the first sits in the pipeline's declared working space. The others are processed as working
-space: `InputTransform` (which carries declared input primaries into ACEScg) is conditioned on
-`FrameParams.InputPrimaries`, and that quantity currently has no entry point.
+The first two have a complete working-space declaration. Explicit Linear, Flextight vendor gamma,
+and uncalibrated RAW paths preserve the fact that their primaries are uncharacterized; admission
+to density processing is an explicit compatibility/user decision, not an implicit claim that the
+input primaries equal ACEScg.
 
-This state does not affect the density inversion. The inversion is $D = -\log_{10}(T/T_\text{base})$,
-where $T_\text{base}$ and the per-channel endpoints are taken from the same buffer; density is a
-self-referential ratio and depends on no colour space assumption. The effect lies on the output
-side, where step 4 interprets the buffer as ACEScg. Magnitudes are given in section 3.
+For uncharacterized paths, the density inversion remains $D = -\log_{10}(T/T_\text{base})$, where
+$T_\text{base}$ and the per-channel endpoints come from the same buffer and density is a
+self-referenced ratio. The remaining risk lies on the output side because step 4 must interpret
+the buffer as the working space. See section 3 for the magnitude.
 
 ---
 
@@ -593,15 +587,26 @@ actual processing.
 
 ### 6.6 Export and preview
 
-Stage 2 completes in the destination space, so export performs no further conversion and only
-attaches the corresponding ICC profile to the file; the pixels on screen are the pixels in the
-file. Containers are 16-bit TIFF and 8-bit JPEG.
+Stage 2 completes in the destination space. Standard export no longer reconstructs a profile from
+its name: it obtains both pixels and the exact ICC from the sole `RenderedFrame`, writing 16-bit
+TIFF or 8-bit JPEG. That exact profile is embedded by default; only exact display-referred sRGB may
+be omitted explicitly, while every other output forces it. Scene-linear ACEScg uses 32-bit IEEE
+floating-point TIFF with a deterministic linear ACEScg ICC; negative and greater-than-one channels
+must not be quantised or clamped. GUI and CLI share the same exporter.
 
-The preview bitmap is submitted to the compositor without a profile and the values reach the panel
-unaltered. On-screen accuracy is handled at the operating-system level: a colorimeter measurement
-generates an ICC profile (containing that panel's per-channel TRC, real primaries and white
-point), which is registered as the system display profile, and the operating system performs the
-conversion centrally.
+Preview branches from the same `RenderedFrame`, but does not send file-encoded values to the panel
+unchanged. It first uses the exact output ICC to convert into D65 linear extended sRGB, preserving
+negative and greater-than-one components, then composites the image, patch, masks, crop, and
+selection in one shared FP16 scene.
+
+The Windows Advanced Color presenter uploads an `R16G16B16A16_FLOAT` scRGB surface and DWM performs
+the single monitor transform. In legacy SDR, the application-level LittleCMS converts to the
+current monitor ICC before a BGRA8 upload, so the application owns that single transform. The
+contract belongs to the preview surface: moving it between displays, or changing the profile, DPI,
+or Advanced Color state, invalidates presentation only and cannot alter the render/export
+fingerprint. An invalid monitor ICC or presenter failure must visibly fall back to emergency sRGB8
+with diagnostics rather than claim WYSIWYG. The macOS final hop remains for a later dedicated
+presenter.
 
 ### 6.7 Roll-wide consistency
 

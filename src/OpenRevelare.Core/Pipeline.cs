@@ -1,3 +1,5 @@
+using OpenRevelare.ColorManagement;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -14,6 +16,217 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Pipeline
 {
+    /// <summary>
+    /// Typed render boundary for new callers. M1 deliberately delegates the pixel math to the
+    /// frozen v1 implementation below; it adds truthful identity and diagnostics without changing
+    /// a single sample. M2 replaces the legacy print-LUT compatibility profile with a real CMM
+    /// conversion and computes a versioned fingerprint.
+    /// </summary>
+    public static RenderedFrame Render(WorkingFrame source, FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(cal);
+
+        ImageBuffer pixels = ProcessFrame(source.Pixels, cal);
+        return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.LegacyV1);
+    }
+
+    /// <summary>
+    /// Attaches the canonical output semantics to pixels already produced by the named pipeline.
+    /// Full-frame and regional renderers share this boundary so compatibility profiles, effective
+    /// LUT identity, mismatch diagnostics and fingerprint availability cannot drift apart.
+    /// </summary>
+    internal static RenderedFrame DescribeRenderedPixels(
+        ImageBuffer pixels,
+        FrameParams cal,
+        ColorPipelineVersion pipelineVersion)
+    {
+        ArgumentNullException.ThrowIfNull(pixels);
+        ArgumentNullException.ThrowIfNull(cal);
+
+        return pipelineVersion switch
+        {
+            ColorPipelineVersion.LegacyV1 => DescribeLegacyPixels(pixels, cal),
+            ColorPipelineVersion.ManagedV2 => DescribeManagedPixels(pixels, cal),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version."),
+        };
+    }
+
+    private static RenderedFrame DescribeLegacyPixels(ImageBuffer pixels, FrameParams cal)
+    {
+        ColorProfileRef requested;
+        ColorProfileRef actual;
+        ColorReference reference;
+        TransferState transfer;
+        NumericRange range;
+        string gamutPolicy;
+        bool mismatch;
+        string effectivePrintLut = string.Empty;
+
+        if (cal.OutputIntent == OutputIntent.None)
+        {
+            requested = actual = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Output);
+            reference = ColorReference.SceneReferred;
+            transfer = TransferState.LinearInProfilePrimaries;
+            range = NumericRange.Extended;
+            gamutPolicy = "none (scene-linear ACEScg)";
+            mismatch = false;
+        }
+        else
+        {
+            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+            requested = BuiltInColorProfiles.For(selected, ProfileRole.Output);
+            bool hasPrintLut = PrintLuts.Resolve(cal.PrintLut) is not null;
+            if (cal.DisplayReferredStage2 && hasPrintLut)
+                effectivePrintLut = cal.PrintLut ?? string.Empty;
+            actual = !cal.DisplayReferredStage2
+                ? BuiltInColorProfiles.LegacyLinearStage2Output(selected)
+                : hasPrintLut
+                    ? BuiltInColorProfiles.LegacyPrintLutOutput(selected)
+                    : requested;
+            reference = ColorReference.DisplayReferred;
+            transfer = TransferState.ProfileEncoded;
+            range = NumericRange.Normalized;
+            gamutPolicy = !cal.DisplayReferredStage2
+                ? "legacy v1 ACEScg primaries / selected transfer; print LUT ignored"
+                : hasPrintLut
+                    ? "print-LUT v1 primaries-only exit"
+                    : "legacy explicit gamut policy";
+            mismatch = actual.Identity != requested.Identity;
+        }
+
+        var encoding = new CharacterizedPixelEncoding(
+            actual,
+            reference,
+            transfer,
+            range);
+        var recipe = new OutputRecipe(
+            ColorPipelineVersion.LegacyV1,
+            requested,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            gamutPolicy,
+            effectivePrintLut,
+            mismatch);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            new RenderFingerprint.Unavailable(
+                FingerprintUnavailableReason.LegacyPipelineHasNoVersionedRecipe));
+    }
+
+    private static RenderedFrame DescribeManagedPixels(ImageBuffer pixels, FrameParams cal)
+    {
+        ColorProfileRef requested;
+        CharacterizedPixelEncoding encoding;
+        string gamutPolicy;
+        string effectivePrintLut = string.Empty;
+
+        if (cal.OutputIntent == OutputIntent.None)
+        {
+            requested = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Output);
+            encoding = new CharacterizedPixelEncoding(
+                requested,
+                ColorReference.SceneReferred,
+                TransferState.LinearInProfilePrimaries,
+                NumericRange.Extended);
+            gamutPolicy = "none (scene-linear ACEScg)";
+        }
+        else
+        {
+            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+            requested = BuiltInColorProfiles.For(selected, ProfileRole.Output);
+            bool hasPrintLut = PrintLuts.Resolve(cal.PrintLut) is not null;
+            if (hasPrintLut)
+            {
+                // Generic external cubes remain uncharacterized and fail in the ManagedV2 step-4
+                // boundary before a RenderedFrame exists. Enforce that invariant again here so a
+                // future resolver change cannot put a machine-specific absolute path into a
+                // portable render recipe/fingerprint by accident.
+                if (!PrintLuts.IsBuiltin(cal.PrintLut))
+                {
+                    throw new InvalidOperationException(
+                        "A successful ManagedV2 print-LUT render must carry a portable built-in " +
+                        "identity, never a filesystem path.");
+                }
+                effectivePrintLut = cal.PrintLut!.ToLowerInvariant();
+            }
+            gamutPolicy = hasPrintLut
+                ? "print-LUT native Rec709 -> exact output ICC (relative colorimetric, BPC off)"
+                : "managed exact built-in output profile";
+            encoding = new CharacterizedPixelEncoding(
+                requested,
+                ColorReference.DisplayReferred,
+                TransferState.ProfileEncoded,
+                NumericRange.Normalized);
+        }
+
+        var recipe = new OutputRecipe(
+            ColorPipelineVersion.ManagedV2,
+            requested,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            gamutPolicy,
+            effectivePrintLut,
+            pixelProfileMismatch: false);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            () => RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
+    }
+
+    /// <summary>
+    /// Explicit versioned render boundary. LegacyV1 delegates to the frozen overload above and
+    /// never touches the supplied CMM. ManagedV2 converts a print-film look from its declared
+    /// native Rec709 encoding to the exact selected profile before Stage 2, so every adjustment
+    /// operates in the encoding its controls declare. No process-wide CMM is consulted or created.
+    /// </summary>
+    public static RenderedFrame Render(
+        WorkingFrame source,
+        FrameParams cal,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+            return Render(source, cal);
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(cal);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+
+        ImageBuffer pixels;
+
+        if (cal.OutputIntent == OutputIntent.None)
+        {
+            pixels = ProcessFrame(source.Pixels, cal);
+        }
+        else
+        {
+            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+
+            // Reuse every frozen operation through Stage 1 and geometry, stopping at the existing
+            // OutputIntent.None gate. Managed step 4 then produces exact target-encoded pixels
+            // before Stage 2. This is the intentional v2 migration of old implicit-false projects
+            // whose legacy route either bypassed the cube or applied only a target TRC.
+            FrameParams scene = cal.Clone();
+            scene.OutputIntent = OutputIntent.None;
+            pixels = ProcessFrame(source.Pixels, scene);
+            ColorPipeline.ToOutputSpaceFor(
+                pixels.Data,
+                cal,
+                ColorPipelineVersion.ManagedV2,
+                colorManagement);
+            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, selected);
+        }
+
+        return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.ManagedV2);
+    }
+
     /// <summary>
     /// Which chroma matrix the inversion should use.
     ///

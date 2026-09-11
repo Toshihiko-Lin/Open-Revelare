@@ -64,7 +64,7 @@ public partial class ImportDialog : Window
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
-            OkBtn.IsEnabled = Files.Count > 0;
+            UpdateTiffAdmissionUi();
         };
     }
 
@@ -98,6 +98,14 @@ public partial class ImportDialog : Window
     }
 
     private void OnClear(object? sender, RoutedEventArgs e) => Files.Clear();
+
+    /// <summary>
+    /// A scanner roll no longer answers for its own colour encoding here. TiffInputDetector reads
+    /// what the file declares, and the preview shows a correctable notice when it had to fall back
+    /// on convention — a decision the user can actually judge, because by then the picture is on
+    /// screen. Asking upfront taxed every import for a minority of files.
+    /// </summary>
+    private void UpdateTiffAdmissionUi() => OkBtn.IsEnabled = Files.Count > 0;
 
     private void OnSourceChanged(object? sender, RoutedEventArgs e) => CalRow.IsVisible = SrcA.IsChecked == true;
 
@@ -157,6 +165,7 @@ public partial class ImportDialog : Window
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
             AutoInvert = AutoInvertChk.IsChecked == true,
             SplitStrips = SplitChk.IsChecked == true,
+            // Left at Unspecified on purpose: that is now "detect", not "unanswered".
         };
         // The dialog's choices become the new defaults, so the next import opens on them.
         if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert

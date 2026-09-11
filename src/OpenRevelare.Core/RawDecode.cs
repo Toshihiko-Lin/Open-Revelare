@@ -1,4 +1,5 @@
 using Sdcb.LibRaw;
+using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -868,6 +869,58 @@ public static class RawDecode
             dngFellBack = true;
             return DecodeLibRaw(path, fbdd, halfSize: false);
         }
+    }
+
+    /// <summary>
+    /// M1 typed RAW boundary. The v1 pipeline admits camera-native numbers for compatibility, but
+    /// the source stays explicitly Uncharacterized instead of being mislabeled as sRGB or ACEScg.
+    /// M2 may attach a user-selected/input characterization without changing this source record.
+    /// </summary>
+    public static WorkingFrame DecodeRawWorking(
+        string path,
+        RawBackend backend,
+        FbddMode fbdd,
+        out bool dngFellBack)
+    {
+        ImageBuffer pixels = DecodeRaw(path, backend, fbdd, out dngFellBack);
+        string backendName = dngFellBack ? $"{backend}->LibRaw fallback" : backend.ToString();
+        return AdmitRawWorking(pixels, path, backendName, fbdd, "full-quality decode");
+    }
+
+    /// <summary>
+    /// Carries an optimized RAW preview/region decode across the same typed admission boundary as
+    /// <see cref="DecodeRawWorking"/>. The optimized decoders intentionally return pixels only;
+    /// callers must use this helper rather than silently relabeling those camera-native numbers as
+    /// characterized ACEScg.
+    /// </summary>
+    public static WorkingFrame AdmitRawWorking(
+        ImageBuffer pixels,
+        string path,
+        string backendName,
+        FbddMode fbdd,
+        string decodeKind)
+    {
+        ArgumentNullException.ThrowIfNull(pixels);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(backendName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(decodeKind);
+        string stableId = FrameSourceIds.ForPath(path);
+        var original = new UncharacterizedPixelEncoding(
+            CaptureKind.RawCameraNative,
+            stableId,
+            CompatibilityPolicy.LegacyTreatNumbersAsWorking,
+            TransferState.Unknown,
+            NumericRange.Normalized);
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            $"linear camera-native UniWB; backend={backendName}; fbdd={fbdd}; {decodeKind}");
+        return new WorkingFrame(
+            pixels,
+            WorkingSpaceId.LinearAcesCgV1,
+            WorkingAdmission.LegacyUncharacterizedPassthrough,
+            source);
     }
 
     /// <summary>Backend-honouring <see cref="DecodeRawDownsampled(string, FbddMode, IReadOnlyList{int})"/>.

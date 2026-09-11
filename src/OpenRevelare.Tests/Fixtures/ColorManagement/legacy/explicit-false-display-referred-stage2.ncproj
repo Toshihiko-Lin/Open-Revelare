@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "created": "2026-08-30",
+  "roll_meta": {
+    "input_type": "tiff",
+    "source_path": "B"
+  },
+  "frames": [
+    {
+      "filename": "synthetic-no-lut.tif",
+      "source_path": "synthetic-no-lut.tif",
+      "d_min_per_channel": [0.09, 0.29, 0.54],
+      "d_max_per_channel": [2.21, 2.34, 2.79],
+      "output_intent": "basic",
+      "display_referred_stage2": false,
+      "output_space": "sRGB",
+      "print_lut": "",
+      "wb_gains": [1.03, 1.0, 0.97],
+      "exposure_ev": 0.25,
+      "contrast": 0.18,
+      "highlights": -0.10,
+      "shadows": 0.08,
+      "saturation": 0.12
+    },
+    {
+      "filename": "synthetic-kodak-adobe.tif",
+      "source_path": "synthetic-kodak-adobe.tif",
+      "d_min_per_channel": [0.09, 0.29, 0.54],
+      "d_max_per_channel": [2.21, 2.34, 2.79],
+      "output_intent": "basic",
+      "display_referred_stage2": false,
+      "output_space": "AdobeRGB",
+      "print_lut": ":kodak-2383",
+      "wb_gains": [1.03, 1.0, 0.97],
+      "exposure_ev": 0.25,
+      "contrast": 0.18,
+      "highlights": -0.10,
+      "shadows": 0.08,
+      "saturation": 0.12
+    }
+  ]
+}

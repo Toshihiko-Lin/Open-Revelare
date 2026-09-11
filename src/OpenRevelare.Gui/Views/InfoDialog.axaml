@@ -1,10 +1,14 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.InfoDialog"
-        Width="460" Height="520"
+        Width="460" SizeToContent="Height" MaxHeight="520"
         WindowStartupLocation="CenterOwner"
         Title="OpenRevelare">
+    <!-- 高度跟着内容走,上限仍是原来的 520。这个对话框最早只承载 快捷键 / 关于 两页长文,
+         520 是照着它们定的;后来色彩管线迁移这类三四行的短文案也用它,于是文字只占顶部约
+         110 px,中间一大片空白才到按钮。固定高度对长文是对的,对短文就是个空盒子。
+         上限保留 520:长文的观感一字不变,短文自己收到该有的大小。 -->
     <DockPanel Margin="16">
         <!-- Header. The mark only shows on 关于 (see InfoDialog.About) — 快捷键 and the
              notices are reading material, not a brand page. -->
@@ -22,7 +26,12 @@
              rightmost as buttons appear. -->
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
                     HorizontalAlignment="Right" Margin="0,10,0,0">
-            <Button Name="CloseButton" Content="{i18n:T '关闭'}" Click="OnCloseClick" />
+            <!-- IsCancel so Esc closes the dialog. Without it the only way out of a modal
+                 with an action button was to hit the mouse target — and the one dialog where
+                 that matters is the one-way colour-pipeline migration, where the keyboard
+                 offered Enter (do it) and no way to say no. Closing never runs the action. -->
+            <Button Name="CloseButton" Content="{i18n:T '关闭'}" IsCancel="True"
+                    Click="OnCloseClick" />
             <Button Name="SecondaryActionButton" IsVisible="False" Click="OnSecondaryActionClick" />
             <Button Name="ActionButton" IsVisible="False" Click="OnActionClick" />
         </StackPanel>

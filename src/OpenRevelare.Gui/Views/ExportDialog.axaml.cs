@@ -24,6 +24,15 @@ public partial class ExportDialog : Window
     /// <summary>The roll's output space — reported, not chosen.</summary>
     private readonly ColorSpaceDef _space;
 
+    /// <summary>
+    /// The user's ordinary display-export preference. A forced state is painted into the
+    /// checkbox without destroying this value, so toggling scene-linear on and back off restores
+    /// an exact-sRGB omission choice made before the toggle.
+    /// </summary>
+    private bool _displayEmbedIccPreference = true;
+
+    private bool _syncingIccControl;
+
     /// <summary>What each space is for, in the hint under the label.</summary>
     private static string HintFor(ColorSpaceDef s) => s.Name switch
     {
@@ -70,6 +79,7 @@ public partial class ExportDialog : Window
         };
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
 
+        _displayEmbedIccPreference = saved.EmbedIcc;
         IccChk.IsChecked = saved.EmbedIcc;
         DownsampleChk.IsChecked = saved.Downsample;
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
@@ -78,26 +88,36 @@ public partial class ExportDialog : Window
         ConflictUnique.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Unique;
     }
 
-    private ExportOptions Collect() => new()
+    private ExportOptions Collect()
     {
-        Format = FmtJpeg.IsChecked == true ? ExportFormat.Jpeg : ExportFormat.Tiff16,
-        TiffCompression = CompressBox.SelectedIndex switch
+        bool exportLinear = LinearChk.IsChecked == true;
+        ExportIccUiState icc = ExportIccUiPolicy.Resolve(
+            _space,
+            exportLinear,
+            _displayEmbedIccPreference);
+        return new ExportOptions
         {
-            1 => TiffIO.CompressionMode.Deflate,
-            2 => TiffIO.CompressionMode.None,
-            _ => TiffIO.CompressionMode.Lzw,
-        },
-        JpegQuality = (int)QualitySlider.Value,
-        // Carried, not chosen: the render already landed in this space.
-        ColorSpace = _space.Name,
-        ExportLinear = LinearChk.IsChecked == true,
-        EmbedIcc = IccChk.IsChecked == true,
-        Downsample = DownsampleChk.IsChecked == true,
-        MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
-        Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
-                 : ConflictSkip.IsChecked == true ? ExportFile.ConflictPolicy.Skip
-                 : ExportFile.ConflictPolicy.Unique,
-    };
+            Format = FmtJpeg.IsChecked == true ? ExportFormat.Jpeg : ExportFormat.Tiff16,
+            TiffCompression = CompressBox.SelectedIndex switch
+            {
+                1 => TiffIO.CompressionMode.Deflate,
+                2 => TiffIO.CompressionMode.None,
+                _ => TiffIO.CompressionMode.Lzw,
+            },
+            JpegQuality = (int)QualitySlider.Value,
+            // Carried, not chosen: the render already landed in this space.
+            ColorSpace = _space.Name,
+            ExportLinear = exportLinear,
+            // Normalize here as well as in the visual state. A stale false preset must never
+            // escape merely because a control event did not run.
+            EmbedIcc = icc.EmbedIcc,
+            Downsample = DownsampleChk.IsChecked == true,
+            MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
+            Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
+                     : ConflictSkip.IsChecked == true ? ExportFile.ConflictPolicy.Skip
+                     : ExportFile.ConflictPolicy.Unique,
+        };
+    }
 
     /// <summary>The picker label: the space's own name, plus what it is in one word.</summary>
     private static string DisplayName(ColorSpaceDef s) => s.Name switch
@@ -118,29 +138,56 @@ public partial class ExportDialog : Window
         bool jpeg = FmtJpeg.IsChecked == true;
         TiffGroup.IsEnabled = !jpeg;
         JpegGroup.IsEnabled = jpeg;
+        LinearChk.IsEnabled = !jpeg;
+        if (jpeg && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
-        // A scene-linear export has no output space and no profile that describes it, so both the
-        // space it would have gone to and the embed option stop applying. Disabled rather than
-        // hidden: they read as "not for this kind of file", which is what is true.
+        // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
+        // the effective value independently of the control so a stale false preset is harmless.
         bool linear = LinearChk.IsChecked == true;
+        ExportIccUiState icc = ExportIccUiPolicy.Resolve(
+            _space,
+            linear,
+            _displayEmbedIccPreference);
         ColorSpaceHint.IsEnabled = !linear;
-        IccChk.IsEnabled = !linear;
+        IccChk.IsEnabled = icc.CanChange;
+        if (IccChk.IsChecked != icc.EmbedIcc)
+        {
+            _syncingIccControl = true;
+            try { IccChk.IsChecked = icc.EmbedIcc; }
+            finally { _syncingIccControl = false; }
+        }
 
         ColorSpaceHint.Text = linear
-            ? Loc.T("场景线性导出不经过第 4 步，因此没有输出色彩空间。")
+            ? Loc.T("场景线性导出不经过第 4 步；以 32-bit float ACEScg 保留负值和大于 1 的通道。")
             : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
 
         IccHint.Text = linear
-            ? Loc.T("场景线性数据没有对应的显示配置文件，贴任何标签都会误导下游，故不嵌入。")
-            : Loc.T("嵌入的配置文件与实际写入的像素一致。");
+            ? Loc.T("必须嵌入与像素一致的 deterministic linear ACEScg exact ICC。")
+            : icc.IsForced
+                ? Loc.F($"为避免文件被按 sRGB 误解，必须嵌入与像素一致的 exact {_space.Name} ICC。")
+                : Loc.T("仅 exact display-referred sRGB 可省略 ICC；勾选时嵌入与像素一致的 exact sRGB ICC。");
 
         SummaryLbl.Text = Collect().Summary();
     }
     private void OnFormatChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnDownsampleToggled(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnAnyChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
+    private void OnIccChanged(object? sender, RoutedEventArgs e)
+    {
+        if (!_syncingIccControl)
+        {
+            bool linear = LinearChk?.IsChecked == true;
+            ExportIccUiState icc = ExportIccUiPolicy.Resolve(
+                _space,
+                linear,
+                _displayEmbedIccPreference);
+            if (icc.CanChange)
+                _displayEmbedIccPreference = IccChk?.IsChecked == true;
+        }
+        SyncEnabledState();
+    }
     private void OnAnyChanged(object? sender, SelectionChangedEventArgs e) => SyncEnabledState();
     private void OnAnyChanged(object? sender, NumericUpDownValueChangedEventArgs e) => SyncEnabledState();
     private void OnQualityChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)

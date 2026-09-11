@@ -1,3 +1,5 @@
+using OpenRevelare.Core;
+
 namespace OpenRevelare.Gui.Models;
 
 /// <summary>Result of the import dialog — port of Python ImportDialog.ImportResult.</summary>
@@ -39,4 +41,12 @@ public sealed class ImportConfig
     /// before the roll will open. Defaults to the saved preference, like <see cref="AutoInvert"/>.
     /// </summary>
     public bool SplitStrips { get; set; }
+
+    /// <summary>
+    /// Roll-level fallback used only when a TIFF has no usable embedded ICC. The import dialog
+    /// requires a deliberate Linear/sRGB choice for scanner rolls. The fail-closed default also
+    /// protects programmatic new-import callers that bypass the dialog.
+    /// </summary>
+    public TiffInputAssumption TiffInputAssumption { get; set; } =
+        OpenRevelare.Core.TiffInputAssumption.Unspecified;
 }

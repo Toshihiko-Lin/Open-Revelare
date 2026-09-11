@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         xmlns:vm="using:OpenRevelare.Gui.ViewModels"
@@ -189,6 +189,11 @@
                         <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
+                        <!-- 诊断入口常驻在此，而不是跟着状态栏的告警出现：颜色报告多数发生在
+                             显示链路一切正常的时候（「导出偏色」「这张不对」），那时状态栏不该
+                             出现任何诊断字样，但报告通道必须仍然存在。 -->
+                        <MenuItem Name="CopyColorDiagnosticsMenuItem" Header="{i18n:T '复制色彩诊断'}"
+                                  Click="OnCopyColorDiagnosticsClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '关于 OpenRevelare'}" Click="OnAboutClick" />
                     </MenuItem>
@@ -238,6 +243,13 @@
                         VerticalAlignment="Center">
                     <TextBlock Text="{Binding BackgroundStatus}" VerticalAlignment="Center"
                                FontSize="11" Foreground="{DynamicResource TextDimBrush}" />
+                </Border>
+                <Border Name="ColorDiagnosticStatus" IsVisible="False"
+                        Background="{DynamicResource AccentSoftBrush}" CornerRadius="4" Padding="7,1"
+                        VerticalAlignment="Center">
+                    <TextBlock Name="ColorDiagnosticText" VerticalAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource TextDimBrush}"
+                               TextTrimming="CharacterEllipsis" MaxWidth="560" />
                 </Border>
             </StackPanel>
         </Border>
@@ -350,7 +362,7 @@
             <GridSplitter Grid.Column="1" Width="1" Background="{DynamicResource BorderSoftBrush}" />
 
             <!-- Col 2 — preview (top bar / viewer / bottom bar) -->
-            <Grid Grid.Column="2" RowDefinitions="Auto,*,Auto">
+            <Grid Grid.Column="2" RowDefinitions="Auto,Auto,*,Auto">
                 <!-- Top bar: only the two view STATES (they need a visible lit indicator);
                      zoom lives on the right as glyphs. Everything else is right-click. -->
                 <Border Grid.Row="0" Padding="8,4" Background="{DynamicResource ChromeBrush}"
@@ -375,6 +387,34 @@
                             </ToggleButton>
                         </StackPanel>
 
+                        <!-- Outside the native-preview airspace: legacy projects retain their
+                             v1 look until this explicit L2 migration is confirmed. -->
+                        <!-- Closable, like every other notice in this window. It was the one
+                             exception, so a roll deliberately kept on v1 wore this bar for the
+                             life of the project. Dismissal is per roll and per session: reopening
+                             the project offers the migration again. -->
+                        <Border Grid.Column="1" IsVisible="{Binding ShowLegacyColorPipelineNotice}"
+                                Margin="10,0" Padding="8,3" CornerRadius="4"
+                                Background="{DynamicResource AccentSoftBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                <TextBlock Text="{Binding LegacyColorPipelineNotice}"
+                                           FontSize="11" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip.Tip="{Binding LegacyColorPipelineNotice}" />
+                                <Button Grid.Column="1" Content="{i18n:T '迁移到色彩管理版…'}"
+                                        Margin="8,0,0,0" Padding="8,3"
+                                        Click="OnMigrateColorPipelineClick" />
+                                <Button Grid.Column="2" Classes="icon" Width="22" Height="22"
+                                        MinHeight="22" CornerRadius="11" Margin="6,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Click="OnDismissLegacyColorPipelineNoticeClick"
+                                        ToolTip.Tip="{i18n:T '关闭提示'}">
+                                    <ctl:Icon Data="{StaticResource IcoClose}" />
+                                </Button>
+                            </Grid>
+                        </Border>
+
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
                             <TextBlock Name="ZoomLabel" Text="100%" VerticalAlignment="Center"
                                        Margin="0,0,6,0" MinWidth="38" TextAlignment="Right"
@@ -391,7 +431,96 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="1" Padding="10" ClipToBounds="True" Background="{DynamicResource ViewerBrush}">
+                <!-- Native HWND airspace cannot be covered by Avalonia controls. Keep every
+                     interactive/status card in its own shell row outside the preview surface. -->
+                <!-- Notice strip: crop banner + TIFF-input and roll-analysis cards.
+                     Grid.Row and ZIndex are decided at runtime by UpdateNoticeStripPlacement(),
+                     not here: the strip floats over the viewer — the placement the crop banner
+                     had before the native presenter existed — unless the Windows child HWND is
+                     actually covering the viewport, which would hide it. -->
+                <StackPanel Name="NoticeStrip" Grid.Row="1" Spacing="4"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Top">
+                    <StackPanel Orientation="Horizontal" Spacing="6"
+                                HorizontalAlignment="Center" Margin="0,4,0,0">
+                        <Border Name="Banner" IsVisible="False" CornerRadius="8"
+                                Background="{DynamicResource ChromeBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                Padding="12,8" MaxWidth="620">
+                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                <TextBlock Grid.Column="0" Name="BannerText" Text=""
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextBrush}"
+                                           TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
+                                <Button Grid.Column="1" Name="CropApplyBtn"
+                                        Content="{i18n:T '应用'}" Classes="primary"
+                                        Margin="10,0,0,0" IsVisible="False"
+                                        Click="OnCropApplyClick" />
+                                <Button Grid.Column="2" Name="CropCancelBtn"
+                                        Content="{i18n:T '取消'}" Margin="10,0,0,0"
+                                        IsVisible="False" Click="OnCropCancelClick" />
+                            </Grid>
+                        </Border>
+                        <Button Name="BannerCloseBtn" IsVisible="False" Classes="icon"
+                                Width="24" Height="24" MinHeight="24" VerticalAlignment="Top"
+                                IsHitTestVisible="True" Click="OnBannerCloseClick"
+                                CornerRadius="12" Background="{DynamicResource ChromeBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                ToolTip.Tip="{i18n:T '关闭提示'}">
+                            <ctl:Icon Data="{StaticResource IcoClose}" />
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Replaces the old mandatory import question. It appears only when the
+                         detector had to fall back on convention, and it is answerable here because
+                         the picture it is about is on screen behind it. -->
+                    <Border IsVisible="{Binding ShowTiffInputNotice}"
+                            HorizontalAlignment="Center" Margin="0,0,0,4"
+                            CornerRadius="8" Padding="12,8" MaxWidth="680"
+                            Background="{DynamicResource ChromeBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                        <Grid ColumnDefinitions="*,8,Auto,6,Auto,8,Auto">
+                            <TextBlock Grid.Column="0" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       FontSize="12" Foreground="{DynamicResource TextBrush}"
+                                       Text="{Binding TiffInputNoticeText}" />
+                            <Button Grid.Column="2" Content="{i18n:T '改为线性'}" Padding="8,3"
+                                    Click="OnTiffInputLinearClick" />
+                            <Button Grid.Column="4" Content="{i18n:T '确认 sRGB'}" Padding="8,3"
+                                    Click="OnTiffInputSrgbClick" />
+                            <Button Grid.Column="6" Classes="icon" Width="24" Height="24"
+                                    MinHeight="24" CornerRadius="12" VerticalAlignment="Center"
+                                    Click="OnDismissTiffInputNoticeClick"
+                                    Background="{DynamicResource ChromeBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <Border IsVisible="{Binding ShowRollAnalysisNotice}"
+                            HorizontalAlignment="Center" Margin="0,0,0,4"
+                            CornerRadius="8" Padding="12,8" MaxWidth="620"
+                            Background="{DynamicResource ChromeBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+                        <Grid ColumnDefinitions="Auto,10,*,10,Auto">
+                            <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="90" Height="3"
+                                         VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       FontSize="12" Foreground="{DynamicResource TextBrush}"
+                                       Text="{i18n:T '正在分析整卷……当前画面用的是第一帧的参数，仅供预览。分析完成后全卷会自动刷新为最终结果。'}" />
+                            <Button Grid.Column="4" Classes="icon" Width="24" Height="24"
+                                    MinHeight="24" CornerRadius="12" VerticalAlignment="Center"
+                                    Click="OnDismissRollAnalysisNoticeClick"
+                                    Background="{DynamicResource ChromeBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <Border Grid.Row="2" Padding="10" ClipToBounds="True" Background="{DynamicResource ViewerBrush}">
                     <Border.ContextMenu>
                         <ContextMenu>
                             <!-- Copy/paste of the frame's parameters leads the menu: it is the
@@ -490,6 +619,12 @@
                         </ContextMenu>
                     </Border.ContextMenu>
                     <Grid Name="ViewPort" PointerWheelChanged="OnViewportWheel">
+                        <!-- Windows color-critical surface. The fixed native child presents only
+                             the final shared scene; ZoomGrid remains the common pointer/controller
+                             layer and the non-Windows/unavailable fallback. -->
+                        <ctl:WindowsPreviewHost Name="WindowsPreview"
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Stretch" />
                         <Grid Name="ZoomGrid" RenderTransformOrigin="0,0"
                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                             <!-- ctl:ColorManagedImage, not Image: the preview must be drawn through Skia WITH its
@@ -525,8 +660,10 @@
                                     PointerMoved="OnOverlayMoved"
                                     PointerReleased="OnOverlayReleased">
                                 <Rectangle Name="SelRect" IsVisible="False"
-                                           Stroke="#E6E9EC" StrokeThickness="1.5"
-                                           StrokeDashArray="4,2" Fill="#22E6E9EC" />
+                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}"
+                                           StrokeDashArray="{x:Static views:PreviewOverlayStyle.MarqueeDash}"
+                                           Fill="{x:Static views:PreviewOverlayStyle.MarqueeFillBrush}" />
                                 <!-- Editable crop frame. Four dim bands rather than one
                                      even-odd path: the bands are plain rectangles the layout
                                      can position directly, and what is outside the crop wants
@@ -534,110 +671,30 @@
                                      are re-sized by 1/zoom in code so they stay a constant size
                                      on screen — everything here lives inside ZoomGrid and would
                                      otherwise grow with the picture. -->
-                                <Rectangle Name="CropDimT" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimB" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimL" IsVisible="False" Fill="#99101214" />
-                                <Rectangle Name="CropDimR" IsVisible="False" Fill="#99101214" />
+                                <Rectangle Name="CropDimT" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimB" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimL" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                <Rectangle Name="CropDimR" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
                                 <Rectangle Name="CropFrame" IsVisible="False"
-                                           Stroke="#E6E9EC" StrokeThickness="1.5" />
+                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}" />
                                 <!-- Thirds guides: a crop frame without them is a box; with them
                                      it is a composition tool. -->
-                                <Line Name="CropV1" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropV2" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropH1" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
-                                <Line Name="CropH2" IsVisible="False" Stroke="#66E6E9EC" StrokeThickness="1" />
+                                <Line Name="CropV1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropV2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropH1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                <Line Name="CropH2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
                                 <!-- Straighten reference line. Warm, not the neutral marquee grey:
                                      it is a transient guide laid over the picture, not a selection. -->
                                 <Line Name="SelLine" IsVisible="False"
-                                      Stroke="#FF5A50" StrokeThickness="2" />
+                                      Stroke="{x:Static views:PreviewOverlayStyle.StraightenBrush}"
+                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.StraightenStrokeThickness}" />
                             </Canvas>
                         </Grid>
-                        <!-- Banner + its dismiss button, side by side. The row itself must stay
-                             hit-testable: hit-testing is inherited DOWNWARD and cannot be
-                             re-enabled by a child, so a dead wrapper here would make the banner's
-                             own 应用/取消 unclickable too. The row therefore has no Background
-                             (nothing to hit between the children) and each child decides for
-                             itself — the banner only in crop mode, the × always. -->
-                        <StackPanel Orientation="Horizontal" Spacing="6"
-                                    VerticalAlignment="Top" HorizontalAlignment="Center"
-                                    Margin="0,10,0,0">
-                            <Border Name="Banner" IsVisible="False" CornerRadius="8"
-                                    VerticalAlignment="Top"
-                                    Background="{DynamicResource ChromeBrush}"
-                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
-                                    Padding="12,8" MaxWidth="620">
-                                <!-- Grid rather than a horizontal StackPanel, for the reason spelled
-                                     out on the roll-analysis card below: a StackPanel measures with
-                                     infinite width, so a long banner overflowed the border once the
-                                     preview pane was narrower than the text wanted to be. -->
-                                <Grid ColumnDefinitions="*,Auto,Auto">
-                                    <TextBlock Grid.Column="0" Name="BannerText" Text="" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextBrush}"
-                                               TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
-                                    <!-- Explicit buttons, not just the Enter/Esc shortcuts: after
-                                         picking a preset the keyboard focus is still in the combo,
-                                         so a hidden key is not a reliable way to apply a crop. -->
-                                    <Button Grid.Column="1" Name="CropApplyBtn" Content="{i18n:T '应用'}" Classes="primary"
-                                            Margin="10,0,0,0"
-                                            IsVisible="False" Click="OnCropApplyClick" />
-                                    <Button Grid.Column="2" Name="CropCancelBtn" Content="{i18n:T '取消'}"
-                                            Margin="10,0,0,0"
-                                            IsVisible="False" Click="OnCropCancelClick" />
-                                </Grid>
-                            </Border>
-                            <!-- Dismisses the HINT, never the Apply/Cancel pair: a tall crop frame
-                                 (a vertical strip, a 3:4) reaches up under this banner and the
-                                 text is what covers the handles. -->
-                            <Button Name="BannerCloseBtn" IsVisible="False" Classes="icon"
-                                    Width="24" Height="24" MinHeight="24" VerticalAlignment="Top"
-                                    IsHitTestVisible="True" Click="OnBannerCloseClick"
-                                    CornerRadius="12"
-                                    Background="{DynamicResource ChromeBrush}"
-                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
-                                    ToolTip.Tip="{i18n:T '关闭提示'}">
-                                <ctl:Icon Data="{StaticResource IcoClose}" />
-                            </Button>
-                        </StackPanel>
-
-                        <!-- 整卷分析进行中：画面此刻用的是第一帧的参数，等整卷池化完成后会整体
-                             刷新一次。这不是错误，但肉眼分辨不出来——首帧不具代表性时全卷缩略图
-                             会明显偏色，不说明就会被当成"这软件不准"。
-
-                             独立于上面那条 Banner：那条是裁切模式用代码驱动的，两者可能同时出现，
-                             共用一个控件就会互相顶掉。放在底部居中，避开顶部的裁切横幅。
-
-                             整行不设 Background，理由与上面那条相同：命中测试只能向下继承、不能被
-                             子元素重新打开，所以由每个子元素自己决定——这里只有卡片本身接收点击。 -->
-                        <Border IsVisible="{Binding ShowRollAnalysisNotice}"
-                                VerticalAlignment="Bottom" HorizontalAlignment="Center"
-                                Margin="0,0,0,14" CornerRadius="8" Padding="12,8" MaxWidth="620"
-                                Background="{DynamicResource ChromeBrush}"
-                                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
-                            <!-- Grid, not a horizontal StackPanel: a StackPanel measures its children
-                                 with INFINITE width, so the text only ever wrapped at its own
-                                 MaxWidth and never at the width actually available. Once the preview
-                                 pane was narrower than the card's natural width the Border clamped to
-                                 the pane while the StackPanel kept arranging at full desired width —
-                                 the sentence ran straight out past the border line. The star column
-                                 hands the TextBlock the leftover width and TextWrapping does the rest,
-                                 so the card shrinks with the pane instead of overflowing it. -->
-                            <Grid ColumnDefinitions="Auto,10,*,10,Auto">
-                                <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="90" Height="3"
-                                             VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource TextBrush}"
-                                           Text="{i18n:T '正在分析整卷……当前画面用的是第一帧的参数，仅供预览。分析完成后全卷会自动刷新为最终结果。'}" />
-                                <Button Grid.Column="4" Classes="icon" Width="24" Height="24" MinHeight="24"
-                                        CornerRadius="12" VerticalAlignment="Center"
-                                        Click="OnDismissRollAnalysisNoticeClick"
-                                        Background="{DynamicResource ChromeBrush}"
-                                        BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
-                                        ToolTip.Tip="{i18n:T '关闭提示'}">
-                                    <ctl:Icon Data="{StaticResource IcoClose}" />
-                                </Button>
-                            </Grid>
-                        </Border>
                     </Grid>
                 </Border>
 
@@ -650,7 +707,7 @@
                      worked on, and leaving it next to 输出空间 put two controls here making
                      contradictory claims about the same pixels — it said sRGB while the render
                      exited in whatever 输出空间 named. It is a checkbox in the export dialog now. -->
-                <Border Grid.Row="2" Padding="8,5" Background="{DynamicResource ChromeBrush}"
+                <Border Grid.Row="3" Padding="8,5" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />

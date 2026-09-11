@@ -4,11 +4,13 @@ using System.Runtime;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
+using OpenRevelare.Presentation;
 
 namespace OpenRevelare.Gui.ViewModels;
 
@@ -43,12 +45,25 @@ namespace OpenRevelare.Gui.ViewModels;
 /// 字段仍然是全类共享的（partial 只是把源码分文件，不是分状态），所以**加字段之前先想清楚
 /// 它属于哪一块**；跨块共享的状态放在本文件里，别放进某一个分文件。
 /// </summary>
-public partial class MainViewModel : ViewModelBase
+public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private const int PreviewMaxEdge = 1600;
 
-    private ImageBuffer? _previewLinear;   // downsampled linear negative for the CURRENT frame
+    // The editor keeps the typed admission/profile identity with the pixels. Existing image math
+    // can continue to consume the convenience view without reopening an untyped colour boundary.
+    private WorkingFrame? _previewWorking;
+    private ImageBuffer? _previewLinear => _previewWorking?.Pixels;
     private CancellationTokenSource? _renderCts;
+    private readonly Lazy<IColorManagementEngine> _colorManagement = new(
+        static () => new LittleCmsEngine(),
+        LazyThreadSafetyMode.ExecutionAndPublication);
+    private bool _disposed;
+
+    private IColorManagementEngine ColorManagement => _colorManagement.Value;
+
+    // The Windows display-contract probe must validate the active monitor ICC through this exact
+    // application engine. The host borrows it; MainViewModel remains its sole owner.
+    internal IColorManagementEngine PresentationColorManagement => ColorManagement;
 
     /// <summary>Decoded previews for the whole roll, keyed by source path — a frame switch is a
     /// dictionary lookup, not a decode. See <see cref="PreviewCache"/> for the memory model.</summary>
@@ -362,8 +377,20 @@ public partial class MainViewModel : ViewModelBase
     /// first. Virtual copies of a whole frame carry no rect and so keep sharing one entry, which
     /// is what they should do: they really are the same pixels.
     /// </summary>
-    private static string PreviewKey(string path, (double X, double Y, double W, double H)? preCrop)
-        => preCrop is { } pc ? $"{path}|{pc.X:F6},{pc.Y:F6},{pc.W:F6},{pc.H:F6}" : path;
+    private string PreviewKey(string path, (double X, double Y, double W, double H)? preCrop)
+        => PreviewKey(path, preCrop, _colorPipelineVersion, _tiffInputAssumption);
+
+    private static string PreviewKey(
+        string path,
+        (double X, double Y, double W, double H)? preCrop,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        string source = preCrop is { } pc
+            ? $"{path}|{pc.X:F6},{pc.Y:F6},{pc.W:F6},{pc.H:F6}"
+            : path;
+        return $"{source}|color-pipeline:{(int)pipelineVersion}|tiff-input:{(int)tiffInputAssumption}";
+    }
 
     /// <summary>
     /// As above, but for a frame that owns only part of its source file.
@@ -380,9 +407,20 @@ public partial class MainViewModel : ViewModelBase
     private Task<PreviewCache.Entry> PreviewAsync(string path,
                                                   (double X, double Y, double W, double H)? preCrop)
     {
-        string key = PreviewKey(path, preCrop);
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+        TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
+        return PreviewAsync(path, preCrop, pipelineVersion, tiffInputAssumption);
+    }
 
-        if (_previews.Get(key) is { } hit) { CaptureTile(key, hit.Preview); return Task.FromResult(hit); }
+    private Task<PreviewCache.Entry> PreviewAsync(
+        string path,
+        (double X, double Y, double W, double H)? preCrop,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        string key = PreviewKey(path, preCrop, pipelineVersion, tiffInputAssumption);
+
+        if (_previews.Get(key) is { } hit) { CaptureTile(key, hit.Working); return Task.FromResult(hit); }
         lock (_decoding)
         {
             if (_decoding.TryGetValue(key, out Task<PreviewCache.Entry>? running)) return running;
@@ -391,11 +429,22 @@ public partial class MainViewModel : ViewModelBase
                 // Straight to preview size: the full-resolution float frame this used to decode
                 // and immediately throw away is the biggest allocation in the program.
                 var (preview, srcW, srcH) = preCrop is { } rect
-                    ? ImageIo.LoadPreviewRegion(path, rect, PreviewMaxEdge)
-                    : ImageIo.LoadPreview(path, PreviewMaxEdge);
+                    ? ImageIo.LoadWorkingPreviewRegion(
+                        path,
+                        rect,
+                        PreviewMaxEdge,
+                        pipelineVersion,
+                        ColorManagement,
+                        tiffInputAssumption)
+                    : ImageIo.LoadWorkingPreview(
+                        path,
+                        PreviewMaxEdge,
+                        pipelineVersion,
+                        ColorManagement,
+                        tiffInputAssumption);
                 var e = new PreviewCache.Entry(preview, srcW, srcH);
-                _previews.Put(key, e.Preview, e.SourceWidth, e.SourceHeight);
-                CaptureTile(key, e.Preview);
+                _previews.Put(key, e.Working, e.SourceWidth, e.SourceHeight);
+                CaptureTile(key, e.Working);
                 return e;
             });
             _decoding[key] = task;
@@ -425,22 +474,22 @@ public partial class MainViewModel : ViewModelBase
     // aspect the double crop produced. Virtual copies of a whole frame have no rect in their key
     // and still share one tile, which is correct.
     private const int TileMaxEdge = 320;   // ≈ the cell width of a 2048 px sheet at 6 columns
-    private readonly Dictionary<string, ImageBuffer> _tiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WorkingFrame> _tiles = new(StringComparer.OrdinalIgnoreCase);
 
-    private void CaptureTile(string key, ImageBuffer preview)
+    private void CaptureTile(string key, WorkingFrame preview)
     {
         lock (_tiles)
         {
             if (_tiles.ContainsKey(key)) return;
-            _tiles[key] = Resample.Box(preview, TileMaxEdge);
+            _tiles[key] = preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge));
         }
     }
 
     /// <summary>The tile for a frame, which is the tile of the region that frame owns.</summary>
-    private ImageBuffer? TileFor(RollFrame f)
+    private WorkingFrame? TileFor(RollFrame f)
     {
         string key = PreviewKey(f.Path, SplitCropOf(f));
-        lock (_tiles) return _tiles.TryGetValue(key, out ImageBuffer? t) ? t : null;
+        lock (_tiles) return _tiles.TryGetValue(key, out WorkingFrame? t) ? t : null;
     }
 
     private void ClearTiles() { lock (_tiles) _tiles.Clear(); }
@@ -450,7 +499,11 @@ public partial class MainViewModel : ViewModelBase
     /// only) and never held for the roll — the same rule the Python GUI states for _hires_current.</summary>
     /// <remarks>A record CLASS, not a tuple: it is written from the export worker thread and read
     /// on the UI thread, and only a reference assignment is atomic.</remarks>
-    private sealed record FullSlot(string Path, ImageBuffer Buf);
+    private sealed record FullSlot(
+        string Path,
+        ColorPipelineVersion PipelineVersion,
+        TiffInputAssumption TiffInputAssumption,
+        WorkingFrame Working);
     private FullSlot? _fullSlot;
 
     [ObservableProperty] private Bitmap? _previewImage;
@@ -488,6 +541,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnPreviewImageChanging(Bitmap? oldValue, Bitmap? newValue)
     {
         if (!ReferenceEquals(oldValue, newValue)) Retire(oldValue);
+        if (newValue is null) ClearPreviewPresentation();
     }
 
     partial void OnSprocketMaskOverlayChanging(Bitmap? oldValue, Bitmap? newValue)
@@ -775,8 +829,17 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _showSprocketMask;          // 预览上叠加红色遮罩（诊断）
     [ObservableProperty] private Bitmap? _sprocketMaskOverlay;
     partial void OnSprocketEnabledChanged(bool value) => ScheduleRender();
-    partial void OnSprocketThresholdChanged(double value) { ScheduleRender(); if (ShowSprocketMask) UpdateSprocketOverlay(); }
-    partial void OnShowSprocketMaskChanged(bool value) => UpdateSprocketOverlay();
+    partial void OnSprocketThresholdChanged(double value) => ScheduleRender();
+    partial void OnShowSprocketMaskChanged(bool value)
+    {
+        UpdatePresentation(() =>
+        {
+            UpdateSprocketOverlay();
+            // The scene can remain null on either side of the toggle; visibility itself is still
+            // part of the canonical presentation generation.
+            InvalidatePresentation();
+        });
+    }
 
     /// <summary>
     /// Rebuild the red diagnostic overlay showing which pixels the sprocket threshold catches.
@@ -791,7 +854,12 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void UpdateSprocketOverlay()
     {
-        if (!ShowSprocketMask || _previewLinear is null) { SprocketMaskOverlay = null; return; }
+        if (!ShowSprocketMask || _previewLinear is null)
+        {
+            SprocketMaskOverlay = null;
+            SprocketMaskScene = null;
+            return;
+        }
 
         // Carry the mask as an image so the existing geometry operators can move it: they resample
         // pixels, and a bool[] has no resampler. 1 = masked.
@@ -819,6 +887,14 @@ public partial class MainViewModel : ViewModelBase
         var shaped = new bool[flags.PixelCount];
         for (int p = 0; p < shaped.Length; p++) shaped[p] = flags.Data[p * 3] > 0.5f;
         SprocketMaskOverlay = BitmapConvert.ToMaskOverlay(shaped, flags.Width, flags.Height);
+        SprocketMaskScene = BuildMaskPresentationScene(
+            shaped,
+            flags.Width,
+            flags.Height,
+            red: 230,
+            green: 0,
+            blue: 0,
+            alpha: 140);
     }
 
     // 输出意图不再是胶卷级模式：预览恒为完整渲染，"线性" 是单次导出的属性
@@ -970,8 +1046,25 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnShowClippingChanged(bool value)
     {
-        if (!value) ClippingOverlay = null;
-        else ScheduleRender();
+        UpdatePresentation(() =>
+        {
+            if (value && _previewRenderedFrame is { } rendered)
+            {
+                // Clipping is a diagnostic of the pixels already on screen. Rebuilding it from
+                // the retained typed frame makes the toggle one complete generation; asking the
+                // render queue for identical pixels would briefly publish "enabled, no mask".
+                ClippingOverlay = BuildClippingOverlay(rendered.Pixels);
+                ClippingScene = BuildClippingPresentationScene(rendered.Pixels);
+            }
+            else
+            {
+                ClippingOverlay = null;
+                ClippingScene = null;
+            }
+            // Visibility itself is presentation state even when there is no frame yet, or when
+            // the generated scene happens to compare equal to the previous one.
+            InvalidatePresentation();
+        });
     }
 
     partial void OnClippingOverlayChanging(Bitmap? oldValue, Bitmap? newValue)
@@ -1212,7 +1305,7 @@ public partial class MainViewModel : ViewModelBase
     private void AdoptPreview(RollFrame frame, PreviewCache.Entry entry,
                               (double X, double Y, double W, double H)? margin, string key)
     {
-        _previewLinear = entry.Preview;
+        _previewWorking = entry.Working;
         _previewMargin = margin;
         _previewFrameRect = margin is { } box && SplitRectOf(frame) is { } rect
                                 ? Relative(rect, box)
@@ -1321,6 +1414,7 @@ public partial class MainViewModel : ViewModelBase
 
     // ── Sampling state ──────────────────────────────────────────────────────────
     private Bitmap? _savedPositive;                   // positive stashed while showing negative
+    private PresentationScene? _savedPositiveScene;
 
     /// <summary>
     /// True while the preview is showing the UN-INVERTED negative (film-base sampling).
@@ -1482,14 +1576,20 @@ public partial class MainViewModel : ViewModelBase
     // ── Sampling view: show the NEGATIVE while picking the film base ─────────────
     public void ShowNegativeView()
     {
-        if (_previewLinear is null) return;
-        // The patch on screen holds POSITIVE pixels, so it goes; the flag makes the NEXT one
-        // render as a negative instead. Dropping it without the flag is not enough, because
-        // zooming in here asks for another one immediately.
-        _showingNegative = true;
-        ClearSharpPatch();
-        _savedPositive = PreviewImage;
-        RefreshNegativeView();
+        if (_previewLinear is not { } negative) return;
+        PreparedPreview preview = PrepareNegativePreview(negative);
+        UpdatePresentation(() =>
+        {
+            // The patch on screen holds POSITIVE pixels, so it goes; the flag makes the NEXT one
+            // render as a negative instead. Dropping it without the flag is not enough, because
+            // zooming in here asks for another one immediately.
+            _showingNegative = true;
+            ClearSharpPatch();
+            _savedPositive = PreviewImage;
+            _savedPositiveScene = PreviewScene;
+            _savedPositiveRenderedFrame = _previewRenderedFrame;
+            PublishCompletePreview(preview, refreshSprocketMask: true);
+        });
     }
 
     /// <summary>
@@ -1503,6 +1603,17 @@ public partial class MainViewModel : ViewModelBase
     private void RefreshNegativeView()
     {
         if (_previewLinear is not { } neg) return;
+        PreparedPreview preview = PrepareNegativePreview(neg);
+        UpdatePresentation(() =>
+        {
+            ClearSharpPatch();
+            PublishCompletePreview(preview, refreshSprocketMask: true);
+        });
+    }
+
+    private PreparedPreview PrepareNegativePreview(ImageBuffer neg)
+    {
+        FrameParams parameters = ForPreview(BuildParams());
         // The buffer is scene-linear ACEScg (pre-inversion). Step 4 takes it to the roll's output
         // space, which is the space BitmapConvert is expecting — applying a bare sRGB gamma here
         // would encode the right curve onto the wrong primaries.
@@ -1513,7 +1624,7 @@ public partial class MainViewModel : ViewModelBase
         // already answered that. Skipping it meant the picture jumped on every toggle: a rotated
         // scan flopped back onto its side, a straightened one went crooked again, and a cropped
         // one snapped out to the whole strip, all under a zoom and pan that stayed put.
-        disp = GeometryForNegative(disp);
+        disp = GeometryForNegative(disp, parameters);
         // The camera's own white balance, applied for VIEWING ONLY. The buffer underneath stays
         // UniWB — every Stage-1 sampler reads _previewLinear, not this copy — but a UniWB negative
         // shown raw reads GREEN, because a Bayer sensor's green channel has about twice the
@@ -1531,8 +1642,12 @@ public partial class MainViewModel : ViewModelBase
         // image viewer, which is what it is being compared against.
         //
         // Never the roll's print-film emulation either: a print stock renders positives.
-        NegativeView.ToDisplay(disp.Data, CurrentOutputSpace);
-        PreviewImage = BitmapConvert.ToBitmap(disp, CurrentOutputSpace);
+        NegativeView.ToDisplay(disp.Data, parameters.ResolvedOutputSpace);
+        RenderedFrame rendered = RegionRender.DescribeNegativeViewerPixels(
+            disp,
+            parameters,
+            _colorPipelineVersion);
+        return PreparePreview(rendered, ShowClipping);
     }
 
     /// <summary>
@@ -1557,9 +1672,9 @@ public partial class MainViewModel : ViewModelBase
     /// positive is wrong every time it is on screen, while the film base is sampled once per roll
     /// and normally before any crop exists.
     /// </summary>
-    private ImageBuffer GeometryForNegative(ImageBuffer img)
+    private ImageBuffer GeometryForNegative(ImageBuffer img, FrameParams? parameters = null)
     {
-        FrameParams p = ForPreview(BuildParams());
+        FrameParams p = parameters ?? ForPreview(BuildParams());
         if (p.QuarterTurns % 4 != 0 || p.FlipH || p.FlipV)
             img = Geometry.ApplyOrientation(img, p.QuarterTurns, p.FlipH, p.FlipV);
         if (p.Rotation != 0.0)
@@ -1651,23 +1766,48 @@ public partial class MainViewModel : ViewModelBase
 
     public void ShowPositiveView()
     {
-        _showingNegative = false;
-        // The patch up now is a NEGATIVE one — it belongs to the view being left.
-        ClearSharpPatch();
-        if (_savedPositive is not null) { PreviewImage = _savedPositive; _savedPositive = null; }
+        PreparedPreview? saved = null;
+        if (_savedPositive is { } fallback &&
+            _savedPositiveScene is { } scene &&
+            _savedPositiveRenderedFrame is { } rendered)
+        {
+            // Histogram and clipping belong to the pixels being restored, never to the
+            // negative viewer that happens to be on screen at this instant.
+            saved = PreparePreview(rendered, ShowClipping, scene, fallback);
+        }
+
+        UpdatePresentation(() =>
+        {
+            _showingNegative = false;
+            // The patch up now belongs to the negative view being left.
+            ClearSharpPatch();
+            if (saved is not null)
+                PublishCompletePreview(saved, refreshSprocketMask: true);
+            _savedPositive = null;
+            _savedPositiveScene = null;
+            _savedPositiveRenderedFrame = null;
+        });
         ScheduleRender();
     }
 
     // ── Before/after compare: show the positive WITHOUT Stage-2 (scene) edits ─────
     public void ShowBeforeEdits()
     {
-        if (_previewLinear is null) return;
-        _showingBeforeEdits = true;
-        ClearSharpPatch();   // patch was rendered WITH the Stage-2 edits this view strips
+        if (_previewWorking is null) return;
         FrameParams p = BuildParams();
         RollFrame.ResetScene(p);   // strip every Stage-2 adjustment
-        ImageBuffer pos = Pipeline.ProcessFrame(_previewLinear, ForPreview(p));
-        PreviewImage = BitmapConvert.ToBitmap(pos, CurrentOutputSpace);
+        RenderedFrame rendered = Pipeline.Render(
+            _previewWorking,
+            ForPreview(p),
+            _colorPipelineVersion,
+            ColorManagement);
+        PreparedPreview preview = PreparePreview(rendered, ShowClipping);
+        UpdatePresentation(() =>
+        {
+            _showingBeforeEdits = true;
+            ClearSharpPatch();   // patch was rendered WITH the Stage-2 edits this view strips
+            PublishCompletePreview(preview, refreshSprocketMask: true);
+        });
     }
 
     public void ShowAfterEdits()
@@ -2043,7 +2183,14 @@ public partial class MainViewModel : ViewModelBase
         if (CurrentFrame is not { } frame) return null;
 
         ImageBuffer full;
-        try { full = ImageIo.LoadLinear(frame.Path); }
+        try
+        {
+            full = ImageIo.LoadWorking(
+                frame.Path,
+                _colorPipelineVersion,
+                ColorManagement,
+                _tiffInputAssumption).Pixels;
+        }
         catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
         {
             // A file the full decoder cannot open is not a reason to lose the estimate entirely —
@@ -2780,7 +2927,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public async Task AutoWbAiAsync()
     {
-        if (_previewLinear is null) return;
+        if (_previewWorking is null) return;
         IsBusy = true;
         StatusText = Loc.T("智能白平衡分析中 …");
         try
@@ -2794,7 +2941,9 @@ public partial class MainViewModel : ViewModelBase
             double[] tBase = TBaseArr(), wbOffset = DMinPerChannel;
             // raw — the pipeline decouples internally, which only holds because
             // BuildDeepWbRenderParams carries DecoupleMatrix. Do not drop it there.
-            ImageBuffer neg = _previewLinear;
+            WorkingFrame previewWorking = _previewWorking;
+            ImageBuffer neg = previewWorking.Pixels;
+            ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             // The highlight anchor is measured the same way 自动亮部 WB measures it: masks off the
             // RAW region (where the sprocket cut and the dark valley are calibrated), values off the
             // decoupled one (where t_base/wb_high live and where the render below lands).
@@ -2859,7 +3008,11 @@ public partial class MainViewModel : ViewModelBase
                     for (int c = 0; c < 3; c++) iterDMax = Math.Max(iterDMax, ep[c] - wbOffset[c]);
                     iterDMax = Math.Max(iterDMax, 1e-6);
 
-                    ImageBuffer pos = Pipeline.ProcessFrame(neg, BuildDeepWbRenderParams(ep, iterDMax));
+                    ImageBuffer pos = Pipeline.Render(
+                        previewWorking.WithPixels(neg),
+                        BuildDeepWbRenderParams(ep, iterDMax),
+                        pipelineVersion,
+                        ColorManagement).Pixels;
                     var (inp, outp) = corr.CorrectOnce(pos);
                     var (li, lo) = MeanLinearHighlight(inp, outp);
 
@@ -3110,10 +3263,14 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public void AutoLevels()
     {
-        if (_previewLinear is null) return;
+        if (_previewWorking is null) return;
         FrameParams p = BuildParams();
         p.BlackPoint = 0.0; p.WhitePoint = 1.0;   // measure the positive WITHOUT the current levels
-        ImageBuffer pos = Pipeline.ProcessFrame(_previewLinear, ForPreview(p));
+        ImageBuffer pos = Pipeline.Render(
+            _previewWorking,
+            ForPreview(p),
+            _colorPipelineVersion,
+            ColorManagement).Pixels;
         // The mask is built on the RAW frame (where the valleys are calibrated) but indexes the
         // RENDERED positive, so the two must be the same size. ForPreview crops the render to the
         // frame rect on a split frame, which is exactly what AutoRegion returns — see KeepMaskFor,
@@ -3192,8 +3349,12 @@ public partial class MainViewModel : ViewModelBase
     // the sampled region off the spot the user clicked.
     private (double Min, double Max)? MinMaxLumaOfRenderedPositive((double X, double Y, double W, double H) rect)
     {
-        if (_previewLinear is null) return null;
-        ImageBuffer pos = Pipeline.ProcessFrame(_previewLinear, ForPreview(BuildParams()));
+        if (_previewWorking is null) return null;
+        ImageBuffer pos = Pipeline.Render(
+            _previewWorking,
+            ForPreview(BuildParams()),
+            _colorPipelineVersion,
+            ColorManagement).Pixels;
         var (x0, y0, x1, y1) = PixelBounds(pos, rect);
         int w = pos.Width;
         float[] d = pos.Data;
@@ -3246,6 +3407,14 @@ public partial class MainViewModel : ViewModelBase
 
     private Catalog.Roll? _roll;
     private readonly RollAutoSave _autoSave;
+    // Independent from the .ncproj schema version. A loaded legacy roll must retain v1 until the
+    // user explicitly opts into the managed pipeline; BuildProjectData creates a fresh snapshot,
+    // so the version has to live with the open roll rather than rely on Project.Data's default.
+    private ColorPipelineVersion _colorPipelineVersion = ColorPipelineVersion.ManagedV2;
+    // One assumption for the whole TIFF roll. It participates in every decode cache key; changing
+    // it can never reuse pixels admitted under a different transfer/profile claim.
+    private TiffInputAssumption _tiffInputAssumption =
+        TiffInputAssumption.LegacyByBitDepthCompatibility;
 
     // Two things are saved on the same idle pause, and they go stale independently: the project
     // file (data) and the cover contact sheet (cosmetic). Warm-up completing dirties only the
@@ -3255,6 +3424,7 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
+        _presentationRevisions.Published += revision => PresentationRevision = revision;
         _autoSave = new RollAutoSave(AutoSaveAsync);
         // The library edits roll info straight from a card. When that card IS the open roll, it
         // has to go through these live notes — the editor owns the project file meanwhile.
@@ -3268,6 +3438,20 @@ public partial class MainViewModel : ViewModelBase
         // select, and it rendered blank instead of the standard entry — which is what an empty PrintLut
         // actually means and what the pipeline is doing.
         RebuildPrintLutList("");
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _renderCts?.Cancel();
+        _thumbCts?.Cancel();
+        _warmCts?.Cancel();
+        _autoSave.Discard();
+        Loc.Changed -= RetranslateText;
+        if (_colorManagement.IsValueCreated)
+            _colorManagement.Value.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -3288,6 +3472,7 @@ public partial class MainViewModel : ViewModelBase
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
         if (!_filmBaseSampled) FilmBaseText = "";
         foreach (RollFrame f in Frames) f.RefreshText();
+        OnPropertyChanged(nameof(LegacyColorPipelineNotice));
     }
 
     /// <summary>The catalog entry for the open roll; null until something is imported.</summary>
@@ -3390,10 +3575,14 @@ public partial class MainViewModel : ViewModelBase
         CommitLiveParams(CurrentFrame);
         var data = new Project.Data
         {
+            ColorPipelineVersion = _colorPipelineVersion,
             Meta = new Project.RollMeta
             {
                 InputType = RollIsRaw ? "raw" : "tiff",
                 SourcePath = _decoupleMatrix is not null ? "A" : "B",
+                TiffIsLinear = RollIsRaw
+                    ? null
+                    : TiffInputAssumptionPolicy.ToPersistedLinearFlag(_tiffInputAssumption),
                 CalSourcePath = _calSourceDir,
                 CalRgbPaths = _calRgbPaths is { Length: 3 } r
                     ? new Dictionary<string, string> { ["R"] = r[0], ["G"] = r[1], ["B"] = r[2] }
@@ -3478,7 +3667,8 @@ public partial class MainViewModel : ViewModelBase
             Orientation = Settings.Current.SheetOrientation,
         };
 
-        List<ImageBuffer> thumbs = await Task.Run(() => RenderSheetCells(cells));
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+        List<ImageBuffer> thumbs = await Task.Run(() => RenderSheetCells(cells, pipelineVersion));
         SheetComposer.Grid grid = await Task.Run(() => SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt));
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);   // UI thread
         ImageBuffer sheet = SheetComposer.ToBuffer(composed);
@@ -3499,7 +3689,7 @@ public partial class MainViewModel : ViewModelBase
             Style = Settings.Current.SheetStyle, Aspect = Settings.Current.SheetAspect,
             Orientation = Settings.Current.SheetOrientation,
         };
-        List<ImageBuffer> thumbs = RenderSheetCells(cells);
+        List<ImageBuffer> thumbs = RenderSheetCells(cells, _colorPipelineVersion);
         SheetComposer.Grid grid = SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt);
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
         SheetStore.Save(_roll!.Id, SheetComposer.ToBuffer(composed));
@@ -3520,10 +3710,10 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>Snapshot every cell's tile and params on the UI thread — both move under a
     /// background pass. Null when there is nothing worth drawing yet.</summary>
-    private List<(ImageBuffer? Tile, FrameParams Params)>? BuildSheetCells()
+    private List<(WorkingFrame? Tile, FrameParams Params)>? BuildSheetCells()
     {
         if (_roll is null || Frames.Count == 0) return null;
-        var cells = new List<(ImageBuffer? Tile, FrameParams Params)>(Frames.Count);
+        var cells = new List<(WorkingFrame? Tile, FrameParams Params)>(Frames.Count);
         foreach (RollFrame f in Frames)
         {
             // A split frame's tile was cut from the source as that frame's region PLUS its margin,
@@ -3534,15 +3724,21 @@ public partial class MainViewModel : ViewModelBase
         return cells.Any(c => c.Tile is not null) ? cells : null;   // nothing decoded yet
     }
 
-    private static List<ImageBuffer> RenderSheetCells(List<(ImageBuffer? Tile, FrameParams Params)> cells)
+    private List<ImageBuffer> RenderSheetCells(
+        List<(WorkingFrame? Tile, FrameParams Params)> cells,
+        ColorPipelineVersion pipelineVersion)
     {
         // Placeholder cells borrow a real tile's dimensions so the grid geometry (median aspect)
         // is the one the finished sheet will have.
-        ImageBuffer sample = cells.First(c => c.Tile is not null).Tile!;
+        ImageBuffer sample = cells.First(c => c.Tile is not null).Tile!.Pixels;
         var list = new List<ImageBuffer>(cells.Count);
         foreach (var (tile, p) in cells)
             list.Add(tile is null ? Placeholder(sample.Width, sample.Height)
-                                  : Pipeline.ProcessFrame(tile, p));
+                                  : Pipeline.Render(
+                                      tile,
+                                      p,
+                                      pipelineVersion,
+                                      ColorManagement).Pixels);
         return list;
     }
 

@@ -126,7 +126,7 @@ public class PreviewColorSpaceTests
     [InlineData("DisplayP3")]
     [InlineData("AdobeRGB")]
     [InlineData("Rec709")]
-    public void Skia_conversion_to_sRGB_agrees_with_the_pipeline(string name)
+    public void Tagged_destination_conversion_to_sRGB_agrees_with_the_pipeline(string name)
     {
         ColorSpaceDef space = ColorSpaces.All[name];
 
@@ -134,24 +134,66 @@ public class PreviewColorSpaceTests
         // missing matrix shows up immediately.
         var encoded = new[] { 0.75f, 0.25f, 0.20f };
 
-        // What the pipeline says this colour is, once carried into sRGB.
-        float[] expected = (float[])encoded.Clone();
-        OutputRender.Decode(expected, space);
-        OutputRender.Convert(expected, space, ColorSpaces.Srgb, GamutMapping.Clip);
-        OutputRender.Encode(expected, ColorSpaces.Srgb);
+        float[] expected = ConvertToSrgb(encoded, space);
 
         // What Skia does with the same colour, given our description of the space.
         float[] actual = ThroughSkia(encoded, space, ColorSpaces.Srgb);
 
-        for (int i = 0; i < 3; i++)
-            Assert.True(Math.Abs(expected[i] - actual[i]) < 3.0f / 255.0f,
-                $"{name} channel {i}: pipeline {expected[i]:F4}, Skia {actual[i]:F4}");
+        AssertRgbClose(name, encoded, expected, actual);
     }
 
     /// <summary>
+    /// Historical characterization: the source image carries its declared space, but Avalonia's
+    /// destination surface has a null colour space. Skia then preserves the source code values
+    /// instead of converting them to the colour-managed sRGB reference.
+    ///
+    /// The repaired shell fallback canonicalizes every RenderedFrame to explicit sRGB before it
+    /// reaches this null destination, while the Windows main preview no longer uses this surface
+    /// at all. Keeping this as a passing characterization prevents a future refactor from treating
+    /// a source tag plus a null destination as a colour-management guarantee again.
+    /// </summary>
+    [Theory]
+    [InlineData("DisplayP3")]
+    [InlineData("AdobeRGB")]
+    [InlineData("Rec709")]
+    public void Null_destination_does_not_convert_non_sRGB_source_to_the_reference(string name)
+    {
+        ColorSpaceDef space = ColorSpaces.All[name];
+        var encoded = new[] { 0.75f, 0.25f, 0.20f };
+
+        float[] expected = ConvertToSrgb(encoded, space);
+        float[] actual = ThroughSkia(encoded, space, null);
+
+        AssertRgbClose(name, encoded, encoded, actual);
+        Assert.Contains(
+            Enumerable.Range(0, 3),
+            channel => Math.Abs(expected[channel] - actual[channel]) >= 3.0f / 255.0f);
+    }
+
+    private static float[] ConvertToSrgb(float[] encoded, ColorSpaceDef sourceSpace)
+    {
+        float[] converted = (float[])encoded.Clone();
+        OutputRender.Decode(converted, sourceSpace);
+        OutputRender.Convert(converted, sourceSpace, ColorSpaces.Srgb, GamutMapping.Clip);
+        OutputRender.Encode(converted, ColorSpaces.Srgb);
+        return converted;
+    }
+
+    private static void AssertRgbClose(string name, float[] source, float[] expected, float[] actual)
+    {
+        for (int i = 0; i < 3; i++)
+            Assert.True(Math.Abs(expected[i] - actual[i]) < 3.0f / 255.0f,
+                $"{name} channel {i}: source={Rgb(source)}, expected={Rgb(expected)}, " +
+                $"actual={Rgb(actual)}");
+    }
+
+    private static string Rgb(float[] values)
+        => $"[{values[0]:F4}, {values[1]:F4}, {values[2]:F4}]";
+
+    /// <summary>
     /// Rendering one 8-bit pixel from <paramref name="from"/> into <paramref name="to"/> the way
-    /// the preview does: build an image that DECLARES its space, draw it into a surface that
-    /// declares the destination, read back what landed.
+    /// the preview does: build an image that DECLARES its space, draw it into a surface whose
+    /// destination is either declared or null, then read back what landed.
     ///
     /// RAW BYTES, never SKBitmap.SetPixel or Canvas.Clear. Those take an <c>SKColor</c>, which
     /// Skia treats as sRGB and converts INTO the bitmap's space on the way in — so writing a
@@ -160,10 +202,10 @@ public class PreviewColorSpaceTests
     /// convenience setters, not of the conversion, and it silently makes this test vacuous. The
     /// preview path itself copies raw bytes (Bitmap.CopyPixels), which is what is modelled here.
     /// </summary>
-    private static float[] ThroughSkia(float[] encoded, ColorSpaceDef from, ColorSpaceDef to)
+    private static float[] ThroughSkia(float[] encoded, ColorSpaceDef from, ColorSpaceDef? to)
     {
         using SKColorSpace src = Make(from);
-        using SKColorSpace dst = Make(to);
+        using SKColorSpace? dst = to is { } destination ? Make(destination) : null;
 
         var srcInfo = new SKImageInfo(1, 1, SKColorType.Rgba8888, SKAlphaType.Unpremul, src);
         byte[] inBytes = { To8(encoded[0]), To8(encoded[1]), To8(encoded[2]), 255 };
