@@ -182,29 +182,31 @@ public static class ColorPipeline
     /// shoulder starts at 0.5, which leaves mid-grey, the mid-tone crossing and diffuse white set
     /// by the decode and the response gamma alone.
     /// </summary>
-    public static void CineonToDisplay(float[] data) => CineonToDisplay(data, applyShoulder: true);
+    public static void CineonToDisplay(float[] data) =>
+        CineonToDisplay(data, shoulderAsymptote: 1.0f);
 
     /// <summary>
-    /// <see cref="CineonToDisplay"/> with the choice of whether the print shoulder runs.
+    /// <see cref="CineonToDisplay"/> aimed at an explicit shoulder asymptote.
     ///
     /// <para>
-    /// WHY THE SHOULDER IS OPTIONAL NOW (D-021). <see cref="Shoulder"/> exists to keep the 2.31
-    /// stops above Cineon's diffuse white from clipping against an SDR output's ceiling, and it
-    /// does that by compressing them asymptotically INTO <c>[0,1]</c>. For a display-referred
-    /// target that is the only honest answer available. For an extended target it is exactly the
-    /// wrong one: the ceiling it is defending against is not there, and the compression spends
-    /// the latitude that the target exists to carry.
+    /// ONE FAMILY, NOT TWO RENDERINGS (D-021). <see cref="HighlightRolloff"/> exists to keep the
+    /// 2.31 stops above Cineon's diffuse white from clipping, and it does that by compressing
+    /// them asymptotically toward a ceiling. For a display-referred target that ceiling can only
+    /// be <c>1.0</c>, which is what <c>shoulderAsymptote: 1.0f</c> means and what the established
+    /// rendering has always done. An extended target has room above one, so it aims the SAME
+    /// curve at its own headroom instead — it does not get a different curve, and it must not,
+    /// because that is what keeps the two agreeing below the knee.
     /// </para>
     ///
     /// <para>
-    /// WITHOUT IT, DIFFUSE WHITE IS ALREADY IN THE RIGHT PLACE. Code 685 decodes to linear 1 by
-    /// construction — it is the exponent's zero — and the black normalisation leaves it at 1.
-    /// So the unshouldered rendering lands diffuse white on exactly <c>1.0</c> and the negative's
-    /// remaining latitude above it, which is the contract an extended target wants verbatim.
-    /// The toe still runs: it shapes the shadows, and shadows are not a highlight decision.
+    /// WHERE THEY AGREE AND WHERE THEY DO NOT. At and below <see cref="HighlightRolloff.Knee"/>
+    /// the curve is the identity for every member of the family, so shadows and mid-tones are
+    /// bit-identical. Above it the renderings diverge progressively, and that divergence IS the
+    /// feature: the SDR path spends the negative's latitude compressing it into <c>[0.5, 1)</c>,
+    /// the extended path spreads the same latitude over <c>[0.5, headroom)</c>.
     /// </para>
     /// </summary>
-    internal static void CineonToDisplay(float[] data, bool applyShoulder)
+    internal static void CineonToDisplay(float[] data, float shoulderAsymptote)
     {
         const double refWhite = 685.0;
         // The response gamma folded into the transform, and the source of its contrast. Not the
@@ -235,8 +237,8 @@ public static class ColorPipeline
             for (int i = from; i < to; i++)
             {
                 float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-                float rendered = Toe(MathF.Max((lin - blackLin) / span, 0.0f));
-                data[i] = applyShoulder ? Shoulder(rendered) : rendered;
+                data[i] = HighlightRolloff.Of(
+                    Toe(MathF.Max((lin - blackLin) / span, 0.0f)), shoulderAsymptote);
             }
         });
     }
@@ -291,46 +293,6 @@ public static class ColorPipeline
     {
         if (v >= ToeKnee) return v;
         return ToeKnee * MathF.Pow(v / ToeKnee, ToeGamma);
-    }
-
-    /// <summary>
-    /// The knee where the shoulder starts, in the normalised linear domain
-    /// <see cref="CineonToDisplay"/> works in. Below it the transform is untouched.
-    ///
-    /// 0.5 is not a free choice: it is what lands code 685 on 0.881 once the output space encodes,
-    /// against the 0.880 measured on the real Kodak 2383 cube. Raising it to 0.6 gives 0.906 and
-    /// lowering it to 0.4 gives 0.854, so this is the value that makes the two renderings agree at
-    /// the diffuse white. In code terms the knee sits at 596, so everything from the film base up
-    /// through the mid-tones passes through unchanged.
-    /// </summary>
-    private const float ShoulderKnee = 0.5f;
-
-    /// <summary>
-    /// Rolls the highlights off instead of letting them clip, so that codes above Cineon's diffuse
-    /// white survive to the screen.
-    ///
-    /// WHAT THIS FIXES. The encoding carries the whole negative: <see cref="FrameParams.DMaxPerChannel"/>
-    /// maps to code 1032, while 685 is only where a PICTURE's white sits, leaving 347 codes — 2.31
-    /// stops — of latitude above it. Without a shoulder that entire span rendered as 1.0 and the
-    /// output space's encoder clamped it away, so the standard rendering was discarding two and a
-    /// third stops of measured data. It showed up on every switch to a print-film cube: the cube
-    /// keeps that latitude (2383 puts 685 at 0.880 and spreads the rest between there and white),
-    /// so a region that had been flat paper-white suddenly acquired detail and read as "the LUT
-    /// darkened my highlights". Nothing was darkened — the standard path had been burning them.
-    ///
-    /// A Reinhard roll-off: everything below <see cref="ShoulderKnee"/> is identity, and above it
-    /// the remaining range is compressed asymptotically toward 1 so nothing ever reaches it. That
-    /// keeps two properties worth having — the mid-tones are bit-identical to what they were
-    /// (code 486 stays at 0.494), and no input, however dense, can clip.
-    ///
-    /// The curve is C¹ at the knee, so there is no visible seam where it engages.
-    /// </summary>
-    private static float Shoulder(float v)
-    {
-        if (v <= ShoulderKnee) return v;
-        const float headroom = 1.0f - ShoulderKnee;
-        float d = v - ShoulderKnee;
-        return ShoulderKnee + headroom * d / (d + headroom);
     }
 
     /// <summary>
@@ -446,18 +408,18 @@ public static class ColorPipeline
     /// </para>
     ///
     /// <para>
-    /// THE SHOULDER IS NOT APPLIED HERE, AND THE OMISSION IS STRUCTURAL. Step 4 leaves the data
-    /// unbounded above; <see cref="HighlightRolloff"/> is the FINISHING step, run once everything
-    /// that can still change a value has run. Exposure and white balance are multiplicative and
-    /// arrive after step 4 in ManagedV2, so rolling off here would let them push the result back
-    /// past the headroom the target promised. This mirrors the SDR path exactly, where the final
-    /// clamp into <c>[0,1]</c> likewise lives at the end of Stage 2 rather than in step 4.
+    /// THE SHOULDER RUNS HERE, IN THE SAME PLACE THE SDR RENDERING RUNS ITS OWN — inside
+    /// <see cref="CineonToDisplay"/>, aimed at this target's headroom instead of at one. What is
+    /// deferred to the end of the render is only the ceiling GUARD: exposure and white balance are
+    /// multiplicative and arrive after step 4 in ManagedV2, so they can push a rendered value back
+    /// past the ceiling the shoulder established. The SDR path ends with exactly the same guard,
+    /// as the clamp into <c>[0,1]</c> at the tail of Stage 2.
     /// </para>
     /// </summary>
     private static void ToExtendedOutputTarget(float[] data, OutputTarget target)
     {
         LogEncoding.ToCineon(data);
-        CineonToDisplay(data, applyShoulder: false);
+        CineonToDisplay(data, target.HighlightHeadroom);
         OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
     }
 

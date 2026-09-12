@@ -768,7 +768,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-019 | Accepted | LUT 的 input encoding 同样由 cube 头部注释认定：声明为非 Cineon 的 cube 在解析时即拒绝，未声明的仍按 Cineon 渲染但记为 `ConventionalDefault` | D-018 只修了 output 一端，而 input 才是无声失败的那一端——ACEScct / Log-C 的 cube 被按 Cineon 喂进去不会报错，只会给出一张看起来正常、颜色是错的图。同一份 Resolve 头部在 `# Display:` 上一行就写着 `#   Input: Cineon Log`，解析器同样把它丢了。拒绝而不是放宽：判据与 D-015 一致，只是让文件能自己推翻一个原本不可见的假设。未声明的不收紧，因为那样会让今天能用的 cube 全部失效，而并没有获得任何新信息——判定刻意从严（注释须以 `input` 开头且紧跟冒号），漏判退回原行为是安全的，误判则是回归 |
 | D-017 | Accepted | ManagedV2 的无/坏 ICC TIFF 使用 roll 级显式 fallback：linear 保持原色未表征并数值透传，sRGB 作为用户指定 exact profile；有效嵌入 ICC 永远优先 | 位深不是色彩声明；选择必须随工程与所有 decode cache 传播，旧项目才保留按位深 compatibility |
 | D-020 | Accepted（**supersedes D-011**） | Windows 的 `ReferenceWhiteScale` 按 Advanced Color **模式**分流，不再是常量：WCG（SDR AC）与 legacy/emergency 仍为 `1.0`；**HDR 为 `SdrWhiteNits / 80`**。HDR 显示不再 fail-closed 到 emergency，走与 WCG 相同的 `LinearExtendedSrgbRgba16F` + `SystemCompositor` | 两种 Advanced Color 的亮度语义是**相反**的，而 D-011 只描述了其中一种。微软规范：SDR AC 是 display-referred，`1.0` 恒为该屏能达到的最大白，reference white **不适用**；HDR 是 scene-referred，`1.0` 恒为 80 nits，应用必须自行把 SDR 内容乘 `SdrWhiteLevelInNits / 80`。D-011 把 `1.0` 钉死，对 WCG 正确、对 HDR 错误，于是 HDR 分支只能 fail-closed——代价是 **HDR 屏用户比普通 SDR 屏用户体验更差**（连 legacy 的 LittleCMS 正确转换都拿不到，直接落无管理 emergency）。分流之后这个倒挂消失，且 `SdrWhiteNits` 早已由 `DISPLAYCONFIG_SDR_WHITE_LEVEL` 探到，管线的三处精确相等校验原样守住"恰好施加一次" |
-| D-021 | Accepted | HDR 输出 target **不套用印相 roll-off**：diffuse white 之上保留负片高光，不再压进 `[0,1]`。SDR 输出**继续**走印相 LUT，D-010 / D-015 / D-018 / D-019 一字不改 | 印相纸没有镜面高光。把印相 roll-off 原样放进 HDR 容器，得到的只是"一张更亮的 SDR"——HDR headroom 一点没被使用，(a) 等于白做。负片本身约 13 档宽容度，**被印相曲线压掉的高光正是 HDR 唯一有内容可放的地方**，所以放开高光不是加特效，是不再丢弃已经拍到的信息。SDR 保留印相有两条硬理由：它是产品既有的渲染身份，且 D-013 要求旧工程可逆——删掉 SDR 那条会让每个已有工程的渲染结果改变、让全部 golden 无故变红。两者共存的代价是零：D-022 的 target 参数化本来就是一条代码路径 |
+| D-021 | Accepted | 显示渲染的肩部改为**一族曲线**，SDR 是其 `asymptote = 1` 的成员：拐点（0.5）以下两者逐位相同，拐点之上 SDR 把负片宽容度压进 `[0.5, 1)`，扩展目标把同样的宽容度铺到 `[0.5, headroom)`。扩展渲染不走印相 LUT。SDR 输出**继续**走印相 LUT，D-010 / D-015 / D-018 / D-019 一字不改 | 印相纸没有镜面高光。把印相 roll-off 原样放进 HDR 容器，得到的只是"一张更亮的 SDR"——HDR headroom 一点没被使用，(a) 等于白做。负片本身约 13 档宽容度，**被印相曲线压掉的高光正是 HDR 唯一有内容可放的地方**，所以放开高光不是加特效，是不再丢弃已经拍到的信息。SDR 保留印相有两条硬理由：它是产品既有的渲染身份，且 D-013 要求旧工程可逆——删掉 SDR 那条会让每个已有工程的渲染结果改变、让全部 golden 无故变红。两者共存的代价是零：D-022 的 target 参数化本来就是一条代码路径 |
 | D-022 | Accepted | 三平台的统一点是**输出变换**（`scene-linear → OutputTarget{primaries, transfer, peakNits, refWhiteNits}`），不是 GPU API。平台 presenter 保持三份、各自原生、只做定格式上传 | 平台之间真正不同的不是"怎么把字节送过去"，是**最后一跳归谁**——`FinalTransformOwner` 那三个值就是这个差异，而 DWM / ColorSync / Wayland CM 各有自己的合成语义、reference white 定义和 profile 来源。统一 GPU API 消不掉任何一个平台相关决定，只会多一层翻译（理由见 §17.1）。反过来，输出变换是唯一**平台无关、且 (a) 预览与 (b) 导出共用**的东西：它住在 `Core`，按 §11.1 的禁令自动三平台一致。今天的行为必须是它的一个特例——`OutputTarget{Rec709, sRGB-TRC, 100, 100}` 逐位复现现有 golden，否则不许合 |
 
 | D-023 | Accepted | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
@@ -791,6 +791,20 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 ---
 
 ## 18. 开放决策的 spike 要求
+
+### D-025（Open）：扩展渲染里 diffuse white 落在哪
+
+D-021 的曲线族让拐点以下逐位一致，但**没有**把 diffuse white 钉在与 SDR 相同的位置：
+code 685（肩部前的线性 1.0）在 `asymptote = 1` 下渲染到 0.75，在 `asymptote = 4.926`
+下渲染到 0.949。也就是说 HDR 渲染整体比 SDR 亮，而不只是高光更高——这正是「HDR 看起来
+就是更亮的 SDR」这个常见陷阱的形状。
+
+单调曲线无法同时满足「拐点以下与 SDR 一致」和「diffuse white 与 SDR 同位」，所以这是一个
+**取舍**而不是缺陷。当前实现选了前者。是否应该改为把 diffuse white 锚定、只让其上的宽容度
+展开，必须在真的 HDR 显示器上并排比对才能判断——**本机（VG27AQ1A）只有 WCG，没有 HDR**。
+
+必须记录：同一张底片在 SDR 与各档 HDR 峰值下的并排观感；中间调是否感觉被抬高；
+纸白是否与 SDR 版本对得上；以及高光细节相对于 `asymptote` 的可见增益。
 
 ### D-012：macOS EDR（Windows 侧已由 D-020 结案）
 

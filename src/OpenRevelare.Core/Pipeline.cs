@@ -250,12 +250,13 @@ public static class Pipeline
 
             if (target.IsExtended)
             {
-                // The shoulder runs LAST, after the only remaining operations that can still move
-                // a value, so the target's peak is a promise about the pixels that actually leave
-                // here. Its display-referred sibling ends the same way, with the clamp into [0,1]
-                // at the tail of ApplyManagedAfterTargetEncoding.
+                // The shoulder itself ran inside step 4, exactly where the SDR rendering runs
+                // its own — they are one family of curves and differ only in where they aim
+                // (D-021). What is left here is the same guard the display-referred path ends
+                // with: exposure and white balance are multiplicative and land after the shoulder,
+                // so they can push a rendered value back past the ceiling it established.
                 Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
-                HighlightRolloff.Apply(pixels.Data, target.HighlightHeadroom);
+                HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
             }
             else
             {

@@ -325,7 +325,7 @@ public static class Stage2
     /// picture that is not the one they built, with nothing on screen to say so.
     /// </para>
     /// </summary>
-    internal static bool HasDisplayReferredAdjustments(FrameParams cal)
+    public static bool HasDisplayReferredAdjustments(FrameParams cal)
     {
         ArgumentNullException.ThrowIfNull(cal);
 

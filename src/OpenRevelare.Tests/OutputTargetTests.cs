@@ -202,59 +202,90 @@ public sealed class OutputTargetTests
     }
 
     [Fact]
-    public void Extended_target_leaves_diffuse_white_and_below_alone()
+    public void Shoulder_is_the_identity_at_and_below_the_knee_for_every_member_of_the_family()
     {
-        // 1.0 is diffuse white by construction, so the shoulder must not touch it or anything
-        // under it: the HDR render and its SDR sibling are the same photograph below paper white.
-        float[] data = [0f, 0.18f, 0.5f, 1f, -0.2f, 0.999f];
-        float[] expected = (float[])data.Clone();
+        // This is what makes an HDR render and its SDR sibling the same photograph in the shadows
+        // and mid-tones: below the knee the curve is the identity no matter where it is aimed.
+        foreach (float asymptote in new[] { 1f, 2f, 4.926f, 20f })
+        {
+            float[] data = [0f, 0.18f, 0.49f, HighlightRolloff.Knee, -0.2f];
+            float[] expected = (float[])data.Clone();
 
-        HighlightRolloff.Apply(data, headroom: 5f);
+            HighlightRolloff.Apply(data, asymptote);
 
-        AssertSameFloatBits(expected, data, "identity at and below diffuse white");
-    }
-
-    [Fact]
-    public void Rolloff_is_monotonic_and_never_reaches_past_the_headroom()
-    {
-        const float headroom = 4f;
-        float[] data = [1.0001f, 1.5f, 2f, 4f, 8f, 64f, 4096f, float.PositiveInfinity];
-
-        HighlightRolloff.Apply(data, headroom);
-
-        for (int i = 1; i < data.Length; i++)
-            Assert.True(data[i] > data[i - 1], $"index {i} broke monotonicity: {data[i - 1]} -> {data[i]}");
-        Assert.All(data, value => Assert.InRange(value, 1f, headroom));
-        Assert.Equal(headroom, data[^1]);
+            AssertSameFloatBits(expected, data, $"identity at and below the knee (asymptote {asymptote:R})");
+        }
     }
 
     /// <summary>
-    /// The join at diffuse white must be C¹, not merely continuous. A shoulder that met the
-    /// identity in value but not in slope would crease exactly where film highlights live, which
-    /// is the part of the picture this whole feature exists to show.
+    /// The established SDR rendering is the <c>asymptote = 1</c> member of this family, not a
+    /// separate implementation. If that ever stopped holding, every existing project would
+    /// re-render — which is why the end-to-end bit-exactness gate above exists too.
     /// </summary>
     [Fact]
-    public void Rolloff_meets_the_identity_with_matching_slope_at_the_knee()
+    public void Sdr_rendering_is_the_asymptote_one_member_of_the_family()
     {
-        const float headroom = 5f;
-        const float epsilon = 1e-3f;
-        float[] data = [1f + epsilon];
+        // The pre-parameterisation shoulder, verbatim: knee 0.5, Reinhard toward 1.0.
+        static float Established(float v)
+        {
+            const float knee = 0.5f;
+            if (v <= knee) return v;
+            const float headroom = 1.0f - knee;
+            float d = v - knee;
+            return knee + headroom * d / (d + headroom);
+        }
 
-        HighlightRolloff.Apply(data, headroom);
-
-        // A C0-only join would depart from the identity linearly in epsilon; a C1 join departs
-        // quadratically. 1e-6 sits between the two by three orders of magnitude.
-        Assert.True(
-            Math.Abs(data[0] - (1f + epsilon)) < 1e-6f,
-            $"slope mismatch at the knee: {data[0]:R} against {1f + epsilon:R}");
+        foreach (float v in new[] { 0f, 0.25f, 0.5f, 0.5001f, 0.75f, 1f, 2f, 8f, 64f })
+        {
+            Assert.Equal(
+                BitConverter.SingleToInt32Bits(Established(v)),
+                BitConverter.SingleToInt32Bits(HighlightRolloff.Of(v, 1f)));
+        }
     }
 
     [Fact]
-    public void Rolloff_passes_non_finite_and_negative_values_through_untouched()
+    public void Shoulder_is_monotonic_and_approaches_but_never_passes_its_asymptote()
+    {
+        const float asymptote = 4f;
+        float[] data = [0.5001f, 0.75f, 1f, 2f, 4f, 8f, 64f, 4096f, float.PositiveInfinity];
+
+        HighlightRolloff.Apply(data, asymptote);
+
+        for (int i = 1; i < data.Length; i++)
+            Assert.True(data[i] > data[i - 1], $"index {i} broke monotonicity: {data[i - 1]} -> {data[i]}");
+        Assert.All(data[..^1], value => Assert.True(
+            value < asymptote, $"{value:R} reached the asymptote it may only approach."));
+        Assert.Equal(asymptote, data[^1]);
+    }
+
+    /// <summary>
+    /// The join at the knee must be C¹, not merely continuous. A shoulder that met the identity in
+    /// value but not in slope would crease exactly where the highlights start, which is the part
+    /// of the picture this whole feature exists to show.
+    /// </summary>
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(4.926f)]
+    public void Shoulder_meets_the_identity_with_matching_slope_at_the_knee(float asymptote)
+    {
+        const float epsilon = 1e-4f;
+        float probe = HighlightRolloff.Knee + epsilon;
+
+        float rolled = HighlightRolloff.Of(probe, asymptote);
+
+        // A C0-only join would depart from the identity linearly in epsilon; a C1 join departs
+        // quadratically. The bound sits between the two by orders of magnitude.
+        Assert.True(
+            Math.Abs(rolled - probe) < 1e-7f,
+            $"slope mismatch at the knee: {rolled:R} against {probe:R}");
+    }
+
+    [Fact]
+    public void Shoulder_passes_non_finite_and_below_knee_values_through_untouched()
     {
         float[] data = [float.NaN, float.NegativeInfinity, -3f, 0f];
 
-        HighlightRolloff.Apply(data, headroom: 2f);
+        HighlightRolloff.Apply(data, asymptote: 2f);
 
         Assert.True(float.IsNaN(data[0]));
         Assert.True(float.IsNegativeInfinity(data[1]));
@@ -263,11 +294,11 @@ public sealed class OutputTargetTests
     }
 
     [Theory]
-    [InlineData(1f)]
     [InlineData(0.5f)]
+    [InlineData(0.25f)]
     [InlineData(float.NaN)]
-    public void Rolloff_rejects_a_target_without_headroom(float headroom) =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => HighlightRolloff.Apply([2f], headroom));
+    public void Shoulder_rejects_an_asymptote_at_or_below_the_knee(float asymptote) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => HighlightRolloff.Apply([2f], asymptote));
 
     [Theory]
     [InlineData(203f)]

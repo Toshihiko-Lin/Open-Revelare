@@ -1,82 +1,139 @@
 namespace OpenRevelare.Core;
 
 /// <summary>
-/// The shoulder an extended-range render uses instead of a clamp (D-021).
+/// The display rendering's shoulder, as one family of curves rather than two implementations
+/// (D-021).
 ///
 /// <para>
-/// WHAT REPLACES WHAT. An SDR terminal ends by forcing every channel into <c>[0,1]</c> — the
-/// print stock's own shoulder does it on the LUT path, <c>ApplyMatrix</c>'s clamp does it on the
-/// analytic one. Neither is available to an extended target: the first is a print emulation, and
-/// a print has no specular highlights to emulate, while the second throws away exactly the
-/// information the target was asked to carry. What is left is the honest version of the same job:
-/// compress what lies above diffuse white into the headroom the target actually has.
+/// THE SDR RENDERING IS A MEMBER OF THIS FAMILY, NOT A SIBLING OF IT. The analytic path has
+/// always ended with a Reinhard shoulder from <see cref="Knee"/> asymptotic to <c>1.0</c>: the
+/// encoding carries the whole negative — D_max lands on code 1032 while 685 is only where a
+/// PICTURE's white sits, leaving 2.31 stops of latitude above it — and without the shoulder that
+/// entire span rendered as 1.0 and the output encoder clamped it away. An extended target does
+/// not need a different curve, it needs the SAME curve aimed somewhere higher. Passing
+/// <c>asymptote = 1</c> reproduces the established rendering exactly.
 /// </para>
 ///
 /// <para>
-/// THE KNEE IS EXACTLY DIFFUSE WHITE, AND THAT IS A CONTRACT. At and below <c>1.0</c> this is the
-/// identity — not approximately, not to within a tolerance, but untouched. An HDR render and its
-/// SDR sibling must agree on the picture and differ only in what they do above paper white; if
-/// the shoulder reached down below <c>1.0</c> it would re-grade the whole image and the two would
-/// no longer be the same photograph.
+/// WHAT THIS MEANS FOR THE TWO RENDERINGS, PRECISELY. They are identical at and below
+/// <see cref="Knee"/> — bit-identical, because below the knee the curve is the identity in both.
+/// Above it they diverge progressively: the SDR render compresses the latitude into
+/// <c>[0.5, 1)</c>, the extended render spreads the same latitude over <c>[0.5, headroom)</c>.
+/// So the shadows and mid-tones of an HDR render ARE its SDR sibling's; the highlights are the
+/// part that was being spent, and the part this exists to stop spending.
 /// </para>
 ///
 /// <para>
-/// THE CURVE. With <c>s = headroom − 1</c> and <c>t = (v − 1) / s</c>, values above the knee map
-/// to <c>1 + s·t/(1+t)</c>. It is monotonic, it maps <c>1 → 1</c> and <c>+∞ → headroom</c> so the
-/// target's peak is a real promise rather than a hope, and its derivative at the knee is exactly
-/// <c>1</c> — the same slope the identity arrives with. That C¹ join is the point: a shoulder
-/// that merely met the identity in value would put a visible crease at diffuse white, which on
-/// film highlights is precisely where the eye is looking.
+/// It would be wrong to describe the two as "identical below paper white". The knee sits at 0.5,
+/// well under Cineon's picture white, so everything from the knee up is reshaped — which is
+/// exactly the point, and exactly what a print stock's shoulder was doing.
 /// </para>
 /// </summary>
 public static class HighlightRolloff
 {
     /// <summary>
-    /// Rolls values above <c>1.0</c> toward <paramref name="headroom"/>, in place, over
-    /// interleaved linear RGB in the target's own primaries.
+    /// Where the shoulder engages, in the normalised linear domain
+    /// <see cref="ColorPipeline.CineonToDisplay"/> works in. Below it the transform is untouched.
     ///
     /// <para>
-    /// APPLIED AFTER THE PRIMARIES ROTATION, ON PURPOSE. The headroom is a statement about the
-    /// numbers that leave the render, so the compression has to happen in the space those numbers
-    /// are in — rolling off in the working space and then rotating into narrower primaries can
-    /// push a channel back above the peak and quietly break the promise. Doing it per channel
-    /// here also desaturates bright colour slightly as it compresses, which is what a shoulder
-    /// does on film and is the behaviour being replaced.
+    /// 0.5 IS NOT A FREE CHOICE. It is what lands code 685 on 0.881 once the output space encodes,
+    /// against the 0.880 measured on the real Kodak 2383 cube. Raising it to 0.6 gives 0.906 and
+    /// lowering it to 0.4 gives 0.854, so this is the value that makes the two renderings agree at
+    /// the diffuse white. In code terms the knee sits at 596, so everything from the film base up
+    /// through the mid-tones passes through unchanged.
+    /// </para>
+    ///
+    /// <para>
+    /// It is shared by every member of the family rather than re-derived per target, and that is
+    /// what makes them agree below it: moving it for extended targets would re-grade the
+    /// mid-tones of an HDR render relative to its SDR sibling, which is precisely what must not
+    /// happen.
     /// </para>
     /// </summary>
-    public static void Apply(float[] data, float headroom)
+    public const float Knee = 0.5f;
+
+    /// <summary>
+    /// One shoulder sample: the identity at and below <see cref="Knee"/>, and above it a Reinhard
+    /// roll-off asymptotic to <paramref name="asymptote"/> — which is therefore approached but
+    /// never reached, so no input, however dense, can clip.
+    ///
+    /// <para>
+    /// The curve is C¹ at the knee: its derivative there is exactly 1, the slope the identity
+    /// arrives with, so nothing creases where it engages.
+    /// </para>
+    /// </summary>
+    public static float Of(float value, float asymptote)
+    {
+        if (!(value > Knee)) return value;
+
+        float span = asymptote - Knee;
+
+        // The limit of the curve. Computing it directly would be Inf/Inf.
+        if (float.IsPositiveInfinity(value)) return asymptote;
+
+        float d = value - Knee;
+        return Knee + (span * d / (d + span));
+    }
+
+    /// <summary>
+    /// Applies <see cref="Of"/> in place over normalised linear samples.
+    ///
+    /// <para>
+    /// Negatives, NaN and everything at or below the knee pass through untouched — the guard is
+    /// written so NaN takes the same exit as an in-range value rather than propagating through the
+    /// arithmetic.
+    /// </para>
+    /// </summary>
+    public static void Apply(float[] data, float asymptote)
     {
         ArgumentNullException.ThrowIfNull(data);
-        if (!float.IsFinite(headroom) || headroom <= 1f)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(headroom),
-                headroom,
-                "Highlight headroom must be finite and greater than one; a target without headroom has nothing to roll off.");
-        }
+        RequireValidAsymptote(asymptote);
 
-        float span = headroom - 1f;
+        ParallelSweep.Over(data.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++) data[i] = Of(data[i], asymptote);
+        });
+    }
+
+    /// <summary>
+    /// Bounds already-rendered samples at <paramref name="asymptote"/>.
+    ///
+    /// <para>
+    /// THE EXTENDED COUNTERPART OF THE SDR PATH'S FINAL CLAMP. Stage 2's display-referred form
+    /// ends by clamping into <c>[0,1]</c>, because exposure and white balance are multiplicative
+    /// and land AFTER the shoulder — they can push a rendered value back past the ceiling the
+    /// shoulder established. The same is true of an extended target, so the same guard applies at
+    /// the same point, against the target's own ceiling instead of one.
+    /// </para>
+    ///
+    /// <para>
+    /// The lower bound is deliberately absent. In the display-referred form a negative could only
+    /// be an artefact of the destination encoding; here it is a colour outside the target's
+    /// primaries, which the extended carrier represents exactly and D-005 keeps on purpose.
+    /// </para>
+    /// </summary>
+    public static void BoundAbove(float[] data, float asymptote)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        RequireValidAsymptote(asymptote);
+
         ParallelSweep.Over(data.Length, (from, to) =>
         {
             for (int i = from; i < to; i++)
             {
-                float value = data[i];
-
-                // Negatives, NaN and everything at or below diffuse white leave untouched. The
-                // comparison is written this way so NaN takes the same exit as an in-range value
-                // rather than falling into the arithmetic below and propagating.
-                if (!(value > 1f)) continue;
-
-                // +Infinity is the limit of the curve, and computing it would produce Inf/Inf.
-                if (float.IsPositiveInfinity(value))
-                {
-                    data[i] = headroom;
-                    continue;
-                }
-
-                float t = (value - 1f) / span;
-                data[i] = 1f + (span * (t / (1f + t)));
+                if (data[i] > asymptote) data[i] = asymptote;
             }
         });
+    }
+
+    private static void RequireValidAsymptote(float asymptote)
+    {
+        if (!float.IsFinite(asymptote) || asymptote <= Knee)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(asymptote),
+                asymptote,
+                $"The shoulder's asymptote must be finite and above the knee ({Knee}).");
+        }
     }
 }
