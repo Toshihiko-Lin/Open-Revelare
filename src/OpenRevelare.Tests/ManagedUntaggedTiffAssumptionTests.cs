@@ -126,6 +126,31 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
     }
 
+    /// <summary>
+    /// THE DETECTOR MUST REPORT THE DECLARATION THE DECODER ACTS ON.
+    ///
+    /// TiffIO undid the Flextight gamma while the detector fell through to the conventional
+    /// default, so the GUI told the user the roll had "no colour declaration, treated as sRGB" and
+    /// offered Linear/sRGB — a choice the decode then ignored. Both must read the same evidence,
+    /// and the answer is conclusive: nothing is left for the user to decide.
+    /// </summary>
+    [Fact]
+    public void Flextight_declaration_is_conclusive_for_the_detector()
+    {
+        string path = WriteFlextightTiff();
+        try
+        {
+            TiffInputDetection detection = TiffInputDetector.Detect(path);
+            Assert.Equal(TiffInputEvidence.VendorGammaDeclaration, detection.Evidence);
+            Assert.True(detection.IsConclusive);
+            Assert.Contains("gamma 2.0", detection.Diagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Flextight_gamma_is_honoured_without_an_explicit_choice()
     {

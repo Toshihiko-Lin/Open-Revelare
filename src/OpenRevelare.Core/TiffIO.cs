@@ -514,6 +514,14 @@ public static class TiffIO
                 colorManagement);
         }
 
+        // Normally unreachable — LoadManagedWorkingFrame honours the vendor declaration before
+        // it gets here — but the detector now reports it, so route it the same way rather than
+        // let the two-way fallback below apply an sRGB curve the file never declared.
+        if (detection.Evidence == TiffInputEvidence.VendorGammaDeclaration)
+            return LoadManagedCompatibility(
+                path,
+                $"{prefix} [{reason}] -> scanner-vendor gamma declaration; primaries uncharacterized");
+
         return detection.Assumption == TiffInputAssumption.Linear
             ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]")
             : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement);
