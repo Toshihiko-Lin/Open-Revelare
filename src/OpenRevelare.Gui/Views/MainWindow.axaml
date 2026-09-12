@@ -709,7 +709,7 @@
                      exited in whatever 输出空间 named. It is a checkbox in the export dialog now. -->
                 <Border Grid.Row="3" Padding="8,5" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
@@ -727,7 +727,19 @@
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
                                   ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 
-                        <Button Grid.Column="5" Name="ExportButton" Classes="primary" Click="OnExportClick"
+                        <!-- HDR 峰值与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成
+                             什么样，输出空间决定装进哪个容器，HDR 峰值决定纸白之上还留不留
+                             东西。零档即 SDR，与本功能出现之前逐位相同。 -->
+                        <TextBlock Grid.Column="4" Classes="fieldLabel" Text="{i18n:T 'HDR 峰值'}" Margin="16,0,8,0" />
+                        <ComboBox Grid.Column="5" SelectedIndex="{Binding HdrPeakIndex}" VerticalAlignment="Center"
+                                  ToolTip.Tip="{i18n:T '底片约有 13 档宽容度，而印相曲线把最亮的几档压进纸白——选 SDR 就是这个一直以来的行为。选一个峰值则不套用印相肩部，把纸白之上的高光留下来：画面在纸白以下与 SDR 完全一致，差别只在高光。&#10;&#10;这是胶卷参数，会保存进工程，并且改变每一帧「是什么」而不是「怎么看它」，所以缩略图会重建。&#10;&#10;只有 HDR 显示器看得到效果，SDR 屏会把超出部分裁掉。注意：HDR 渲染不接受色阶／对比度／高光阴影／曲线／饱和度——这些调整是按显示范围定义的，喂给 scene-referred 数据没有意义，所以会拒绝渲染而不是悄悄忽略。&#10;&#10;不确定就选 SDR。'}">
+                            <ComboBoxItem Content="{i18n:T 'SDR（印相）'}" />
+                            <ComboBoxItem Content="{i18n:T 'HDR 600 nits'}" />
+                            <ComboBoxItem Content="{i18n:T 'HDR 1000 nits'}" />
+                            <ComboBoxItem Content="{i18n:T 'HDR 4000 nits'}" />
+                        </ComboBox>
+
+                        <Button Grid.Column="7" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
                                 ToolTip.Tip="{i18n:T '导出当前帧（Ctrl+E）'}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -735,7 +747,7 @@
                                 <TextBlock Text="{i18n:T '导出…'}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="6" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
+                        <Button Grid.Column="8" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
                                 CornerRadius="0,6,6,0" Padding="6,6" Margin="1,0,0,0"
                                 ToolTip.Tip="{i18n:T '整卷导出 / 印样'}">
                             <ctl:Icon Data="{StaticResource IcoChevron}" Width="12" Height="12"

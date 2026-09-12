@@ -587,5 +587,10 @@
   "旧的第 2 步渲染方式（变化最大）": "the legacy step-2 rendering (the largest change)",
   "曲线": "tone curves",
   "胶片 LUT": "a film LUT",
-  "、": ", "
+  "、": ", ",
+  "HDR 峰值": "HDR peak",
+  "SDR（印相）": "SDR (print)",
+  "按印相渲染，高光收进纸白。这是一直以来的行为，不确定就选它。": "Renders as a print, with highlights folded into paper white. This is the long-standing behaviour; pick it if unsure.",
+  "不套用印相肩部，把底片纸白之上的高光留下来。画面在纸白以下与 SDR 完全一致，差别只在高光。仅在 HDR 显示器上看得到，SDR 屏会裁掉超出部分；导出文件不受影响。": "Skips the print shoulder and keeps the highlights above the negative's paper white. Below paper white the picture is identical to SDR; only the highlights differ. Visible only on an HDR display — an SDR screen clips what is beyond it — and the exported file is unaffected.",
+  "　当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。": "  Levels, contrast, highlights/shadows, curves or saturation are currently adjusted; an HDR render refuses them — reset them first."
 }

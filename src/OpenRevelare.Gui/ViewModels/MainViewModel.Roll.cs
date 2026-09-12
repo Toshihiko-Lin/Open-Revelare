@@ -113,6 +113,94 @@ public partial class MainViewModel
     /// <summary>The roll's output space — what an export will be written in.</summary>
     public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
 
+    // ══ HDR 峰值 ═══════════════════════════════════════════════════════════════
+    //
+    // 与【输出空间】并列而不并入其中，因为它们回答的是不同的问题：输出空间决定画面装进哪个
+    // 容器，HDR 峰值决定 diffuse white 之上还留不留东西。零 = SDR，也就是既有的印相渲染。
+    //
+    // 预设而不是自由输入：这个数字的意义是「目标显示设备的峰值亮度」，它来自一小组真实存在
+    // 的档位，而不是一个连续旋钮。给一个文本框会邀请用户去微调一个他们无从校验的值。
+    private static readonly double[] HdrPeakOptions = { 0d, 600d, 1000d, 4000d };
+
+    private int _hdrPeakIndex;
+
+    /// <summary>
+    /// 本卷的 HDR 峰值档位（D-021）。零档即 SDR，渲染与本功能出现之前逐位相同。
+    ///
+    /// 与输出空间同为**胶卷级**参数：一条胶卷里各帧动态范围不同，会让接触印样变成一组无法
+    /// 互相比较的渲染。改动会重建缩略图，因为它改变的是每一帧**是什么**，不是怎么看它。
+    /// </summary>
+    public int HdrPeakIndex
+    {
+        get => _hdrPeakIndex;
+        set
+        {
+            int v = Math.Clamp(value, 0, HdrPeakOptions.Length - 1);
+            if (_hdrPeakIndex == v) return;
+            _hdrPeakIndex = v;
+            OnPropertyChanged(nameof(HdrPeakIndex));
+            OnPropertyChanged(nameof(HdrPeakHint));
+
+            foreach (RollFrame f in Frames) f.Params.HdrPeakNits = HdrPeakOptions[v];
+            if (Frames.Count > 0) MarkRollDirty();
+
+            foreach (RollFrame f in Frames) SetThumbnail(f, null);
+            RestartThumbnails();
+            ScheduleRender();
+        }
+    }
+
+    /// <summary>
+    /// What the selected HDR peak means, shown under the picker.
+    ///
+    /// <para>
+    /// THE D-023 RESTRICTION IS STATED HERE RATHER THAN DISCOVERED AT RENDER TIME. An extended
+    /// render refuses display-referred Stage 2 adjustments instead of silently dropping them, and
+    /// <c>ReportRenderFailure</c> would catch that — but a failure message after the fact is a
+    /// worse way to learn a rule than the control that sets it saying so.
+    /// </para>
+    /// </summary>
+    public string HdrPeakHint
+    {
+        get
+        {
+            if (HdrPeakOptions[_hdrPeakIndex] <= 0d)
+                return Loc.T("按印相渲染，高光收进纸白。这是一直以来的行为，不确定就选它。");
+
+            string blocked = CurrentFrame is { } frame &&
+                             Stage2.HasDisplayReferredAdjustments(frame.Params)
+                ? Loc.T("　当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
+                : string.Empty;
+
+            return Loc.T(
+                "不套用印相肩部，把底片纸白之上的高光留下来。画面在纸白以下与 SDR 完全一致，"
+                + "差别只在高光。仅在 HDR 显示器上看得到，SDR 屏会裁掉超出部分；导出文件不受影响。")
+                + blocked;
+        }
+    }
+
+    private void SyncHdrPeak(double nits)
+    {
+        int i = Array.FindIndex(HdrPeakOptions, option => option == nits);
+
+        // An unrecognised stored peak falls back to SDR rather than refusing to open the roll,
+        // matching ResolvedOutputTarget's own degradation. It is announced, because the picture
+        // will differ from the one that was saved.
+        if (i < 0)
+        {
+            foreach (RollFrame f in Frames) f.Params.HdrPeakNits = HdrPeakOptions[0];
+            if (Frames.Count > 0)
+            {
+                MarkRollDirty();
+                StatusText = Loc.F($"HDR 峰值 {nits:0} nits 本版本不提供，本卷改按 SDR 渲染——高光会与上次打开时不同。");
+            }
+        }
+
+        _hdrPeakIndex = i < 0 ? 0 : i;
+        OnPropertyChanged(nameof(HdrPeakIndex));
+        OnPropertyChanged(nameof(HdrPeakHint));
+    }
+
     // ══ 胶片风格（印片 LUT） ═══════════════════════════════════════════════════
     //
     // 与【输出空间】并列而不是并入其中，因为两者正交：LUT 决定画面被渲染成什么样，输出空间

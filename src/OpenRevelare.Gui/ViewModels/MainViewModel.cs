@@ -1524,6 +1524,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OutputIntent = OutputIntent.Basic,
         // Step-4 target: the space Stage 2 runs in and the file is written in.
         OutputSpace = OutputSpaces[_outputSpaceIndex].Name,
+        // Whether step 4 keeps anything above diffuse white. Same reason as the output space for
+        // living in this snapshot rather than being read off the frame: the picker's state is what
+        // the preview, the thumbnails and an export all have to agree on.
+        HdrPeakNits = HdrPeakOptions[_hdrPeakIndex],
         // The print-film emulation that runs INSIDE step 4. Like the output space it belongs to
         // this snapshot rather than being read off the frame: this is the state the picker is
         // showing, and the preview, the thumbnails and an export all have to render the same

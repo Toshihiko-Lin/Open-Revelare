@@ -851,6 +851,7 @@ public partial class MainViewModel
         // Adopt the roll's saved step-4 target without writing it back or dirtying the roll —
         // this is loading, not choosing.
         SyncOutputSpace(p.ResolvedOutputSpace.Name);
+        SyncHdrPeak(p.HdrPeakNits);
         SyncPrintLut(p.PrintLut);
         // Stage 1 — film base
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
