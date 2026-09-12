@@ -135,6 +135,11 @@ public partial class MainViewModel
         get => _hdrPeakIndex;
         set
         {
+            // A LegacyV1 roll renders through the frozen v1 path, which never reaches the
+            // parameterized terminal (D-013): a peak stored on it would be a lie the file tells.
+            // The picker is disabled for such rolls; this guard keeps any other route honest too.
+            if (UsesLegacyColorPipeline) value = 0;
+
             int v = Math.Clamp(value, 0, HdrPeakOptions.Length - 1);
             if (_hdrPeakIndex == v) return;
             _hdrPeakIndex = v;
@@ -160,10 +165,20 @@ public partial class MainViewModel
     /// worse way to learn a rule than the control that sets it saying so.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// False for a LegacyV1 roll. Its rendering is frozen by D-013 and never reaches the
+    /// parameterized terminal, so offering the picker would let the user choose something that
+    /// does nothing — which is exactly what happened before this existed.
+    /// </summary>
+    public bool CanChooseHdrPeak => !UsesLegacyColorPipeline;
+
     public string HdrPeakHint
     {
         get
         {
+            if (UsesLegacyColorPipeline)
+                return Loc.T("此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。");
+
             if (HdrPeakOptions[_hdrPeakIndex] <= 0d)
                 return Loc.T("按印相渲染，高光收进纸白。这是一直以来的行为，不确定就选它。");
 
@@ -182,6 +197,11 @@ public partial class MainViewModel
 
     private void SyncHdrPeak(double nits)
     {
+        // What a v1 roll RENDERS is SDR whatever its file says, so that is what the picker
+        // shows. Nothing is written back here — loading is not an edit — but the next save
+        // will record the truth.
+        if (UsesLegacyColorPipeline) nits = 0d;
+
         int i = Array.FindIndex(HdrPeakOptions, option => option == nits);
 
         // An unrecognised stored peak falls back to SDR rather than refusing to open the roll,

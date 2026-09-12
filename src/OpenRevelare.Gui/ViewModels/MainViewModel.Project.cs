@@ -184,6 +184,8 @@ public partial class MainViewModel
         if (_colorPipelineVersion == value) return;
         _colorPipelineVersion = value;
         OnPropertyChanged(nameof(UsesLegacyColorPipeline));
+        OnPropertyChanged(nameof(CanChooseHdrPeak));
+        OnPropertyChanged(nameof(HdrPeakHint));
         OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
         OnPropertyChanged(nameof(ColorPipelineDiagnostic));

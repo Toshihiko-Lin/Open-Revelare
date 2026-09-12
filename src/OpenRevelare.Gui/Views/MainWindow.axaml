@@ -731,7 +731,7 @@
                              什么样，输出空间决定装进哪个容器，HDR 峰值决定纸白之上还留不留
                              东西。零档即 SDR，与本功能出现之前逐位相同。 -->
                         <TextBlock Grid.Column="4" Classes="fieldLabel" Text="{i18n:T 'HDR 峰值'}" Margin="16,0,8,0" />
-                        <ComboBox Grid.Column="5" SelectedIndex="{Binding HdrPeakIndex}" VerticalAlignment="Center"
+                        <ComboBox Grid.Column="5" SelectedIndex="{Binding HdrPeakIndex}" IsEnabled="{Binding CanChooseHdrPeak}" VerticalAlignment="Center"
                                   ToolTip.Tip="{i18n:T '底片约有 13 档宽容度，而印相曲线把最亮的几档压进纸白——选 SDR 就是这个一直以来的行为。选一个峰值则把同一条肩部曲线瞄得更高：阴影与中间调与 SDR 逐位相同，更亮的部分不再被压进纸白，而是铺开到所选峰值。&#10;&#10;这是胶卷参数，会保存进工程，并且改变每一帧「是什么」而不是「怎么看它」，所以缩略图会重建。&#10;&#10;只有 HDR 显示器看得到效果，SDR 屏会把超出部分裁掉。注意：HDR 渲染不接受色阶／对比度／高光阴影／曲线／饱和度——这些调整是按显示范围定义的，喂给 scene-referred 数据没有意义，所以会拒绝渲染而不是悄悄忽略。&#10;&#10;不确定就选 SDR。'}">
                             <ComboBoxItem Content="{i18n:T 'SDR（印相）'}" />
                             <ComboBoxItem Content="{i18n:T 'HDR 600 nits'}" />
