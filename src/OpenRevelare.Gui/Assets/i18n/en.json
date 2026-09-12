@@ -535,6 +535,8 @@
   "只对当前帧做同样的自动流程，不动其他帧、也不改动裁切——用于整卷参数对这一张不合适时。": "Runs the same automatic pass on this frame alone, leaving the rest of the roll and the crop untouched — for when the roll-wide parameters do not suit this one picture.",
   "底片分割（仅扫描件）": "Strip splitting (scans only)",
   "导入时识别一张里的多格底片并分割": "Detect and split several negatives held in one file",
+  "分割识别失败": "Strip detection failed",
+  "识别底片分割时出错，这一卷会按整张导入（每个文件一帧）。\n\n{0}": "Strip detection hit an error; this roll is imported unsplit (one frame per file).\n\n{0}",
   "扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。": "Scanners routinely put a whole strip into one image. Ticked, the import detects how many frames each file holds and opens a window to confirm the dividers.",
   "不勾选则一个文件按一帧导入——已经在扫描软件里切好、或本来就是一格一张时用这个。相机 RAW 不受影响，始终一张一帧。": "Unticked, one file is one frame — for scans already cut in the scanner software, or made one negative at a time. Camera RAW is unaffected: it is always one frame per file.",
   "亮度": "Brightness",

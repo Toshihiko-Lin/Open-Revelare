@@ -1774,6 +1774,11 @@ public partial class MainWindow : Window
         if (scans.Count == 0) { Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>()); return true; }
 
         Vm.StatusText = Loc.T("正在识别底片分割 …");
+        // Taken HERE, on the UI thread. `Vm` reads DataContext, which is an Avalonia styled
+        // property and throws "Call from invalid thread" off the UI thread — inside the
+        // Task.Run below that made every split pre-pass fail on the first file, and the roll
+        // then imported unsplit with the failure hidden behind the load's own status line.
+        OpenRevelare.ColorManagement.IColorManagementEngine colorManagement = Vm.PresentationColorManagement;
         // Flat, not grouped by file: one scan can hold several strips side by side, and each
         // becomes its own plan with its own dividers. They share the file's one preview.
         List<(Models.StripPlan Plan, OpenRevelare.Core.ImageBuffer Preview)> detected;
@@ -1788,7 +1793,7 @@ public partial class MainWindow : Window
                     p,
                     1200,
                     OpenRevelare.Core.ColorPipelineVersion.ManagedV2,
-                    Vm.PresentationColorManagement,
+                    colorManagement,
                     cfg.TiffInputAssumption);
                 OpenRevelare.Core.ImageBuffer preview = working.Pixels;
                 return Models.StripPlan.Detect(p, preview)
@@ -1799,7 +1804,18 @@ public partial class MainWindow : Window
         {
             // A failed pre-pass must not block the import: fall through with no splits and let
             // the roll load one frame per file, which is what it did before this feature.
-            Vm.StatusText = Loc.T("分割识别失败，按整张导入：") + ex.Message;
+            //
+            // Said in a dialog, not on the status line. The load that follows overwrites the
+            // status line within a frame ("正在解码 …"), so a status message here was never
+            // readable — the user ticked 分割, got an unsplit strip, and had nothing to report.
+            Vm.StatusText = "";
+            // The trace goes in too: "Call from invalid thread" with no frame is not something
+            // the user can act on or report, and this pass has no log to fall back on.
+            string trace = ex.ToString();
+            if (trace.Length > 1500) trace = trace[..1500] + " …";
+            await new InfoDialog(Loc.T("分割识别失败"),
+                    Loc.F($"识别底片分割时出错，这一卷会按整张导入（每个文件一帧）。\n\n{trace}"))
+                .ShowDialog(this);
             Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>());
             return true;
         }
