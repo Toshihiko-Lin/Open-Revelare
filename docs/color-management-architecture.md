@@ -194,6 +194,12 @@ linear extended-sRGB 使用 sRGB/D65 原色坐标，但依靠 float 的负值和
 显示器、ICC、DPI、窗口所在屏幕、Advanced Color/EDR 状态只能使 presentation generation 失效；
 不得改变 `RenderedFrame`、导出像素或导出 profile hash。
 
+唯一的口子是 D-027：**新建**卷的 `HdrPeakNits` 初值取自导入那一刻的显示器。它随即写进工程，
+成为卷自己的参数；此后显示器变化对它无效，已存在的卷更是丝毫不受影响。
+
+D-028 的高光软校样**不是**口子：它发生在 presentation generation（组合根，`RenderedFrame` 之后），
+正是本条允许显示环境进入的那一步。
+
 ### I6：共享 render 在各平台相同
 
 相同源数据、项目版本、参数、profile bytes 和 CMM 版本，在 Windows、macOS、Linux、CLI 上必须产生
@@ -776,6 +782,9 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 
 | D-023 | Accepted | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
 | D-024 | Accepted | 扩展渲染的输出空间**恒为 `LinearExtendedSrgb`**（D-005 的 canonical 载体），不跟随工程的 output space 选择 | output space 选择器选的是 display-referred 编码（sRGB / Adobe RGB / Rec709），每一个都同时断言了一个有界范围和一条传递曲线，而扩展渲染两者都没有。载体是线性、Rec709 原色、无界，并且能用 `[0,1]` 之外的分量表示这些原色之外的颜色——选"Adobe RGB HDR"不会让色域变宽（载体本来就比 Adobe RGB 宽），只会多一条需要撤销的曲线。像素因此必须贴载体自己的 profile：给线性数值贴带 TRC 的 ICC 正是 D-003 要防的"只换标签不做转换" |
+| D-027 | Accepted | **新卷**的 `HdrPeakNits` 缺省取当前显示器能完整显示的最高档（`RecommendedHdrPeakIndex`），无 HDR 显示器或读不到面板峰值则 SDR；只在导入那一刻读一次，随后写进工程，显示器变化不再触碰它。已有工程按存的值打开，不受影响。选择器各行同时标注"本机推荐 / 超出本机 x×"——只是标注，不选择 | 用户提出"预览应按检测到的显示屏自动匹配"。三种做法里选了最窄的：显示端软映射（presentation 层 tone-map，I5 不破）代价约一天且要改 WYSIWYG 徽章语义；让 `HdrPeakNits` 跟随显示器则同一卷换台机器导出就不同，工程里存的值失去意义，正是 I5 要防的。"新卷缺省"把对显示器的依赖压缩到创建一刻，之后卷是自己的：I5 的措辞"显示环境不能改变渲染和导出"对**已存在的**卷仍然逐字成立，对新卷则是"决定了初值"而非"改变"。档位同时加了 400：400/203 ≈ 1.97×，在 SDR 白留在 Windows 默认亮度（≈240 nits）的 DisplayHDR 400 面板上（余量 ≈2.2×），它是唯一能完整显示的一档 |
+| D-029 | Accepted | HDR 的 GUI 形态对齐 Lightroom：底栏只有 **SDR / HDR 开关**；开启后直方图下方出现 **HDR 上限**滑块，单位是 SDR 白之上的**档数**（0.5 … +4，步进 0.1，默认 +2.3 = 1000 nits），读数同时给出 nits。工程仍存 `hdr_peak_nits`（= 203 × 2^档），持久化形式不变；超出范围的存档值拉到最近端并公告。D-027 的"新卷缺省"改为：显示器余量向下取到 0.1 档作为上限，无余量则关。四个 nits 预设（400/600/1000/4000）**废止** | 照片交付没有母版监视器那几台设备可挂靠（电影的 1000/4000 由此而来），照片这边的同行——LR 的 HDR Limit、ISO 21496-1 gain map 的 headroom、ACES 2.0 的参数化输出——全是连续值。预设的原始理由是"文本框邀请用户微调一个无从校验的值"，D-028 之后这个值在屏幕上、在直方图直尺上都能校验，理由不再成立。滑块放在直方图下而不是底栏，因为它管的正是直方图右侧那四档；底栏只剩"要不要"这一个决定 |
+| D-028 | Accepted | **预览高光软校样**：扩展渲染的目标余量超过当前显示器余量时，组合根在 presentation generation 里用 `HighlightSoftProof.Fit` 把 `(1, 目标余量]` 单调压进 `(1, 显示余量]`——拐点恰在 diffuse white（canonical 1.0），拐点处斜率 1，目标顶端精确落在面板顶端；`RenderedFrame`、直方图、导出一律不动。显示器无余量（SDR 模式 / 滑块拉满）时不做、照旧裁切。状态徽章相应标"（高光软校样）"或"（高光裁切）"。`HdrPeakNits` 仍是工程参数（母版），不随显示器 | 用户要求预览对齐 Lightroom：LR 的 HDR Limit 由用户定档，显示余量由系统探到，预览把超出部分压进可显示范围而不是裁掉。这正好落在 I5 允许的那一格——"显示环境只能影响 presentation generation"——所以不需要改 I5，只需要把这一步放在组合根、放在 RenderedFrame 之后。拐点钉在 1.0 是为了让 SDR 范围逐位不变：软校样只能重塑"因为 HDR 目标才存在"的那部分，不能重新调中间调或移动纸白。无余量时不做，是因为把 `(1, 目标]` 压进"零"只能把拐点挪到 1 以下，那就动了 SDR 范围；诚实的做法是裁切并在徽章上说出来。区分"母版"与"预览"也回答了"既然预览跟屏幕走，为什么还要档位"：档位决定导出文件，屏幕决定你此刻看到多少 |
 | D-026 | Accepted（待真机复核） | macOS 的 `ReferenceWhiteScale` **恒为 1**，`ExtendedHeadroom` = `NSScreen.maximumExtendedDynamicRangeColorComponentValue`（当前值，不取 potential）；只有一种模式（系统所有的 FP16 载体），探不到屏幕即 emergency。presenter 在且仅在 headroom > 1 时置 `wantsExtendedDynamicRangeContent`——这是 D-012 的**候选**答案 | Apple 的 extended-linear-sRGB 载体把 SDR 白定在 canonical 1.0（相对亮度滑块，不是 nits），所以没有什么可乘——这与 Windows HDR（D-020，1.0 = 80 nits，应用自己抬 diffuse white）正好是镜像：同一份载体字节，抬白的归属相反，契约记录归属，builder 按契约行事。headroom 直接用 AppKit 报的当前值：potential 是别的亮度下能到的，不是现在会显示的；错的"安全线"比没有更糟。EDR 请求跟随 headroom：无余量时请求它一无所获且可能多一次 tone map，有余量时不请求则 >1 全被 layer 裁掉。D-012 保持 Open 直到真机证明开启该标记不改变 SDR 亮度 |
 
 ### 17.1 拒绝的替代方案
