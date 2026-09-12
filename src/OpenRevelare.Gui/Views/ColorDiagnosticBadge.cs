@@ -67,8 +67,17 @@ internal static class ColorDiagnosticBadge
     /// that the badge does not already say.
     /// </summary>
     internal static string? FormatTooltip(bool hasWarning, bool colorManagementUnavailable)
+        => FormatTooltip(hasWarning, colorManagementUnavailable, displaySpace: null);
+
+    /// <summary>
+    /// The healthy form carries the DISPLAY SPACE. It is the one colour fact the user cannot set
+    /// anywhere — it is discovered from the contract, and I5 keeps it out of the render — so it
+    /// had no home in the controls, and the output-space picker was being read as if it were
+    /// this. Here it sits next to the mode it belongs to.
+    /// </summary>
+    internal static string? FormatTooltip(bool hasWarning, bool colorManagementUnavailable, string? displaySpace)
     {
-        if (!hasWarning) return null;
+        if (!hasWarning) return displaySpace;
 
         string what = colorManagementUnavailable
             ? Loc.T("颜色管理不可用：取不到这台显示器的颜色配置文件，画面正按标准 sRGB 显示，颜色可能与实际不符。")
@@ -79,5 +88,30 @@ internal static class ColorDiagnosticBadge
             : Loc.T("可先重新启动应用；若反复出现，请从【帮助 → 复制色彩诊断】取得诊断后反馈。");
 
         return what + "\n\n" + how;
+    }
+
+    /// <summary>
+    /// The display space in the user's terms: who maps the picture onto the panel, into what,
+    /// and how far above SDR white the panel goes. Every number comes from the contract the
+    /// presenter is bound to — nothing here is a preference, which is the point of saying it.
+    /// </summary>
+    internal static string DescribeDisplaySpace(DisplayContract contract, string monitor)
+    {
+        ArgumentNullException.ThrowIfNull(contract);
+        string mapping = contract.TransformOwner switch
+        {
+            FinalTransformOwner.SystemCompositor =>
+                Loc.T("由系统合成器把画面映射到面板原生色域：面板有多宽就显示多宽，输出空间之外的颜色不会先被裁掉。"),
+            FinalTransformOwner.Application =>
+                Loc.T("由本应用按显示器的颜色配置文件转换后送显：显示范围以该配置文件描述的面板色域为准。"),
+            _ => Loc.T("未做显示端色彩管理：画面按 sRGB 送显。"),
+        };
+        string white = contract.ExtendedHeadroom > 1f
+            ? Loc.F($"SDR 白 {contract.SdrReferenceWhite:0} nits，纸白之上还有 +{MathF.Log2(contract.ExtendedHeadroom):0.0} 档余量。")
+            : Loc.F($"SDR 白 {contract.SdrReferenceWhite:0} nits，纸白之上没有余量（非 HDR 模式）。");
+        return Loc.F($"显示空间（探测所得，不可选）：{monitor} · {contract.DiagnosticName}")
+            + "\n" + mapping
+            + "\n" + white
+            + "\n" + Loc.T("它只决定你在这块屏上看到什么，不影响渲染与导出（I5）；导出写的是【输出空间】。");
     }
 }

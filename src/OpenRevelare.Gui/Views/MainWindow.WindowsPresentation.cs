@@ -625,7 +625,10 @@ public partial class MainWindow
         _lastWindowsColorDiagnostics = BuildWindowsColorDiagnostics();
         ToolTip.SetTip(
             ColorDiagnosticStatus,
-            ColorDiagnosticBadge.FormatTooltip(hasWarning, colorManagementUnavailable));
+            ColorDiagnosticBadge.FormatTooltip(
+                hasWarning,
+                colorManagementUnavailable,
+                ColorDiagnosticBadge.DescribeDisplaySpace(contract, monitor)));
     }
 
     /// <summary>

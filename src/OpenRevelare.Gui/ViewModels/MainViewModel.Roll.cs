@@ -325,7 +325,7 @@ public partial class MainViewModel
     /// <summary>The toggle's hover text: what the control is, then where the roll stands on this display.</summary>
     public string HdrToggleTooltip =>
         Loc.T("关：印相渲染，高光收进纸白，一直以来的行为；不确定就关。开：纸白之上的宽容度铺到直方图下方【HDR 上限】所设的档数，导出随之。预览在本机余量内自动软校样。")
-        + "\n" + Loc.T("开启时【输出空间】与【胶片风格】不参与：扩展渲染不裁到任何色域，直接用显示器全色域（D-024），印片 LUT 是把高光收进纸白的显示参考表，与 HDR 互斥（D-021）。两个下拉让位给说明，关闭 HDR 即恢复所选值。")
+        + "\n" + Loc.T("开启时【输出空间】与【胶片风格】不参与：扩展渲染不裁到任何色域（D-024），印片 LUT 是把高光收进纸白的显示参考表，与 HDR 互斥（D-021）。两个下拉让位给说明，关闭 HDR 即恢复所选值。")
         + "\n" + HdrLimitHint;
 
     /// <summary>
