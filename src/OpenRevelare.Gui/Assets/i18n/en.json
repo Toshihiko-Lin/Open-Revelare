@@ -589,7 +589,7 @@
   "胶片 LUT": "a film LUT",
   "、": ", ",
   "HDR 上限": "HDR limit",
-  "线性扩展 sRGB · 不裁色域": "Linear extended sRGB · no gamut clip",
+  "显示器全色域": "Display's full gamut",
   "解析肩部 · 不走印片": "Analytic shoulder · no print stock",
   "开": "On",
   "关（印相）": "Off (print)",

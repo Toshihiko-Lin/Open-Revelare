@@ -728,8 +728,8 @@
                             <ComboBoxItem Content="{i18n:T 'Adobe RGB（宽色域）'}" />
                         </ComboBox>
                         <TextBlock Grid.Column="1" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center"
-                                   Text="{i18n:T '线性扩展 sRGB · 不裁色域'}" Foreground="{DynamicResource TextDimBrush}"
-                                   ToolTip.Tip="{i18n:T 'HDR 开启时的载体（D-024）：以 sRGB 原色为坐标轴、分量可为负或大于 1 的线性空间，P3、Adobe RGB 之外的颜色原样保留，由系统合成器映射到面板原生色域——比 SDR 下任何一个输出空间都宽。导出的 float32 TIFF 同样带此 profile。容器原色（P3 / BT.2020）要到 PQ 导出才需要选。'}" />
+                                   Text="{i18n:T '显示器全色域'}" Foreground="{DynamicResource TextDimBrush}"
+                                   ToolTip.Tip="{i18n:T 'HDR 开启时不选容器：渲染不裁到任何色域三角，P3、Adobe RGB 之外的颜色原样保留，由系统直接映射到这块屏幕的原生色域——面板有多宽就显示多宽，比 SDR 下任何一个输出空间都宽（D-024）。导出的 float32 TIFF 同样不裁；容器原色（P3 / BT.2020）要到 PQ 导出才需要选。'}" />
 
                         <!-- 胶片风格与输出空间并列，不并入其中：前者决定画面被渲染成什么样，
                              后者决定它被装进哪个容器，两者正交。内置两张印片（见
