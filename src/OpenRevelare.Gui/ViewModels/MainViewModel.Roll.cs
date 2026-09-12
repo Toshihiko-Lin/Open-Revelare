@@ -220,11 +220,8 @@ public partial class MainViewModel
     /// D-023 refusal or a "this panel clips at 2.1 stops" is only worth computing if it is shown.
     /// </summary>
     public string HdrPeakTooltip =>
-        Loc.T("底片约有 13 档宽容度，而印相曲线把最亮的几档压进纸白——选 SDR 就是这个一直以来的行为。选一个峰值则把同一条肩部曲线瞄得更高：阴影与中间调与 SDR 逐位相同，更亮的部分不再被压进纸白，而是铺开到所选峰值。")
-        + "\n\n"
-        + Loc.T("这是胶卷参数，会保存进工程，并且改变每一帧「是什么」而不是「怎么看它」，所以缩略图会重建。只有 HDR 显示器看得到效果，SDR 屏会把超出部分裁掉。HDR 渲染不接受色阶／对比度／高光阴影／曲线／饱和度——这些调整是按显示范围定义的，会拒绝渲染而不是悄悄忽略。")
-        + "\n\n"
-        + HdrPeakHint;
+        Loc.T("纸白之上的高光保留到多少 nits；SDR 即印相，一直以来的行为。")
+        + "\n" + HdrPeakHint;
 
     /// <summary>
     /// False for a LegacyV1 roll. Its rendering is frozen by D-013 and never reaches the
@@ -241,16 +238,14 @@ public partial class MainViewModel
                 return Loc.T("此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。");
 
             if (HdrPeakOptions[_hdrPeakIndex] <= 0d)
-                return Loc.T("按印相渲染，高光收进纸白。这是一直以来的行为，不确定就选它。");
+                return Loc.T("印相渲染，高光收进纸白。不确定就选它。");
 
             string blocked = CurrentFrame is { } frame &&
                              Stage2.HasDisplayReferredAdjustments(frame.Params)
                 ? Loc.T("当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
                 : string.Empty;
 
-            return Loc.T(
-                "与 SDR 共用同一条肩部曲线，只是瞄得更高：阴影与中间调逐位相同，"
-                + "更亮的部分不再把底片宽容度压进纸白，而是铺开到所选峰值。")
+            return Loc.T("阴影与中间调同 SDR，纸白之上的宽容度铺到所选峰值。")
                 + "\n" + DescribeDisplayFit(HdrPeakOptions[_hdrPeakIndex])
                 + (blocked.Length == 0 ? string.Empty : "\n" + blocked);
         }
