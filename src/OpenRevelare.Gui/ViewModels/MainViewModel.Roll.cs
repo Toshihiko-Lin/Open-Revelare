@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
+using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.Interop;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
@@ -182,10 +183,35 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(HdrPeakHint));
         OnPropertyChanged(nameof(HdrPeakTooltip));
         OnPropertyChanged(nameof(DisplayHdrHeadroom));
+        OnPropertyChanged(nameof(HistogramTooltip));
     }
 
     /// <summary>For the histogram's "the panel stops here" marker; one when unknown or SDR.</summary>
     public double DisplayHdrHeadroom => _displayCapability?.Headroom ?? 1d;
+
+    /// <summary>
+    /// What the histogram's zones and lines mean for the frame on screen. An extended render's
+    /// histogram has two different axes side by side — encoded value on the left, stops on the
+    /// right — and a line whose position depends on the monitor; none of that is guessable from
+    /// the picture alone.
+    /// </summary>
+    public string HistogramTooltip
+    {
+        get
+        {
+            if (Histogram is not { IsExtended: true })
+                return Loc.T("已渲染正片的 RGB 直方图，横轴为输出空间的编码值 0–1。");
+
+            string zones = Loc.T("左侧 3/4：SDR 区，按 sRGB 编码值 0–1，与 SDR 渲染的直方图同形。")
+                + "\n" + Loc.T("实线：SDR 白（diffuse white）。")
+                + "\n" + Loc.F($"右侧 1/4：白点以上 +{HistogramData.ExtendedStops:0} 档（对数刻度），每格 1 档。");
+            double headroom = DisplayHdrHeadroom;
+            string clip = headroom > 1d && double.IsFinite(headroom)
+                ? "\n" + Loc.F($"红色虚线：这块屏能显示到 +{Math.Log2(headroom):0.0} 档（余量 {headroom:0.0}×）；右侧红区已渲染但屏幕显示不出来。")
+                : "\n" + Loc.T("当前显示器不在 HDR 模式，或读不到面板峰值：没有裁切线。");
+            return zones + clip;
+        }
+    }
 
     /// <summary>
     /// The picker's hover text: what the control is, then what the current choice means on the
@@ -219,14 +245,14 @@ public partial class MainViewModel
 
             string blocked = CurrentFrame is { } frame &&
                              Stage2.HasDisplayReferredAdjustments(frame.Params)
-                ? Loc.T("　当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
+                ? Loc.T("当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
                 : string.Empty;
 
             return Loc.T(
                 "与 SDR 共用同一条肩部曲线，只是瞄得更高：阴影与中间调逐位相同，"
                 + "更亮的部分不再把底片宽容度压进纸白，而是铺开到所选峰值。")
-                + DescribeDisplayFit(HdrPeakOptions[_hdrPeakIndex])
-                + blocked;
+                + "\n" + DescribeDisplayFit(HdrPeakOptions[_hdrPeakIndex])
+                + (blocked.Length == 0 ? string.Empty : "\n" + blocked);
         }
     }
 
@@ -245,16 +271,16 @@ public partial class MainViewModel
     {
         float targetHeadroom = (float)(peakNits / OutputTarget.ReferenceWhiteNits);
         if (_displayCapability is not { } display)
-            return Loc.T("　当前显示器不在 HDR 模式：这里的选择只影响导出，以及在 HDR 屏上的显示。");
+            return Loc.T("当前显示器不在 HDR 模式：这里的选择只影响导出，以及在 HDR 屏上的显示。");
         if (display.PanelPeakNits is not { } panelPeak)
-            return Loc.F($"　显示器在 HDR 模式，但读不到面板峰值亮度（{display.FailureReason}），无法判断会不会裁。");
+            return Loc.F($"显示器在 HDR 模式，但读不到面板峰值亮度（{display.FailureReason}），无法判断会不会裁。");
 
         string tier = panelPeak >= 1000f ? "DisplayHDR 1000"
             : panelPeak >= 600f ? "DisplayHDR 600"
             : panelPeak >= 400f ? "DisplayHDR 400"
             : Loc.T("低于 DisplayHDR 400");
         string screen = Loc.F(
-            $"　此屏 ≈ {tier} 级（峰值 {panelPeak:0} nits），SDR 白 {display.SdrWhiteNits:0} nits → 余量 {display.Headroom:0.0}×。");
+            $"此屏 ≈ {tier} 级（峰值 {panelPeak:0} nits），SDR 白 {display.SdrWhiteNits:0} nits → 余量 {display.Headroom:0.0}×。");
         string fit = targetHeadroom <= display.Headroom
             ? Loc.F($"本档 {targetHeadroom:0.0}× 可完整显示。")
             : Loc.F($"本档 {targetHeadroom:0.0}× 超出 {targetHeadroom - display.Headroom:0.0}×，最亮的部分会在 {display.Headroom:0.0}× 处被面板裁掉；把 SDR 内容亮度再调低可换到更多余量。");

@@ -618,6 +618,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _fileName = "";
     [ObservableProperty] private HistogramData? _histogram;   // RGB histogram of the rendered positive
 
+    partial void OnHistogramChanged(HistogramData? value) => OnPropertyChanged(nameof(HistogramTooltip));
+
     // ══ Roll (multi-frame) ══════════════════════════════════════════════════════
     public RollNotes Notes { get; } = new();
     public ObservableCollection<RollFrame> Frames { get; } = new();
