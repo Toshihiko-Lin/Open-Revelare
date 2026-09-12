@@ -138,7 +138,9 @@ public partial class MainViewModel
             rendered,
             scene,
             fallback,
-            HistogramData.FromFrame(rendered),
+            // The roll's target, read off the picker: HdrPeakNits is roll-level, so every frame
+            // this method can be handed was rendered for it.
+            HistogramData.FromFrame(rendered, CurrentTargetHeadroom),
             clippingEnabled ? BuildClippingOverlay(rendered.Pixels) : null,
             clippingEnabled ? BuildClippingPresentationScene(rendered.Pixels) : null);
     }

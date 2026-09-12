@@ -427,15 +427,17 @@ public sealed class OutputTargetTests
             MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm);
 
         OpenRevelare.Gui.Controls.HistogramData histogram =
-            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame);
+            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame, cal.ResolvedOutputTarget.HighlightHeadroom);
 
         Assert.True(histogram.IsExtended);
         Assert.Equal(192, histogram.SdrBinCount);
+        // 1000/203 = 4.93x = 2.3 stops fits Lightroom's fixed four-stop axis.
+        Assert.Equal(4f, histogram.ExtendedStops);
         int aboveWhite = frame.Pixels.Data.Count(value => value > 1f);
         Assert.True(aboveWhite > 0, "fixture must contain highlights above SDR white");
         float extendedZone = histogram.R[192..].Sum() + histogram.G[192..].Sum() + histogram.B[192..].Sum();
         Assert.Equal(aboveWhite, (int)extendedZone);
-        // Nothing lands in the last bin unless it is at or beyond +5 stops, which this render is not.
+        // Nothing lands in the last bin unless it is at or beyond the axis end, which BoundAbove forbids.
         Assert.Equal(0f, histogram.R[255] + histogram.G[255] + histogram.B[255]);
     }
 
@@ -448,7 +450,7 @@ public sealed class OutputTargetTests
             MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm);
 
         OpenRevelare.Gui.Controls.HistogramData viaFrame =
-            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame);
+            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame, cal.ResolvedOutputTarget.HighlightHeadroom);
         OpenRevelare.Gui.Controls.HistogramData viaBuffer =
             OpenRevelare.Gui.Controls.HistogramData.FromBuffer(frame.Pixels.Data);
 

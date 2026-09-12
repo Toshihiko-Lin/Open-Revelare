@@ -125,6 +125,10 @@ public partial class MainViewModel
 
     private int _hdrPeakIndex;
 
+    /// <summary>The selected target's headroom above diffuse white (1 for SDR); see <see cref="OutputTarget.HighlightHeadroom"/>.</summary>
+    private float CurrentTargetHeadroom
+        => new FrameParams { HdrPeakNits = HdrPeakOptions[_hdrPeakIndex] }.ResolvedOutputTarget.HighlightHeadroom;
+
     /// <summary>
     /// 本卷的 HDR 峰值档位（D-021）。零档即 SDR，渲染与本功能出现之前逐位相同。
     ///
@@ -200,15 +204,14 @@ public partial class MainViewModel
         get
         {
             if (Histogram is not { IsExtended: true })
-                return Loc.T("已渲染正片的 RGB 直方图，横轴为输出空间的编码值 0–1。");
+                return Loc.T("已渲染正片的 RGB 直方图，横轴为输出空间的编码值 0–1；刻度在图下的直尺上。");
 
-            string zones = Loc.T("左侧 3/4：SDR 区，按 sRGB 编码值 0–1，与 SDR 渲染的直方图同形。")
-                + "\n" + Loc.T("实线：SDR 白（diffuse white）。")
-                + "\n" + Loc.F($"右侧 1/4：白点以上 +{HistogramData.ExtendedStops:0} 档（对数刻度），每格 1 档。");
+            string zones = Loc.T("左侧 3/4：SDR 区，按 sRGB 编码值 0–1，与 SDR 渲染的直方图同形；直尺上的「1」即 SDR 白（diffuse white）。")
+                + "\n" + Loc.F($"右侧 1/4：白点以上 +{Histogram.ExtendedStops:0} 档（对数刻度，与 Lightroom 同为固定 4 档；4000 nits 档为 5），直尺每格 1 档。");
             double headroom = DisplayHdrHeadroom;
             string clip = headroom > 1d && double.IsFinite(headroom)
-                ? "\n" + Loc.F($"红色虚线：这块屏能显示到 +{Math.Log2(headroom):0.0} 档（余量 {headroom:0.0}×）；右侧红区已渲染但屏幕显示不出来。")
-                : "\n" + Loc.T("当前显示器不在 HDR 模式，或读不到面板峰值：没有裁切线。");
+                ? "\n" + Loc.F($"红色虚线与直尺红刻度：这块屏能显示到 +{Math.Log2(headroom):0.0} 档（余量 {headroom:0.0}×）；其右的红区已渲染但屏幕显示不出来。")
+                : "\n" + Loc.T("当前显示器不在 HDR 模式，或读不到面板峰值：直尺上没有红色刻度。");
             return zones + clip;
         }
     }
