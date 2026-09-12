@@ -166,6 +166,26 @@ public partial class MainViewModel
     /// </para>
     /// </summary>
     /// <summary>
+    /// What the display under the window can physically show above SDR white, as the composition
+    /// root last reported it. INFORMATIONAL ONLY: invariant I5 forbids the display from changing
+    /// the render, and nothing here feeds a render — it feeds the hint under the picker, so the
+    /// user learns where the panel stops before choosing a peak it cannot reach.
+    /// </summary>
+    private DisplayHdrCapability? _displayCapability;
+
+    /// <summary>Called by the composition root whenever the display contract changes.</summary>
+    public void SetDisplayHdrCapability(DisplayHdrCapability? capability)
+    {
+        if (Equals(_displayCapability, capability)) return;
+        _displayCapability = capability;
+        OnPropertyChanged(nameof(HdrPeakHint));
+        OnPropertyChanged(nameof(DisplayHdrHeadroom));
+    }
+
+    /// <summary>For the histogram's "the panel stops here" marker; one when unknown or SDR.</summary>
+    public double DisplayHdrHeadroom => _displayCapability?.Headroom ?? 1d;
+
+    /// <summary>
     /// False for a LegacyV1 roll. Its rendering is frozen by D-013 and never reaches the
     /// parameterized terminal, so offering the picker would let the user choose something that
     /// does nothing — which is exactly what happened before this existed.
@@ -189,10 +209,41 @@ public partial class MainViewModel
 
             return Loc.T(
                 "与 SDR 共用同一条肩部曲线，只是瞄得更高：阴影与中间调逐位相同，"
-                + "更亮的部分不再把底片宽容度压进纸白，而是铺开到所选峰值。"
-                + "仅在 HDR 显示器上看得到，SDR 屏会裁掉超出部分；导出文件不受影响。")
+                + "更亮的部分不再把底片宽容度压进纸白，而是铺开到所选峰值。")
+                + DescribeDisplayFit(HdrPeakOptions[_hdrPeakIndex])
                 + blocked;
         }
+    }
+
+    /// <summary>
+    /// Where THIS display stops showing what the selected peak puts above SDR white.
+    ///
+    /// <para>
+    /// The target's shoulder aims at <c>peak / 203</c> times diffuse white; the panel shows up to
+    /// <c>panelPeak / sdrWhite</c> times it (D-020, with the headroom from
+    /// <c>IDXGIOutput6::GetDesc1</c>). Everything between those two numbers is rendered and then
+    /// clipped by the compositor — which is exactly what "switching to 4000 still changes the
+    /// picture" looks like from the outside, and the reason the user needs to see both numbers.
+    /// </para>
+    /// </summary>
+    private string DescribeDisplayFit(double peakNits)
+    {
+        float targetHeadroom = (float)(peakNits / OutputTarget.ReferenceWhiteNits);
+        if (_displayCapability is not { } display)
+            return Loc.T("　当前显示器不在 HDR 模式：这里的选择只影响导出，以及在 HDR 屏上的显示。");
+        if (display.PanelPeakNits is not { } panelPeak)
+            return Loc.F($"　显示器在 HDR 模式，但读不到面板峰值亮度（{display.FailureReason}），无法判断会不会裁。");
+
+        string tier = panelPeak >= 1000f ? "DisplayHDR 1000"
+            : panelPeak >= 600f ? "DisplayHDR 600"
+            : panelPeak >= 400f ? "DisplayHDR 400"
+            : Loc.T("低于 DisplayHDR 400");
+        string screen = Loc.F(
+            $"　此屏 ≈ {tier} 级（峰值 {panelPeak:0} nits），SDR 白 {display.SdrWhiteNits:0} nits → 余量 {display.Headroom:0.0}×。");
+        string fit = targetHeadroom <= display.Headroom
+            ? Loc.F($"本档 {targetHeadroom:0.0}× 可完整显示。")
+            : Loc.F($"本档 {targetHeadroom:0.0}× 超出 {targetHeadroom - display.Headroom:0.0}×，最亮的部分会在 {display.Headroom:0.0}× 处被面板裁掉；把 SDR 内容亮度再调低可换到更多余量。");
+        return screen + fit;
     }
 
     private void SyncHdrPeak(double nits)

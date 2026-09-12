@@ -47,7 +47,11 @@ public sealed record WindowsDisplayDiagnostics(
     string? ProfileSha256,
     string? FallbackReason,
     bool WysiwygGuaranteed,
-    bool RequiresExplicitRefresh);
+    bool RequiresExplicitRefresh,
+    float? PanelMinNits = null,
+    float? PanelMaxNits = null,
+    float? PanelMaxFullFrameNits = null,
+    string? PanelLuminanceFailureReason = null);
 
 internal sealed class MonitorProfileData
 {
@@ -105,7 +109,9 @@ internal sealed record WindowsDisplayProbeSnapshot(
     string? SdrWhiteFailureReason,
     MonitorProfileData? MonitorProfile,
     string? MonitorProfileFailureReason,
-    string? FailureReason)
+    string? FailureReason,
+    Interop.DisplayLuminance? Luminance = null,
+    string? LuminanceFailureReason = null)
 {
     internal WindowsDisplaySemanticKey SemanticKey => new(
         DisplayId,
@@ -119,6 +125,7 @@ internal sealed record WindowsDisplayProbeSnapshot(
         WindowDpi,
         SdrWhiteRaw,
         SdrWhiteFailureReason,
+        Luminance?.MaxNits,
         MonitorProfile?.Identity.Sha256Hex,
         FailureReason ?? AdvancedColor.FailureReason ?? MonitorProfileFailureReason);
 
@@ -169,6 +176,7 @@ internal readonly record struct WindowsDisplaySemanticKey(
     uint? WindowDpi,
     uint? SdrWhiteRaw,
     string? SdrWhiteFailureReason,
+    float? PanelMaxNits,
     string? ProfileSha256,
     string? FailureReason);
 

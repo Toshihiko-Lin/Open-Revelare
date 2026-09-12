@@ -140,7 +140,7 @@ public partial class MainViewModel
             Bitmap fallback = BuildFallbackBitmap(rendered, scene);
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
-            HistogramData histogram = HistogramData.FromBuffer(outImg.Data);
+            HistogramData histogram = HistogramData.FromFrame(rendered);
             WriteableBitmap? clipping = ShowClipping ? BuildClippingOverlay(outImg) : null;
             PresentationScene? clippingScene = ShowClipping
                 ? BuildClippingPresentationScene(outImg)
@@ -176,7 +176,7 @@ public partial class MainViewModel
             PresentationScene scene = ConvertPreviewScene(rendered);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
-            HistogramData h = HistogramData.FromBuffer(outImg.Data);
+            HistogramData h = HistogramData.FromFrame(rendered);
             WriteableBitmap? c = wantClipping ? BuildClippingOverlay(outImg) : null;
             PresentationScene? clipScene = wantClipping
                 ? BuildClippingPresentationScene(outImg)

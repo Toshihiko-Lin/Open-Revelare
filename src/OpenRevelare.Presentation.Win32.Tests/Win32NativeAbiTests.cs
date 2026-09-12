@@ -32,6 +32,9 @@ public sealed class Win32NativeAbiTests
         Assert.Equal(36, Marshal.SizeOf<DisplayConfigAdvancedColorInfo2>());
         Assert.Equal(32, Marshal.SizeOf<DisplayConfigAdvancedColorInfo>());
         Assert.Equal(24, Marshal.SizeOf<DisplayConfigSdrWhiteLevel>());
+        // dxgi1_6.h DXGI_OUTPUT_DESC1 on x64: 64 (name) + 16 (rect) + 4 + 4 + 8 (HMONITOR) + 4 + 4
+        // + 32 (four chromaticity pairs) + 12 (three luminances) = 148, padded to 152.
+        Assert.Equal(152, Marshal.SizeOf<DxgiOutputInterop.DxgiOutputDesc1>());
     }
 
     [Fact]

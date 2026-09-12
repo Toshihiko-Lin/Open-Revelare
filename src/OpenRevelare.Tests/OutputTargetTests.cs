@@ -412,6 +412,54 @@ public sealed class OutputTargetTests
         }
     }
 
+    /// <summary>
+    /// The established histogram clamps at one. Fed a scene-referred render it would pile every
+    /// highlight into the last bin and read as a clipped picture; the extended histogram gives
+    /// values above SDR white their own zone, in stops, and leaves the SDR zone shaped like the
+    /// SDR histogram of the same picture.
+    /// </summary>
+    [Fact]
+    public void Extended_histogram_puts_values_above_sdr_white_in_their_own_zone()
+    {
+        var cal = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        using var cmm = new LittleCmsEngine();
+        RenderedFrame frame = Pipeline.Render(
+            MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm);
+
+        OpenRevelare.Gui.Controls.HistogramData histogram =
+            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame);
+
+        Assert.True(histogram.IsExtended);
+        Assert.Equal(192, histogram.SdrBinCount);
+        int aboveWhite = frame.Pixels.Data.Count(value => value > 1f);
+        Assert.True(aboveWhite > 0, "fixture must contain highlights above SDR white");
+        float extendedZone = histogram.R[192..].Sum() + histogram.G[192..].Sum() + histogram.B[192..].Sum();
+        Assert.Equal(aboveWhite, (int)extendedZone);
+        // Nothing lands in the last bin unless it is at or beyond +5 stops, which this render is not.
+        Assert.Equal(0f, histogram.R[255] + histogram.G[255] + histogram.B[255]);
+    }
+
+    [Fact]
+    public void Sdr_histogram_is_unchanged_by_the_frame_overload()
+    {
+        var cal = new FrameParams { OutputSpace = "sRGB", PrintLut = "" };
+        using var cmm = new LittleCmsEngine();
+        RenderedFrame frame = Pipeline.Render(
+            MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm);
+
+        OpenRevelare.Gui.Controls.HistogramData viaFrame =
+            OpenRevelare.Gui.Controls.HistogramData.FromFrame(frame);
+        OpenRevelare.Gui.Controls.HistogramData viaBuffer =
+            OpenRevelare.Gui.Controls.HistogramData.FromBuffer(frame.Pixels.Data);
+
+        Assert.False(viaFrame.IsExtended);
+        Assert.Equal(256, viaFrame.SdrBinCount);
+        Assert.Equal(viaBuffer.R, viaFrame.R);
+        Assert.Equal(viaBuffer.G, viaFrame.G);
+        Assert.Equal(viaBuffer.B, viaFrame.B);
+        Assert.Equal(viaBuffer.L, viaFrame.L);
+    }
+
     /// <summary>An engine that fails the test if anything asks it to do colour management.</summary>
     private sealed class UnusableColorManagement : IColorManagementEngine
     {

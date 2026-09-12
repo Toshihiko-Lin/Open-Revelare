@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.ViewModels;
 using OpenRevelare.Presentation;
+using OpenRevelare.Gui.Models;
 using OpenRevelare.Presentation.Win32;
 using OpenRevelare.Presentation.Win32.Native;
 using PresentationPixelRect = OpenRevelare.Presentation.PixelRect;
@@ -553,6 +554,14 @@ public partial class MainWindow
         }
 
         WindowsDisplayDiagnostics? display = WindowsPreview.DisplayDiagnostics;
+        Vm?.SetDisplayHdrCapability(
+            display?.ActiveColorMode == WindowsAdvancedColorMode.HighDynamicRange
+                ? new DisplayHdrCapability(
+                    contract.SdrReferenceWhite,
+                    contract.ExtendedHeadroom,
+                    display.PanelMaxNits,
+                    display.PanelLuminanceFailureReason)
+                : null);
         string monitor = display?.MonitorFriendlyName ?? display?.GdiDeviceName ?? contract.DisplayId;
         string warning = WindowsPreview.VisibleWarning ?? WindowsPreview.LastPresentationError ?? string.Empty;
         string guarantee = WindowsPresentationGuarantee.IsEffective(

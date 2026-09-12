@@ -138,7 +138,7 @@ public partial class MainViewModel
             rendered,
             scene,
             fallback,
-            HistogramData.FromBuffer(rendered.Pixels.Data),
+            HistogramData.FromFrame(rendered),
             clippingEnabled ? BuildClippingOverlay(rendered.Pixels) : null,
             clippingEnabled ? BuildClippingPresentationScene(rendered.Pixels) : null);
     }

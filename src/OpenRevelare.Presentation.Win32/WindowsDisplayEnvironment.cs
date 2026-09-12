@@ -284,7 +284,7 @@ internal static class WindowsDisplayContractProvider
                 null,
                 sdrWhite,
                 AdvancedColorReferenceWhiteScale(snapshot.AdvancedColor.Mode, sdrWhite),
-                1f,
+                AdvancedColorExtendedHeadroom(snapshot.AdvancedColor.Mode, sdrWhite, snapshot.Luminance),
                 $"Windows Advanced Color · {snapshot.AdvancedColor.Mode}");
         }
 
@@ -356,6 +356,34 @@ internal static class WindowsDisplayContractProvider
             "Only an active Advanced Color mode has a canonical reference-white scale."),
     };
 
+    /// <summary>
+    /// How far above the SDR reference white the panel can actually go, as a multiple of it.
+    ///
+    /// <para>
+    /// ONLY HDR HAS HEADROOM. Under WCG (Advanced Color SDR) canonical <c>1.0</c> is already the
+    /// panel's maximum white by definition, so there is nothing above it to reach — the answer is
+    /// exactly one regardless of what the panel could do in another mode. Under HDR the ceiling
+    /// is the panel's peak (<c>IDXGIOutput6::GetDesc1</c>, EDID or calibration-derived) over the
+    /// SDR white the user chose: the same 400-nit panel offers 5× at 80 nits and only 1.4× at
+    /// 280 nits, which is why the user's slider matters as much as the hardware.
+    /// </para>
+    ///
+    /// <para>
+    /// Falls back to one, never to a guess. A headroom the application cannot prove is worse than
+    /// none: it would be used to draw a "safe up to here" line that is not.
+    /// </para>
+    /// </summary>
+    internal static float AdvancedColorExtendedHeadroom(
+        WindowsAdvancedColorMode mode,
+        float sdrWhiteNits,
+        Interop.DisplayLuminance? luminance)
+    {
+        if (mode != WindowsAdvancedColorMode.HighDynamicRange) return 1f;
+        if (luminance is not { MaxNits: > 0f and var max } || !float.IsFinite(max)) return 1f;
+        if (!float.IsFinite(sdrWhiteNits) || sdrWhiteNits <= 0f) return 1f;
+        return MathF.Max(1f, max / sdrWhiteNits);
+    }
+
     internal static WindowsDisplayDiagnostics Diagnostics(
         WindowsDisplayProbeSnapshot snapshot,
         DisplayContract contract)
@@ -399,6 +427,10 @@ internal static class WindowsDisplayContractProvider
             profile?.Identity.Sha256Hex,
             contract.VisibleWarning,
             contract.VisibleWarning is null,
-            true);
+            true,
+            snapshot.Luminance?.MinNits,
+            snapshot.Luminance?.MaxNits,
+            snapshot.Luminance?.MaxFullFrameNits,
+            snapshot.LuminanceFailureReason);
     }
 }

@@ -774,7 +774,7 @@
                 <Border Grid.Row="0" Padding="10,8,10,4" Background="{DynamicResource Panel2Brush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
-                        <ctl:HistogramView Data="{Binding Histogram}" Height="64" HorizontalAlignment="Stretch" />
+                        <ctl:HistogramView Data="{Binding Histogram}" DisplayHeadroom="{Binding DisplayHdrHeadroom}" Height="64" HorizontalAlignment="Stretch" />
                         <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}"
                                       IsEnabled="{Binding HasImage}"

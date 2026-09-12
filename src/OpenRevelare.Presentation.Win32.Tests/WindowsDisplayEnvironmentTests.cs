@@ -213,6 +213,57 @@ public sealed class WindowsDisplayEnvironmentTests
     /// into the contract — PresentationBufferBuilder compares it for EXACT equality against the
     /// scene's tag, so any tidying here would surface as a rejected frame rather than a dim one.
     /// </summary>
+    /// <summary>
+    /// Headroom exists only under HDR, and only when the panel's peak is known. WCG's canonical
+    /// 1.0 is already the panel's maximum white, so there is nothing above it; an unknown peak
+    /// yields one rather than a guess, because a "safe up to here" line that is wrong is worse
+    /// than none.
+    /// </summary>
+    [Theory]
+    [InlineData(WindowsAdvancedColorMode.WideColorGamut, 520f, 120f, 1f)]
+    [InlineData(WindowsAdvancedColorMode.HighDynamicRange, 520f, 120f, 520f / 120f)]
+    [InlineData(WindowsAdvancedColorMode.HighDynamicRange, 520f, 280f, 520f / 280f)]
+    [InlineData(WindowsAdvancedColorMode.HighDynamicRange, 100f, 280f, 1f)]   // panel below SDR white: clamp, never < 1
+    public void Extended_headroom_is_panel_peak_over_sdr_white_under_hdr_only(
+        WindowsAdvancedColorMode mode, float panelMax, float sdrWhite, float expected)
+    {
+        var luminance = new Interop.DisplayLuminance(0.01f, panelMax, panelMax, 10);
+
+        float headroom = WindowsDisplayContractProvider.AdvancedColorExtendedHeadroom(mode, sdrWhite, luminance);
+
+        Assert.Equal(expected, headroom);
+    }
+
+    [Fact]
+    public void Extended_headroom_is_one_when_the_panel_peak_is_unknown()
+    {
+        Assert.Equal(1f, WindowsDisplayContractProvider.AdvancedColorExtendedHeadroom(
+            WindowsAdvancedColorMode.HighDynamicRange, 120f, null));
+        Assert.Equal(1f, WindowsDisplayContractProvider.AdvancedColorExtendedHeadroom(
+            WindowsAdvancedColorMode.HighDynamicRange, 120f, new Interop.DisplayLuminance(0f, 0f, 0f, 8)));
+    }
+
+    /// <summary>The headroom reaches the contract, and a panel-peak change bumps the revision.</summary>
+    [Fact]
+    public void Hdr_contract_carries_the_panel_headroom_and_a_peak_change_is_a_new_revision()
+    {
+        WindowsDisplayProbeSnapshot first = AdvancedSnapshot(WindowsAdvancedColorMode.HighDynamicRange, 120f, 1500) with
+        {
+            Luminance = new Interop.DisplayLuminance(0.01f, 520f, 520f, 10),
+        };
+        var probe = new FakeProbe(first);
+        using var environment = CreateEnvironment(probe);
+
+        Assert.Equal(520f / 120f, environment.Current.ExtendedHeadroom);
+        Assert.Equal(520f, environment.Diagnostics.PanelMaxNits);
+        long revision = environment.Current.Revision;
+
+        probe.Current = first with { Luminance = new Interop.DisplayLuminance(0.01f, 1000f, 1000f, 10) };
+        Assert.True(environment.Refresh());
+        Assert.Equal(revision + 1, environment.Current.Revision);
+        Assert.Equal(1000f / 120f, environment.Current.ExtendedHeadroom);
+    }
+
     [Fact]
     public void Hdr_reference_white_scale_is_an_exact_quotient_of_the_nominal_white()
     {

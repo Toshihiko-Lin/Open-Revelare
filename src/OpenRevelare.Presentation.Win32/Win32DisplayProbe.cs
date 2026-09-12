@@ -41,6 +41,7 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         string stableId = BuildStableDisplayId(activePath);
         AdvancedColorState advanced = ReadAdvancedColor(activePath);
         (uint? sdrRaw, float sdrNits, string? sdrFailure) = ReadSdrWhite(activePath);
+        (DisplayLuminance? luminance, string? luminanceFailure) = DxgiOutputInterop.Read(monitor);
 
         MonitorProfileData? profile = null;
         string? profileFailure = null;
@@ -64,7 +65,9 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
             sdrFailure,
             profile,
             profileFailure,
-            null);
+            null,
+            luminance,
+            luminanceFailure);
     }
 
     private static ActiveDisplayPath ResolveActivePath(string gdiDeviceName)
