@@ -298,6 +298,9 @@ public static class Project
             // Absent = false: a project written before the Stage-2 rework keeps the old chain.
             ["display_referred_stage2"] = p.DisplayReferredStage2,
             ["output_space"] = p.OutputSpace,
+            // Absent = 0 = SDR, so every project written before HDR existed loads as the
+            // display-referred rendering it was built against (D-013, D-021).
+            ["hdr_peak_nits"] = p.HdrPeakNits,
             ["print_lut"] = p.PrintLut,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
@@ -368,6 +371,9 @@ public static class Project
             // the old one, which means the working space is now ACEScg for them too and step 4 is
             // a real conversion. Their pixels will differ from what the old build produced.
             OutputSpace = Str(d, "output_space", "sRGB"),
+            // Absent means SDR, and an unreachable stored peak degrades to SDR in
+            // ResolvedOutputTarget rather than refusing to open the roll.
+            HdrPeakNits = Dbl(d, "hdr_peak_nits", 0.0),
             // Absent in every project written before print-film emulation existed, and empty
             // means pass-through — so those rolls render bit-identically to before.
             PrintLut = Str(d, "print_lut", ""),

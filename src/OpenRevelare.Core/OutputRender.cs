@@ -21,6 +21,26 @@ public enum GamutMapping
     /// where clipping shifts hues most visibly.
     /// </summary>
     Desaturate,
+
+    /// <summary>
+    /// No mapping at all: the matrix result is written through, negatives and values above one
+    /// included.
+    ///
+    /// <para>
+    /// FOR EXTENDED-RANGE TARGETS ONLY. The other two members answer "this colour does not fit,
+    /// what do we give up" — chroma or hue. An extended target does not have that problem yet,
+    /// because the range it is heading for is not <c>[0,1]</c>: clamping here would destroy the
+    /// highlights the render was asked to keep (D-021), and desaturating would spend chroma
+    /// paying for a boundary that does not exist. Tone limiting happens later and deliberately,
+    /// against the target's own headroom, not as a side effect of a colour-space rotation.
+    /// </para>
+    ///
+    /// <para>
+    /// The name is a promise about this function only. It does not mean the values are
+    /// displayable; it means this stage is not the one that decides they are not.
+    /// </para>
+    /// </summary>
+    PreserveExtended,
 }
 
 /// <summary>
@@ -67,6 +87,7 @@ public static class OutputRender
         float ly = (float)toXyz[1, 0], lg = (float)toXyz[1, 1], lb = (float)toXyz[1, 2];
 
         bool desaturate = mapping == GamutMapping.Desaturate;
+        bool preserveExtended = mapping == GamutMapping.PreserveExtended;
 
         ParallelSweep.OverPixels(data.Length / 3, (from, to) =>
         {
@@ -77,6 +98,14 @@ public static class OutputRender
                 float nr = m00 * r + m01 * g + m02 * b;
                 float ng = m10 * r + m11 * g + m12 * b;
                 float nb = m20 * r + m21 * g + m22 * b;
+
+                if (preserveExtended)
+                {
+                    data[p] = nr;
+                    data[p + 1] = ng;
+                    data[p + 2] = nb;
+                    continue;
+                }
 
                 if (desaturate)
                     Desaturate(ref nr, ref ng, ref nb, ly, lg, lb);

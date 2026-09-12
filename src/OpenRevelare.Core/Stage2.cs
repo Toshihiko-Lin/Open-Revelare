@@ -308,6 +308,102 @@ public static class Stage2
     /// most importantly, authored curve coordinates are sampled without the legacy private
     /// gamma round trip. The final display-referred result is normalized exactly once here.
     /// </summary>
+    /// <summary>
+    /// True when the roll asks for any Stage 2 operation whose definition is display-referred —
+    /// levels, contrast, highlights/shadows, curves or saturation.
+    ///
+    /// <para>
+    /// These are not merely "tuned for" a display range, they are DEFINED against one: contrast
+    /// pivots about 0.5, levels map a black and white point onto <c>[0,1]</c>, the curves are
+    /// lookups indexed by a normalised value. Handing them scene-referred data with highlights
+    /// at 6.0 does not produce a slightly different picture, it produces a meaningless one.
+    /// </para>
+    ///
+    /// <para>
+    /// An extended-range render therefore refuses rather than ignoring them (D-021, and the same
+    /// fail-closed judgement as D-015): silently dropping a user's grade would hand back a
+    /// picture that is not the one they built, with nothing on screen to say so.
+    /// </para>
+    /// </summary>
+    internal static bool HasDisplayReferredAdjustments(FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(cal);
+
+        bool doLevels = (cal.BlackPoint != 0.0 || cal.WhitePoint != 1.0)
+                        && cal.BlackPoint < cal.WhitePoint;
+        bool doContrast = cal.Contrast != 0.0;
+        bool doHighlightsShadows = cal.Highlights != 0.0 || cal.Shadows != 0.0;
+        bool curveEnds = cal.CurveHasEndpoints;
+        bool doCurves = BuildLut(cal.CurvePointsM, curveEnds) != null
+                        || BuildLut(cal.CurvePointsR, curveEnds) != null
+                        || BuildLut(cal.CurvePointsG, curveEnds) != null
+                        || BuildLut(cal.CurvePointsB, curveEnds) != null;
+        bool doSaturation = cal.Saturation != 0.0;
+
+        return doLevels || doContrast || doHighlightsShadows || doCurves || doSaturation;
+    }
+
+    /// <summary>
+    /// Stage 2 for a scene-referred extended render: white balance and exposure, and nothing else.
+    ///
+    /// <para>
+    /// THESE TWO SURVIVE THE MOVE BECAUSE THEY ARE MULTIPLICATIVE IN LINEAR LIGHT. The managed
+    /// display-referred form already decodes to linear, multiplies, and re-encodes; here the data
+    /// is linear to begin with, so the decode and encode are simply absent rather than skipped.
+    /// The result is the same operation on the same quantity.
+    /// </para>
+    ///
+    /// <para>
+    /// NEGATIVES ARE NOT CLAMPED, unlike the display-referred form. There a negative component
+    /// could only be an out-of-range artefact of the destination encoding; here it is a colour
+    /// outside the target's primaries, which the extended carrier represents exactly and which
+    /// D-005 keeps on purpose.
+    /// </para>
+    /// </summary>
+    internal static void ApplyManagedToExtendedTarget(float[] d, FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+        ArgumentNullException.ThrowIfNull(cal);
+
+        if (HasDisplayReferredAdjustments(cal))
+        {
+            throw new NotSupportedException(
+                CoreText.T("HDR 输出暂不支持 display-referred 的 Stage 2 调整（色阶／对比度／高光阴影／曲线／饱和度）。")
+                + CoreText.T("请将这些调整复位，或改用 SDR 输出。"));
+        }
+
+        static bool AllOne(double[] values) =>
+            values.All(value => Math.Abs(value - 1.0) <= 1e-8 + 1e-5);
+
+        bool doWhiteBalance = !AllOne(cal.WbGains);
+        bool doExposure = cal.ExposureEv != 0.0;
+        if (!doWhiteBalance && !doExposure) return;
+
+        float redGain = (float)cal.WbGains[0];
+        float greenGain = (float)cal.WbGains[1];
+        float blueGain = (float)cal.WbGains[2];
+        float exposureGain = (float)Math.Pow(2.0, cal.ExposureEv);
+
+        ParallelSweep.OverPixels(d.Length / 3, (from, to) =>
+        {
+            for (int index = from; index < to; index += 3)
+            {
+                if (doWhiteBalance)
+                {
+                    d[index] *= redGain;
+                    d[index + 1] *= greenGain;
+                    d[index + 2] *= blueGain;
+                }
+                if (doExposure)
+                {
+                    d[index] *= exposureGain;
+                    d[index + 1] *= exposureGain;
+                    d[index + 2] *= exposureGain;
+                }
+            }
+        });
+    }
+
     internal static void ApplyManagedAfterTargetEncoding(
         float[] d,
         FrameParams cal,

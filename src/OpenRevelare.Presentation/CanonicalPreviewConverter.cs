@@ -36,6 +36,18 @@ public static class CanonicalPreviewConverter
         }
 
         var size = new PixelSize(renderedFrame.Pixels.Width, renderedFrame.Pixels.Height);
+
+        // A scene-referred extended render already IS the canonical carrier: linear, Rec709
+        // primaries, D65, unbounded. The conversion is the identity, so it is performed as one.
+        //
+        // THIS IS NOT AN OPTIMISATION, IT IS THE CORRECT TRANSFORM. Routing these pixels through
+        // the CMM would ask an ICC engine to round-trip them via D50 PCS XYZ and back, and a PCS
+        // is a bounded, display-referred connection space — the negatives and the values above
+        // one that the extended render exists to carry are exactly what such a round trip is
+        // entitled to discard. Doing nothing preserves them by construction.
+        if (IsCanonicalCarrier(renderedFrame))
+            return PresentationScene.FromOwnedPixels(ToOpaqueRgbaHalf(renderedFrame), size, referenceWhiteScale);
+
         float[] d50Xyz = new float[renderedFrame.Pixels.Data.Length];
         var request = new ColorTransformRequest(
             renderedFrame.OutputProfile,
@@ -84,5 +96,43 @@ public static class CanonicalPreviewConverter
         }
 
         return PresentationScene.FromOwnedPixels(rgba, size, referenceWhiteScale);
+    }
+
+    /// <summary>
+    /// True when the rendered pixels are already canonical presentation values — linear in the
+    /// carrier's own primaries, tagged with the carrier's own profile.
+    ///
+    /// <para>
+    /// Both halves are required. The transfer state alone would also admit scene-linear ACEScg
+    /// (<c>OutputIntent.None</c>), whose primaries are emphatically not the carrier's, and the
+    /// profile alone cannot be trusted to imply a linear encoding.
+    /// </para>
+    /// </summary>
+    private static bool IsCanonicalCarrier(RenderedFrame frame) =>
+        frame.Encoding.Transfer == TransferState.LinearInProfilePrimaries &&
+        frame.OutputProfile.Identity ==
+            BuiltInColorProfiles.LinearExtendedSrgb(ProfileRole.Output).Identity;
+
+    /// <summary>
+    /// Widens interleaved RGB float to premultiplied RGBA-half with alpha exactly one. The render
+    /// boundary produces opaque pixels, so premultiplication is a no-op and the scene can be
+    /// declared opaque on arrival.
+    /// </summary>
+    private static Half[] ToOpaqueRgbaHalf(RenderedFrame frame)
+    {
+        ReadOnlySpan<float> rgb = frame.Pixels.Data;
+        int pixelCount = rgb.Length / 3;
+        var rgba = new Half[checked(pixelCount * 4)];
+        for (int pixel = 0; pixel < pixelCount; pixel++)
+        {
+            int source = pixel * 3;
+            int destination = pixel * 4;
+            rgba[destination] = (Half)rgb[source];
+            rgba[destination + 1] = (Half)rgb[source + 1];
+            rgba[destination + 2] = (Half)rgb[source + 2];
+            rgba[destination + 3] = (Half)1f;
+        }
+
+        return rgba;
     }
 }

@@ -182,7 +182,29 @@ public static class ColorPipeline
     /// shoulder starts at 0.5, which leaves mid-grey, the mid-tone crossing and diffuse white set
     /// by the decode and the response gamma alone.
     /// </summary>
-    public static void CineonToDisplay(float[] data)
+    public static void CineonToDisplay(float[] data) => CineonToDisplay(data, applyShoulder: true);
+
+    /// <summary>
+    /// <see cref="CineonToDisplay"/> with the choice of whether the print shoulder runs.
+    ///
+    /// <para>
+    /// WHY THE SHOULDER IS OPTIONAL NOW (D-021). <see cref="Shoulder"/> exists to keep the 2.31
+    /// stops above Cineon's diffuse white from clipping against an SDR output's ceiling, and it
+    /// does that by compressing them asymptotically INTO <c>[0,1]</c>. For a display-referred
+    /// target that is the only honest answer available. For an extended target it is exactly the
+    /// wrong one: the ceiling it is defending against is not there, and the compression spends
+    /// the latitude that the target exists to carry.
+    /// </para>
+    ///
+    /// <para>
+    /// WITHOUT IT, DIFFUSE WHITE IS ALREADY IN THE RIGHT PLACE. Code 685 decodes to linear 1 by
+    /// construction — it is the exponent's zero — and the black normalisation leaves it at 1.
+    /// So the unshouldered rendering lands diffuse white on exactly <c>1.0</c> and the negative's
+    /// remaining latitude above it, which is the contract an extended target wants verbatim.
+    /// The toe still runs: it shapes the shadows, and shadows are not a highlight decision.
+    /// </para>
+    /// </summary>
+    internal static void CineonToDisplay(float[] data, bool applyShoulder)
     {
         const double refWhite = 685.0;
         // The response gamma folded into the transform, and the source of its contrast. Not the
@@ -213,7 +235,8 @@ public static class ColorPipeline
             for (int i = from; i < to; i++)
             {
                 float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-                data[i] = Shoulder(Toe(MathF.Max((lin - blackLin) / span, 0.0f)));
+                float rendered = Toe(MathF.Max((lin - blackLin) / span, 0.0f));
+                data[i] = applyShoulder ? Shoulder(rendered) : rendered;
             }
         });
     }
@@ -367,6 +390,75 @@ public static class ColorPipeline
         }
         else
             ToOutputSpace(data, output);
+    }
+
+    /// <summary>
+    /// Step 4 against a parameterized terminal (D-022). This is the single place that decides what
+    /// the render puts above diffuse white, and both consumers — preview on an HDR display and an
+    /// HDR deliverable — go through it.
+    ///
+    /// <para>
+    /// AN SDR TARGET IS NOT REIMPLEMENTED HERE. It delegates to the existing overload verbatim, so
+    /// the established rendering cannot drift by being described twice; the golden renders are the
+    /// gate that proves it.
+    /// </para>
+    /// </summary>
+    public static void ToOutputTargetFor(
+        float[] data,
+        FrameParams cal,
+        OutputTarget target,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(cal);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (!target.IsExtended)
+        {
+            ToOutputSpaceFor(data, cal, pipelineVersion, colorManagement);
+            return;
+        }
+
+        ToExtendedOutputTarget(data, target);
+    }
+
+    /// <summary>
+    /// The extended terminal: scene-linear working RGB → Cineon log → the analytic display
+    /// rendering → the target's primaries, unclamped → highlight shoulder.
+    ///
+    /// <para>
+    /// THE PRINT LUT IS DELIBERATELY NOT CONSULTED, AND THAT IS THE DECISION, NOT AN OMISSION
+    /// (D-021). A print stock emulation IS a display rendering whose shoulder compresses the
+    /// negative's highlights into paper white — running it and then claiming headroom above that
+    /// white would produce a brighter SDR picture, not an HDR one, because the information the
+    /// headroom is for was spent inside the cube. The negative holds roughly thirteen stops and
+    /// the print curve discards the top of them; an extended target exists precisely to stop
+    /// discarding them. Callers that want the print look ask for an SDR target, which still
+    /// renders through the cube exactly as before.
+    /// </para>
+    ///
+    /// <para>
+    /// NO ENCODING CURVE IS APPLIED. The result is scene-referred linear in the target's
+    /// primaries with diffuse white at <c>1.0</c>. That is what the scRGB/CCCS carrier wants
+    /// verbatim, and it is what a PQ or float-TIFF encoder wants as ITS input; baking a display
+    /// TRC in here would have to be undone by every one of them.
+    /// </para>
+    ///
+    /// <para>
+    /// THE SHOULDER IS NOT APPLIED HERE, AND THE OMISSION IS STRUCTURAL. Step 4 leaves the data
+    /// unbounded above; <see cref="HighlightRolloff"/> is the FINISHING step, run once everything
+    /// that can still change a value has run. Exposure and white balance are multiplicative and
+    /// arrive after step 4 in ManagedV2, so rolling off here would let them push the result back
+    /// past the headroom the target promised. This mirrors the SDR path exactly, where the final
+    /// clamp into <c>[0,1]</c> likewise lives at the end of Stage 2 rather than in step 4.
+    /// </para>
+    /// </summary>
+    private static void ToExtendedOutputTarget(float[] data, OutputTarget target)
+    {
+        LogEncoding.ToCineon(data);
+        CineonToDisplay(data, applyShoulder: false);
+        OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
     }
 
     /// <summary>

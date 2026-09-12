@@ -199,6 +199,42 @@ public sealed class FrameParams
     }
 
     /// <summary>
+    /// Peak luminance, in nits, for a scene-referred extended (HDR) render. Zero — the default —
+    /// means the roll renders to the established display-referred SDR terminal.
+    ///
+    /// <para>
+    /// A PLAIN NUMBER RATHER THAN A MODE FLAG, and zero rather than a nullable, so that a project
+    /// written before this existed loads as SDR without a migration and a project written by a
+    /// newer build naming a peak this one cannot reach still loads (D-013's spirit: absent means
+    /// the old behaviour, and the old behaviour is never rewritten underneath the user).
+    /// </para>
+    ///
+    /// <para>
+    /// IT IS A PROPERTY OF THE PROJECT, NOT OF THE MONITOR. Invariant I5 forbids the display
+    /// environment from changing the render, so this is what the user asked the picture to BE.
+    /// An SDR display showing it clips; that is the presentation contract's business.
+    /// </para>
+    /// </summary>
+    public double HdrPeakNits { get; set; }
+
+    /// <summary>
+    /// The resolved step-4 terminal (D-022): an extended target when <see cref="HdrPeakNits"/>
+    /// names a reachable peak, and otherwise the SDR target that reproduces today's rendering
+    /// exactly.
+    ///
+    /// <para>
+    /// A peak at or below <see cref="OutputTarget.ReferenceWhiteNits"/> resolves to SDR rather
+    /// than throwing, for the same reason <see cref="ResolvedOutputSpace"/> falls back instead of
+    /// failing: a stored value this build cannot honour must degrade to the safe rendering, not
+    /// stop the roll from opening.
+    /// </para>
+    /// </summary>
+    public OutputTarget ResolvedOutputTarget =>
+        double.IsFinite(HdrPeakNits) && HdrPeakNits > OutputTarget.ReferenceWhiteNits
+            ? OutputTarget.Hdr((float)HdrPeakNits)
+            : OutputTarget.Sdr(ResolvedOutputSpace);
+
+    /// <summary>
     /// The print-film emulation applied between Stage 1 and the output space — a path to a
     /// <c>.cube</c> file, or empty for none.
     ///
@@ -413,6 +449,7 @@ public sealed class FrameParams
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,
+        HdrPeakNits = HdrPeakNits,
         PrintLut = PrintLut,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,

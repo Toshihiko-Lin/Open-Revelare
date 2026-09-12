@@ -153,14 +153,39 @@ public static class Pipeline
                 }
                 effectivePrintLut = cal.PrintLut!.ToLowerInvariant();
             }
-            gamutPolicy = hasPrintLut
-                ? "print-LUT native Rec709 -> exact output ICC (relative colorimetric, BPC off)"
-                : "managed exact built-in output profile";
-            encoding = new CharacterizedPixelEncoding(
-                requested,
-                ColorReference.DisplayReferred,
-                TransferState.ProfileEncoded,
-                NumericRange.Normalized);
+            OutputTarget target = cal.ResolvedOutputTarget;
+            if (target.IsExtended)
+            {
+                // The pixels are LINEAR in the canonical carrier's primaries, so they must be
+                // tagged with the carrier's profile and not with the roll's display-referred
+                // output selection — an sRGB or Adobe RGB profile asserts a TRC these numbers do
+                // not carry, which is exactly the "relabel without converting" failure D-003
+                // exists to prevent. The encoding model already had every term for this; it is
+                // how OutputIntent.None describes scene-linear ACEScg.
+                //
+                // The print LUT is not part of this rendering (D-021), so the recipe must not
+                // claim one: the effective identity stays empty whatever the roll selected.
+                requested = BuiltInColorProfiles.LinearExtendedSrgb(ProfileRole.Output);
+                encoding = new CharacterizedPixelEncoding(
+                    requested,
+                    ColorReference.SceneReferred,
+                    TransferState.LinearInProfilePrimaries,
+                    NumericRange.Extended);
+                gamutPolicy =
+                    $"scene-referred extended, unclamped primaries, shoulder to {target.HighlightHeadroom:0.###}× diffuse white";
+                effectivePrintLut = string.Empty;
+            }
+            else
+            {
+                gamutPolicy = hasPrintLut
+                    ? "print-LUT native Rec709 -> exact output ICC (relative colorimetric, BPC off)"
+                    : "managed exact built-in output profile";
+                encoding = new CharacterizedPixelEncoding(
+                    requested,
+                    ColorReference.DisplayReferred,
+                    TransferState.ProfileEncoded,
+                    NumericRange.Normalized);
+            }
         }
 
         var recipe = new OutputRecipe(
@@ -207,7 +232,7 @@ public static class Pipeline
         }
         else
         {
-            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+            OutputTarget target = cal.ResolvedOutputTarget;
 
             // Reuse every frozen operation through Stage 1 and geometry, stopping at the existing
             // OutputIntent.None gate. Managed step 4 then produces exact target-encoded pixels
@@ -216,12 +241,26 @@ public static class Pipeline
             FrameParams scene = cal.Clone();
             scene.OutputIntent = OutputIntent.None;
             pixels = ProcessFrame(source.Pixels, scene);
-            ColorPipeline.ToOutputSpaceFor(
+            ColorPipeline.ToOutputTargetFor(
                 pixels.Data,
                 cal,
+                target,
                 ColorPipelineVersion.ManagedV2,
                 colorManagement);
-            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, selected);
+
+            if (target.IsExtended)
+            {
+                // The shoulder runs LAST, after the only remaining operations that can still move
+                // a value, so the target's peak is a promise about the pixels that actually leave
+                // here. Its display-referred sibling ends the same way, with the clamp into [0,1]
+                // at the tail of ApplyManagedAfterTargetEncoding.
+                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
+                HighlightRolloff.Apply(pixels.Data, target.HighlightHeadroom);
+            }
+            else
+            {
+                Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
+            }
         }
 
         return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.ManagedV2);
