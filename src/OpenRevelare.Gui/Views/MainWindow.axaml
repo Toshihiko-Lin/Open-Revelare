@@ -625,6 +625,12 @@
                         <ctl:WindowsPreviewHost Name="WindowsPreview"
                                                 HorizontalAlignment="Stretch"
                                                 VerticalAlignment="Stretch" />
+                        <!-- macOS colour-critical surface: the same contract-bound buffer on a
+                             CAMetalLayer. Each host hides itself off its own platform, so only
+                             one of the two ever materialises a native view. -->
+                        <ctl:MacOSPreviewHost Name="MacOSPreview"
+                                              HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch" />
                         <Grid Name="ZoomGrid" RenderTransformOrigin="0,0"
                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                             <!-- ctl:ColorManagedImage, not Image: the preview must be drawn through Skia WITH its

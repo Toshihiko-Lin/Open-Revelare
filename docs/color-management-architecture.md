@@ -700,7 +700,7 @@ compositor。
 | M2 | **完成** | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | 有效 ICC 原子转换；untagged/坏 ICC 显式 fallback 与项目往返；normalized TIFF16 与 extended TIFF32F round-trip；exact embedded ICC；L2 显式迁移；稳定 render fingerprint |
 | M3 | Windows 切片完成；macOS 待办 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | Windows 主图/patch/masks/crop 单一合成且末跳前无 8-bit/clamp；D-011 已关闭，D-012 留给 macOS |
 | M4 | 代码/自动化完成；硬件人工验收待办 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | transform-count、ABI、recovery/fallback 与当前 EIZO 契约探针已验证；色度计/参考查看器和双屏人工比较待完成 |
-| M5 | **托管半边完成，原生半边待真机**（2026-09-12） | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | `OpenRevelare.Presentation.MacOS`（环境 / 契约 / presenter）+ 25 条假件测试全绿；`Presentation.MacOS.Native` 的 Obj-C++ 源码与 `build-macos-presenter.sh` 已写但**未在 Mac 上编译**；D-026 定了 mac 的 reference-white/headroom 政策，D-012 仍 Open，候选规则见 D-026 |
+| M5 | **托管半边完成，原生半边待真机**（2026-09-12） | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | `OpenRevelare.Presentation.MacOS`（环境 / 契约 / presenter）+ 25 条假件测试全绿；Avalonia 宿主 `MacOSPreviewHost` + backend（5 条 reconcile/recovery 测试）已接入组合根（`IPreviewHost` 按平台选宿主，Windows 回归实测不变）；`Presentation.MacOS.Native` 的 Obj-C++ 源码与 `build-macos-presenter.sh` 已写但**未在 Mac 上编译**；D-026 定了 mac 的 reference-white/headroom 政策，D-012 仍 Open，候选规则见 D-026 |
 | M6 | 部分完成 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux/macOS 部分待后续 |
 
 ### 15.1 提交边界

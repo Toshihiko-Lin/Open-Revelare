@@ -14,7 +14,7 @@ public sealed class WindowsPreviewHostTests
     [Fact]
     public void Physical_size_rounds_midpoints_away_and_promotes_empty_bounds()
     {
-        PresentationPixelSize size = WindowsPreviewPhysicalSize.FromBounds(new Size(1d, 0d), 2.5d);
+        PresentationPixelSize size = PreviewPhysicalSize.FromBounds(new Size(1d, 0d), 2.5d);
 
         Assert.Equal(new PresentationPixelSize(3, 1), size);
     }
@@ -23,7 +23,7 @@ public sealed class WindowsPreviewHostTests
     public void Physical_size_rejects_scaled_int32_overflow()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            WindowsPreviewPhysicalSize.FromBounds(new Size(int.MaxValue, 1d), 2d));
+            PreviewPhysicalSize.FromBounds(new Size(int.MaxValue, 1d), 2d));
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class WindowsPreviewHostTests
         var sink = new FakeSink(Contract(revision: 4));
         var dispatcher = new ManualDispatcher();
         var rejected = new List<Exception>();
-        using var mailbox = new WindowsPreviewFrameMailbox(sink, dispatcher, rejected.Add);
+        using var mailbox = new PreviewFrameMailbox(sink, dispatcher, rejected.Add);
         PresentationBuffer first = Frame(fill: 0x11, revision: 4);
         PresentationBuffer newest = Frame(fill: 0x22, revision: 4);
 
@@ -50,7 +50,7 @@ public sealed class WindowsPreviewHostTests
     {
         var sink = new FakeSink(Contract(revision: 8));
         var dispatcher = new ManualDispatcher();
-        using var mailbox = new WindowsPreviewFrameMailbox(sink, dispatcher, _ => { });
+        using var mailbox = new PreviewFrameMailbox(sink, dispatcher, _ => { });
 
         Assert.Throws<PresentationContractException>(() =>
             mailbox.Enqueue(Frame(fill: 0x33, revision: 7)));
@@ -64,7 +64,7 @@ public sealed class WindowsPreviewHostTests
         var sink = new FakeSink(Contract(revision: 12));
         var dispatcher = new ManualDispatcher();
         var rejected = new List<Exception>();
-        using var mailbox = new WindowsPreviewFrameMailbox(sink, dispatcher, rejected.Add);
+        using var mailbox = new PreviewFrameMailbox(sink, dispatcher, rejected.Add);
         mailbox.Enqueue(Frame(fill: 0x44, revision: 12));
 
         sink.Contract = Contract(revision: 13);
@@ -79,7 +79,7 @@ public sealed class WindowsPreviewHostTests
     {
         var sink = new FakeSink(Contract(revision: 20));
         var dispatcher = new ManualDispatcher();
-        var mailbox = new WindowsPreviewFrameMailbox(sink, dispatcher, _ => { });
+        var mailbox = new PreviewFrameMailbox(sink, dispatcher, _ => { });
         mailbox.Enqueue(Frame(fill: 0x55, revision: 20));
 
         mailbox.Dispose();
@@ -108,7 +108,7 @@ public sealed class WindowsPreviewHostTests
             factory);
         int recoveries = 0;
         backend.PresenterRecoveryRequested += (_, _) => recoveries++;
-        Assert.True(WindowsPresentationGuarantee.IsEffective(
+        Assert.True(PresentationGuarantee.IsEffective(
             backend.Current,
             backend.IsPresenterAvailable));
 
@@ -119,7 +119,7 @@ public sealed class WindowsPreviewHostTests
         Assert.True(failed.Disposed);
         Assert.False(backend.IsPresenterAvailable);
         Assert.Contains("present failed", backend.PresenterFailure!);
-        Assert.False(WindowsPresentationGuarantee.IsEffective(
+        Assert.False(PresentationGuarantee.IsEffective(
             backend.Current,
             backend.IsPresenterAvailable));
 
@@ -129,7 +129,7 @@ public sealed class WindowsPreviewHostTests
         Assert.Null(backend.PresenterFailure);
         Assert.Equal(1, environment.RefreshCalls);
         Assert.Equal(1, recoveries);
-        Assert.True(WindowsPresentationGuarantee.IsEffective(
+        Assert.True(PresentationGuarantee.IsEffective(
             backend.Current,
             backend.IsPresenterAvailable));
         backend.Present(Frame(fill: 0x78, revision: 4));
@@ -254,14 +254,14 @@ public sealed class WindowsPreviewHostTests
             0);
     }
 
-    private sealed class FakeSink : IWindowsPreviewFrameSink
+    private sealed class FakeSink : IPreviewFrameSink
     {
         internal FakeSink(DisplayContract contract) => Contract = contract;
 
         internal DisplayContract Contract { get; set; }
         internal List<PresentationBuffer> Presented { get; } = [];
 
-        DisplayContract IWindowsPreviewFrameSink.Current => Contract;
+        DisplayContract IPreviewFrameSink.Current => Contract;
 
         public void Present(PresentationBuffer frame)
         {
@@ -270,7 +270,7 @@ public sealed class WindowsPreviewHostTests
         }
     }
 
-    private sealed class ManualDispatcher : IWindowsPreviewDispatcher
+    private sealed class ManualDispatcher : IPreviewDispatcher
     {
         private readonly Queue<Action> _work = new();
 

@@ -47,11 +47,11 @@ public partial class MainWindow : Window
                 // instead (the same fallback an unsupported display already uses), and the first
                 // ManagedV2 render reports the real reason through the status bar it already has.
                 // LegacyV1 projects never touch the CMM at all and keep working entirely.
-                if (OperatingSystem.IsWindows())
+                if (ActivePreview is { } preview)
                 {
                     try
                     {
-                        WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
+                        preview.ConfigureColorManagement(vm.PresentationColorManagement);
                     }
                     catch (OpenRevelare.ColorManagement.ColorManagementException ex)
                     {

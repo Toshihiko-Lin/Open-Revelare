@@ -27,12 +27,26 @@ public partial class MainWindow
     private bool _windowsPresentationWorkerActive;
     private bool _windowsPresentationClosed;
     private long _windowsPresentationEpoch;
-    private string _lastWindowsColorDiagnostics = "Windows color presentation has not initialized.";
+    private string _lastWindowsColorDiagnostics = "Native color presentation has not initialized.";
+
+    /// <summary>
+    /// The native preview host for THIS platform, or null where there is none (Linux today). Both
+    /// hosts present the same contract-bound FP16 buffer the shared compositor produces; choosing
+    /// one here is the only place the composition root knows which OS it is on.
+    /// </summary>
+    private IPreviewHost? ActivePreview =>
+        OperatingSystem.IsWindows() ? WindowsPreview
+        : OperatingSystem.IsMacOS() ? MacOSPreview
+        : null;
 
     private void InitializeWindowsPresentation()
     {
-        bool enabled = OperatingSystem.IsWindows();
-        WindowsPreview.IsVisible = enabled;
+        IPreviewHost? preview = ActivePreview;
+        bool enabled = preview is not null;
+        // Each host hides itself off its own platform; the active one starts visible and then
+        // gates itself on presenter availability.
+        WindowsPreview.IsVisible = ReferenceEquals(preview, WindowsPreview);
+        MacOSPreview.IsVisible = ReferenceEquals(preview, MacOSPreview);
         UpdateNoticeStripPlacement();
         // 徽章和【帮助 → 复制色彩诊断】原本跟着 WindowsPreview 一起关掉。但它们承载的是两件事，
         // 只有「显示链路契约」是 Windows 概念；「这一卷走的是哪条色彩管线、TIFF 输入按什么假设」
@@ -48,22 +62,26 @@ public partial class MainWindow
 
         ColorDiagnosticStatus.IsVisible = true;
 
-        WindowsPreview.ContractChanged += OnWindowsDisplayContractChanged;
-        WindowsPreview.PresentationFailed += OnWindowsPresentationFailed;
-        WindowsPreview.PresentationRecoveryRequested += OnWindowsPresenterRecoveryRequested;
-        WindowsPreview.PropertyChanged += (_, args) =>
+        preview!.ContractChanged += OnWindowsDisplayContractChanged;
+        preview.PresentationFailed += OnWindowsPresentationFailed;
+        preview.PresentationRecoveryRequested += OnWindowsPresenterRecoveryRequested;
+        // Both hosts are AvaloniaObjects with the same six status properties; any of them changing
+        // means the badge must be recomputed, and presenter availability also moves the notice strip.
+        ((AvaloniaObject)preview).PropertyChanged += (_, args) =>
         {
-            if (args.Property == WindowsPreviewHost.CurrentContractProperty ||
-                args.Property == WindowsPreviewHost.DisplayDiagnosticsProperty ||
-                args.Property == WindowsPreviewHost.PresenterDiagnosticsProperty ||
-                args.Property == WindowsPreviewHost.VisibleWarningProperty ||
-                args.Property == WindowsPreviewHost.LastPresentationErrorProperty ||
-                args.Property == WindowsPreviewHost.IsPresenterAvailableProperty)
+            switch (args.Property.Name)
             {
-                UpdateWindowsColorStatus();
+                case nameof(IPreviewHost.CurrentContract):
+                case "DisplayDiagnostics":
+                case "PresenterDiagnostics":
+                case nameof(IPreviewHost.VisibleWarning):
+                case nameof(IPreviewHost.LastPresentationError):
+                case nameof(IPreviewHost.IsPresenterAvailable):
+                    UpdateWindowsColorStatus();
+                    break;
             }
 
-            if (args.Property == WindowsPreviewHost.IsPresenterAvailableProperty)
+            if (args.Property.Name == nameof(IPreviewHost.IsPresenterAvailable))
                 UpdateNoticeStripPlacement();
         };
         Opened += (_, _) => QueueWindowsPresentation();
@@ -87,8 +105,7 @@ public partial class MainWindow
         // zero height, so moving the strip into the viewer's cell hands that height back to the
         // preview without any conditional markup. ZIndex is required there because a Grid paints
         // in child order and the viewer Border is declared after the strip.
-        bool childWindowCoversViewport =
-            OperatingSystem.IsWindows() && WindowsPreview.IsPresenterAvailable;
+        bool childWindowCoversViewport = ActivePreview?.IsPresenterAvailable == true;
 
         Grid.SetRow(NoticeStrip, childWindowCoversViewport ? 1 : 2);
         NoticeStrip.ZIndex = childWindowCoversViewport ? 0 : 1;
@@ -102,9 +119,9 @@ public partial class MainWindow
         MainViewModel viewModel,
         string? propertyName)
     {
-        if (!OperatingSystem.IsWindows())
+        if (ActivePreview is null)
         {
-            // 非 Windows 只关心两件事：徽章内容本身，以及「有没有打开卷」这个可见性条件。
+            // 没有原生宿主的平台只关心两件事：徽章内容本身，以及「有没有打开卷」这个可见性条件。
             if (propertyName is nameof(MainViewModel.ColorPipelineDiagnostic)
                              or nameof(MainViewModel.HasImage))
             {
@@ -133,7 +150,7 @@ public partial class MainWindow
 
     private void OnWindowsPresentationFailed(
         object? sender,
-        WindowsPreviewPresentationFailedEventArgs args)
+        PreviewPresentationFailedEventArgs args)
     {
         if (args.Error is PresentationContractException)
             QueueWindowsPresentation();
@@ -155,7 +172,7 @@ public partial class MainWindow
     /// </summary>
     private void QueueWindowsPresentation()
     {
-        if (!OperatingSystem.IsWindows() || _windowsPresentationClosed) return;
+        if (ActivePreview is null || _windowsPresentationClosed) return;
         if (!Dispatcher.UIThread.CheckAccess())
         {
             Dispatcher.UIThread.Post(QueueWindowsPresentation, DispatcherPriority.Background);
@@ -225,7 +242,7 @@ public partial class MainWindow
         if (_windowsPresentationClosed || epoch != _windowsPresentationEpoch) return;
         try
         {
-            WindowsPreview.PresentNewest(buffer);
+            ActivePreview!.PresentNewest(buffer);
             UpdateWindowsColorStatus();
         }
         catch (PresentationContractException)
@@ -259,7 +276,7 @@ public partial class MainWindow
 
     private WindowsPresentationSnapshot? CaptureWindowsPresentationSnapshot()
     {
-        if (Vm is not { } vm || WindowsPreview.CurrentContract is not { } contract) return null;
+        if (Vm is not { } vm || ActivePreview?.CurrentContract is not { } contract) return null;
         double logicalWidth = ViewPort.Bounds.Width;
         double logicalHeight = ViewPort.Bounds.Height;
         double renderScaling = RenderScaling;
@@ -526,7 +543,7 @@ public partial class MainWindow
     /// </summary>
     private void UpdateColorPipelineOnlyStatus()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (ActivePreview is not null) return;
         if (Vm is not { HasImage: true } vm)
         {
             ColorDiagnosticStatus.IsVisible = false;
@@ -542,31 +559,23 @@ public partial class MainWindow
 
     private void UpdateWindowsColorStatus()
     {
-        if (!OperatingSystem.IsWindows()) return;
-        DisplayContract? contract = WindowsPreview.CurrentContract;
+        if (ActivePreview is not { } preview) return;
+        DisplayContract? contract = preview.CurrentContract;
         if (contract is null)
         {
-            ColorDiagnosticText.Text = "Windows preview · probing display contract…";
+            ColorDiagnosticText.Text = "Native preview · probing display contract…";
             ColorDiagnosticText.Foreground = Brushes.Orange;
             // Transient, and not a fault: do not leave a stale hover behind.
             ToolTip.SetTip(ColorDiagnosticStatus, null);
             return;
         }
 
-        WindowsDisplayDiagnostics? display = WindowsPreview.DisplayDiagnostics;
-        Vm?.SetDisplayHdrCapability(
-            display?.ActiveColorMode == WindowsAdvancedColorMode.HighDynamicRange
-                ? new DisplayHdrCapability(
-                    contract.SdrReferenceWhite,
-                    contract.ExtendedHeadroom,
-                    display.PanelMaxNits,
-                    display.PanelLuminanceFailureReason)
-                : null);
-        string monitor = display?.MonitorFriendlyName ?? display?.GdiDeviceName ?? contract.DisplayId;
-        string warning = WindowsPreview.VisibleWarning ?? WindowsPreview.LastPresentationError ?? string.Empty;
-        string guarantee = WindowsPresentationGuarantee.IsEffective(
+        Vm?.SetDisplayHdrCapability(DescribeDisplayCapability(preview, contract));
+        string monitor = DescribeMonitorName(preview, contract);
+        string warning = preview.VisibleWarning ?? preview.LastPresentationError ?? string.Empty;
+        string guarantee = PresentationGuarantee.IsEffective(
             contract,
-            WindowsPreview.IsPresenterAvailable)
+            preview.IsPresenterAvailable)
             ? "WYSIWYG"
             : "unmanaged";
         // The guarantee above is about the LAST hop only. On a roll whose input was never
@@ -598,6 +607,45 @@ public partial class MainWindow
             ColorDiagnosticBadge.FormatTooltip(hasWarning, colorManagementUnavailable));
     }
 
+    /// <summary>
+    /// What the picker hint and the histogram need to know about the screen, from whichever host
+    /// is active. Windows knows the panel's peak in nits (DXGI); macOS knows only the EDR ratio,
+    /// which is all its carrier is defined in — so the peak is null there and the hint speaks in
+    /// headroom alone.
+    /// </summary>
+    private static DisplayHdrCapability? DescribeDisplayCapability(IPreviewHost preview, DisplayContract contract)
+    {
+        switch (preview)
+        {
+            case WindowsPreviewHost windows:
+                return windows.DisplayDiagnostics is { ActiveColorMode: WindowsAdvancedColorMode.HighDynamicRange } display
+                    ? new DisplayHdrCapability(
+                        contract.SdrReferenceWhite,
+                        contract.ExtendedHeadroom,
+                        display.PanelMaxNits,
+                        display.PanelLuminanceFailureReason)
+                    : null;
+            case MacOSPreviewHost mac:
+                return mac.DisplayDiagnostics is { } screen && contract.ExtendedHeadroom > 1f
+                    ? new DisplayHdrCapability(
+                        contract.SdrReferenceWhite,
+                        contract.ExtendedHeadroom,
+                        PanelPeakNits: null,
+                        FailureReason: null)
+                    : null;
+            default:
+                return null;
+        }
+    }
+
+    private static string DescribeMonitorName(IPreviewHost preview, DisplayContract contract) => preview switch
+    {
+        WindowsPreviewHost windows =>
+            windows.DisplayDiagnostics?.MonitorFriendlyName ?? windows.DisplayDiagnostics?.GdiDeviceName ?? contract.DisplayId,
+        MacOSPreviewHost mac => mac.DisplayDiagnostics?.LocalizedName ?? contract.DisplayId,
+        _ => contract.DisplayId,
+    };
+
     private string BuildWindowsColorDiagnostics(Exception? compositionError = null)
     {
         var text = new StringBuilder();
@@ -608,15 +656,15 @@ public partial class MainWindow
         // 报告在三平台都能出，但只有 render/input/CMM 这一半是三平台共有的。下面每一段读的都是
         // Windows presenter 的状态，在别的平台上全是默认值 —— 打印出来不是「诊断信息不足」，
         // 而是一串看着像结论的空值。说清楚它为什么不在，比留一堆 unavailable 诚实。
-        if (!OperatingSystem.IsWindows())
+        if (ActivePreview is not { } preview)
         {
             text.AppendLine(
-                "Presenter contract: not applicable — the display-contract half of these " +
-                "diagnostics is Windows-only. Everything above applies on every platform.");
+                "Presenter contract: not applicable — this platform has no native preview host. " +
+                "Everything above applies on every platform.");
             return text.ToString().TrimEnd();
         }
 
-        DisplayContract? contract = WindowsPreview.CurrentContract;
+        DisplayContract? contract = preview.CurrentContract;
         if (contract is null)
         {
             text.AppendLine("Presenter contract: unavailable");
@@ -635,56 +683,23 @@ public partial class MainWindow
             text.AppendLine(contract.DeviceProfile is { } profile
                 ? $"Monitor profile: {profile.Description} [{profile.Identity.Sha256Hex}]"
                 : "Monitor profile: owned by system or unavailable");
-            bool effectiveWysiwyg = WindowsPresentationGuarantee.IsEffective(
+            bool effectiveWysiwyg = PresentationGuarantee.IsEffective(
                 contract,
-                WindowsPreview.IsPresenterAvailable);
+                preview.IsPresenterAvailable);
             text.AppendLine($"Contract WYSIWYG-capable: {contract.IsWysiwygGuaranteed}");
-            text.AppendLine($"Native presenter available: {WindowsPreview.IsPresenterAvailable}");
+            text.AppendLine($"Native presenter available: {preview.IsPresenterAvailable}");
             text.AppendLine($"Effective WYSIWYG guaranteed: {effectiveWysiwyg}");
             if (!string.IsNullOrWhiteSpace(contract.VisibleWarning))
                 text.AppendLine($"Fallback warning: {contract.VisibleWarning}");
         }
 
-        if (WindowsPreview.DisplayDiagnostics is { } display)
-        {
-            text.AppendLine(
-                $"Display probe: api={display.ProbeApi}; GDI={display.GdiDeviceName}; " +
-                $"path={display.MonitorDevicePath}; name={display.MonitorFriendlyName}");
-            text.AppendLine(
-                $"Advanced Color: active={display.AdvancedColorActive}; mode={display.ActiveColorMode}; " +
-                $"encoding={display.ColorEncoding}; bitsPerChannel={display.BitsPerColorChannel}; " +
-                $"rawFlags={display.AdvancedColorRawFlags}");
-            text.AppendLine(
-                $"Display profile probe: status={display.ProfileStatus}; scope={display.ProfileScope}; " +
-                $"file={display.ProfileFileName}; sha256={display.ProfileSha256}");
-            text.AppendLine(
-                $"Display fallback: {display.FallbackReason ?? "none"}; " +
-                $"contractCapableWYSIWYG={display.WysiwygGuaranteed}; " +
-                $"presenterAvailable={WindowsPreview.IsPresenterAvailable}; " +
-                $"effectiveWYSIWYG={WindowsPresentationGuarantee.IsEffective(contract, WindowsPreview.IsPresenterAvailable)}; " +
-                $"explicitRefresh={display.RequiresExplicitRefresh}");
-        }
+        string platform = preview.DescribePlatformDiagnostics();
+        if (platform.Length > 0) text.AppendLine(platform);
 
-        if (WindowsPreview.PresenterDiagnostics is { } native)
-        {
-            text.AppendLine(
-                $"Native presenter: ABI={native.AbiVersion}; mode={native.Mode}; " +
-                $"size={native.Size.Width}x{native.Size.Height}; DXGI format=0x{native.DxgiFormat:X}; " +
-                $"colorSpace=0x{native.DxgiColorSpace:X}; colorSpaceSet={native.ColorSpaceWasSet}");
-            text.AppendLine(
-                $"Native adapter: LUID={native.AdapterLuid}; featureLevel=0x{native.FeatureLevel:X}; " +
-                $"WARP={native.UsingWarp}; childHwnd=0x{native.ChildHwnd:X}");
-            text.AppendLine(
-                $"Native presents: ok={native.SuccessfulPresentCount}; rejected={native.RejectedPresentCount}; " +
-                $"lastResult={native.LastResult}; lastRevision={native.LastContractRevision}; " +
-                $"lastDisplay={native.LastDisplayId}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(WindowsPreview.LastPresentationError))
-            text.AppendLine($"Last presentation error: {WindowsPreview.LastPresentationError}");
+        if (!string.IsNullOrWhiteSpace(preview.LastPresentationError))
+            text.AppendLine($"Last presentation error: {preview.LastPresentationError}");
         if (compositionError is not null)
             text.AppendLine($"Composition error: {compositionError.GetType().Name}: {compositionError.Message}");
-        text.AppendLine($"Pointer routing: {WindowsPreviewHost.PointerInputLimitation}");
         return text.ToString().TrimEnd();
     }
 
@@ -700,13 +715,13 @@ public partial class MainWindow
 
     private void StopWindowsPresentation()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (ActivePreview is not { } preview) return;
         lock (_windowsPresentationGate)
         {
             _windowsPresentationClosed = true;
             _pendingWindowsPresentation = null;
         }
-        WindowsPreview.Dispose();
+        preview.Dispose();
     }
 
     private sealed record WindowsPresentationSnapshot(

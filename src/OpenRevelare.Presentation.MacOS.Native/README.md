@@ -30,6 +30,14 @@ create/present 的合同——已由两边的测试钉住（`MacOSNativeAbiTests
    触发新 revision（`MacOSDisplayEnvironmentTests.Headroom_change_publishes_a_new_revision`
    证明了托管半边；真机要证明 AppKit 通知真的到达）。
 
+## 托管侧接线（已完成）
+
+`OpenRevelare.Gui/Controls/MacOSPreviewHost.cs` 是 `NativeControlHost` 子类：mac 上取到 `NSView` 后创建
+`MacOSPreviewHostBackend`（环境 + presenter + 重建/恢复回路），组合根 `MainWindow.WindowsPresentation.cs`
+通过 `IPreviewHost` 按平台选宿主，Windows 与 macOS 走同一条合成队列。刷新靠 1 秒轮询 +
+Avalonia 的 `ScalingChanged`/`PositionChanged`，不挂 AppKit 通知——与 Win32 宿主在消息迟到时的
+回退路径相同。
+
 ## 构建
 
 ```bash

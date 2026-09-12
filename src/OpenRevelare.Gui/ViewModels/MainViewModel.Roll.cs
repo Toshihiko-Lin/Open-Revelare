@@ -268,7 +268,18 @@ public partial class MainViewModel
         if (_displayCapability is not { } display)
             return Loc.T("当前显示器不在 HDR 模式：这里的选择只影响导出，以及在 HDR 屏上的显示。");
         if (display.PanelPeakNits is not { } panelPeak)
+        {
+            // macOS reports headroom as a ratio and never as nits: the EDR carrier is defined
+            // relative to SDR white, so a ratio is the whole truth there, not a missing number.
+            if (display.FailureReason is null && display.Headroom > 1f)
+            {
+                return Loc.F($"此屏当前 EDR 余量 {display.Headroom:0.0}×（随亮度设置变化）。")
+                    + (targetHeadroom <= display.Headroom
+                        ? Loc.F($"本档 {targetHeadroom:0.0}× 可完整显示。")
+                        : Loc.F($"本档 {targetHeadroom:0.0}× 超出 {targetHeadroom - display.Headroom:0.0}×，最亮的部分会在 {display.Headroom:0.0}× 处被裁掉；调低屏幕亮度可换到更多余量。"));
+            }
             return Loc.F($"显示器在 HDR 模式，但读不到面板峰值亮度（{display.FailureReason}），无法判断会不会裁。");
+        }
 
         string tier = panelPeak >= 1000f ? "DisplayHDR 1000"
             : panelPeak >= 600f ? "DisplayHDR 600"
