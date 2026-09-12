@@ -561,9 +561,12 @@ GUI composition root 选择实现。Core、ColorManagement、Preview 和 ViewMod
 - 监听 window screen/profile/headroom 变化并递增 revision；
 - `NSScreen.colorSpace` 默认只用于诊断、能力与次要 app-managed surface，不在主 tagged layer 上再手动转一次。
 
-项目目标是 `net8.0` 而不是 `net8.0-macos`。建议用一个 Objective-C++ C ABI dylib 封装 AppKit/Metal，
-沿用 `packaging/macos` 已有的 dylib 拷贝、install-name 和签名流程，避免在 C# 各处散落
-`objc_msgSend` P/Invoke。
+项目目标是 `net8.0` 而不是 `net8.0-macos`。实现为一个 Objective-C++ C ABI dylib
+（`src/OpenRevelare.Presentation.MacOS.Native`，导出 `orwm_probe/create/resize/present/query_diagnostics/destroy`），
+沿用 `packaging/macos` 已有的 dylib 拷贝、install-name 和签名流程（`build-macos-presenter.sh`），
+托管侧 `OpenRevelare.Presentation.MacOS` 镜像 Win32 那一层：`MacOSDisplayEnvironment`（语义键含
+显示器 id、色彩空间名、backing scale、当前/potential EDR 值）、`MacOSDisplayContractProvider`（D-026）、
+`MacOSPreviewPresenter`（stale revision 拒绝、换屏/换 EDR 请求即要求重建）。
 
 `CAMetalLayer.wantsExtendedDynamicRangeContent` 暂不在本文写死。Apple 的 HDR/EDR 示例会设置它，
 但“允许 extended RGB 分量以承载 SDR 广色域”和“让内容使用高于 SDR 白的亮度”不是同一个产品决定。
@@ -697,7 +700,7 @@ compositor。
 | M2 | **完成** | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | 有效 ICC 原子转换；untagged/坏 ICC 显式 fallback 与项目往返；normalized TIFF16 与 extended TIFF32F round-trip；exact embedded ICC；L2 显式迁移；稳定 render fingerprint |
 | M3 | Windows 切片完成；macOS 待办 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | Windows 主图/patch/masks/crop 单一合成且末跳前无 8-bit/clamp；D-011 已关闭，D-012 留给 macOS |
 | M4 | 代码/自动化完成；硬件人工验收待办 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | transform-count、ABI、recovery/fallback 与当前 EIZO 契约探针已验证；色度计/参考查看器和双屏人工比较待完成 |
-| M5 | 按当前目标延后 | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | Windows PR 合入后另开修复；D-012 随该阶段关闭 |
+| M5 | **托管半边完成，原生半边待真机**（2026-09-12） | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | `OpenRevelare.Presentation.MacOS`（环境 / 契约 / presenter）+ 25 条假件测试全绿；`Presentation.MacOS.Native` 的 Obj-C++ 源码与 `build-macos-presenter.sh` 已写但**未在 Mac 上编译**；D-026 定了 mac 的 reference-white/headroom 政策，D-012 仍 Open，候选规则见 D-026 |
 | M6 | 部分完成 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux/macOS 部分待后续 |
 
 ### 15.1 提交边界
@@ -773,6 +776,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 
 | D-023 | Accepted | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
 | D-024 | Accepted | 扩展渲染的输出空间**恒为 `LinearExtendedSrgb`**（D-005 的 canonical 载体），不跟随工程的 output space 选择 | output space 选择器选的是 display-referred 编码（sRGB / Adobe RGB / Rec709），每一个都同时断言了一个有界范围和一条传递曲线，而扩展渲染两者都没有。载体是线性、Rec709 原色、无界，并且能用 `[0,1]` 之外的分量表示这些原色之外的颜色——选"Adobe RGB HDR"不会让色域变宽（载体本来就比 Adobe RGB 宽），只会多一条需要撤销的曲线。像素因此必须贴载体自己的 profile：给线性数值贴带 TRC 的 ICC 正是 D-003 要防的"只换标签不做转换" |
+| D-026 | Accepted（待真机复核） | macOS 的 `ReferenceWhiteScale` **恒为 1**，`ExtendedHeadroom` = `NSScreen.maximumExtendedDynamicRangeColorComponentValue`（当前值，不取 potential）；只有一种模式（系统所有的 FP16 载体），探不到屏幕即 emergency。presenter 在且仅在 headroom > 1 时置 `wantsExtendedDynamicRangeContent`——这是 D-012 的**候选**答案 | Apple 的 extended-linear-sRGB 载体把 SDR 白定在 canonical 1.0（相对亮度滑块，不是 nits），所以没有什么可乘——这与 Windows HDR（D-020，1.0 = 80 nits，应用自己抬 diffuse white）正好是镜像：同一份载体字节，抬白的归属相反，契约记录归属，builder 按契约行事。headroom 直接用 AppKit 报的当前值：potential 是别的亮度下能到的，不是现在会显示的；错的"安全线"比没有更糟。EDR 请求跟随 headroom：无余量时请求它一无所获且可能多一次 tone map，有余量时不请求则 >1 全被 layer 裁掉。D-012 保持 Open 直到真机证明开启该标记不改变 SDR 亮度 |
 
 ### 17.1 拒绝的替代方案
 
@@ -807,6 +811,11 @@ code 685（肩部前的线性 1.0）在 `asymptote = 1` 下渲染到 0.75，在 
 纸白是否与 SDR 版本对得上；以及高光细节相对于 `asymptote` 的可见增益。
 
 ### D-012：macOS EDR（Windows 侧已由 D-020 结案）
+
+> **候选答案已实现，等真机判定。** D-026 把 `wantsExtendedDynamicRangeContent` 定为"当且仅当
+> 契约 headroom > 1"，`MacOSDisplayContractProvider.ShouldRequestExtendedRange` 就是那条规则，
+> presenter 在它翻转时要求重建（`MacOSPreviewPresenterTests.Headroom_appearing_flips_the_edr_request_and_requires_recreation`）。
+> 下面的 spike 清单现在有了一个具体的被试对象。
 
 > **Windows 的 reference white 不再是开放决策。** D-020 已按 Advanced Color 模式分流并落地：
 > WCG `1.0`、HDR `SdrWhiteNits / 80`，由 `WindowsDisplayEnvironmentTests` 的三条用例钉住。
