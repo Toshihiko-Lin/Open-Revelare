@@ -96,6 +96,35 @@ public sealed class GainMapJpegTests
     }
 
     /// <summary>
+    /// The sprocket mask is paper white in both renditions, so the map carries no gain there: an
+    /// HDR display shows the holes as an SDR one does. Not bit-zero — the SDR shoulder only
+    /// approaches 1.0 asymptotically, so the base's fill sits a hair under it (about 0.98) while
+    /// the extended fill is pinned to exactly 1.0 — but a few hundredths of a stop, which is the
+    /// map's own quantisation step and invisible next to the picture's stops of gain.
+    /// </summary>
+    [Fact]
+    public void Gain_map_carries_no_gain_over_the_sprocket_mask()
+    {
+        const int masked = 6;   // the fixture's only pixel above the default threshold
+        (RenderedFrame sdr, RenderedFrame hdr, OutputTarget target) = RenderPair(ColorSpaces.Srgb, sprocket: true);
+        for (int c = 0; c < 3; c++) Assert.Equal(1f, hdr.Pixels.Data[masked * 3 + c]);
+
+        HdrGainMap map = HdrGainMap.Compute(sdr, hdr, ColorSpaces.Srgb, target);
+        float[] sdrLinear = (float[])sdr.Pixels.Data.Clone();
+        OutputRender.Decode(sdrLinear, ColorSpaces.Srgb);
+        for (int c = 0; c < 3; c++)
+        {
+            int i = masked * 3 + c;
+            float reconstructed = HdrGainMap.Reconstruct(sdrLinear[i], map.Map.Data[i], c, map.Metadata, 1f);
+            float gainStops = MathF.Log2(reconstructed / sdrLinear[i]);
+            Assert.InRange(gainStops, -0.05f, 0.05f);
+            Assert.InRange(reconstructed, 0.98f, 1.02f);
+        }
+        // And the map is not empty overall — the picture's highlights still get their headroom.
+        Assert.True(map.Metadata.HdrCapacityMax > 0.5f);
+    }
+
+    /// <summary>
     /// A colour outside the base's primaries is desaturated toward its own grey, not clipped: its
     /// luminance survives, no component goes negative, and the map's range stays the content's
     /// rather than growing by the several stops a clipped-to-black component would add.
@@ -276,10 +305,10 @@ public sealed class GainMapJpegTests
     /// member of the shoulder family in <paramref name="baseSpace"/>, no print LUT on either.
     /// </summary>
     private static (RenderedFrame Sdr, RenderedFrame Hdr, OutputTarget Target) RenderPair(
-        ColorSpaceDef baseSpace, bool neutral = false)
+        ColorSpaceDef baseSpace, bool neutral = false, bool sprocket = false)
     {
-        var hdrParams = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = Peak };
-        var sdrParams = new FrameParams { OutputSpace = baseSpace.Name, PrintLut = "", HdrPeakNits = 0d };
+        var hdrParams = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = Peak, SprocketEnabled = sprocket };
+        var sdrParams = new FrameParams { OutputSpace = baseSpace.Name, PrintLut = "", HdrPeakNits = 0d, SprocketEnabled = sprocket };
         using var cmm = new LittleCmsEngine();
         RenderedFrame hdr = Pipeline.Render(MakeWorkingFrame(neutral), hdrParams, ColorPipelineVersion.ManagedV2, cmm);
         RenderedFrame sdr = Pipeline.Render(MakeWorkingFrame(neutral), sdrParams, ColorPipelineVersion.ManagedV2, cmm);

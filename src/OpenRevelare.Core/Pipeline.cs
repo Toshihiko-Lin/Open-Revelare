@@ -240,7 +240,10 @@ public static class Pipeline
             // whose legacy route either bypassed the cube or applied only a target TRC.
             FrameParams scene = cal.Clone();
             scene.OutputIntent = OutputIntent.None;
-            pixels = ProcessFrame(source.Pixels, scene);
+            // An extended target needs to know which output pixels are FILL — the sprocket mask
+            // and the rotation's corners — because fill is not picture and must not be rendered
+            // as one (see below). The SDR path never asks, so it stays bit-identical.
+            pixels = ProcessFrame(source.Pixels, scene, target.IsExtended, out bool[]? fill);
             ColorPipeline.ToOutputTargetFor(
                 pixels.Data,
                 cal,
@@ -257,6 +260,19 @@ public static class Pipeline
                 // so they can push a rendered value back past the ceiling it established.
                 Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
                 HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
+
+                // FILL IS PAPER WHITE, NOT A HIGHLIGHT. The mask and the rotation corners are
+                // written as linear 1.0 before the log encode, which is the TOP of the Cineon
+                // domain (code 1032): the SDR shoulder squeezes that to paper white, which is what
+                // the fill has always meant, but the extended shoulder aims at the headroom and
+                // would carry the same value to the peak — sprocket holes blazing at the roll's
+                // HDR limit, and a gain map that lights them up on every HDR display. Nothing was
+                // measured there, so there is nothing for the headroom to show; the fill is pinned
+                // to the carrier's diffuse white, where it reads exactly as it does in SDR and the
+                // gain map stays empty. It runs after the guard because exposure is multiplicative
+                // and the fill is not something exposure applies to either.
+                if (fill is not null)
+                    Sprocket.ApplyMask(pixels.Data, fill);
             }
             else
             {
@@ -279,7 +295,20 @@ public static class Pipeline
 
     /// <summary>Run Stage 1 and, for BASIC intent, the sRGB exit TRC.</summary>
     public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal)
+        => ProcessFrame(img, cal, trackFill: false, out _);
+
+    /// <summary>
+    /// <see cref="ProcessFrame(ImageBuffer, FrameParams)"/>, optionally reporting which OUTPUT
+    /// pixels are fill rather than picture: the sprocket/light-board mask and the corners the
+    /// straighten rotation uncovers, both carried through the same orientation → rotation → crop
+    /// the pixels go through. Null when not tracked or when the frame has neither.
+    ///
+    /// A pixel the rotation's bilinear blends with fill counts as fill: in the linear domain the
+    /// fill is far above every picture value, so any share of it dominates the blend.
+    /// </summary>
+    private static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal, bool trackFill, out bool[]? fill)
     {
+        fill = null;
         // ── Pre-inversion linear-domain corrections (distortion → vignette) ───────
         // Order mirrors pipeline.py: (lensfun) → distortion → (lcc) → vignette → (decouple).
         //
@@ -371,6 +400,9 @@ public static class Pipeline
         if (cal.CropRect != null)
             result = Geometry.ApplyCrop(result, cal.CropRect.Value);
 
+        if (trackFill && (sprocketMask != null || cal.Rotation != 0.0))
+            fill = MapFillThroughGeometry(sprocketMask, src.Width, src.Height, cal);
+
 
         // ── Output intent gate ────────────────────────────────────────────────
         if (cal.OutputIntent == OutputIntent.None)
@@ -384,5 +416,35 @@ public static class Pipeline
         //    the preview and the exported file use, so the two agree by construction.
         Stage2.ApplyChain(result.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return result;
+    }
+
+    /// <summary>
+    /// The fill mask in OUTPUT coordinates. The mask is known on the source grid; the picture
+    /// then goes through the geometry ops, so the mask goes through the very same ops — as a
+    /// 1.0/0.0 image, with the rotation's own fill so its corners are counted — rather than
+    /// through a second, hand-kept copy of their arithmetic. Any non-zero share of fill after the
+    /// rotation's bilinear marks the pixel; see the tracking overload of <c>ProcessFrame</c>.
+    /// </summary>
+    private static bool[] MapFillThroughGeometry(bool[]? sprocketMask, int width, int height, FrameParams cal)
+    {
+        var mask = new ImageBuffer(width, height);
+        if (sprocketMask != null)
+            Sprocket.ApplyMask(mask.Data, sprocketMask);
+
+        if (cal.QuarterTurns != 0 || cal.FlipH || cal.FlipV)
+            mask = Geometry.ApplyOrientation(mask, cal.QuarterTurns, cal.FlipH, cal.FlipV);
+        if (cal.Rotation != 0.0)
+            mask = Geometry.ApplyRotation(mask, cal.Rotation, fill: 1.0f);
+        if (cal.CropRect != null)
+            mask = Geometry.ApplyCrop(mask, cal.CropRect.Value);
+
+        var fill = new bool[mask.PixelCount];
+        float[] data = mask.Data;
+        ParallelSweep.Over(fill.Length, (from, to) =>
+        {
+            for (int p = from; p < to; p++)
+                fill[p] = data[p * 3] > 0.0f;
+        });
+        return fill;
     }
 }

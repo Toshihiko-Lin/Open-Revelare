@@ -92,6 +92,74 @@ public sealed class OutputTargetTests
     }
 
     /// <summary>
+    /// The sprocket/light-board mask is fill, not picture: it is written as the top of the Cineon
+    /// domain, which the SDR shoulder squeezes to paper white but the extended shoulder would carry
+    /// to the peak. On an extended target it must sit at the carrier's diffuse white — exactly 1.0,
+    /// unmoved by exposure — while every other pixel renders as if the mask were not there.
+    /// </summary>
+    [Fact]
+    public void Sprocket_mask_is_diffuse_white_not_a_highlight_on_an_extended_target()
+    {
+        // The fixture's seventh pixel is the only one whose luma clears the default threshold —
+        // bright on the NEGATIVE, so it is a shadow in the picture and paper white under the mask.
+        const int masked = 6;
+        var withMask = new FrameParams
+        {
+            OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d,
+            SprocketEnabled = true, ExposureEv = 1.0,
+        };
+        FrameParams withoutMask = withMask.Clone();
+        withoutMask.SprocketEnabled = false;
+        using var cmm = new LittleCmsEngine();
+
+        float[] masked_ = Pipeline.Render(
+            MakeWorkingFrame(), withMask, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+        float[] unmasked = Pipeline.Render(
+            MakeWorkingFrame(), withoutMask, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+
+        Assert.Contains(unmasked, value => value > 1f);
+        for (int c = 0; c < 3; c++)
+        {
+            Assert.NotEqual(1f, unmasked[masked * 3 + c]);
+            Assert.Equal(1f, masked_[masked * 3 + c]);
+        }
+        for (int i = 0; i < masked_.Length; i++)
+        {
+            if (i / 3 == masked) continue;
+            Assert.Equal(
+                BitConverter.SingleToInt32Bits(unmasked[i]),
+                BitConverter.SingleToInt32Bits(masked_[i]));
+        }
+    }
+
+    /// <summary>
+    /// The straighten rotation's corners are the same kind of fill and get the same treatment; a
+    /// picture pixel next to them is still allowed above diffuse white.
+    /// </summary>
+    [Fact]
+    public void Rotation_corners_are_diffuse_white_on_an_extended_target()
+    {
+        var cal = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d, Rotation = 12.0 };
+        using var cmm = new LittleCmsEngine();
+
+        RenderedFrame frame = Pipeline.Render(
+            MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm);
+
+        // Which output pixels the rotation uncovers, by the rotation's own rule.
+        ImageBuffer corners = Geometry.ApplyRotation(new ImageBuffer(4, 2), cal.Rotation, fill: 1.0f);
+        int cornerCount = 0;
+        for (int p = 0; p < corners.PixelCount; p++)
+        {
+            if (corners.Data[p * 3] != 1f) continue;
+            cornerCount++;
+            for (int c = 0; c < 3; c++) Assert.Equal(1f, frame.Pixels.Data[p * 3 + c]);
+        }
+        Assert.True(cornerCount > 0, "a 12° turn of a 4×2 frame must uncover at least one corner");
+        Assert.True(cornerCount < corners.PixelCount, "and must leave some picture");
+        Assert.Contains(frame.Pixels.Data, value => value > 1f);
+    }
+
+    /// <summary>
     /// A roll with no HDR peak must render exactly as it always has — same pixels, same
     /// display-referred encoding. This is the D-022 gate at the level users actually meet.
     /// </summary>
