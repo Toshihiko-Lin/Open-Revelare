@@ -67,7 +67,7 @@ JOBS=""
 if [ "$OS" = "Darwin" ]; then JOBS="$(sysctl -n hw.ncpu)"; else JOBS="$(getconf _NPROCESSORS_ONLN)"; fi
 case "$JOBS" in ''|*[!0-9]*) JOBS=1 ;; esac
 
-echo "==> 使用官方 autotools 构建 shared lcms2（$RID）"
+echo "==> 使用官方 autotools 构建 shared lcms2（${RID}）"
 cd "$SOURCE"
 ./configure \
   --prefix="$PREFIX" \
@@ -118,7 +118,7 @@ fi
 # 真红了，三个方向都在 PR4-HANDOFF §8.4：钉镜像 / 调低使用面 / 改 README。
 GLIBC_FLOOR="2.35"      # 与 README.md 与 README.en.md 的支持矩阵同源，改一处必须改三处
 if [ "$OS" = "Linux" ]; then
-  echo "==> 校验 glibc 符号下限（承诺 ≤ $GLIBC_FLOOR）"
+  echo "==> 校验 glibc 符号下限（承诺 ≤ ${GLIBC_FLOOR}）"
   # 能走到这里说明 autotools 刚刚成功链接过一次，binutils 必然在场，所以硬失败是安全的：
   # 找不到工具意味着环境不对，而不是「这台机器不方便检查」。
   if command -v readelf >/dev/null 2>&1; then
@@ -148,7 +148,7 @@ if [ "$OS" = "Linux" ]; then
     echo "    需要的 glibc 版本：$(printf '%s' "$REQUIRED_VERSIONS" | tr '\n' ' ')"
     echo "    其中最高：$WORST_VERSION"
     if [ "$(glibc_key "$WORST_VERSION")" -gt "$(glibc_key "$GLIBC_FLOOR")" ]; then
-      echo "错误：$CANONICAL 要求 glibc $WORST_VERSION，高于 README 承诺的 $GLIBC_FLOOR" >&2
+      echo "错误：${CANONICAL} 要求 glibc ${WORST_VERSION}，高于 README 承诺的 ${GLIBC_FLOOR}" >&2
       echo "      这份 AppImage 在 Ubuntu 22.04 / Debian 12 上会加载失败。" >&2
       echo "      三个方向（见 PR4-HANDOFF §8.4）：" >&2
       echo "        1. 把 release 的 linux job 钉到与承诺相符的 runner 镜像；" >&2
