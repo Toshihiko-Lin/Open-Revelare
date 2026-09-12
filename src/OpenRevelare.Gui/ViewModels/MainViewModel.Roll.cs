@@ -315,16 +315,17 @@ public partial class MainViewModel
     /// <summary>
     /// False while HDR is on. The extended render's carrier is fixed to linear extended sRGB
     /// (D-024) and it does not run the print LUT (D-021), so the two pickers would change
-    /// nothing; they are greyed rather than left to look effective, and the reason is stated in
-    /// the toggle's tooltip, the hint under the slider and the status bar at the moment of
-    /// switching — a disabled control shows no tooltip of its own.
+    /// nothing. They are HIDDEN and replaced by a line saying what applies instead — not greyed:
+    /// a greyed "sRGB" reads as "HDR is clipped to sRGB", and the truth is the opposite (the
+    /// carrier clips no gamut at all). The reason is also in the toggle's tooltip, the hint under
+    /// the slider and the status bar at the moment of switching.
     /// </summary>
     public bool CanChooseOutputSpaceAndPrintLut => !_hdrEnabled;
 
     /// <summary>The toggle's hover text: what the control is, then where the roll stands on this display.</summary>
     public string HdrToggleTooltip =>
         Loc.T("关：印相渲染，高光收进纸白，一直以来的行为；不确定就关。开：纸白之上的宽容度铺到直方图下方【HDR 上限】所设的档数，导出随之。预览在本机余量内自动软校样。")
-        + "\n" + Loc.T("开启时【输出空间】与【胶片风格】不参与：扩展渲染的载体恒为线性扩展 sRGB（D-024），印片 LUT 是把高光收进纸白的显示参考表，与 HDR 互斥（D-021）。两个下拉随之变灰，关闭 HDR 即恢复。")
+        + "\n" + Loc.T("开启时【输出空间】与【胶片风格】不参与：扩展渲染的载体恒为线性扩展 sRGB、不裁色域（D-024），印片 LUT 是把高光收进纸白的显示参考表，与 HDR 互斥（D-021）。两个下拉让位给说明，关闭 HDR 即恢复所选值。")
         + "\n" + HdrLimitHint;
 
     /// <summary>

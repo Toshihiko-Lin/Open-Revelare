@@ -717,15 +717,19 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />
-                        <!-- 两个下拉在 HDR 开启时变灰：扩展渲染不用它们（D-024 / D-021），原因写在 HDR
-                             开关的 tooltip 与上限滑块的 hint 里。 -->
+                        <!-- 两个下拉在 HDR 开启时让位给一行说明，而不是灰着还显示 "sRGB" / "Kodak 2383"：
+                             扩展渲染不用它们（D-024 / D-021），灰掉的旧值会被读成"HDR 被裁到 sRGB"，
+                             而事实相反——载体不裁色域。原因也写在 HDR 开关的 tooltip 与上限滑块的 hint 里。 -->
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
-                                  IsEnabled="{Binding CanChooseOutputSpaceAndPrintLut}"
+                                  IsVisible="{Binding CanChooseOutputSpaceAndPrintLut}"
                                   ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
                             <ComboBoxItem Content="{i18n:T 'sRGB（通用）'}" />
                             <ComboBoxItem Content="{i18n:T 'Display P3（宽色域）'}" />
                             <ComboBoxItem Content="{i18n:T 'Adobe RGB（宽色域）'}" />
                         </ComboBox>
+                        <TextBlock Grid.Column="1" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center"
+                                   Text="{i18n:T '线性扩展 sRGB · 不裁色域'}" Foreground="{DynamicResource TextDimBrush}"
+                                   ToolTip.Tip="{i18n:T 'HDR 开启时的载体（D-024）：以 sRGB 原色为坐标轴、分量可为负或大于 1 的线性空间，P3、Adobe RGB 之外的颜色原样保留，由系统合成器映射到面板原生色域——比 SDR 下任何一个输出空间都宽。导出的 float32 TIFF 同样带此 profile。容器原色（P3 / BT.2020）要到 PQ 导出才需要选。'}" />
 
                         <!-- 胶片风格与输出空间并列，不并入其中：前者决定画面被渲染成什么样，
                              后者决定它被装进哪个容器，两者正交。内置两张印片（见
@@ -733,9 +737,13 @@
                              cube 的 TITLE。 -->
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
-                                  IsEnabled="{Binding CanChooseOutputSpaceAndPrintLut}"
+                                  IsVisible="{Binding CanChooseOutputSpaceAndPrintLut}"
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
                                   ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
+
+                        <TextBlock Grid.Column="3" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center" MinWidth="150"
+                                   Text="{i18n:T '解析肩部 · 不走印片'}" Foreground="{DynamicResource TextDimBrush}"
+                                   ToolTip.Tip="{i18n:T 'HDR 开启时不走印片 LUT（D-021）：印片是把高光收进纸白的显示参考表，与 HDR 互斥；扩展渲染用与 SDR 同一族的解析肩部，拐点以下逐位相同、拐点以上铺到所设上限。关闭 HDR 即恢复本卷所选的胶片风格。'}" />
 
                         <!-- HDR 与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成什么样，
                              输出空间决定装进哪个容器，HDR 决定纸白之上还留不留东西。关即 SDR，
