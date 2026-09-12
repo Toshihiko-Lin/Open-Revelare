@@ -455,13 +455,25 @@ public sealed record PresentationBuffer(
 
 ### 9.2 平台模式
 
-| Surface / 模式 | 共享层输出 | 最后一次 monitor transform |
-|---|---|---|
-| Windows Advanced Color 主预览 | linear extended-sRGB RGBA16F + reference-white scale | DWM |
-| Windows legacy SDR 主预览 | monitor-device BGRA8 | shared LittleCMS |
-| macOS native 主预览 | linear extended-sRGB RGBA16F + reference-white scale | Core Animation / ColorSync |
-| macOS/Windows Avalonia 次要图像 surface | 优先 monitor-device BGRA8；能力不足则 emergency | shared LittleCMS 或明确无管理 |
-| Linux 初期 | 已验证 profile provider 时 monitor-device BGRA8，否则 emergency | shared LittleCMS 或无 |
+| Surface / 模式 | 共享层输出 | `ReferenceWhiteScale` | 最后一次 monitor transform |
+|---|---|---|---|
+| Windows Advanced Color **WCG**（SDR 屏）主预览 | linear extended-sRGB RGBA16F | `1.0` | DWM |
+| Windows Advanced Color **HDR** 主预览 | linear extended-sRGB RGBA16F | `SdrWhiteNits / 80`（D-020） | DWM |
+| Windows legacy SDR 主预览 | monitor-device BGRA8 | `1.0` | shared LittleCMS |
+| macOS native 主预览 | linear extended-sRGB RGBA16F | SDR/WCG `1.0`；EDR 待 D-012 | Core Animation / ColorSync |
+| macOS/Windows Avalonia 次要图像 surface | **ACM 开启时必然是 sRGB**（见下）；否则优先 monitor-device BGRA8，能力不足则 emergency | `1.0` | ACM 开：DWM 按 sRGB；否则 shared LittleCMS 或明确无管理 |
+| Linux 初期 | 已验证 profile provider 时 monitor-device BGRA8，否则 emergency | `1.0` | shared LittleCMS 或无 |
+
+> [!IMPORTANT]
+> **次要 surface 那一格是 OS 约束，不是应用选择。** Advanced Color 激活时，Windows 的 profile
+> 管理 API 对 `STANDARD` subtype **一律返回「无 profile」**，无论实际装了什么；未打标签、走整数
+> 像素格式的内容一律被当作 sRGB。也就是说 Avalonia 画的任何图像 surface 在 ACM 下拿不到显示器
+> profile，也无法超出 sRGB 色域。微软提供的出口是 per-exe 的兼容助手（可执行文件属性 →
+> 兼容性 → *Use legacy display ICC color management*），而它**没有任何编程启用方式**。
+> 主预览逃过这一条，唯一原因是它打了标签（scRGB FP16 + `SetColorSpace1`）。
+> 若要在 AC 激活时取得**真实**面板 profile（做色域警告/软打样用），须查
+> `CPST_EXTENDED_DISPLAY_COLOR_MODE` 而非当前代码使用的 `CPST_STANDARD_DISPLAY_COLOR_MODE`——
+> 查 `EXTENDED` 等于向 OS 声明本应用是 Advanced Color-aware。
 
 Windows 与 macOS 可以共享同一 D65/linear/RGBA-half 内存布局，但 `1.0` 的物理亮度语义不能默认完全
 相同。`SdrReferenceWhite`/scale 是 contract 数据，由共享 presentation builder 应用，平台 presenter
@@ -712,7 +724,7 @@ compositor。
 | platform adapter 长成第二套引擎 | 依赖图与禁止清单；平台测试只检查 surface contract |
 | Avalonia 升级后 null layer 行为改变，device RGB fallback 双转 | pin/version integration test；无法证明 passthrough 时降为 emergency |
 | 未表征 RAW 被“顺手修成”普通 camera ColorMatrix | explicit `UncharacterizedCapture`；input policy/golden/product decision |
-| HDR/EDR 改变 SDR 亮度 | reference-white contract；D-011/D-012 spike；首期不做 HDR grading |
+| HDR/EDR 改变 SDR 亮度 | reference-white contract；Windows 由 D-020 按模式分流并测试钉死，macOS 仍待 D-012 spike |
 | 外部 profile 文件被替换 | exact bytes/hash 随项目或内容寻址保存 |
 | **进程里已存在同名 lcms2，app-owned 那份被加载器去重掉** | 见下方附注：目前靠**同名覆盖**成立，不是靠隔离 |
 
@@ -746,7 +758,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-008 | Accepted | native GPU API 只 present，不恢复 Core GPU processing backend | 符合现有 CPU 架构与已测性能结论 |
 | D-009 | Accepted | 未表征输入保持 `Uncharacterized`，不得假贴 sRGB/ACEScg | 不用一个新猜测替换旧猜测；保证诊断诚实 |
 | D-010 | Accepted | print LUT native output 必须色度转换到 exact selected output profile | 保颜色而非保 code value，消除 TRC/profile mismatch |
-| D-011 | Accepted（Windows） | Windows scRGB `ReferenceWhiteScale=1.0`；canonical `1.0` 表示 Windows 报告的 SDR reference white（不可用时 80 nits） | 当前 EIZO/WCG 探针报告 80 nits；DWM 拥有唯一 monitor transform；macOS 亮度语义不在此决定中，仍由 D-012 验证 |
+| D-011 | **Superseded by D-020** | Windows scRGB `ReferenceWhiteScale=1.0`；canonical `1.0` 表示 Windows 报告的 SDR reference white（不可用时 80 nits） | 当前 EIZO/WCG 探针报告 80 nits；DWM 拥有唯一 monitor transform；macOS 亮度语义不在此决定中，仍由 D-012 验证 |
 | D-012 | Open | macOS SDR WCG 是否/何时设置 `wantsExtendedDynamicRangeContent` | 需实机验证 extended channel 与 SDR 亮度，不能把 HDR 示例直接当 WCG 规范 |
 | D-013 | Accepted | 采用 L2 显式 opt-in migration：缺字段为 v1 且不自动改写；新工程为 v2；只有用户迁移才写 v2 | 保持旧 look 和工程可逆性，同时让新工程使用完整 managed 链路 |
 | D-014 | Accepted | 首版采用共享自有 CPU F16 compositor；native presenter 只作固定格式上传 | 1600×900 compose/pack 约 12.8/1.2 ms，3840×2160 约 41.8/6.9 ms；场景语义仍只有一份，未引入平台 shader 分叉 |
@@ -755,6 +767,12 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-018 | Accepted | 「声明为 Rec709 output」由解析 cube 头部注释认定，而非内置白名单；读不到声明的仍按 D-015 fail closed | 两个内置资产的 Rec709 原本来自人工阅读同一行注释再硬编码，而解析器对所有其他文件丢弃了这行——用户从 Resolve 导出的 LUT 写着与内置完全相同的话却被拒。读取它不放宽 D-015 的判据，只是让判据可以被文件自己满足；内置资产随之走同一条路径，解析回归会在测试中立刻暴露而不是等用户撞上 |
 | D-019 | Accepted | LUT 的 input encoding 同样由 cube 头部注释认定：声明为非 Cineon 的 cube 在解析时即拒绝，未声明的仍按 Cineon 渲染但记为 `ConventionalDefault` | D-018 只修了 output 一端，而 input 才是无声失败的那一端——ACEScct / Log-C 的 cube 被按 Cineon 喂进去不会报错，只会给出一张看起来正常、颜色是错的图。同一份 Resolve 头部在 `# Display:` 上一行就写着 `#   Input: Cineon Log`，解析器同样把它丢了。拒绝而不是放宽：判据与 D-015 一致，只是让文件能自己推翻一个原本不可见的假设。未声明的不收紧，因为那样会让今天能用的 cube 全部失效，而并没有获得任何新信息——判定刻意从严（注释须以 `input` 开头且紧跟冒号），漏判退回原行为是安全的，误判则是回归 |
 | D-017 | Accepted | ManagedV2 的无/坏 ICC TIFF 使用 roll 级显式 fallback：linear 保持原色未表征并数值透传，sRGB 作为用户指定 exact profile；有效嵌入 ICC 永远优先 | 位深不是色彩声明；选择必须随工程与所有 decode cache 传播，旧项目才保留按位深 compatibility |
+| D-020 | Accepted（**supersedes D-011**） | Windows 的 `ReferenceWhiteScale` 按 Advanced Color **模式**分流，不再是常量：WCG（SDR AC）与 legacy/emergency 仍为 `1.0`；**HDR 为 `SdrWhiteNits / 80`**。HDR 显示不再 fail-closed 到 emergency，走与 WCG 相同的 `LinearExtendedSrgbRgba16F` + `SystemCompositor` | 两种 Advanced Color 的亮度语义是**相反**的，而 D-011 只描述了其中一种。微软规范：SDR AC 是 display-referred，`1.0` 恒为该屏能达到的最大白，reference white **不适用**；HDR 是 scene-referred，`1.0` 恒为 80 nits，应用必须自行把 SDR 内容乘 `SdrWhiteLevelInNits / 80`。D-011 把 `1.0` 钉死，对 WCG 正确、对 HDR 错误，于是 HDR 分支只能 fail-closed——代价是 **HDR 屏用户比普通 SDR 屏用户体验更差**（连 legacy 的 LittleCMS 正确转换都拿不到，直接落无管理 emergency）。分流之后这个倒挂消失，且 `SdrWhiteNits` 早已由 `DISPLAYCONFIG_SDR_WHITE_LEVEL` 探到，管线的三处精确相等校验原样守住"恰好施加一次" |
+| D-021 | Accepted | HDR 输出 target **不套用印相 roll-off**：diffuse white 之上保留负片高光，不再压进 `[0,1]`。SDR 输出**继续**走印相 LUT，D-010 / D-015 / D-018 / D-019 一字不改 | 印相纸没有镜面高光。把印相 roll-off 原样放进 HDR 容器，得到的只是"一张更亮的 SDR"——HDR headroom 一点没被使用，(a) 等于白做。负片本身约 13 档宽容度，**被印相曲线压掉的高光正是 HDR 唯一有内容可放的地方**，所以放开高光不是加特效，是不再丢弃已经拍到的信息。SDR 保留印相有两条硬理由：它是产品既有的渲染身份，且 D-013 要求旧工程可逆——删掉 SDR 那条会让每个已有工程的渲染结果改变、让全部 golden 无故变红。两者共存的代价是零：D-022 的 target 参数化本来就是一条代码路径 |
+| D-022 | Accepted | 三平台的统一点是**输出变换**（`scene-linear → OutputTarget{primaries, transfer, peakNits, refWhiteNits}`），不是 GPU API。平台 presenter 保持三份、各自原生、只做定格式上传 | 平台之间真正不同的不是"怎么把字节送过去"，是**最后一跳归谁**——`FinalTransformOwner` 那三个值就是这个差异，而 DWM / ColorSync / Wayland CM 各有自己的合成语义、reference white 定义和 profile 来源。统一 GPU API 消不掉任何一个平台相关决定，只会多一层翻译（理由见 §17.1）。反过来，输出变换是唯一**平台无关、且 (a) 预览与 (b) 导出共用**的东西：它住在 `Core`，按 §11.1 的禁令自动三平台一致。今天的行为必须是它的一个特例——`OutputTarget{Rec709, sRGB-TRC, 100, 100}` 逐位复现现有 golden，否则不许合 |
+
+| D-023 | Accepted | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
+| D-024 | Accepted | 扩展渲染的输出空间**恒为 `LinearExtendedSrgb`**（D-005 的 canonical 载体），不跟随工程的 output space 选择 | output space 选择器选的是 display-referred 编码（sRGB / Adobe RGB / Rec709），每一个都同时断言了一个有界范围和一条传递曲线，而扩展渲染两者都没有。载体是线性、Rec709 原色、无界，并且能用 `[0,1]` 之外的分量表示这些原色之外的颜色——选"Adobe RGB HDR"不会让色域变宽（载体本来就比 Adobe RGB 宽），只会多一条需要撤销的曲线。像素因此必须贴载体自己的 profile：给线性数值贴带 TRC 的 ICC 正是 D-003 要防的"只换标签不做转换" |
 
 ### 17.1 拒绝的替代方案
 
@@ -766,12 +784,20 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
   framework merge 成本；除非 native preview 方案实证不可行，不采用。
 - **Windows/macOS 分别实现 overlay shader**：业务逻辑和几何必然漂移，airspace 问题也没有被统一解决。
 - **用 Electron/Chromium 绕过**：不能消除色彩契约问题，且违背现有基础上的修复目标。
+- **用一套 Vulkan presenter 统一三平台**（`VK_EXT_swapchain_colorspace` / `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT`）：范畴错误。它统一的是"怎么把字节送过去"，而平台差异全在"送过去之后谁做什么"，一个平台相关决定都消不掉。三条具体理由：Windows 上 `EXTENDED_SRGB_LINEAR` 在 **ACM-SDR-WCG**（本应用的头号场景，HDR 关）下能否取得存疑，可能严格劣于 DXGI；macOS 上 MoltenVK 最终仍落到 `CAMetalLayer`，而 EDR 的 `wantsExtendedDynamicRangeContent` / `maximumExtendedDynamicRangeColorComponentValue` 是 layer 属性，**逃不掉原生层**；Linux 上 Mesa 的 Vulkan colorspace **本来就是靠 Wayland CM 协议实现的**，不会让我们提前拿到任何东西。外加丢失现有 WARP 软件回退、对 (b) 导出零帮助、以及一个需要按 D-002 纪律做 app-owned 校验的大型原生依赖。
+- **把预览搬进 Avalonia 自己的合成器**（`ICompositionGpuInterop` + `CompositionDrawingSurface`）：能消掉 airspace 税、让叠加层变成真正的 Avalonia 控件，但导入之后像素归 Avalonia 合成器管，而它是 8-bit sRGB 的——广色域在导入那一刻就死了。**airspace 与色域在 Avalonia 下二选一**，本应用选色域。这也是 D-007（叠加层在共享 F16 场景里合成）的最终理由。
+- **HDR 用 `R10G10B10A2` + HDR10/BT.2100 swapchain**（微软的 Option 2）：只是性能优化，且要求无 alpha 混合、仅 HDR 屏，并**放弃负值与 sRGB 色域外表示**——那正是 D-005 要保的东西。FP16 + scRGB 是唯一对 SDR / WCG / HDR 三者通用的载体。
 
 ---
 
 ## 18. 开放决策的 spike 要求
 
-### D-011 / D-012：reference white 与 macOS EDR
+### D-012：macOS EDR（Windows 侧已由 D-020 结案）
+
+> **Windows 的 reference white 不再是开放决策。** D-020 已按 Advanced Color 模式分流并落地：
+> WCG `1.0`、HDR `SdrWhiteNits / 80`，由 `WindowsDisplayEnvironmentTests` 的三条用例钉住。
+> 下面这份 spike 清单只对 **macOS** 仍然有效；其中「Windows Advanced Color 同一 canonical patch
+> 的相对白表现」保留为 macOS 的对照基准，而不再是 Windows 自己的待验项。
 
 必须记录：
 
@@ -781,7 +807,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 - 是否发生 component clamp、整体亮度变化或 tone mapping；
 - Windows Advanced Color 同一 canonical patch 的相对白表现。
 
-结论必须更新 contract 的 scale 语义和 D-011/D-012，不允许只留下实验代码。
+结论必须更新 contract 的 scale 语义和 D-012，不允许只留下实验代码。
 
 ### D-013：legacy migration
 

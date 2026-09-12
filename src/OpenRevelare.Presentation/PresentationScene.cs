@@ -67,6 +67,45 @@ public sealed class PresentationScene
         ReferenceWhiteScale = referenceWhiteScale;
     }
 
+    /// <summary>Shares one scene's validated pixel storage under a different reference-white policy.</summary>
+    private PresentationScene(PresentationScene source, float referenceWhiteScale)
+    {
+        if (!float.IsFinite(referenceWhiteScale) || referenceWhiteScale <= 0f)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(referenceWhiteScale),
+                "Reference-white scale must be finite and positive.");
+        }
+
+        LinearExtendedSrgbRgba = source.LinearExtendedSrgbRgba;
+        Size = source.Size;
+        IsKnownOpaque = source.IsKnownOpaque;
+        ReferenceWhiteScale = referenceWhiteScale;
+    }
+
+    /// <summary>
+    /// Returns these exact pixels tagged with a different reference-white policy.
+    ///
+    /// <para>
+    /// THE PIXELS ARE NOT TOUCHED, AND THAT IS THE POINT. A scene always stores canonical D65
+    /// linear extended-sRGB at the carrier's nominal white; <see cref="ReferenceWhiteScale"/>
+    /// records which display policy those pixels are destined for, and
+    /// <c>PresentationBufferBuilder</c> applies that scale exactly once while packing. Re-tagging
+    /// is therefore metadata only, and the immutable storage is shared rather than copied.
+    /// </para>
+    ///
+    /// <para>
+    /// This exists because the scale is a property of the DISPLAY, not of the render. The shared
+    /// view model builds scenes without knowing which monitor they will land on — §11.1 forbids
+    /// platform state from leaking there — while the composition root does know. Dragging a
+    /// window from a WCG display to an HDR one changes the contract scale (D-020) without
+    /// changing a single rendered pixel, and every scene in one composition must agree on the
+    /// policy or the compositor and builder reject the frame.
+    /// </para>
+    /// </summary>
+    public PresentationScene WithReferenceWhiteScale(float referenceWhiteScale) =>
+        referenceWhiteScale == ReferenceWhiteScale ? this : new PresentationScene(this, referenceWhiteScale);
+
     /// <summary>
     /// Adopts a freshly-created array that has never escaped the presentation assembly. Public
     /// callers continue to receive a defensive copy through the public constructor.

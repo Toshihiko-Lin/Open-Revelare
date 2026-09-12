@@ -260,23 +260,8 @@ internal static class WindowsDisplayContractProvider
 
         if (snapshot.AdvancedColor.Active)
         {
-            if (snapshot.AdvancedColor.Mode == WindowsAdvancedColorMode.HighDynamicRange)
-            {
-                return new DisplayContract(
-                    snapshot.DisplayId,
-                    revision,
-                    PresentationEncoding.UnmanagedEmergencySrgb8,
-                    FinalTransformOwner.None,
-                    null,
-                    sdrWhite,
-                    1f,
-                    1f,
-                    "Windows HDR presentation unsupported",
-                    "Windows HDR/reference-white presentation is not supported in this phase; " +
-                    "the required reference-white spike has not been completed.");
-            }
-
-            if (snapshot.AdvancedColor.Mode != WindowsAdvancedColorMode.WideColorGamut)
+            if (snapshot.AdvancedColor.Mode is not (WindowsAdvancedColorMode.WideColorGamut or
+                WindowsAdvancedColorMode.HighDynamicRange))
             {
                 return new DisplayContract(
                     snapshot.DisplayId,
@@ -298,7 +283,7 @@ internal static class WindowsDisplayContractProvider
                 FinalTransformOwner.SystemCompositor,
                 null,
                 sdrWhite,
-                1f,
+                AdvancedColorReferenceWhiteScale(snapshot.AdvancedColor.Mode, sdrWhite),
                 1f,
                 $"Windows Advanced Color · {snapshot.AdvancedColor.Mode}");
         }
@@ -336,6 +321,40 @@ internal static class WindowsDisplayContractProvider
             1f,
             $"Windows app-managed · {profile.FileName} [{profileRef.Identity.Sha256Hex[..12]}]");
     }
+
+    /// <summary>
+    /// The canonical reference-white scale for an active Advanced Color mode (D-020).
+    ///
+    /// <para>
+    /// THE TWO MODES ARE NOT THE SAME POLICY. Advanced Color SDR (WCG) composition is
+    /// display-referred: canonical <c>1.0</c> is always the maximum white the panel can
+    /// reproduce, and a reference-white level does not apply at all, so the only correct scale
+    /// is exactly <c>1.0</c>. HDR composition is scene-referred: canonical <c>1.0</c> is always
+    /// the nominal 80 nits, and the user-configured SDR reference white (commonly around
+    /// 200 nits on a desktop HDR monitor) is where diffuse white belongs. Presenting an
+    /// unscaled SDR render on an HDR display therefore reproduces it at 80 nits — correct
+    /// colour, far too dim.
+    /// </para>
+    ///
+    /// <para>
+    /// D-011 pinned this to a constant <c>1.0</c>, which is right for WCG and wrong for HDR;
+    /// that is why HDR had to fail closed. The scale is contract data only — the shared
+    /// <c>PresentationBufferBuilder</c> applies it exactly once, and no platform presenter is
+    /// permitted to hide an exposure multiplier (§9.2).
+    /// </para>
+    /// </summary>
+    internal static float AdvancedColorReferenceWhiteScale(
+        WindowsAdvancedColorMode mode,
+        float sdrWhiteNits) => mode switch
+    {
+        WindowsAdvancedColorMode.WideColorGamut => 1f,
+        WindowsAdvancedColorMode.HighDynamicRange =>
+            sdrWhiteNits / DisplayContract.CanonicalNominalWhiteNits,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(mode),
+            mode,
+            "Only an active Advanced Color mode has a canonical reference-white scale."),
+    };
 
     internal static WindowsDisplayDiagnostics Diagnostics(
         WindowsDisplayProbeSnapshot snapshot,

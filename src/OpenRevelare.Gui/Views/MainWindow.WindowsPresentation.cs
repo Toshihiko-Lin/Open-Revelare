@@ -281,7 +281,16 @@ public partial class MainWindow
 
         var overlays = new List<PresentationOverlay>();
         var primitives = new List<PresentationRasterPrimitive>();
-        if (vm.PreviewScene is { } baseScene)
+
+        // The view model is platform-neutral (§11.1) and therefore tags every scene it builds with
+        // the carrier's nominal white. The reference-white policy belongs to the DISPLAY, and this
+        // is the first place that knows which display the frame is going to, so the scenes are
+        // re-tagged here. Under D-020 the scale is no longer a constant: dragging the window from
+        // a WCG display to an HDR one changes it without changing a rendered pixel. Re-tagging
+        // shares the pixel storage; the compositor and PresentationBufferBuilder both reject a
+        // composition whose layers disagree on the policy, so all of them must be re-tagged.
+        float referenceWhiteScale = contract.ReferenceWhiteScale;
+        if (vm.PreviewScene?.WithReferenceWhiteScale(referenceWhiteScale) is { } baseScene)
         {
             var geometry = new PreviewViewportGeometry(
                 baseScene.Size,
@@ -297,14 +306,21 @@ public partial class MainWindow
             {
                 var normalized = new PreviewRect(patch.X, patch.Y, patch.W, patch.H);
                 overlays.Add(new PresentationOverlay(
-                    patch.Scene,
+                    patch.Scene.WithReferenceWhiteScale(referenceWhiteScale),
                     RoundUnclipped(geometry.NormalizedToPhysical(normalized))));
             }
 
             if (vm.ShowSprocketMask && vm.SprocketMaskScene is { } sprocket)
-                overlays.Add(new PresentationOverlay(sprocket, imageDestination));
+            {
+                overlays.Add(new PresentationOverlay(
+                    sprocket.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
+            }
+
             if (vm.ShowClipping && vm.ClippingScene is { } clipping)
-                overlays.Add(new PresentationOverlay(clipping, imageDestination));
+            {
+                overlays.Add(new PresentationOverlay(
+                    clipping.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
+            }
 
             AddCropPrimitives(primitives, geometry, renderScaling);
             AddTransientSelectionPrimitives(primitives, renderScaling);

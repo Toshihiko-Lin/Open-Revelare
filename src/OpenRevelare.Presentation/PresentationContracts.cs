@@ -224,6 +224,15 @@ public sealed class PresentationBuffer
 /// </summary>
 public sealed class DisplayContract
 {
+    /// <summary>
+    /// The luminance, in nits, that canonical <c>1.0</c> denotes before any reference-white
+    /// scaling. This is the nominal white of the scRGB/CCCS carrier itself, not a property of
+    /// any display: scRGB (1.0, 1.0, 1.0) is D65 white at 80 nits by definition, which is also
+    /// the divisor Windows specifies for converting a reported SDR reference white into a
+    /// canonical scale (D-020).
+    /// </summary>
+    public const float CanonicalNominalWhiteNits = 80f;
+
     public string DisplayId { get; }
     public long Revision { get; }
     public PresentationEncoding Encoding { get; }

@@ -156,22 +156,71 @@ public sealed class WindowsDisplayEnvironmentTests
             environment.Diagnostics.ProfileStatus);
     }
 
+    /// <summary>
+    /// D-020 (supersedes D-011). HDR composition is scene-referred: canonical 1.0 is the nominal
+    /// 80 nits, so diffuse white must be lifted to the reference white the user configured or the
+    /// render reproduces at 80 nits — correct colour, far too dim. The display is otherwise the
+    /// same system-owned FP16 surface as WCG, and must NOT fall back to a warned emergency: an
+    /// HDR panel is a wide-gamut panel, and emergency would leave it worse off than a plain SDR
+    /// display, which at least gets the legacy LittleCMS transform.
+    /// </summary>
     [Fact]
-    public void Hdr_state_is_explicit_emergency_until_reference_white_policy_is_verified()
+    public void Hdr_state_maps_to_system_owned_fp16_with_scene_referred_reference_white_scale()
     {
         var probe = new FakeProbe(AdvancedSnapshot(
             WindowsAdvancedColorMode.HighDynamicRange, 200f, 2500));
         using var environment = CreateEnvironment(probe);
 
-        Assert.Equal(PresentationEncoding.UnmanagedEmergencySrgb8, environment.Current.Encoding);
-        Assert.Equal(FinalTransformOwner.None, environment.Current.TransformOwner);
+        Assert.Equal(PresentationEncoding.LinearExtendedSrgbRgba16F, environment.Current.Encoding);
+        Assert.Equal(FinalTransformOwner.SystemCompositor, environment.Current.TransformOwner);
+        Assert.Null(environment.Current.DeviceProfile);
         Assert.Equal(200f, environment.Current.SdrReferenceWhite);
-        Assert.Equal(1f, environment.Current.ReferenceWhiteScale);
-        Assert.Contains("HDR/reference-white", environment.Current.VisibleWarning!);
+        Assert.Equal(2.5f, environment.Current.ReferenceWhiteScale);
+        Assert.Equal(0, environment.Current.RequiredApplicationMonitorTransformCount);
+        Assert.Null(environment.Current.VisibleWarning);
         Assert.Equal(WindowsAdvancedColorMode.HighDynamicRange, environment.Diagnostics.ActiveColorMode);
         Assert.Equal(2500u, environment.Diagnostics.SdrWhiteRaw!.Value);
         Assert.Equal(200f, environment.Diagnostics.SdrWhiteNits);
-        Assert.False(environment.Diagnostics.WysiwygGuaranteed);
+        Assert.True(environment.Diagnostics.WysiwygGuaranteed);
+        Assert.Equal(WindowsMonitorProfileStatus.OwnedBySystemAdvancedColor,
+            environment.Diagnostics.ProfileStatus);
+    }
+
+    /// <summary>
+    /// The two Advanced Color modes carry OPPOSITE luminance policies, which is exactly what
+    /// D-011's single constant could not express. WCG is display-referred — 1.0 is always the
+    /// panel's maximum white and no scaling applies — while HDR is scene-referred. Same reported
+    /// SDR white, same probe, different scale.
+    /// </summary>
+    [Theory]
+    [InlineData(WindowsAdvancedColorMode.WideColorGamut, 1f)]
+    [InlineData(WindowsAdvancedColorMode.HighDynamicRange, 3.125f)]
+    public void Advanced_color_reference_white_scale_is_per_mode(
+        WindowsAdvancedColorMode mode,
+        float expectedScale)
+    {
+        var probe = new FakeProbe(AdvancedSnapshot(mode, 250f, 3125));
+        using var environment = CreateEnvironment(probe);
+
+        Assert.Equal(PresentationEncoding.LinearExtendedSrgbRgba16F, environment.Current.Encoding);
+        Assert.Equal(250f, environment.Current.SdrReferenceWhite);
+        Assert.Equal(expectedScale, environment.Current.ReferenceWhiteScale);
+    }
+
+    /// <summary>
+    /// The reported SDR white has no reason to be a round multiple of the 80-nit nominal. The
+    /// scale is a plain quotient and must not be rounded, bucketed or clamped anywhere on the way
+    /// into the contract — PresentationBufferBuilder compares it for EXACT equality against the
+    /// scene's tag, so any tidying here would surface as a rejected frame rather than a dim one.
+    /// </summary>
+    [Fact]
+    public void Hdr_reference_white_scale_is_an_exact_quotient_of_the_nominal_white()
+    {
+        var probe = new FakeProbe(AdvancedSnapshot(
+            WindowsAdvancedColorMode.HighDynamicRange, 203f, 2537));
+        using var environment = CreateEnvironment(probe);
+
+        Assert.Equal(203f / DisplayContract.CanonicalNominalWhiteNits, environment.Current.ReferenceWhiteScale);
     }
 
     [Fact]
