@@ -195,6 +195,12 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// What the export dialog carries: the limit in stops while HDR is on, zero otherwise — the
+    /// same distinction <see cref="FrameParams.HdrPeakNits"/> makes with zero.
+    /// </summary>
+    public double ExportHdrLimitStops => _hdrEnabled ? _hdrLimitStops : 0d;
+
+    /// <summary>
     /// Writes the roll's peak onto every frame and re-renders. Thumbnails are rebuilt — after a
     /// pause when the change came from the slider, which fires on every tick of a drag and would
     /// otherwise restart the whole roll's decode pass a dozen times per second.
@@ -1017,6 +1023,77 @@ public partial class MainViewModel
         return q;
     }
 
+    /// <summary>
+    /// The SDR base of a gain-map JPEG: the same params with the HDR peak removed, in the base
+    /// space the export chose, and WITHOUT the print LUT.
+    ///
+    /// The two renditions of a gain-map file are one picture at two headrooms — a reader blends
+    /// between them by how much headroom its display has — so they must be members of one
+    /// rendering. The extended rendition never runs the print stock (D-021); a base that did
+    /// would make every intermediate display show a picture that is half print look and half
+    /// analytic shoulder, and an SDR display show a print the HDR display never shows. The base
+    /// is therefore the asymptote-1 member of the same shoulder family, bit-identical to the HDR
+    /// rendition below the knee, which is also what makes the map nearly empty.
+    /// </summary>
+    private static FrameParams GainMapBaseParams(FrameParams hdr, ColorSpaceDef baseSpace)
+    {
+        FrameParams q = hdr.Clone();
+        q.HdrPeakNits = 0d;
+        q.OutputSpace = baseSpace.Name;
+        q.PrintLut = "";
+        return q;
+    }
+
+    /// <summary>
+    /// Renders and writes one export. A JPEG of an extended render is a gain-map JPEG and needs a
+    /// second, SDR render of the same frame; everything else is one render and one write.
+    /// </summary>
+    private void RenderAndWriteExport(
+        WorkingFrame working,
+        FrameParams ep,
+        string path,
+        ExportOptions opt,
+        ColorPipelineVersion pipelineVersion)
+    {
+        RenderedFrame rendered = Pipeline.Render(working, ep, pipelineVersion, ColorManagement);
+        // Decided off the frame the render actually produced rather than the params: a LegacyV1
+        // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
+        bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
+            && rendered.Encoding.Range == NumericRange.Extended;
+        if (!gainMap)
+        {
+            WriteExport(rendered, path, opt);
+            return;
+        }
+
+        ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
+        RenderedFrame sdrBase = Pipeline.Render(
+            working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
+        if (opt.Downsample)
+        {
+            sdrBase = sdrBase.WithPixels(Resample.Box(sdrBase.Pixels, opt.MaxLongEdge));
+            rendered = rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge));
+        }
+        JpegIO.ExportGainMapJpeg(
+            sdrBase,
+            rendered,
+            baseSpace,
+            ep.ResolvedOutputTarget,
+            path,
+            opt.JpegQuality,
+            profilePolicy: ProfilePolicyFor(opt));
+    }
+
+    /// <summary>
+    /// Scene-linear/extended output is only portable with its exact profile. The old dialog
+    /// setting may contain a stale "omit ICC" value from an sRGB export; it must not turn a later
+    /// linear or HDR export into an error or an uncharacterized file.
+    /// </summary>
+    private static ExportProfilePolicy ProfilePolicyFor(ExportOptions opt) =>
+        opt.ExportLinear || opt.EmbedIcc || (opt.IsHdr && opt.Format != ExportFormat.Jpeg)
+            ? ExportProfilePolicy.EmbedExact
+            : ExportProfilePolicy.OmitExactSrgb;
+
     private static void WriteExport(RenderedFrame rendered, string path, ExportOptions opt)
     {
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
@@ -1025,12 +1102,7 @@ public partial class MainViewModel
         RenderedFrame output = opt.Downsample
             ? rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge))
             : rendered;
-        // Scene-linear/extended output is only portable with its exact linear ACEScg profile.
-        // The old dialog setting may contain a stale "omit ICC" value from an sRGB export; it
-        // must not turn a later linear export into an error or an uncharacterized file.
-        ExportProfilePolicy profilePolicy = opt.ExportLinear || opt.EmbedIcc
-            ? ExportProfilePolicy.EmbedExact
-            : ExportProfilePolicy.OmitExactSrgb;
+        ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
         if (opt.Format == ExportFormat.Jpeg)
             JpegIO.ExportJpeg(
@@ -1087,12 +1159,7 @@ public partial class MainViewModel
                         pipelineVersion,
                         ColorManagement,
                         tiffInputAssumption);
-                    RenderedFrame rendered = Pipeline.Render(
-                        working,
-                        ep,
-                        pipelineVersion,
-                        ColorManagement);
-                    WriteExport(rendered, outPath, opt);
+                    RenderAndWriteExport(working, ep, outPath, opt, pipelineVersion);
                 });
             }
             string detail = "";

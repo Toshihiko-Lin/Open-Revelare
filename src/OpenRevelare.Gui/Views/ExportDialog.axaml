@@ -28,8 +28,7 @@
                     <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
                                  IsCheckedChanged="OnFormatChanged" />
                 </StackPanel>
-                <TextBlock Classes="groupHint"
-                           Text="{i18n:T '普通输出使用 16-bit TIFF；场景线性输出自动使用 32-bit float TIFF 保留超范围分量。JPEG 适合直接分享。'}" />
+                <TextBlock Classes="groupHint" Name="FormatHint" TextWrapping="Wrap" />
             </StackPanel>
 
             <!-- Disabled rather than hidden: an option that vanishes reads as a missing
@@ -78,6 +77,18 @@
             <StackPanel Spacing="4">
                 <TextBlock Text="{i18n:T '色彩空间'}" FontWeight="SemiBold" />
                 <TextBlock Classes="groupHint" Name="ColorSpaceHint" TextWrapping="Wrap" />
+
+                <!-- Only an HDR roll has a gain-map base to choose; see ExportOptions.HdrBaseSpace. -->
+                <StackPanel Name="HdrBaseGroup" Spacing="4" Margin="0,6,0,0">
+                    <TextBlock Text="{i18n:T '增益图基底'}" FontWeight="SemiBold" />
+                    <ComboBox Name="HdrBaseBox" HorizontalAlignment="Stretch"
+                              SelectionChanged="OnAnyChanged">
+                        <ComboBoxItem Content="{i18n:T 'sRGB（通用，所有看图软件都按它假定）'}" />
+                        <ComboBoxItem Content="{i18n:T 'Display P3（手机相册的选择，保留更多宽色域高光）'}" />
+                    </ComboBox>
+                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                               Text="{i18n:T '文件的容器原色，不是渲染的输出空间：渲染不裁色域，但增益图 JPEG 只能装下基底原色之内的颜色，其余在这个文件里被裁。母版仍在 float32 TIFF。'}" />
+                </StackPanel>
 
                 <CheckBox Name="LinearChk" Content="{i18n:T '导出为场景线性 ACEScg（32-bit float，跳过帧编辑）'}"
                           Margin="0,6,0,0" IsCheckedChanged="OnAnyChanged" />

@@ -597,5 +597,18 @@
   "HDR 关闭：印相渲染，高光收进纸白。": "HDR off: rendered as a print, highlights folded into paper white.",
   "此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。": "This roll is still on the legacy colour pipeline (v1); its rendering is frozen by D-013 and HDR has no effect. Available once the roll is migrated to v2.",
   "（高光软校样）": " (highlights soft-proofed)",
-  "（高光裁切）": " (highlights clipped)"
+  "（高光裁切）": " (highlights clipped)",
+  "HDR 已开（+{0:0.0} 档）：TIFF 写成 32-bit float 线性母版；JPEG 写成增益图 JPEG——SDR 基底加一张增益图，任何看图软件都能打开，HDR 屏上恢复高光，余量不足的屏幕按比例回落。": "HDR is on (+{0:0.0} stops): TIFF writes the 32-bit float linear master; JPEG writes a gain-map JPEG — an SDR base plus a gain map, opens in any viewer, recovers the highlights on an HDR display and scales back on a display with less headroom.",
+  "HDR 母版：linear extended sRGB 载体，线性、无上界、不裁色域（D-024）。输出空间不参与。": "HDR master: the linear extended sRGB carrier — linear, unbounded, gamut untouched (D-024). The output space plays no part.",
+  "HDR 渲染本身没有输出空间；增益图 JPEG 的 SDR 基底要装进一个显示空间，在下面选。": "The HDR rendering has no output space of its own; the gain-map JPEG's SDR base has to go into a display space, chosen below.",
+  "必须嵌入载体的 exact ICC：float32 线性数据离开这个配置文件无法被正确解读。": "The carrier's exact ICC must be embedded: float32 linear data cannot be read correctly without it.",
+  "增益图基底": "Gain-map base",
+  "sRGB（通用，所有看图软件都按它假定）": "sRGB (universal; every viewer assumes it)",
+  "Display P3（手机相册的选择，保留更多宽色域高光）": "Display P3 (what phone cameras write; keeps more of a wide-gamut highlight)",
+  "文件的容器原色，不是渲染的输出空间：渲染不裁色域，但增益图 JPEG 只能装下基底原色之内的颜色，其余在这个文件里被裁。母版仍在 float32 TIFF。": "The file's container primaries, not the render's output space: the render clips no gamut, but a gain-map JPEG can only hold colours inside the base's primaries; the rest is clipped in this file. The master is still the float32 TIFF.",
+  "HDR 母版 +{0:0.0} 档 · linear extended sRGB · 强制嵌入 exact ICC": "HDR master +{0:0.0} stops · linear extended sRGB · exact ICC embedded (forced)",
+  "增益图 JPEG 品质 {0}": "Gain-map JPEG quality {0}",
+  "HDR +{0:0.0} 档": "HDR +{0:0.0} stops",
+  "基底 {0}": "base {0}",
+  "HDR JPEG（增益图）": "HDR JPEG (gain map)"
 }

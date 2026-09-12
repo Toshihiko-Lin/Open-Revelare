@@ -2009,11 +2009,12 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         // Options first, destination second: the format decides the extension the save dialog
         // should be offering, so asking for a filename first asks in the wrong order.
-        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace);
+        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
+        bool floatTiff = opt.ExportLinear || opt.IsHdr;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.T("导出正片"),
@@ -2021,8 +2022,9 @@ public partial class MainWindow : Window
             FileTypeChoices = new List<FilePickerFileType>
             {
                 jpeg
-                    ? new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } }
-                    : new FilePickerFileType(opt.ExportLinear ? "32-bit float TIFF" : "16-bit TIFF")
+                    ? new FilePickerFileType(opt.WritesGainMap ? Loc.T("HDR JPEG（增益图）") : "JPEG")
+                        { Patterns = new[] { "*.jpg", "*.jpeg" } }
+                    : new FilePickerFileType(floatTiff ? "32-bit float TIFF" : "16-bit TIFF")
                         { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
@@ -2069,7 +2071,7 @@ public partial class MainWindow : Window
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
-        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace);
+        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
