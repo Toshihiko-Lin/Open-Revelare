@@ -186,6 +186,7 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(UsesLegacyColorPipeline));
         OnPropertyChanged(nameof(CanChooseHdrPeak));
         OnPropertyChanged(nameof(HdrPeakHint));
+        OnPropertyChanged(nameof(HdrPeakTooltip));
         OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
         OnPropertyChanged(nameof(ColorPipelineDiagnostic));

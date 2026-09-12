@@ -145,6 +145,7 @@ public partial class MainViewModel
             _hdrPeakIndex = v;
             OnPropertyChanged(nameof(HdrPeakIndex));
             OnPropertyChanged(nameof(HdrPeakHint));
+            OnPropertyChanged(nameof(HdrPeakTooltip));
 
             foreach (RollFrame f in Frames) f.Params.HdrPeakNits = HdrPeakOptions[v];
             if (Frames.Count > 0) MarkRollDirty();
@@ -179,11 +180,25 @@ public partial class MainViewModel
         if (Equals(_displayCapability, capability)) return;
         _displayCapability = capability;
         OnPropertyChanged(nameof(HdrPeakHint));
+        OnPropertyChanged(nameof(HdrPeakTooltip));
         OnPropertyChanged(nameof(DisplayHdrHeadroom));
     }
 
     /// <summary>For the histogram's "the panel stops here" marker; one when unknown or SDR.</summary>
     public double DisplayHdrHeadroom => _displayCapability?.Headroom ?? 1d;
+
+    /// <summary>
+    /// The picker's hover text: what the control is, then what the current choice means on the
+    /// display under the window right now. The second half is <see cref="HdrPeakHint"/>, which
+    /// otherwise had no outlet — the sibling OutputSpaceHint never acquired one either, and a
+    /// D-023 refusal or a "this panel clips at 2.1 stops" is only worth computing if it is shown.
+    /// </summary>
+    public string HdrPeakTooltip =>
+        Loc.T("底片约有 13 档宽容度，而印相曲线把最亮的几档压进纸白——选 SDR 就是这个一直以来的行为。选一个峰值则把同一条肩部曲线瞄得更高：阴影与中间调与 SDR 逐位相同，更亮的部分不再被压进纸白，而是铺开到所选峰值。")
+        + "\n\n"
+        + Loc.T("这是胶卷参数，会保存进工程，并且改变每一帧「是什么」而不是「怎么看它」，所以缩略图会重建。只有 HDR 显示器看得到效果，SDR 屏会把超出部分裁掉。HDR 渲染不接受色阶／对比度／高光阴影／曲线／饱和度——这些调整是按显示范围定义的，会拒绝渲染而不是悄悄忽略。")
+        + "\n\n"
+        + HdrPeakHint;
 
     /// <summary>
     /// False for a LegacyV1 roll. Its rendering is frozen by D-013 and never reaches the
@@ -271,6 +286,7 @@ public partial class MainViewModel
         _hdrPeakIndex = i < 0 ? 0 : i;
         OnPropertyChanged(nameof(HdrPeakIndex));
         OnPropertyChanged(nameof(HdrPeakHint));
+            OnPropertyChanged(nameof(HdrPeakTooltip));
     }
 
     // ══ 胶片风格（印片 LUT） ═══════════════════════════════════════════════════
