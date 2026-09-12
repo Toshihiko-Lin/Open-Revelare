@@ -114,68 +114,132 @@ public partial class MainViewModel
     /// <summary>The roll's output space — what an export will be written in.</summary>
     public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
 
-    // ══ HDR 峰值 ═══════════════════════════════════════════════════════════════
+    // ══ HDR ═══════════════════════════════════════════════════════════════════
     //
     // 与【输出空间】并列而不并入其中，因为它们回答的是不同的问题：输出空间决定画面装进哪个
-    // 容器，HDR 峰值决定 diffuse white 之上还留不留东西。零 = SDR，也就是既有的印相渲染。
+    // 容器，HDR 决定 diffuse white 之上还留不留东西。关 = SDR，也就是既有的印相渲染。
     //
-    // 预设而不是自由输入：这个数字的意义是「目标显示设备的峰值亮度」，它来自一小组真实存在
-    // 的档位，而不是一个连续旋钮。给一个文本框会邀请用户去微调一个他们无从校验的值。
-    private static readonly double[] HdrPeakOptions = { 0d, 600d, 1000d, 4000d };
+    // 两个控件，两层意思（D-028 的分界）：底栏一个开关，直方图下一个上限滑块。
+    // 上限的单位是 SDR 白之上的**档数**，与 Lightroom 的 HDR Limit 同义、同刻度（0.5 … +4）；
+    // 存进工程时换算成 nits（peak = 203 × 2^stops），HdrPeakNits 的持久化形式不变。它是母版
+    // 参数——导出文件里高光保留到哪——**不是**预览：预览在本机余量内自动软校样（D-028）。
+    // 以前是四个 nits 预设（400/600/1000/4000，供参考：+1.0/+1.6/+2.3/+4.3 档），照片交付没有
+    // 母版监视器那几台设备可挂靠，连续值才是同行（LR、gain map、ACES 2.0）的做法。
 
-    private int _hdrPeakIndex;
+    /// <summary>The slider's range in stops above SDR white; +4 is Lightroom's ceiling and the histogram's axis.</summary>
+    public const double HdrLimitMinStops = 0.5;
+    public const double HdrLimitMaxStops = 4.0;
+    private const double HdrLimitStep = 0.1;
+
+    private bool _hdrEnabled;
+    private double _hdrLimitStops = 2.3;   // 1000 nits: the streaming-delivery mastering peak, when nothing better is known
+
+    /// <summary>
+    /// The peak this roll's extended render aims at, from the slider; zero while HDR is off.
+    /// This is what <see cref="FrameParams.HdrPeakNits"/> stores.
+    /// </summary>
+    private double HdrPeakNits => _hdrEnabled ? NitsForStops(_hdrLimitStops) : 0d;
+
+    private static double NitsForStops(double stops) => OutputTarget.ReferenceWhiteNits * Math.Pow(2d, stops);
+    private static double StopsForNits(double nits) => Math.Log2(nits / OutputTarget.ReferenceWhiteNits);
 
     /// <summary>The selected target's headroom above diffuse white (1 for SDR); see <see cref="OutputTarget.HighlightHeadroom"/>.</summary>
     private float CurrentTargetHeadroom
-        => new FrameParams { HdrPeakNits = HdrPeakOptions[_hdrPeakIndex] }.ResolvedOutputTarget.HighlightHeadroom;
+        => new FrameParams { HdrPeakNits = HdrPeakNits }.ResolvedOutputTarget.HighlightHeadroom;
 
     /// <summary>
-    /// 本卷的 HDR 峰值档位（D-021）。零档即 SDR，渲染与本功能出现之前逐位相同。
+    /// Whether this roll renders above diffuse white (D-021). Off, the rendering is bit-identical
+    /// to what it was before HDR existed.
     ///
-    /// 与输出空间同为**胶卷级**参数：一条胶卷里各帧动态范围不同，会让接触印样变成一组无法
-    /// 互相比较的渲染。改动会重建缩略图，因为它改变的是每一帧**是什么**，不是怎么看它。
+    /// Roll-level, like the output space: a roll whose frames disagree on dynamic range has no
+    /// comparable contact sheet. Changing it rebuilds the thumbnails, because it changes what
+    /// each frame IS, not how it is viewed.
     /// </summary>
-    public int HdrPeakIndex
+    public bool HdrEnabled
     {
-        get => _hdrPeakIndex;
+        get => _hdrEnabled;
         set
         {
             // A LegacyV1 roll renders through the frozen v1 path, which never reaches the
             // parameterized terminal (D-013): a peak stored on it would be a lie the file tells.
-            // The picker is disabled for such rolls; this guard keeps any other route honest too.
-            if (UsesLegacyColorPipeline) value = 0;
-
-            int v = Math.Clamp(value, 0, HdrPeakOptions.Length - 1);
-            if (_hdrPeakIndex == v) return;
-            _hdrPeakIndex = v;
-            OnPropertyChanged(nameof(HdrPeakIndex));
-            OnPropertyChanged(nameof(HdrPeakHint));
-            OnPropertyChanged(nameof(HdrPeakTooltip));
-
-            foreach (RollFrame f in Frames) f.Params.HdrPeakNits = HdrPeakOptions[v];
-            if (Frames.Count > 0) MarkRollDirty();
-
-            foreach (RollFrame f in Frames) SetThumbnail(f, null);
-            RestartThumbnails();
-            ScheduleRender();
+            if (UsesLegacyColorPipeline) value = false;
+            if (_hdrEnabled == value) return;
+            _hdrEnabled = value;
+            OnPropertyChanged(nameof(HdrEnabled));
+            ApplyHdrToRoll(rebuildThumbnailsNow: true);
         }
     }
 
     /// <summary>
-    /// What the selected HDR peak means, shown under the picker.
-    ///
-    /// <para>
-    /// THE D-023 RESTRICTION IS STATED HERE RATHER THAN DISCOVERED AT RENDER TIME. An extended
-    /// render refuses display-referred Stage 2 adjustments instead of silently dropping them, and
-    /// <c>ReportRenderFailure</c> would catch that — but a failure message after the fact is a
-    /// worse way to learn a rule than the control that sets it saying so.
-    /// </para>
+    /// How far above SDR white the render may reach, in stops — Lightroom's HDR Limit. Snapped to
+    /// a tenth of a stop from the slider; a value loaded from a roll keeps its exact figure.
     /// </summary>
+    public double HdrLimitStops
+    {
+        get => _hdrLimitStops;
+        set
+        {
+            double v = Math.Clamp(Math.Round(value / HdrLimitStep) * HdrLimitStep, HdrLimitMinStops, HdrLimitMaxStops);
+            if (Math.Abs(_hdrLimitStops - v) < 1e-9) return;
+            _hdrLimitStops = v;
+            OnPropertyChanged(nameof(HdrLimitStops));
+            if (_hdrEnabled) ApplyHdrToRoll(rebuildThumbnailsNow: false);
+            else NotifyHdrText();
+        }
+    }
+
+    /// <summary>
+    /// Writes the roll's peak onto every frame and re-renders. Thumbnails are rebuilt — after a
+    /// pause when the change came from the slider, which fires on every tick of a drag and would
+    /// otherwise restart the whole roll's decode pass a dozen times per second.
+    /// </summary>
+    private void ApplyHdrToRoll(bool rebuildThumbnailsNow)
+    {
+        double nits = HdrPeakNits;
+        foreach (RollFrame f in Frames) f.Params.HdrPeakNits = nits;
+        if (Frames.Count > 0) MarkRollDirty();
+        NotifyHdrText();
+        ScheduleRender();
+        if (rebuildThumbnailsNow) RebuildThumbnails();
+        else ScheduleThumbnailRebuild();
+    }
+
+    private void RebuildThumbnails()
+    {
+        _thumbRebuildCts?.Cancel();
+        foreach (RollFrame f in Frames) SetThumbnail(f, null);
+        RestartThumbnails();
+    }
+
+    private CancellationTokenSource? _thumbRebuildCts;
+
+    private async void ScheduleThumbnailRebuild()
+    {
+        _thumbRebuildCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _thumbRebuildCts = cts;
+        try
+        {
+            await Task.Delay(500, cts.Token);
+            foreach (RollFrame f in Frames) SetThumbnail(f, null);
+            RestartThumbnails();
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void NotifyHdrText()
+    {
+        OnPropertyChanged(nameof(HdrLimitText));
+        OnPropertyChanged(nameof(HdrLimitHint));
+        OnPropertyChanged(nameof(HdrToggleTooltip));
+        OnPropertyChanged(nameof(HistogramTooltip));
+    }
+
     /// <summary>
     /// What the display under the window can physically show above SDR white, as the composition
     /// root last reported it. INFORMATIONAL ONLY: invariant I5 forbids the display from changing
-    /// the render, and nothing here feeds a render — it feeds the hint under the picker, so the
-    /// user learns where the panel stops before choosing a peak it cannot reach.
+    /// the render, and nothing here feeds a render — it feeds the hint under the slider and the
+    /// default for a NEW roll (D-027), so the user learns where the panel stops.
     /// </summary>
     private DisplayHdrCapability? _displayCapability;
 
@@ -184,14 +248,40 @@ public partial class MainViewModel
     {
         if (Equals(_displayCapability, capability)) return;
         _displayCapability = capability;
-        OnPropertyChanged(nameof(HdrPeakHint));
-        OnPropertyChanged(nameof(HdrPeakTooltip));
         OnPropertyChanged(nameof(DisplayHdrHeadroom));
-        OnPropertyChanged(nameof(HistogramTooltip));
+        OnPropertyChanged(nameof(DisplayHdrStops));
+        OnPropertyChanged(nameof(HasDisplayHdrStops));
+        NotifyHdrText();
     }
 
     /// <summary>For the histogram's "the panel stops here" marker; one when unknown or SDR.</summary>
     public double DisplayHdrHeadroom => _displayCapability?.Headroom ?? 1d;
+
+    // Windows gives nits and a ratio, macOS only the ratio (see DescribeDisplayFit); a failure to
+    // read the panel leaves the hint without a verdict rather than guessing.
+    private bool DisplayHeadroomIsKnown =>
+        _displayCapability is { FailureReason: null } d && d.Headroom > 1f && float.IsFinite(d.Headroom);
+
+    /// <summary>Stops above SDR white this display shows in full; NaN when unknown or not HDR.</summary>
+    public double DisplayHdrStops => DisplayHeadroomIsKnown ? Math.Log2(_displayCapability!.Headroom) : double.NaN;
+
+    public bool HasDisplayHdrStops => DisplayHeadroomIsKnown;
+
+    /// <summary>
+    /// What a NEW roll starts at (D-027): HDR on, with the limit at what the display under the
+    /// window shows in full (to the tenth below, inside the slider's range); off when there is no
+    /// such display. Read once, at import. From then on the value is the roll's own, saved in
+    /// its file, and no display change touches it — a roll that rendered differently on another
+    /// machine is the whole of I5's concern, and the reason this stops at the default instead of
+    /// following the display.
+    /// </summary>
+    private double DefaultHdrPeakNitsForNewRoll()
+    {
+        if (!DisplayHeadroomIsKnown) return 0d;
+        double stops = Math.Floor(DisplayHdrStops / HdrLimitStep) * HdrLimitStep;
+        if (stops < HdrLimitMinStops) return 0d;
+        return NitsForStops(Math.Min(stops, HdrLimitMaxStops));
+    }
 
     /// <summary>
     /// What the histogram's zones and lines mean for the frame on screen. An extended render's
@@ -207,80 +297,87 @@ public partial class MainViewModel
                 return Loc.T("已渲染正片的 RGB 直方图，横轴为输出空间的编码值 0–1；刻度在图下的直尺上。");
 
             string zones = Loc.T("左侧 3/4：SDR 区，按 sRGB 编码值 0–1，与 SDR 渲染的直方图同形；直尺上的「1」即 SDR 白（diffuse white）。")
-                + "\n" + Loc.F($"右侧 1/4：白点以上 +{Histogram.ExtendedStops:0} 档（对数刻度，与 Lightroom 同为固定 4 档；4000 nits 档为 5），直尺每格 1 档。");
+                + "\n" + Loc.F($"右侧 1/4：白点以上 +{Histogram.ExtendedStops:0} 档（对数刻度，与 Lightroom 同为固定 4 档），直尺每格 1 档。");
             double headroom = DisplayHdrHeadroom;
             string clip = headroom > 1d && double.IsFinite(headroom)
-                ? "\n" + Loc.F($"红色虚线与直尺红刻度：这块屏能显示到 +{Math.Log2(headroom):0.0} 档（余量 {headroom:0.0}×）；其右的红区已渲染但屏幕显示不出来。")
+                ? "\n" + Loc.F($"红色虚线与直尺红刻度：这块屏能显示到 +{Math.Log2(headroom):0.0} 档（余量 {headroom:0.0}×）；其右的红区在预览里被压进红线以内（高光软校样），导出保留原值。")
                 : "\n" + Loc.T("当前显示器不在 HDR 模式，或读不到面板峰值：直尺上没有红色刻度。");
             return zones + clip;
         }
     }
 
-    /// <summary>
-    /// The picker's hover text: what the control is, then what the current choice means on the
-    /// display under the window right now. The second half is <see cref="HdrPeakHint"/>, which
-    /// otherwise had no outlet — the sibling OutputSpaceHint never acquired one either, and a
-    /// D-023 refusal or a "this panel clips at 2.1 stops" is only worth computing if it is shown.
-    /// </summary>
-    public string HdrPeakTooltip =>
-        Loc.T("纸白之上的高光保留到多少 nits；SDR 即印相，一直以来的行为。")
-        + "\n" + HdrPeakHint;
+    /// <summary>The toggle's hover text: what the control is, then where the roll stands on this display.</summary>
+    public string HdrToggleTooltip =>
+        Loc.T("关：印相渲染，高光收进纸白，一直以来的行为；不确定就关。开：纸白之上的宽容度铺到直方图下方【HDR 上限】所设的档数，导出随之。预览在本机余量内自动软校样。")
+        + "\n" + HdrLimitHint;
 
     /// <summary>
     /// False for a LegacyV1 roll. Its rendering is frozen by D-013 and never reaches the
-    /// parameterized terminal, so offering the picker would let the user choose something that
+    /// parameterized terminal, so offering the toggle would let the user choose something that
     /// does nothing — which is exactly what happened before this existed.
     /// </summary>
     public bool CanChooseHdrPeak => !UsesLegacyColorPipeline;
 
-    public string HdrPeakHint
+    /// <summary>The slider's readout: stops, and the mastering peak they mean in nits (diffuse white 203, BT.2408).</summary>
+    public string HdrLimitText => Loc.F($"+{_hdrLimitStops:0.0} 档 · {NitsForStops(_hdrLimitStops):0} nits");
+
+    /// <summary>
+    /// What the limit means on this display right now, under the slider.
+    ///
+    /// <para>
+    /// THE D-023 RESTRICTION IS STATED HERE RATHER THAN DISCOVERED AT RENDER TIME. An extended
+    /// render refuses display-referred Stage 2 adjustments instead of silently dropping them, and
+    /// <c>ReportRenderFailure</c> would catch that — but a failure message after the fact is a
+    /// worse way to learn a rule than the control that sets it saying so.
+    /// </para>
+    /// </summary>
+    public string HdrLimitHint
     {
         get
         {
             if (UsesLegacyColorPipeline)
                 return Loc.T("此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。");
 
-            if (HdrPeakOptions[_hdrPeakIndex] <= 0d)
-                return Loc.T("印相渲染，高光收进纸白。不确定就选它。");
+            if (!_hdrEnabled)
+                return Loc.T("HDR 关闭：印相渲染，高光收进纸白。");
 
             string blocked = CurrentFrame is { } frame &&
                              Stage2.HasDisplayReferredAdjustments(frame.Params)
                 ? Loc.T("当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
                 : string.Empty;
 
-            return Loc.T("阴影与中间调同 SDR，纸白之上的宽容度铺到所选峰值。")
-                + "\n" + DescribeDisplayFit(HdrPeakOptions[_hdrPeakIndex])
+            return DescribeDisplayFit(_hdrLimitStops)
                 + (blocked.Length == 0 ? string.Empty : "\n" + blocked);
         }
     }
 
     /// <summary>
-    /// Where THIS display stops showing what the selected peak puts above SDR white.
+    /// Where THIS display stops showing what the limit puts above SDR white.
     ///
     /// <para>
-    /// The target's shoulder aims at <c>peak / 203</c> times diffuse white; the panel shows up to
+    /// The target's shoulder aims at <c>2^limit</c> times diffuse white; the panel shows up to
     /// <c>panelPeak / sdrWhite</c> times it (D-020, with the headroom from
-    /// <c>IDXGIOutput6::GetDesc1</c>). Everything between those two numbers is rendered and then
-    /// clipped by the compositor — which is exactly what "switching to 4000 still changes the
-    /// picture" looks like from the outside, and the reason the user needs to see both numbers.
+    /// <c>IDXGIOutput6::GetDesc1</c>). Everything between those two numbers is soft-proofed into
+    /// the panel's range (D-028) — the reason the user needs to see both numbers is that the
+    /// export keeps the first.
     /// </para>
     /// </summary>
-    private string DescribeDisplayFit(double peakNits)
+    private string DescribeDisplayFit(double targetStops)
     {
-        float targetHeadroom = (float)(peakNits / OutputTarget.ReferenceWhiteNits);
         if (_displayCapability is not { } display)
             return Loc.T("当前显示器不在 HDR 模式：这里的选择只影响导出，以及在 HDR 屏上的显示。");
+        double displayStops = Math.Log2(display.Headroom);
+        string fit = targetStops <= displayStops
+            ? Loc.F($"上限 +{targetStops:0.0} 档可完整显示。")
+            : displayStops > 0d
+                ? Loc.F($"上限 +{targetStops:0.0} 档超出 {targetStops - displayStops:0.0} 档：预览把超出部分压进 +{displayStops:0.0} 档以内（高光软校样），导出不受影响；把 SDR 内容亮度调低可换到更多余量。")
+                : Loc.F($"上限 +{targetStops:0.0} 档，此屏没有纸白之上的余量：预览裁切在纸白，导出不受影响。");
         if (display.PanelPeakNits is not { } panelPeak)
         {
             // macOS reports headroom as a ratio and never as nits: the EDR carrier is defined
             // relative to SDR white, so a ratio is the whole truth there, not a missing number.
             if (display.FailureReason is null && display.Headroom > 1f)
-            {
-                return Loc.F($"此屏当前 EDR 余量 {display.Headroom:0.0}×（随亮度设置变化）。")
-                    + (targetHeadroom <= display.Headroom
-                        ? Loc.F($"本档 {targetHeadroom:0.0}× 可完整显示。")
-                        : Loc.F($"本档 {targetHeadroom:0.0}× 超出 {targetHeadroom - display.Headroom:0.0}×，最亮的部分会在 {display.Headroom:0.0}× 处被裁掉；调低屏幕亮度可换到更多余量。"));
-            }
+                return Loc.F($"此屏当前 EDR 余量 +{displayStops:0.0} 档（{display.Headroom:0.0}×，随亮度设置变化）。") + fit;
             return Loc.F($"显示器在 HDR 模式，但读不到面板峰值亮度（{display.FailureReason}），无法判断会不会裁。");
         }
 
@@ -289,39 +386,42 @@ public partial class MainViewModel
             : panelPeak >= 400f ? "DisplayHDR 400"
             : Loc.T("低于 DisplayHDR 400");
         string screen = Loc.F(
-            $"此屏 ≈ {tier} 级（峰值 {panelPeak:0} nits），SDR 白 {display.SdrWhiteNits:0} nits → 余量 {display.Headroom:0.0}×。");
-        string fit = targetHeadroom <= display.Headroom
-            ? Loc.F($"本档 {targetHeadroom:0.0}× 可完整显示。")
-            : Loc.F($"本档 {targetHeadroom:0.0}× 超出 {targetHeadroom - display.Headroom:0.0}×，最亮的部分会在 {display.Headroom:0.0}× 处被面板裁掉；把 SDR 内容亮度再调低可换到更多余量。");
+            $"此屏 ≈ {tier} 级（峰值 {panelPeak:0} nits），SDR 白 {display.SdrWhiteNits:0} nits → 余量 +{displayStops:0.0} 档（{display.Headroom:0.0}×）。");
         return screen + fit;
     }
 
+    /// <summary>
+    /// Adopts a roll's stored peak into the toggle and slider. Nothing is written back — loading
+    /// is not an edit — but the next save will record the truth.
+    /// </summary>
     private void SyncHdrPeak(double nits)
     {
-        // What a v1 roll RENDERS is SDR whatever its file says, so that is what the picker
-        // shows. Nothing is written back here — loading is not an edit — but the next save
-        // will record the truth.
+        // What a v1 roll RENDERS is SDR whatever its file says, so that is what the controls show.
         if (UsesLegacyColorPipeline) nits = 0d;
 
-        int i = Array.FindIndex(HdrPeakOptions, option => option == nits);
-
-        // An unrecognised stored peak falls back to SDR rather than refusing to open the roll,
-        // matching ResolvedOutputTarget's own degradation. It is announced, because the picture
-        // will differ from the one that was saved.
-        if (i < 0)
+        bool enabled = double.IsFinite(nits) && nits > OutputTarget.ReferenceWhiteNits;
+        if (enabled)
         {
-            foreach (RollFrame f in Frames) f.Params.HdrPeakNits = HdrPeakOptions[0];
-            if (Frames.Count > 0)
+            // A peak outside the slider's range is pulled to its nearest end rather than refusing
+            // to open the roll. Announced, because the picture will differ from the one that was
+            // saved — and written through, so the file stops disagreeing with the controls.
+            double stops = StopsForNits(nits);
+            double clamped = Math.Clamp(stops, HdrLimitMinStops, HdrLimitMaxStops);
+            if (Math.Abs(clamped - stops) > 1e-9)
             {
-                MarkRollDirty();
-                StatusText = Loc.F($"HDR 峰值 {nits:0} nits 本版本不提供，本卷改按 SDR 渲染——高光会与上次打开时不同。");
+                foreach (RollFrame f in Frames) f.Params.HdrPeakNits = NitsForStops(clamped);
+                if (Frames.Count > 0)
+                {
+                    MarkRollDirty();
+                    StatusText = Loc.F($"HDR 上限 +{stops:0.0} 档（{nits:0} nits）超出本版本范围，本卷改按 +{clamped:0.0} 档——高光会与上次打开时不同。");
+                }
             }
+            _hdrLimitStops = clamped;
         }
-
-        _hdrPeakIndex = i < 0 ? 0 : i;
-        OnPropertyChanged(nameof(HdrPeakIndex));
-        OnPropertyChanged(nameof(HdrPeakHint));
-            OnPropertyChanged(nameof(HdrPeakTooltip));
+        _hdrEnabled = enabled;
+        OnPropertyChanged(nameof(HdrEnabled));
+        OnPropertyChanged(nameof(HdrLimitStops));
+        NotifyHdrText();
     }
 
     // ══ 胶片风格（印片 LUT） ═══════════════════════════════════════════════════

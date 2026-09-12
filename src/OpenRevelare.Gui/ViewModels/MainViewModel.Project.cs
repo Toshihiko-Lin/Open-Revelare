@@ -185,8 +185,7 @@ public partial class MainViewModel
         _colorPipelineVersion = value;
         OnPropertyChanged(nameof(UsesLegacyColorPipeline));
         OnPropertyChanged(nameof(CanChooseHdrPeak));
-        OnPropertyChanged(nameof(HdrPeakHint));
-        OnPropertyChanged(nameof(HdrPeakTooltip));
+        NotifyHdrText();
         OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
         OnPropertyChanged(nameof(ColorPipelineDiagnostic));
@@ -699,6 +698,13 @@ public partial class MainViewModel
         // rather than the finished frames keeps each split scan's virtual copies next to their
         // parent, since they are all contributed by one path.
         foreach (string p in SortedByName(paths)) AddFramesForPath(p);
+        // D-027: a new roll starts at the HDR tier this display shows in full. Seeded on the
+        // frames BEFORE the first switch, so LoadParams adopts it like any stored value, and
+        // before RegisterRoll, so the first .ncproj carries it — a default that lived only in the
+        // picker would evaporate when the roll is reopened elsewhere, which is exactly the drift
+        // I5 forbids. OpenProjectAsync never comes through here: an existing roll keeps its own.
+        double newRollPeak = DefaultHdrPeakNitsForNewRoll();
+        foreach (RollFrame f in Frames) f.Params.HdrPeakNits = newRollPeak;
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file

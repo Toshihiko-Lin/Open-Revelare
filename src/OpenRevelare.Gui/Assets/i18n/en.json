@@ -588,12 +588,12 @@
   "曲线": "tone curves",
   "胶片 LUT": "a film LUT",
   "、": ", ",
-  "HDR 峰值": "HDR peak",
+  "HDR 上限": "HDR limit",
+  "开": "On",
+  "关（印相）": "Off (print)",
+  "+{0:0.0} 档 · {1:0} nits": "+{0:0.0} stops · {1:0} nits",
+  "HDR 关闭：印相渲染，高光收进纸白。": "HDR off: rendered as a print, highlights folded into paper white.",
   "此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。": "This roll is still on the legacy colour pipeline (v1); its rendering is frozen by D-013 and HDR has no effect. Available once the roll is migrated to v2.",
-  "SDR（印相）": "SDR (print)",
   "（高光软校样）": " (highlights soft-proofed)",
-  "（高光裁切）": " (highlights clipped)",
-  "按印相渲染，高光收进纸白。这是一直以来的行为，不确定就选它。": "Renders as a print, with highlights folded into paper white. This is the long-standing behaviour; pick it if unsure.",
-  "与 SDR 共用同一条肩部曲线，只是瞄得更高：阴影与中间调逐位相同，更亮的部分不再把底片宽容度压进纸白，而是铺开到所选峰值。仅在 HDR 显示器上看得到，SDR 屏会裁掉超出部分；导出文件不受影响。": "Shares one shoulder curve with SDR, simply aimed higher: shadows and mid-tones are bit-identical, while the brighter part no longer compresses the negative's latitude into paper white but spreads it out to the chosen peak. Visible only on an HDR display — an SDR screen clips what is beyond it — and the exported file is unaffected.",
-  "　当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。": "  Levels, contrast, highlights/shadows, curves or saturation are currently adjusted; an HDR render refuses them — reset them first."
+  "（高光裁切）": " (highlights clipped)"
 }

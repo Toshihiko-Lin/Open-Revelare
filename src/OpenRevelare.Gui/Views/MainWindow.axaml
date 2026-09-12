@@ -733,17 +733,15 @@
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
                                   ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 
-                        <!-- HDR 峰值与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成
-                             什么样，输出空间决定装进哪个容器，HDR 峰值决定纸白之上还留不留
-                             东西。零档即 SDR，与本功能出现之前逐位相同。 -->
-                        <TextBlock Grid.Column="4" Classes="fieldLabel" Text="{i18n:T 'HDR 峰值'}" Margin="16,0,8,0" />
-                        <ComboBox Grid.Column="5" SelectedIndex="{Binding HdrPeakIndex}" IsEnabled="{Binding CanChooseHdrPeak}" VerticalAlignment="Center"
-                                  ToolTip.Tip="{Binding HdrPeakTooltip}">
-                            <ComboBoxItem Content="{i18n:T 'SDR（印相）'}" />
-                            <ComboBoxItem Content="{i18n:T 'HDR 600 nits'}" />
-                            <ComboBoxItem Content="{i18n:T 'HDR 1000 nits'}" />
-                            <ComboBoxItem Content="{i18n:T 'HDR 4000 nits'}" />
-                        </ComboBox>
+                        <!-- HDR 与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成什么样，
+                             输出空间决定装进哪个容器，HDR 决定纸白之上还留不留东西。关即 SDR，
+                             与本功能出现之前逐位相同。开了之后"留到几档"在直方图下方的
+                             【HDR 上限】滑块（与 Lightroom 同构：底栏只切换，上限在直方图旁）。 -->
+                        <TextBlock Grid.Column="4" Classes="fieldLabel" Text="HDR" Margin="16,0,8,0" />
+                        <ToggleSwitch Grid.Column="5" IsChecked="{Binding HdrEnabled}" IsEnabled="{Binding CanChooseHdrPeak}"
+                                      OnContent="{i18n:T '开'}" OffContent="{i18n:T '关（印相）'}"
+                                      VerticalAlignment="Center" MinHeight="0" Padding="0"
+                                      ToolTip.Tip="{Binding HdrToggleTooltip}" />
 
                         <Button Grid.Column="7" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,6"
@@ -781,6 +779,17 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
                         <ctl:HistogramView Data="{Binding Histogram}" DisplayHeadroom="{Binding DisplayHdrHeadroom}" ToolTip.Tip="{Binding HistogramTooltip}" Height="78" HorizontalAlignment="Stretch" />
+                        <!-- Lightroom's HDR Limit, where Lightroom puts it: under the histogram whose
+                             right quarter it governs, only while HDR is on. Stops above SDR white;
+                             the readout also says the mastering peak in nits. It is the MASTER's
+                             ceiling (what an export keeps), not the preview's — the preview fits
+                             itself to this display on its own (D-028). -->
+                        <StackPanel IsVisible="{Binding HdrEnabled}" ToolTip.Tip="{Binding HdrLimitHint}">
+                            <ctl:SliderRow Label="{i18n:T 'HDR 上限'}" Minimum="0.5" Maximum="4" Decimals="1" Increment="0.1"
+                                           DefaultValue="2.3" FormatString="+0.0" Value="{Binding HdrLimitStops}" />
+                            <TextBlock Text="{Binding HdrLimitText}" FontSize="11" Foreground="{DynamicResource TextDimBrush}"
+                                       HorizontalAlignment="Right" Margin="0,-2,0,2" />
+                        </StackPanel>
                         <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}"
                                       IsEnabled="{Binding HasImage}"

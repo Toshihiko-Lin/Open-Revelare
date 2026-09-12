@@ -1529,7 +1529,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // Whether step 4 keeps anything above diffuse white. Same reason as the output space for
         // living in this snapshot rather than being read off the frame: the picker's state is what
         // the preview, the thumbnails and an export all have to agree on.
-        HdrPeakNits = HdrPeakOptions[_hdrPeakIndex],
+        HdrPeakNits = HdrPeakNits,
         // The print-film emulation that runs INSIDE step 4. Like the output space it belongs to
         // this snapshot rather than being read off the frame: this is the state the picker is
         // showing, and the preview, the thumbnails and an export all have to render the same
@@ -3478,6 +3478,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
         if (!_filmBaseSampled) FilmBaseText = "";
         foreach (RollFrame f in Frames) f.RefreshText();
+        NotifyHdrText();
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
     }
 
