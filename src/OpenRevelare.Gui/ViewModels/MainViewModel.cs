@@ -1943,6 +1943,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// <see cref="TBaseToDensity"/> 的逆：黑端的绝对密度 → 片基透射率，给高光估计器当参考。
+    /// 估计器于是在「相对片基」的密度（= 跨度）上选帧、抬升，结果再由 <see cref="AddDMin"/>
+    /// 变回绝对密度写入亮端。为什么必须这样，见 AutoInvertRollAsync 第二阶段的说明。
+    /// </summary>
+    private static double[] TBaseFromDensity(double[] dMin)
+    {
+        var t = new double[3];
+        for (int c = 0; c < 3; c++) t[c] = Math.Pow(10.0, -dMin[c]);
+        return t;
+    }
+
+    /// <summary>相对片基的高光密度（跨度）→ 对 T=1 的绝对密度，即 <c>span + D_min</c>。</summary>
+    private static double[] AddDMin(double[] span, double[] dMin)
+    {
+        var d = new double[3];
+        for (int c = 0; c < 3; c++) d[c] = span[c] + dMin[c];
+        return d;
+    }
+
+    /// <summary>
     /// 高光采样：框负片上最浓的区域（= 正片高光），测出亮端三个密度。
     ///
     /// 这里曾有两个按钮——「框选亮部」解白平衡、「框选 D_max」定端点——它们测的是同一个量，
@@ -2462,18 +2482,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             rollBase ??= await Task.Run(
                 () => FilmBase.EstimateTBaseFromRoll(baseList, cut), ct);
 
-            // 估计器一律传中性参考，让它们直接产出**对 T=1 的绝对密度**——与 D_min 同一基准。
-            //
-            // 传 rollBase 会得到「相对片基」的密度，而黑端现在是绝对密度，两端基准不一致：
-            // 跨度 = D_max − D_min 会各通道少算一个 D_min，而三通道少得不一样多
-            // （实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。
-            double[] neutralRef = { 1.0, 1.0, 1.0 };
+            // 估计器传**片基**做参考，让它们在「相对片基」的密度上工作——那正是反相消费的量：
+            // 跨度 = D_max − D_min，颜色平衡是三通道跨度之比（DensityEndpoints.FromMeasured）。
+            // 选帧、抬升都只在跨度上才成立；传中性参考得到的是绝对密度，每通道各带一个 D_min，
+            // 抬升 k 倍后跨度多出 (k−1)·D_min——这是片基色的逐通道偏置，整卷因此偏红
+            // （实测诺日士1089：k=1.549，跨度 R/G 从 0.866 掉到 0.767）。
+            // 写回 DMaxPerChannel 时再加回 D_min，两端仍然是同一基准的绝对密度——
+            // 早先「传 rollBase 会让两端基准不一致」的问题，出在没加回，不在传什么。
+            double[] dMin = TBaseToDensity(rollBase);
+            double[] AbsoluteFrom(double[] span) => AddDMin(span, dMin);
 
             double[]? rollWbHigh = null;
             try
             {
-                rollWbHigh = await Task.Run(
-                    () => FilmBase.AutoWbHighFromRoll(masks, neutralRef, cut, valueList), ct);
+                rollWbHigh = AbsoluteFrom(await Task.Run(
+                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, cut, valueList), ct));
             }
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
@@ -2482,7 +2505,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // uses: an opaque film-edge line would inflate the channels unequally and show up as
             // a colour cast.
             double[]? rollDMaxPerCh = await Task.Run(
-                () => FilmBase.DetectDMaxPerChannelFromRoll(values, neutralRef, 90.0, masks, cut), ct);
+                () => FilmBase.DetectDMaxPerChannelFromRoll(values, rollBase, 90.0, masks, cut), ct);
+            if (rollDMaxPerCh is not null) rollDMaxPerCh = AbsoluteFrom(rollDMaxPerCh);
 
             ct.ThrowIfCancellationRequested();
 
@@ -2490,13 +2514,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             try
             {
                 // 片基的绝对密度就是黑端本身。
-                DMinPerChannel = TBaseToDensity(rollBase);
+                DMinPerChannel = dMin;
 
                 // The highlight endpoint, from whichever measurement is available. Both estimators
-                // return the same quantity — three absolute densities — so there is nothing to
-                // reconcile and no second field left to contradict them. The per-channel D-max
-                // detector is preferred: it pools an upper percentile across the roll, where
-                // AutoWbHighFromRoll takes the single densest frame's highlight.
+                // return the same quantity — three densities against the base, made absolute
+                // above — so there is nothing to reconcile and no second field left to contradict
+                // them. The per-channel D-max detector is preferred: it picks the frame the roll
+                // agrees on, where AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
                 // The detector's endpoints ARE the placement — both the channels' relative spans
@@ -2634,8 +2658,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
-        // 不再预先除以 t_base：参考透射率恒为 1,1,1，估计器直接产出对 T=1 的绝对密度，
-        // 与 D_min 同基准。（这里曾经按片基归一化，那是旧模型的做法。）
+        // 估计器按当前黑端归一化（参考 = 10^−D_min），在跨度上测量，结果加回 D_min——见下。
         //
         // Masked on the RAW region: both valleys are calibrated on raw luma. Without this the
         // light board and — far more damaging — the opaque blocking card sit inside the
@@ -2661,11 +2684,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // — the neutral default on a fresh roll — while the status line below still printed those
         // stale numbers as though they had just been measured. That is the "单张没把高光段测上"
         // gap: not a wrong measurement but a missing one, reported as success.
+        // Measured against the CURRENT black end, the same way the roll chain measures against
+        // the roll base: the estimators then work on spans, which is what the no-clip lift has
+        // to preserve, and D_min is added back so the endpoint stays absolute. See the roll
+        // chain's stage 2 for the cast that measuring absolute densities produced.
+        double[] dMin = DMinPerChannel;
+        double[] tBase = TBaseFromDensity(dMin);
         double[]? highlight = null;
         if (mask is not null)
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { src }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut);
+                new[] { src }, tBase, 90.0, new[] { mask }, cut);
 
             // Fallback: the densest-highlight solve. It answers from the same masked pixels but
             // reduces them differently, so it still produces a triplet where the percentile
@@ -2676,14 +2705,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 try
                 {
                     highlight = FilmBase.AutoWbHighFromRoll(
-                        new[] { mask }, new[] { 1.0, 1.0, 1.0 }, cut,
+                        new[] { mask }, tBase, cut,
                         valueImages: ReferenceEquals(mask, src) ? null : new[] { src });
                 }
                 catch { /* no usable highlight in this frame — say so below */ }
             }
         }
 
-        if (highlight is not null) DMaxPerChannel = highlight;
+        if (highlight is not null) DMaxPerChannel = AddDMin(highlight, dMin);
         _lastHighlightMeasured = highlight is not null;
 
         StatusText = highlight is not null
@@ -2818,14 +2847,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ImageBuffer? val = AutoRegionStage1();
         if (raw is null || val is null) return;
 
-        // 参考一律中性，与【自动（整卷）】和【自动高光】完全一致。
+        // 参考取当前黑端换算的片基透射率，与【自动（整卷）】和【自动高光】完全一致：估计器在
+        // 跨度上工作，结果加回 D_min 写成绝对密度。三条「自动白端」路径必须同一基准，否则
+        // 同一张片子给出不同的亮端。
         //
-        // 这里曾传 TBaseArr()，那会让估计器产出「相对片基」的密度，而黑端是**对 T=1 的绝对
-        // 密度**——两端基准不一致，跨度 D_max − D_min 就会各通道少算一个 D_min，而三通道少得
-        // 不一样多（整卷路径实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。新工程的 TBase
-        // 恒为 1,1,1 所以看不出来，但旧工程会从文件里读回非中性的 TBase，那时这个按钮与另外
-        // 两条路径就给出不同的亮端。
-        double[] neutralRef = { 1.0, 1.0, 1.0 };
+        // 参考不能是 TBaseArr()：新工程的 TBase 恒为 1,1,1，旧工程会从文件读回非中性值，两者
+        // 都不是黑端所在的位置；也不能是中性 1,1,1——那样得到的是绝对密度，抬升系数会把片基色
+        // 掺进跨度，见整卷链第二阶段。
+        double[] dMin = DMinPerChannel;
+        double[] tBase = TBaseFromDensity(dMin);
         IReadOnlyList<ImageBuffer>? values = ReferenceEquals(raw, val) ? null : new[] { val };
         double? cut = AutoBoardCut();
 
@@ -2836,7 +2866,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { val }, neutralRef, 90.0, new[] { raw }, cut);
+                new[] { val }, tBase, 90.0, new[] { raw }, cut);
         }
         catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
 
@@ -2844,7 +2874,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, neutralRef, cut, values);
+                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, tBase, cut, values);
             }
             catch (Exception ex)
             {
@@ -2859,7 +2889,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        DMaxPerChannel = highlight;
+        DMaxPerChannel = AddDMin(highlight, dMin);
         StatusText = Loc.F($"自动白点 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
     }
 

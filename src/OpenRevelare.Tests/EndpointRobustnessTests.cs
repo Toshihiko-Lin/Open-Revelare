@@ -241,44 +241,89 @@ public class EndpointRobustnessTests
     }
 
     /// <summary>
-    /// A ROLL-WIDE EXPOSURE TREND MUST NOT BE MISTAKEN FOR THE FILM'S COLOUR.
+    /// THE ROLL'S COLOUR IS WHERE ITS FRAMES AGREE, NOT AT EITHER END OF ITS EXPOSURE RANGE.
     ///
-    /// The frames of a real roll do not scatter randomly about one colour — their highlight
-    /// ratios drift with highlight DEPTH, because a deeper highlight is a brighter subject and a
-    /// brighter subject contributes more of its own colour to the measurement. Measured on the
-    /// 除碳5219 roll, R/G and B/G are anti-correlated (−0.63) and both track depth.
+    /// The shape of a real roll (诺日士1089, twelve frames): a handful of well-exposed frames whose
+    /// highlight was a genuine white and which therefore report the same ratios to within grain,
+    /// plus more frames whose brightest subject was something coloured and which scatter — each
+    /// in its own direction, none agreeing with any other.
     ///
-    /// Against a trend, a median picks the middle of the roll's EXPOSURE distribution, which is a
-    /// scene statistic, not a film one. The frame with a genuinely neutral highlight ranked 28th
-    /// of 32 under that criterion. Extrapolating the trend to the shallow end — where a highlight
-    /// barely clears the base and so carries least of its subject — is what makes the neutral end
-    /// of the roll reachable.
-    ///
-    /// The roll here is built with an explicit trend and a clean neutral frame at the shallow end,
-    /// which a median would pass over because it sits at the edge of the distribution.
+    /// Neither a depth rule nor a trend rule finds the cluster. The scattered frames here are
+    /// deliberately the SHALLOW ones and drift consistently with depth, which is what an earlier
+    /// revision extrapolated to and picked from; a median of the ratios is pulled toward the
+    /// scattered side as well. Only the frames that back each other can say what the film's
+    /// highlight looks like.
     /// </summary>
     [Fact]
-    public void The_rolls_colour_is_read_at_the_shallow_end_of_its_exposure_trend()
+    public void The_rolls_colour_comes_from_the_frames_that_agree_with_each_other()
     {
-        // Sixteen frames whose ratios drift with depth: the deep ones progressively redder in
-        // R/G and weaker in B/G, the shallow ones near neutral — the shape of a real roll.
-        var roll = new ImageBuffer[16];
-        for (int i = 0; i < 16; i++)
+        // Five deep frames within ±1% of R/G 0.92 / B/G 1.11 — the film's white.
+        var cluster = new[]
         {
-            double g = 1.40 + i * 0.03;          // green depth, shallow -> deep
-            double drift = i * 0.004;            // contamination grows with depth
-            roll[i] = Frame((g * (0.80 + drift), g, g * (1.50 - drift), 40));
-        }
+            Frame((1.40 * 0.925, 1.40, 1.40 * 1.100, 40)),
+            Frame((1.45 * 0.915, 1.45, 1.45 * 1.115, 40)),
+            Frame((1.50 * 0.920, 1.50, 1.50 * 1.105, 40)),
+            Frame((1.55 * 0.930, 1.55, 1.55 * 1.120, 40)),
+            Frame((1.60 * 0.918, 1.60, 1.60 * 1.108, 40)),
+        };
+        // Seven shallow frames, each a different coloured subject, whose ratios happen to trend
+        // with depth — the pattern a trend fit would follow to the shallow end.
+        var scattered = new[]
+        {
+            Frame((0.80 * 0.860, 0.80, 0.80 * 0.900, 40)),
+            Frame((0.85 * 0.980, 0.85, 0.85 * 0.960, 40)),
+            Frame((0.90 * 0.870, 0.90, 0.90 * 1.160, 40)),
+            Frame((0.95 * 1.060, 0.95, 0.95 * 0.780, 40)),
+            Frame((1.00 * 0.900, 1.00, 1.00 * 1.010, 40)),
+            Frame((1.05 * 0.970, 1.05, 1.05 * 0.870, 40)),
+            Frame((1.10 * 0.950, 1.10, 1.10 * 1.160, 40)),
+        };
+        var roll = cluster.Concat(scattered).ToArray();
 
         double[] answer = FilmBase.DetectDMaxPerChannelFromRoll(
             roll, new[] { 1.0, 1.0, 1.0 }, 90.0, roll, null, edgeInset: 0.0)!;
 
         double rg = answer[0] / answer[1], bg = answer[2] / answer[1];
+        Assert.InRange(rg, 0.91, 0.935);
+        Assert.InRange(bg, 1.095, 1.125);
+    }
 
-        // The shallow end of the trend is R/G 0.80 / B/G 1.50; the roll's MEDIAN frame sits near
-        // 0.83 / 1.47. The answer must land nearer the shallow end than the median.
-        Assert.True(rg < 0.818, $"R/G followed the roll's median instead of its shallow end: {rg:F4}");
-        Assert.True(bg > 1.482, $"B/G followed the roll's median instead of its shallow end: {bg:F4}");
+    /// <summary>
+    /// THE NO-CLIP LIFT MUST NOT CHANGE THE COLOUR THE FRAME WAS CHOSEN FOR — IN THE SPANS.
+    ///
+    /// The inversion consumes <c>dMax_c − dMin_c</c> per channel, so colour is the ratio between
+    /// the three SPANS. The detector's lift multiplies whatever densities it was handed; only if
+    /// those are measured against the film base (tBase = the base, not 1,1,1) does one factor
+    /// leave the span ratios alone. Measured against a neutral reference on an orange-masked
+    /// roll, a 1.549× lift added (k−1)·dMin to every span and moved the roll's span R/G from
+    /// 0.866 to 0.767 — the whole roll came out red.
+    ///
+    /// A deep frame elsewhere on the roll forces the lift here; the chosen frame is the cluster's
+    /// and must come back with its own span ratios, lifted.
+    /// </summary>
+    [Fact]
+    public void The_lift_preserves_span_ratios_when_measured_against_the_base()
+    {
+        double[] dMin = { 0.30, 0.65, 0.90 };
+        double[] tBase = dMin.Select(d => System.Math.Pow(10.0, -d)).ToArray();
+
+        // Three agreeing frames with span ratios R/G 0.90 / B/G 1.10 above the base, and one
+        // much deeper neutral-ish frame that only sets the headroom.
+        ImageBuffer Above(double g, double rg, double bg) =>
+            Frame((dMin[0] + g * rg, dMin[1] + g, dMin[2] + g * bg, 40));
+        var roll = new[]
+        {
+            Above(1.00, 0.90, 1.10), Above(1.05, 0.90, 1.10), Above(1.10, 0.90, 1.10),
+            Above(1.60, 0.99, 1.01),
+        };
+
+        double[] span = FilmBase.DetectDMaxPerChannelFromRoll(
+            roll, tBase, 90.0, roll, null, edgeInset: 0.0)!;
+
+        Assert.Equal(0.90, span[0] / span[1], 2);
+        Assert.Equal(1.10, span[2] / span[1], 2);
+        // Lifted clear of the deep frame's own channel maxima.
+        Assert.True(span[1] >= 1.60 - 0.01, $"green span {span[1]:F3} did not clear the deep frame");
     }
 
     // ── 2. The board shoulder is measured, not assumed ──────────────────────────────
