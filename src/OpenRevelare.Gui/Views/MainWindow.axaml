@@ -717,7 +717,10 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />
+                        <!-- 两个下拉在 HDR 开启时变灰：扩展渲染不用它们（D-024 / D-021），原因写在 HDR
+                             开关的 tooltip 与上限滑块的 hint 里。 -->
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
+                                  IsEnabled="{Binding CanChooseOutputSpaceAndPrintLut}"
                                   ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
                             <ComboBoxItem Content="{i18n:T 'sRGB（通用）'}" />
                             <ComboBoxItem Content="{i18n:T 'Display P3（宽色域）'}" />
@@ -730,6 +733,7 @@
                              cube 的 TITLE。 -->
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
                         <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
+                                  IsEnabled="{Binding CanChooseOutputSpaceAndPrintLut}"
                                   ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
                                   ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
 

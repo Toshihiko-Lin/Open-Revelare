@@ -166,6 +166,12 @@ public partial class MainViewModel
             if (_hdrEnabled == value) return;
             _hdrEnabled = value;
             OnPropertyChanged(nameof(HdrEnabled));
+            OnPropertyChanged(nameof(CanChooseOutputSpaceAndPrintLut));
+            // Said at the moment it starts mattering, not left for the greyed controls to imply:
+            // the extended render keeps neither the roll's output space (D-024) nor its print
+            // stock (D-021), so a roll that had either set changes more than its highlights.
+            if (value && (_outputSpaceIndex != 0 || _printLutIndex != 0))
+                StatusText = Loc.T("HDR 开启：输出空间与胶片风格不参与扩展渲染（载体恒为线性扩展 sRGB，印片 LUT 不走）；关闭 HDR 即恢复。");
             ApplyHdrToRoll(rebuildThumbnailsNow: true);
         }
     }
@@ -306,9 +312,19 @@ public partial class MainViewModel
         }
     }
 
+    /// <summary>
+    /// False while HDR is on. The extended render's carrier is fixed to linear extended sRGB
+    /// (D-024) and it does not run the print LUT (D-021), so the two pickers would change
+    /// nothing; they are greyed rather than left to look effective, and the reason is stated in
+    /// the toggle's tooltip, the hint under the slider and the status bar at the moment of
+    /// switching — a disabled control shows no tooltip of its own.
+    /// </summary>
+    public bool CanChooseOutputSpaceAndPrintLut => !_hdrEnabled;
+
     /// <summary>The toggle's hover text: what the control is, then where the roll stands on this display.</summary>
     public string HdrToggleTooltip =>
         Loc.T("关：印相渲染，高光收进纸白，一直以来的行为；不确定就关。开：纸白之上的宽容度铺到直方图下方【HDR 上限】所设的档数，导出随之。预览在本机余量内自动软校样。")
+        + "\n" + Loc.T("开启时【输出空间】与【胶片风格】不参与：扩展渲染的载体恒为线性扩展 sRGB（D-024），印片 LUT 是把高光收进纸白的显示参考表，与 HDR 互斥（D-021）。两个下拉随之变灰，关闭 HDR 即恢复。")
         + "\n" + HdrLimitHint;
 
     /// <summary>
@@ -346,7 +362,12 @@ public partial class MainViewModel
                 ? Loc.T("当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
                 : string.Empty;
 
+            string ignored = _outputSpaceIndex != 0 || _printLutIndex != 0
+                ? Loc.T("本卷选的输出空间／胶片风格在 HDR 下不参与渲染（D-024 / D-021）。")
+                : string.Empty;
+
             return DescribeDisplayFit(_hdrLimitStops)
+                + (ignored.Length == 0 ? string.Empty : "\n" + ignored)
                 + (blocked.Length == 0 ? string.Empty : "\n" + blocked);
         }
     }
@@ -420,6 +441,7 @@ public partial class MainViewModel
         }
         _hdrEnabled = enabled;
         OnPropertyChanged(nameof(HdrEnabled));
+        OnPropertyChanged(nameof(CanChooseOutputSpaceAndPrintLut));
         OnPropertyChanged(nameof(HdrLimitStops));
         NotifyHdrText();
     }
