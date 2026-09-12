@@ -22,6 +22,14 @@ public partial class MainViewModel
     internal const float CanonicalPreviewReferenceWhiteScale = 1f;
 
     [ObservableProperty] private PresentationScene? _previewScene;
+
+    /// <summary>
+    /// How far above diffuse white <see cref="PreviewScene"/> may reach — the target headroom of
+    /// the render it came from, one for SDR. Published in the same revision as the scene so the
+    /// composition root never pairs one render's pixels with another's headroom. Read by the
+    /// soft proof (D-028) and by nothing that renders or exports (I5).
+    /// </summary>
+    public float PreviewHighlightHeadroom { get; private set; } = 1f;
     [ObservableProperty] private PresentationScene? _sprocketMaskScene;
     [ObservableProperty] private PresentationScene? _clippingScene;
     [ObservableProperty] private long _presentationRevision;
@@ -179,6 +187,7 @@ public partial class MainViewModel
             ClippingOverlay = clippingOverlay;
             ClippingScene = clippingScene;
             if (refreshSprocketMask && ShowSprocketMask) UpdateSprocketOverlay();
+            PreviewHighlightHeadroom = histogram.TargetHeadroom;
             PreviewScene = scene;
             OnPropertyChanged(nameof(ColorPipelineDiagnostic));
         });
@@ -189,6 +198,7 @@ public partial class MainViewModel
         UpdatePresentation(() =>
         {
             _previewRenderedFrame = null;
+            PreviewHighlightHeadroom = 1f;
             PreviewScene = null;
             ClippingScene = null;
             SprocketMaskScene = null;

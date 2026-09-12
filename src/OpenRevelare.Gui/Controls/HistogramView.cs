@@ -35,6 +35,14 @@ public sealed class HistogramData
 
     public const float LightroomStops = 4f;
 
+    /// <summary>
+    /// The headroom the frame was rendered for (<see cref="OutputTarget.HighlightHeadroom"/>);
+    /// one for a display-referred render. Carried here because the histogram and the scene are
+    /// published together from one render, and the composition root needs this number next to
+    /// the scene to soft-proof it (D-028).
+    /// </summary>
+    public float TargetHeadroom { get; init; } = 1f;
+
     /// <summary>The axis length for a target with this much headroom above diffuse white.</summary>
     public static float StopsFor(float targetHeadroom)
         => targetHeadroom > 1f && float.IsFinite(targetHeadroom)
@@ -108,6 +116,7 @@ public sealed class HistogramData
         {
             R = r, G = g, B = b, L = l, IsExtended = true, SdrBinCount = ExtendedSdrBins,
             ExtendedStops = stops,
+            TargetHeadroom = targetHeadroom > 1f && float.IsFinite(targetHeadroom) ? targetHeadroom : 1f,
         };
     }
 

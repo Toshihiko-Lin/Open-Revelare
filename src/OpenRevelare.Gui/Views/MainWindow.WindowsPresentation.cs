@@ -308,7 +308,16 @@ public partial class MainWindow
         // shares the pixel storage; the compositor and PresentationBufferBuilder both reject a
         // composition whose layers disagree on the policy, so all of them must be re-tagged.
         float referenceWhiteScale = contract.ReferenceWhiteScale;
-        if (vm.PreviewScene?.WithReferenceWhiteScale(referenceWhiteScale) is { } baseScene)
+        // D-028: an extended render that out-reaches this display's headroom is fitted into it
+        // here — presentation generation, the one place I5 lets the display in — rather than
+        // clipped by the compositor. The fit precedes the re-tag so the cache keys on the view
+        // model's own scene object. The sharp patch is the same render at full resolution and
+        // gets the same fit, or it would sit brighter than the picture around it.
+        float contentHeadroom = vm.PreviewHighlightHeadroom;
+        float displayHeadroom = contract.ExtendedHeadroom;
+        if (vm.PreviewScene is { } previewScene &&
+            _frameSoftProof.Fit(previewScene, contentHeadroom, displayHeadroom)
+                .WithReferenceWhiteScale(referenceWhiteScale) is { } baseScene)
         {
             var geometry = new PreviewViewportGeometry(
                 baseScene.Size,
@@ -324,7 +333,8 @@ public partial class MainWindow
             {
                 var normalized = new PreviewRect(patch.X, patch.Y, patch.W, patch.H);
                 overlays.Add(new PresentationOverlay(
-                    patch.Scene.WithReferenceWhiteScale(referenceWhiteScale),
+                    _patchSoftProof.Fit(patch.Scene, contentHeadroom, displayHeadroom)
+                        .WithReferenceWhiteScale(referenceWhiteScale),
                     RoundUnclipped(geometry.NormalizedToPhysical(normalized))));
             }
 
@@ -589,6 +599,17 @@ public partial class MainWindow
         // (复制色彩诊断) away, where it says "Input encoding: Uncharacterized" in full.
         if (Vm?.InputIsUncharacterized == true)
             guarantee += Services.Loc.T("（显示端）");
+        // Same honesty for the top of the range. WYSIWYG is a claim about the last hop's colour
+        // transform; when the render reaches above what this panel can show, the highlights are
+        // either soft-proofed into it (D-028) or, with no headroom to proof into, clipped. Either
+        // way the picture on screen is not the render above diffuse white, and the badge says so.
+        if (Vm is { PreviewHighlightHeadroom: > 1f } vm && guarantee.StartsWith("WYSIWYG", StringComparison.Ordinal))
+        {
+            if (HighlightSoftProof.IsNeeded(vm.PreviewHighlightHeadroom, contract.ExtendedHeadroom))
+                guarantee += Services.Loc.T("（高光软校样）");
+            else if (!(contract.ExtendedHeadroom > 1f))
+                guarantee += Services.Loc.T("（高光裁切）");
+        }
         bool hasWarning = !string.IsNullOrWhiteSpace(warning);
         // Which advice applies is decided by the typed owner, not by the warning text; see
         // ColorDiagnosticBadge.
@@ -723,6 +744,9 @@ public partial class MainWindow
         }
         preview.Dispose();
     }
+
+    private readonly SoftProofCache _frameSoftProof = new();
+    private readonly SoftProofCache _patchSoftProof = new();
 
     private sealed record WindowsPresentationSnapshot(
         long Epoch,

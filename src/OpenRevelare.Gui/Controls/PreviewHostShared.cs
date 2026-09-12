@@ -89,6 +89,34 @@ internal static class PresentationGuarantee
         presenterAvailable && contract?.IsWysiwygGuaranteed == true;
 }
 
+/// <summary>
+/// <see cref="HighlightSoftProof.Fit"/>, remembered for one source scene. A composition is
+/// captured on every pan, zoom and overlay toggle; the frame's pixels change far less often
+/// than that, and the fit is a full pass over them. Keyed by scene identity: the view model
+/// publishes a new scene object per render, and re-tagging the reference white happens after
+/// the fit, so identity is the right key.
+/// </summary>
+internal sealed class SoftProofCache
+{
+    private PresentationScene? _source;
+    private float _contentHeadroom;
+    private float _displayHeadroom;
+    private PresentationScene? _fitted;
+
+    internal PresentationScene Fit(PresentationScene source, float contentHeadroom, float displayHeadroom)
+    {
+        if (_fitted is not null && ReferenceEquals(source, _source) &&
+            contentHeadroom == _contentHeadroom && displayHeadroom == _displayHeadroom)
+            return _fitted;
+
+        _fitted = HighlightSoftProof.Fit(source, contentHeadroom, displayHeadroom);
+        _source = source;
+        _contentHeadroom = contentHeadroom;
+        _displayHeadroom = displayHeadroom;
+        return _fitted;
+    }
+}
+
 internal interface IPreviewFrameSink
 {
     DisplayContract Current { get; }

@@ -433,6 +433,8 @@ public sealed class OutputTargetTests
         Assert.Equal(192, histogram.SdrBinCount);
         // 1000/203 = 4.93x = 2.3 stops fits Lightroom's fixed four-stop axis.
         Assert.Equal(4f, histogram.ExtendedStops);
+        // The target's headroom rides along for the soft proof (D-028).
+        Assert.Equal(cal.ResolvedOutputTarget.HighlightHeadroom, histogram.TargetHeadroom);
         int aboveWhite = frame.Pixels.Data.Count(value => value > 1f);
         Assert.True(aboveWhite > 0, "fixture must contain highlights above SDR white");
         float extendedZone = histogram.R[192..].Sum() + histogram.G[192..].Sum() + histogram.B[192..].Sum();
@@ -456,6 +458,7 @@ public sealed class OutputTargetTests
 
         Assert.False(viaFrame.IsExtended);
         Assert.Equal(256, viaFrame.SdrBinCount);
+        Assert.Equal(1f, viaFrame.TargetHeadroom);
         Assert.Equal(viaBuffer.R, viaFrame.R);
         Assert.Equal(viaBuffer.G, viaFrame.G);
         Assert.Equal(viaBuffer.B, viaFrame.B);
