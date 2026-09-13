@@ -255,10 +255,11 @@ public static class Pipeline
             {
                 // The shoulder itself ran inside step 4, exactly where the SDR rendering runs
                 // its own — they are one family of curves and differ only in where they aim
-                // (D-021). What is left here is the same guard the display-referred path ends
-                // with: exposure and white balance are multiplicative and land after the shoulder,
-                // so they can push a rendered value back past the ceiling it established.
-                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
+                // (D-021). Stage 2 then runs against the roll's own range (D-032), and what is
+                // left is the same guard the display-referred path ends with: exposure is
+                // multiplicative and levels/contrast/curves are open-ended above, so they can push
+                // a rendered value back past the ceiling the shoulder established.
+                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
                 HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
 
                 // FILL IS PAPER WHITE, NOT A HIGHLIGHT. The mask and the rotation corners are

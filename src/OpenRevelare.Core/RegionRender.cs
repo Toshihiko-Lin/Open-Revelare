@@ -482,7 +482,7 @@ public static class RegionRender
                 colorManagement);
             if (target.IsExtended)
             {
-                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
+                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
                 HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
                 if (fill is not null)
                     Sprocket.ApplyMask(pixels.Data, fill);

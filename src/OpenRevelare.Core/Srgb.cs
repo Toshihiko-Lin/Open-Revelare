@@ -28,6 +28,30 @@ public static class Srgb
             : MathF.Pow((x + 0.055f) / 1.055f, 2.4f);
     }
 
+    /// <summary>
+    /// sRGB's piecewise curve extended to the whole real line: unbounded above and mirrored
+    /// about zero. Exactly <see cref="LinearToSrgb"/> on [0,1]. Stage 2's working domain on an extended target (D-032),
+    /// where both overshoot above the headroom and out-of-gamut negatives must survive.
+    /// </summary>
+    public static float LinearToSrgbExtended(float linear)
+    {
+        float magnitude = MathF.Abs(linear);
+        float encoded = magnitude <= 0.0031308f
+            ? magnitude * 12.92f
+            : 1.055f * MathF.Pow(magnitude, 1.0f / 2.4f) - 0.055f;
+        return linear < 0.0f ? -encoded : encoded;
+    }
+
+    /// <summary>Inverse of <see cref="LinearToSrgbExtended"/>.</summary>
+    public static float SrgbToLinearExtended(float encoded)
+    {
+        float magnitude = MathF.Abs(encoded);
+        float linear = magnitude <= 0.04045f
+            ? magnitude / 12.92f
+            : MathF.Pow((magnitude + 0.055f) / 1.055f, 2.4f);
+        return encoded < 0.0f ? -linear : linear;
+    }
+
     private const int LutSize = 65536;
 
     // Both tables are built in DOUBLE and then narrowed, matching how _srgb.py builds

@@ -180,27 +180,102 @@ public sealed class OutputTargetTests
     }
 
     /// <summary>
-    /// Levels, contrast, highlights/shadows, curves and saturation are DEFINED against a display
-    /// range. An extended render refuses them rather than dropping them silently, which would
-    /// hand the user a picture that is not the one they graded (D-021, and D-015's precedent).
+    /// D-032 (superseding D-023's refusal): levels, contrast, highlights/shadows, curves and
+    /// saturation are defined against a display range, and on an extended target that range is
+    /// the roll's own <c>[0, headroom]</c>. Each of them renders, takes effect, and stays inside
+    /// the headroom — the shoulder's ceiling is enforced after them, not defeated by them.
     /// </summary>
     [Theory]
     [InlineData("Contrast")]
     [InlineData("Saturation")]
     [InlineData("Highlights")]
-    public void Hdr_roll_refuses_display_referred_stage2_adjustments(string adjustment)
+    [InlineData("Levels")]
+    [InlineData("Curve")]
+    public void Hdr_roll_applies_display_referred_stage2_adjustments_against_its_own_range(string adjustment)
     {
-        var cal = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        var neutral = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        FrameParams graded = neutral.Clone();
         switch (adjustment)
         {
-            case "Contrast": cal.Contrast = 0.25; break;
-            case "Saturation": cal.Saturation = 0.3; break;
-            case "Highlights": cal.Highlights = -0.4; break;
+            case "Contrast": graded.Contrast = 0.25; break;
+            case "Saturation": graded.Saturation = 0.3; break;
+            case "Highlights": graded.Highlights = -0.4; break;
+            case "Levels": graded.BlackPoint = 0.05; graded.WhitePoint = 0.9; break;
+            case "Curve":
+                graded.CurvePointsM = [(0.0, 0.0), (0.5, 0.4), (1.0, 1.0)];
+                break;
         }
         using var cmm = new LittleCmsEngine();
 
-        Assert.Throws<NotSupportedException>(() =>
-            Pipeline.Render(MakeWorkingFrame(), cal, ColorPipelineVersion.ManagedV2, cmm));
+        RenderedFrame plain = Pipeline.Render(
+            MakeWorkingFrame(), neutral, ColorPipelineVersion.ManagedV2, cmm);
+        RenderedFrame withGrade = Pipeline.Render(
+            MakeWorkingFrame(), graded, ColorPipelineVersion.ManagedV2, cmm);
+
+        float headroom = graded.ResolvedOutputTarget.HighlightHeadroom;
+        Assert.NotEqual(plain.Pixels.Data, withGrade.Pixels.Data);
+        Assert.All(withGrade.Pixels.Data, value => Assert.True(
+            float.IsFinite(value) && value <= headroom,
+            $"{adjustment} escaped the headroom: {value:R} > {headroom:R}."));
+        Assert.Equal(ColorReference.SceneReferred, withGrade.Encoding.Reference);
+        Assert.Equal(NumericRange.Extended, withGrade.Encoding.Range);
+    }
+
+    /// <summary>
+    /// The point of defining the ops against the roll's range rather than against SDR white: the
+    /// highlights slider reaches the highlights ABOVE SDR white. A pixel the neutral render put
+    /// past 1.0 must come down when highlights are pulled, and the picture below white must not
+    /// be crushed to get there — the two ranges are graded as one.
+    /// </summary>
+    [Fact]
+    public void Hdr_highlights_slider_reaches_the_range_above_sdr_white()
+    {
+        var neutral = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        FrameParams pulled = neutral.Clone();
+        pulled.Highlights = -0.6;
+        using var cmm = new LittleCmsEngine();
+
+        float[] plain = Pipeline.Render(
+            MakeWorkingFrame(), neutral, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+        float[] withPull = Pipeline.Render(
+            MakeWorkingFrame(), pulled, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+
+        int aboveWhite = 0;
+        for (int i = 0; i < plain.Length; i++)
+        {
+            if (plain[i] <= 1f) continue;
+            aboveWhite++;
+            Assert.True(withPull[i] < plain[i],
+                $"component {i} at {plain[i]:R} (above SDR white) did not come down: {withPull[i]:R}.");
+        }
+        Assert.True(aboveWhite > 0, "fixture has no highlight above SDR white to test with");
+        Assert.Contains(plain.Zip(withPull), pair => pair.First < 1f && pair.Second > 0f);
+    }
+
+    /// <summary>
+    /// The ops run in an encoded domain that has to be open at both ends: overshoot above the
+    /// headroom has to survive to the ceiling, and D-005's out-of-gamut negatives have to survive
+    /// the round trip. On [0,1] it is sRGB's own curve, bit for bit.
+    /// </summary>
+    [Theory]
+    [InlineData(0.0f)]
+    [InlineData(0.002f)]
+    [InlineData(0.18f)]
+    [InlineData(1.0f)]
+    [InlineData(4.93f)]
+    [InlineData(18.0f)]
+    [InlineData(-0.002f)]
+    [InlineData(-0.35f)]
+    public void Extended_stage2_encoding_round_trips_beyond_the_unit_range(float linear)
+    {
+        float encoded = Srgb.LinearToSrgbExtended(linear);
+        float back = Srgb.SrgbToLinearExtended(encoded);
+
+        Assert.True(MathF.Abs(back - linear) <= 1e-5f * MathF.Max(1f, MathF.Abs(linear)),
+            $"{linear:R} came back as {back:R}.");
+        Assert.Equal(MathF.Sign(linear), MathF.Sign(encoded));
+        if (linear is >= 0f and <= 1f)
+            Assert.Equal(Srgb.LinearToSrgb(linear), encoded);
     }
 
     /// <summary>

@@ -332,10 +332,10 @@ public partial class MainViewModel
     /// What the limit means on this display right now, under the slider.
     ///
     /// <para>
-    /// THE D-023 RESTRICTION IS STATED HERE RATHER THAN DISCOVERED AT RENDER TIME. An extended
-    /// render refuses display-referred Stage 2 adjustments instead of silently dropping them, and
-    /// <c>ReportRenderFailure</c> would catch that — but a failure message after the fact is a
-    /// worse way to learn a rule than the control that sets it saying so.
+    /// The D-032 consequence is stated here for the same reason D-023's restriction used to be:
+    /// the control that sets the range is the right place to say what the range does. Under HDR
+    /// the tone controls span the limit — a curve's right end is the peak — so moving this
+    /// slider re-grades the picture, which is not what it does in SDR.
     /// </para>
     /// </summary>
     public string HdrLimitHint
@@ -348,9 +348,9 @@ public partial class MainViewModel
             if (!_hdrEnabled)
                 return Loc.T("HDR 关闭：印相渲染，高光收进纸白。");
 
-            string blocked = CurrentFrame is { } frame &&
-                             Stage2.HasDisplayReferredAdjustments(frame.Params)
-                ? Loc.T("当前有色阶／对比度／高光阴影／曲线／饱和度的调整，HDR 渲染会拒绝——请先把它们复位。")
+            string graded = CurrentFrame is { } frame &&
+                            Stage2.HasDisplayReferredAdjustments(frame.Params)
+                ? Loc.T("色阶／对比度／高光阴影／曲线／饱和度在 HDR 下按这个上限定义（曲线右端 = 峰值），改上限会一起改影调（D-032）。")
                 : string.Empty;
 
             string ignored = _outputSpaceIndex != 0 || _printLutIndex != 0
@@ -359,7 +359,7 @@ public partial class MainViewModel
 
             return DescribeDisplayFit(_hdrLimitStops)
                 + (ignored.Length == 0 ? string.Empty : "\n" + ignored)
-                + (blocked.Length == 0 ? string.Empty : "\n" + blocked);
+                + (graded.Length == 0 ? string.Empty : "\n" + graded);
         }
     }
 
