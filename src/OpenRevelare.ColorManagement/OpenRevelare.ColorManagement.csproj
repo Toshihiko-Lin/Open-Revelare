@@ -21,8 +21,15 @@
     The application owns one pinned LittleCMS build. packaging/lcms writes it under native/<rid>;
     Content (not None) lets the native library and its hash manifest flow through project
     references into tests, CLI and GUI output. Normal builds target the host architecture used by
-    this repository's CI/release matrix: Windows/Linux x64 and macOS arm64.
+    this repository's CI/release matrix: Windows/Linux x64 and macOS arm64 / x64. On macOS the
+    RID follows the SDK host (NETCoreSdkRuntimeIdentifier), so an Intel Mac — or the Intel release
+    runner — picks up native/osx-x64 without any switch; packaging/lcms/build-unix.sh writes to
+    the same directory by uname.
   -->
+  <PropertyGroup>
+    <_LcmsMacRid>osx-arm64</_LcmsMacRid>
+    <_LcmsMacRid Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'osx-x64'">osx-x64</_LcmsMacRid>
+  </PropertyGroup>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <Content Include="..\..\native\win-x64\lcms2.dll"
              Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\win-x64\lcms2.dll')"
@@ -40,11 +47,11 @@
              Link="lcms2.manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-    <Content Include="..\..\native\osx-arm64\liblcms2*.dylib"
-             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\liblcms2.dylib')"
+    <Content Include="..\..\native\$(_LcmsMacRid)\liblcms2*.dylib"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\$(_LcmsMacRid)\liblcms2.dylib')"
              Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\native\osx-arm64\lcms2.manifest.json"
-             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\lcms2.manifest.json')"
+    <Content Include="..\..\native\$(_LcmsMacRid)\lcms2.manifest.json"
+             Condition="Exists('$(MSBuildThisFileDirectory)..\..\native\$(_LcmsMacRid)\lcms2.manifest.json')"
              Link="lcms2.manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -56,7 +63,7 @@
              Condition="$([MSBuild]::IsOSPlatform('Linux')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\linux-x64\liblcms2.so')"
              Text="Pinned LittleCMS native library is missing. Run packaging/lcms/build-unix.sh." />
     <Warning Code="ORLCMS001"
-             Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\osx-arm64\liblcms2.dylib')"
+             Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MSBuildThisFileDirectory)..\..\native\$(_LcmsMacRid)\liblcms2.dylib')"
              Text="Pinned LittleCMS native library is missing. Run packaging/lcms/build-unix.sh." />
   </Target>
 

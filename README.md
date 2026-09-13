@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for Windows x64" src="https://img.shields.io/badge/Windows-x64%20installer-1677ff?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for Linux x86_64" src="https://img.shields.io/badge/Linux-x86__64%20AppImage-e95420?style=for-the-badge&logo=linux&logoColor=white"></a>
-  <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for macOS (Apple Silicon / Intel)" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-111111?style=for-the-badge&logo=apple&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -130,7 +130,8 @@ OpenRevelare 的想法很简单：把去色罩从「调出来的」变成「算�
 |---|---|---|---|
 | Windows 10/11 x64 | `setup.exe` | 无 | **正式版** —— 开发机就是它，每次发版实测 |
 | Linux x86_64 | `.AppImage` | glibc ≥ 2.35（Ubuntu 22.04 / Debian 12 及以上） | **公测** |
-| macOS Apple Silicon | `.dmg` | macOS 12 或更高 | **公测，从未在真机上跑过** |
+| macOS Apple Silicon | `-arm64.dmg` | macOS 12 或更高 | **公测，从未在真机上跑过** |
+| macOS Intel | `-x86_64.dmg` | macOS 12 或更高 | **公测，从未在真机上跑过** |
 
 <details>
 <summary><b>Windows</b> —— 「Windows 已保护你的电脑」怎么办</summary>
@@ -144,7 +145,7 @@ OpenRevelare 的想法很简单：把去色罩从「调出来的」变成「算�
 <details>
 <summary><b>macOS</b> —— 「已损坏，无法打开」怎么办</summary>
 
-打开 dmg，把 OpenRevelare 拖进「应用程序」。
+打开 dmg，把 OpenRevelare 拖进「应用程序」。两个 dmg 按芯片选：Apple Silicon（M 系列）用 `-arm64`，Intel 用 `-x86_64`——装错了不能靠 Rosetta 补救（Rosetta 只会在 M 系列上跑 Intel 包，反过来不行）。不确定的话看  → 关于本机 → 「芯片」或「处理器」一行。
 
 首次打开会提示「已损坏」或「无法验证开发者」。**不是文件损坏**，是没有买 Apple 开发者计划（99 美元/年）、未经公证。任选一种方式绕过：
 
@@ -321,10 +322,10 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 
 # macOS —— 需在 mac 上跑
 ./packaging/macos/bundle-libraw.sh             # 编译 LibRaw 0.21.4（NuGet 没有 mac runtime 包）
-./packaging/macos/build-app.sh --dmg           # → installer/OpenRevelare-{版本}-{arch}.dmg
+./packaging/macos/build-app.sh --dmg           # → installer/OpenRevelare-{版本}-{arm64|x86_64}.dmg（三个脚本都按本机 uname 认架构）
 ```
 
-`dotnet publish -r linux-x64` / `-r osx-arm64` **在 Windows 上也能跑**，但 `appimagetool`、`codesign`、`hdiutil` 必须在对应系统上执行。三平台产物由 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 tag 自动构建。
+`dotnet publish -r linux-x64` / `-r osx-arm64` / `-r osx-x64` **在 Windows 上也能跑**，但 `appimagetool`、`codesign`、`hdiutil` 必须在对应系统上执行。三平台四个产物由 [`.github/workflows/release.yml`](.github/workflows/release.yml) 打 tag 自动构建。
 
 > **macOS 的 LibRaw 必须锁 0.21.x**：Sdcb.LibRaw 0.21.1.7 按 0.21 的 `libraw_data_t` 布局 marshal，brew 上的 0.22 加过字段，偏移全错。`bundle-libraw.sh` 因此锁 0.21.4 源码编译。
 

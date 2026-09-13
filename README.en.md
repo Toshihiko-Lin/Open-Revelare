@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for Windows x64" src="https://img.shields.io/badge/Windows-x64%20installer-1677ff?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for Linux x86_64" src="https://img.shields.io/badge/Linux-x86__64%20AppImage-e95420?style=for-the-badge&logo=linux&logoColor=white"></a>
-  <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for macOS Apple Silicon" src="https://img.shields.io/badge/macOS-Apple%20Silicon-111111?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Download for macOS (Apple Silicon / Intel)" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-111111?style=for-the-badge&logo=apple&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -133,7 +133,8 @@ Builds are on [Releases](https://github.com/Toshihiko-Lin/Open-Revelare/releases
 |---|---|---|---|
 | Windows 10/11 x64 | `setup.exe` | none | **Stable** — developed on it, tested on every release |
 | Linux x86_64 | `.AppImage` | glibc ≥ 2.35 (Ubuntu 22.04 / Debian 12+) | **Beta** |
-| macOS Apple Silicon | `.dmg` | macOS 12+ | **Beta, never run on real hardware** |
+| macOS Apple Silicon | `-arm64.dmg` | macOS 12+ | **Beta, never run on real hardware** |
+| macOS Intel | `-x86_64.dmg` | macOS 12+ | **Beta, never run on real hardware** |
 
 <details>
 <summary><b>Windows</b> — "Windows protected your PC"</summary>
@@ -147,7 +148,7 @@ If a blue "Windows protected your PC" dialog appears, click **More info → Run 
 <details>
 <summary><b>macOS</b> — "is damaged and can't be opened"</summary>
 
-Open the dmg and drag OpenRevelare into Applications.
+Open the dmg and drag OpenRevelare into Applications. Pick the dmg by chip: `-arm64` for Apple Silicon (M-series), `-x86_64` for Intel. The wrong one cannot be rescued by Rosetta (Rosetta only runs Intel builds on M-series, never the other way round). Not sure? Apple menu → About This Mac → the "Chip" / "Processor" line.
 
 The first launch may report "damaged" or "unidentified developer". **The file is not damaged** — the build is simply not notarised (no Apple Developer Program membership, $99/year). Either bypass:
 
@@ -331,10 +332,10 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{ver
 
 # macOS — run on macOS
 ./packaging/macos/bundle-libraw.sh             # build LibRaw 0.21.4 (no macOS runtime package on NuGet)
-./packaging/macos/build-app.sh --dmg           # → installer/OpenRevelare-{version}-{arch}.dmg
+./packaging/macos/build-app.sh --dmg           # → installer/OpenRevelare-{version}-{arm64|x86_64}.dmg (all three scripts pick the arch from uname)
 ```
 
-`dotnet publish -r linux-x64` / `-r osx-arm64` also works on Windows, but `appimagetool`, `codesign` and `hdiutil` must run on their own OS. All three platform artifacts are built automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml) on tag.
+`dotnet publish -r linux-x64` / `-r osx-arm64` / `-r osx-x64` also works on Windows, but `appimagetool`, `codesign` and `hdiutil` must run on their own OS. All four artifacts (three platforms, two macOS architectures) are built automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml) on tag.
 
 > **macOS must pin LibRaw to 0.21.x**: Sdcb.LibRaw 0.21.1.7 marshals against the 0.21 `libraw_data_t` layout; the 0.22 shipped by brew adds fields and shifts every offset. `bundle-libraw.sh` therefore builds 0.21.4 from source.
 

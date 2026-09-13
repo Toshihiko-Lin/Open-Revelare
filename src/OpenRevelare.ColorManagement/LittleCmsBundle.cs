@@ -138,6 +138,8 @@ internal static class LittleCmsBundle
             return ("linux-x64", "liblcms2.so");
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && architecture == Architecture.Arm64)
             return ("osx-arm64", "liblcms2.dylib");
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && architecture == Architecture.X64)
+            return ("osx-x64", "liblcms2.dylib");
 
         throw new ColorManagementException(
             $"No pinned LittleCMS artifact is defined for {RuntimeInformation.OSDescription} / {architecture}.");

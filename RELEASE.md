@@ -44,10 +44,11 @@
 git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <Version>
 ```
 
-`release.yml` 会并行出三个平台的包（macOS 约 9 分钟，编 LibRaw 占大头），
-然后建一个 **draft** release 把产物收进去。
+`release.yml` 会并行出三个平台四个包——macOS 分 Apple Silicon 与 Intel 两格（各约 9 分钟，
+编 LibRaw 占大头；Intel 那格跑在 `macos-15-intel`，**GitHub 2027-08 起不再提供 Intel runner**，
+到时候要么停出 Intel 包要么自架 runner），然后建一个 **draft** release 把产物收进去。
 
-- [ ] 四个 job 全绿。Linux / macOS 要跑 `packaging/**.sh`，
+- [ ] 五个 job 全绿（guard / windows / linux / macos ×2）。Linux / macOS 要跑 `packaging/**.sh`，
       这些脚本的可执行位记录在 git index 里（`100755`）——在 Windows 上新增脚本时
       记得 `git update-index --chmod=+x`，否则 runner 上是 Permission denied。
 
@@ -65,7 +66,8 @@ git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <
 - [ ] **手动把这个 release 搬到 Gitee。** 在 `https://gitee.com/Toshihiko-Lin/revelare-release/releases`
       新建一个标签和 release，标签名与 GitHub 一致（例如 `v1.1.0`，带 v，与仓库现有的保持一致；
       客户端两种都认，`tag_name` 读进来会 `TrimStart('v')`），正文与 GitHub 一致，
-      把 GitHub release 的几个包（setup.exe / AppImage / dmg）上传为附件。
+      把 GitHub release 的四个包（setup.exe / AppImage / `-arm64.dmg` / `-x86_64.dmg`）上传为附件，
+      **两个 dmg 都要**——Intel 用户的客户端只认 `x86_64` 那个，缺了它「前往下载」就退回 release 页面。
       新版客户端 (≥1.0.0) 会同时查询两个 API 并等齐两边——搬到 Gitee 之后大陆用户才能收到通知，
       也才会在弹窗里看到「国内镜像下载」这个按钮（两边版号一致才给，见上表下方说明）。
 - [ ] 附件名保持 CI 产出的原名。客户端按**扩展名 + 架构**挑包
@@ -105,6 +107,8 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 的 `version.json`（`main` 分支
       官网按 `downloads.*`（Gitee，主按钮）和 `downloads_github.*`（次按钮）分别填；
       **某个平台的键缺了或为空，那个按钮就变成灰的「即将发布」**，不是回落到旧链接。
       三个平台的文件名见第三步。
+      **Intel dmg 目前没有对应的键**：官网只读 `downloads.macos`（填 arm64 那个），Intel 用户
+      要从 release 页面自己拿。要在官网加按钮得先改站点再加键，站点没改之前加了键也没人读。
 - [ ] `download_url` 是**给旧版 0.8.0 和首页用的单一入口**，指向 `https://revelare.netlify.app/download`
       这个落地页而不是某个 exe——首页的「下载」按钮和 0.8.0 的更新弹窗都用它，
       落地页再按平台分流。分平台的精确链接在上面两组里。
@@ -130,7 +134,7 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 的 `version.json`（`main` 分支
 curl -s https://api.github.com/repos/Toshihiko-Lin/Open-Revelare/releases/latest | grep '"tag_name"'
 
 # Gitee：注意仓库是 revelare-release。顺便核对附件齐不齐——
-# 三个平台的包都在，国内用户的「前往下载」才不会退回 release 页面
+# 四个包都在（dmg 要有 arm64 和 x86_64 两个），国内用户的「前往下载」才不会退回 release 页面
 curl -s https://gitee.com/api/v5/repos/Toshihiko-Lin/revelare-release/releases/latest \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['tag_name']); [print(' -',a['name']) for a in d['assets']]"
 ```

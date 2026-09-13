@@ -1,6 +1,6 @@
 name: release
 
-# 打 tag 就出三个平台的包，收进一个 draft release 里等人工写说明后再发布。
+# 打 tag 就出三个平台四个包（mac 分 arm64 / Intel），收进一个 draft release 里等人工写说明后再发布。
 #   git tag v1.0.0 && git push origin v1.0.0
 # 也可以在 Actions 页面手动跑（workflow_dispatch），那种情况下只上传构建产物、不建 release。
 #
@@ -166,14 +166,25 @@ jobs:
           path: installer/*.AppImage
           if-no-files-found: error
 
-  # **只出 Apple Silicon 一个包**（用户 2026-08-04 决定）。Intel runner 是 macOS ×10 倍率
-  # 里最贵的一格（约 80 计费分钟/次），而 Intel Mac 已是 2020 年前的机型、目前 mac 用户为零。
-  # Intel 用户拿 arm64 包走不了 Rosetta（Rosetta 只能反过来：x64 包在 arm64 上跑），
-  # 所以这等于暂时不支持 Intel Mac —— 真有人要，把这个 job 复制一份改成
-  # `runs-on: macos-13` 就行，两个脚本都按 uname 自己认架构，不用传参。
+  # **Apple Silicon 与 Intel 各出一个包**（用户 2026-09-13 决定，推翻 2026-08-04 的
+  # "只出 arm64"）。Intel 用户拿 arm64 包走不了 Rosetta（Rosetta 只能反过来：x64 包在
+  # arm64 上跑），所以 Intel 包不能省。代价：Intel runner 是 macOS ×10 倍率里最贵的一格
+  # （约 80 计费分钟/次），公开仓库不计费，但仍只挂在 tag 上，别挂 push。
+  #
+  # 两格共用同一套步骤：三个 packaging 脚本都按 uname 自己认架构、写进 native/osx-<arch>/，
+  # 只有 dotnet publish 的 -r 与产物名要带 RID / 架构，从 matrix 取。
+  #
+  # `macos-15-intel` 是 GitHub 最后一代 x86_64 镜像，**2027-08 下线**，之后 Actions 不再
+  # 提供 Intel runner —— 到时候 Intel 包要么停出、要么自架 runner，这是个已知的截止日。
   macos:
     needs: guard
-    runs-on: macos-latest      # Apple Silicon
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest,   rid: osx-arm64, arch: arm64 }   # Apple Silicon
+          - { runner: macos-15-intel, rid: osx-x64,   arch: x86_64 }  # Intel，见上
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -185,7 +196,7 @@ jobs:
         run: brew install jpeg-turbo little-cms2 librsvg
       - name: 编 + 装配 libraw.23.dylib
         run: ./packaging/macos/bundle-libraw.sh
-      # HDR/EDR 预览的原生半边。产物与 libraw 同路：native/osx-arm64/*.dylib → publish →
+      # HDR/EDR 预览的原生半边。产物与 libraw 同路：native/osx-<arch>/*.dylib → publish →
       # Contents/MacOS。缺了它程序照跑，只是预览退回 Avalonia 的 SDR 位图，徽章报 emergency ——
       # 正是 2026-09-13 之前每个 mac 发布件的实际状态。运行时行为（D-012 / D-026 四项）
       # 未经真机验证，用户 2026-09-13 决定按可用发布。
@@ -197,9 +208,10 @@ jobs:
         run: bash packaging/lcms/build-unix.sh
       - name: publish + 装配 Little CMS manifest
         run: |
-          dotnet publish src/OpenRevelare.Gui -c Release -r osx-arm64 --self-contained true -o publish/osx-arm64
-          cp native/osx-arm64/lcms2.manifest.json publish/osx-arm64/lcms2.manifest.json
-          cmp -s native/osx-arm64/liblcms2.2.dylib publish/osx-arm64/liblcms2.2.dylib
+          RID=${{ matrix.rid }}
+          dotnet publish src/OpenRevelare.Gui -c Release -r "$RID" --self-contained true -o "publish/$RID"
+          cp "native/$RID/lcms2.manifest.json" "publish/$RID/lcms2.manifest.json"
+          cmp -s "native/$RID/liblcms2.2.dylib" "publish/$RID/liblcms2.2.dylib"
       - name: 打 .app / .dmg（ad-hoc 签名）
         # ad-hoc 是**定下来的路线**，不是临时凑合：用户 2026-08-04 决定不买 Apple
         # Developer Program（99 美元/年）。代价是用户首次打开要自己绕 Gatekeeper，
@@ -219,9 +231,18 @@ jobs:
           test -f "$P" || { echo ".app 缺 macOS presenter 垫片"; exit 1; }
           codesign -v "$P"
           otool -D "$P" | grep -F '@loader_path/libOpenRevelare.Presentation.MacOS.Native.dylib'
+          # 架构闸门：进包的每个 Mach-O 都得是本格的架构，dmg 名字也得带对（客户端更新器按
+          # 文件名里的 arm64 / x86_64 挑包，见 Updater.PlatformAssetUrl）。
+          for f in publish/OpenRevelare.app/Contents/MacOS/OpenRevelare \
+                   publish/OpenRevelare.app/Contents/MacOS/libraw.23.dylib \
+                   publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib "$P"; do
+            lipo -archs "$f" | tr ' ' '\n' | grep -qx '${{ matrix.arch }}' \
+              || { echo "$f 的架构是 [$(lipo -archs "$f")]，不是 ${{ matrix.arch }}"; exit 1; }
+          done
+          ls installer/OpenRevelare-*-${{ matrix.arch }}.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64
+          name: macos-${{ matrix.arch }}
           path: installer/*.dmg
           if-no-files-found: error
 

@@ -148,7 +148,10 @@ codesign -v "$APP/Contents/MacOS/libraw.23.dylib"
 codesign -dv "$MAIN" 2>&1 | head -3 || true
 
 # ── dmg ────────────────────────────────────────────────────────────────────
-DMG="$ROOT/installer/OpenRevelare-${VERSION}-${ARCH}.dmg"
+# 文件名里的架构写 arm64 / x86_64，不是 RID 里的 x64：客户端更新器按这两个词挑包
+# （Updater.PlatformAssetUrl），Linux 的 AppImage 也叫 x86_64，三处同一套叫法。
+DMG_ARCH="$ARCH"; [ "$ARCH" = "x64" ] && DMG_ARCH=x86_64
+DMG="$ROOT/installer/OpenRevelare-${VERSION}-${DMG_ARCH}.dmg"
 if [ "$MAKE_DMG" = 1 ]; then
   echo "==> 生成 dmg"
   mkdir -p "$ROOT/installer"

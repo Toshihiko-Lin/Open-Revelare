@@ -102,7 +102,9 @@ jobs:
   # 假 dylib 不能省：Gui.csproj 的 WarnMissingMacLibRaw 在文件缺失时发 Warning，
   # 而下面带 -warnaserror，缺了它这一格会以一条与本次改动无关的错误常红。
   macos:
-    runs-on: macos-latest      # Apple Silicon
+    runs-on: macos-latest      # Apple Silicon。Intel 不在 CI 里：托管代码与垫片源码两边一样，
+                               # Intel 独有的只是 RID 选择（LittleCmsBundle / ColorManagement.csproj），
+                               # 由 release.yml 的 macos-15-intel 那格在真 x86_64 上验，不值得每次 push 都付 ×10 倍率。
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
