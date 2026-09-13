@@ -31,95 +31,147 @@ public static class ImageIo
 
     // ── Decode admission control ────────────────────────────────────────────────
     //
-    // A single decode in flight costs several times the finished frame: LibRaw's unpacked Bayer
-    // data, its demosaiced working image, the 16-bit result, and whatever the caller builds from
-    // it. Measured on a 60 MP Sony ARW that is ~129 MB Bayer + ~518 MB demosaic workspace +
-    // ~388 MB result ≈ 1.0 GB resident at the peak, hence <see cref="PerSlotBytes"/>.
+    // A single decode in flight costs several times the finished frame: the file bytes LibRaw
+    // reads from, its unpacked Bayer data, its demosaiced working image, the 16-bit result, and
+    // whatever the caller builds from it. Measured on a 60 MP Sony ARW at full quality that is
+    // ~129 MB Bayer + ~518 MB demosaic workspace + ~388 MB result ≈ 1.0 GB resident at the
+    // peak, hence <see cref="FullSlotBytes"/>. A PREVIEW decode is a different animal: it is
+    // half-size (2×2 binning, no demosaic workspace), so an 80 MP ORF peaks around 500 MB and
+    // a 24 MP frame well under 200 MB — <see cref="PreviewSlotBytes"/>. The gate weighs each
+    // decode by which it is, because the import is all previews and sizing those as if they
+    // were exports left two thirds of the machine idle.
     //
     // ONE gate shared by every entry point here — import warm-up, calibration, thumbnails and
     // export all draw on the same physical memory, so counting them separately is how you get
     // three "safe" limits multiplying into an unsafe total.
     //
-    // The limit is RE-EVALUATED as work arrives rather than fixed at startup, and it is sized
+    // The budget is RE-EVALUATED as work arrives rather than fixed at startup, and it is sized
     // from memory that is actually FREE, not from total RAM. Those are different questions: a
     // 48 GB workstation with a browser, a game and Lightroom open may have 4 GB left, and the
     // old rule — a fixed three slots chosen once from TotalAvailableMemoryBytes — would happily
     // start three 1 GB decodes into it. Re-checking also means a long import backs off when
     // something else on the machine grows, and opens back up when it exits.
-    private const long PerSlotBytes = 1_200L << 20;   // ~1.2 GB per in-flight decode
-    private const long ReserveBytes = 2L << 30;       // leave the OS and the rest of the app room
-    private const int HardCap = 8;                    // beyond this, decode is not the bottleneck
+    private const long FullSlotBytes = 1_200L << 20;     // ~1.2 GB per in-flight full-quality decode
+    private const long PreviewSlotBytes = 512L << 20;    // ~0.5 GB per in-flight half-size preview
+    private const long ReserveBytes = 2L << 30;          // leave the OS and the rest of the app room
+    private const int HardCap = 8;                       // beyond this, decode is not the bottleneck
     private const int LimitRefreshMs = 1500;
 
     private static readonly object GateLock = new();
     private static int _inFlight;
-    private static int _cachedLimit;   // 0 == never computed; see the guard below
-    private static long _limitStamp;
+    private static long _inFlightBytes;
+    private static long _cachedBudget;   // bytes available to decodes; see the guard below
+    private static bool _budgetKnown;
+    private static long _budgetStamp;
 
-    /// <summary>The concurrency currently allowed: the user's override, else derived from free
-    /// physical memory. Cached briefly — this is consulted on every decode and, on Windows, each
-    /// call is a syscall.</summary>
+    /// <summary>
+    /// How many decode workers a roll-wide pass should run: the user's override, else most of
+    /// the cores. LibRaw's unpack is single-threaded per file, so the roll only gets faster by
+    /// running files side by side — measured on a 6-core/12-thread machine with 80 MP ORFs,
+    /// 2 workers gave 1.28 s a frame and 8 gave 0.46 s. Two cores are left for the UI and the
+    /// downsample's own parallel loop. This is the number of workers ASKING; the memory gate
+    /// below still decides how many are admitted at once.
+    /// </summary>
+    public static int PreviewWorkers
+    {
+        get
+        {
+            int manual = Settings.Current.DecodeConcurrency;
+            return manual > 0
+                ? Math.Clamp(manual, 1, HardCap)
+                : Math.Clamp(Environment.ProcessorCount * 2 / 3, 2, HardCap);
+        }
+    }
+
+    /// <summary>The user's fixed concurrency, or 0 for automatic.</summary>
+    private static int ManualLimit() => Math.Clamp(Settings.Current.DecodeConcurrency, 0, HardCap);
+
+    /// <summary>Bytes the gate may hand out in total right now, refreshed briefly — this is
+    /// consulted on every decode and, on Windows, each probe is a syscall.</summary>
     /// <remarks>
-    /// The <c>_cachedLimit > 0</c> test is load-bearing, not a nicety. Every computed limit is
-    /// clamped to at least 1, so zero can only mean "not computed yet" — and it must not be
-    /// served, because the caller uses it as <c>while (_inFlight >= limit)</c> and a limit of
-    /// zero admits nobody, ever. Relying on the timestamp alone to catch the first call does
-    /// not work: any sentinel far in the past makes <c>now - _limitStamp</c> overflow, which
-    /// wraps NEGATIVE and reads as "cache is fresh".
+    /// <c>_budgetKnown</c> is load-bearing, not a nicety: relying on the timestamp alone to
+    /// catch the first call does not work, because any sentinel far in the past makes
+    /// <c>now - _budgetStamp</c> overflow, which wraps NEGATIVE and reads as "cache is fresh".
     /// </remarks>
-    private static int CurrentLimit()
+    private static long CurrentBudget()
     {
         long now = Environment.TickCount64;
-        if (_cachedLimit > 0 && now - _limitStamp < LimitRefreshMs) return _cachedLimit;
-
-        int manual = Settings.Current.DecodeConcurrency;
-        _cachedLimit = manual > 0 ? Math.Clamp(manual, 1, HardCap) : AutoLimit();
-        _limitStamp = now;
-        return _cachedLimit;
+        if (_budgetKnown && now - _budgetStamp < LimitRefreshMs) return _cachedBudget;
+        _cachedBudget = AutoBudget();
+        _budgetKnown = true;
+        _budgetStamp = now;
+        return _cachedBudget;
     }
 
-    /// <summary>Slots that fit in free memory, with a reserve held back. Decodes already in
-    /// flight have themselves consumed free memory, so the probe is self-correcting.</summary>
-    private static int AutoLimit()
+    /// <summary>Free memory less a reserve, with the decodes already in flight added back — they
+    /// have themselves consumed free memory, so the probe is self-correcting and the figure
+    /// describes total concurrency rather than "how much MORE fits".</summary>
+    private static long AutoBudget()
     {
-        long usable;
         if (SystemMemory.TryGetAvailableBytes(out long free))
-        {
-            // Already-running decodes are counted in `free`; add them back so the limit
-            // describes total concurrency rather than "how many MORE fit".
-            usable = free + (long)Volatile.Read(ref _inFlight) * PerSlotBytes - ReserveBytes;
-        }
-        else
-        {
-            // No free-memory API (macOS): fall back to the old total-based rule.
-            double gb = SystemMemory.TotalBytes() / (1024.0 * 1024 * 1024);
-            return Math.Clamp(Math.Min(gb < 12 ? 1 : gb < 24 ? 2 : 3, Environment.ProcessorCount), 1, HardCap);
-        }
-        int bySlots = (int)(usable / PerSlotBytes);
-        return Math.Clamp(Math.Min(bySlots, Environment.ProcessorCount), 1, HardCap);
+            return free + Volatile.Read(ref _inFlightBytes) - ReserveBytes;
+
+        // No free-memory API (macOS): fall back to the old total-based rule, expressed in
+        // full-quality slots so it stays as conservative as it was.
+        double gb = SystemMemory.TotalBytes() / (1024.0 * 1024 * 1024);
+        int slots = Math.Clamp(Math.Min(gb < 12 ? 1 : gb < 24 ? 2 : 3, Environment.ProcessorCount), 1, HardCap);
+        return slots * FullSlotBytes;
     }
 
-    /// <summary>For 偏好设置: what 自动 would pick right now, and the free memory it read to
-    /// decide (null when the platform cannot report it and the total-based fallback is in use).</summary>
-    public static (int Auto, long? FreeBytes) AutoConcurrencyInfo()
-        => (AutoLimit(), SystemMemory.TryGetAvailableBytes(out long f) ? f : null);
+    /// <summary>For 偏好设置: how many preview decodes and how many full-quality ones 自动 would
+    /// admit right now, and the free memory it read to decide (null when the platform cannot
+    /// report it and the total-based fallback is in use).</summary>
+    public static (int AutoPreview, int AutoFull, long? FreeBytes) AutoConcurrencyInfo()
+    {
+        long budget = AutoBudget();
+        int cap = Math.Min(Environment.ProcessorCount, HardCap);
+        int preview = (int)Math.Clamp(budget / PreviewSlotBytes, 1, cap);
+        int full = (int)Math.Clamp(budget / FullSlotBytes, 1, cap);
+        return (preview, full, SystemMemory.TryGetAvailableBytes(out long f) ? f : null);
+    }
 
-    private static T Gated<T>(Func<T> decode)
+    /// <summary>Run <paramref name="decode"/> once the gate admits a decode of
+    /// <paramref name="slotBytes"/>. A manual limit counts decodes; the automatic one weighs
+    /// them against free memory, always admitting at least one so a small machine still gets
+    /// its picture, and never more than one per core.</summary>
+    private static T Gated<T>(long slotBytes, Func<T> decode)
     {
         lock (GateLock)
         {
-            // Timed wait, so a limit that GREW while we were blocked is noticed even if no
-            // decode finished to pulse us. A limit that shrank simply stops admitting until
+            // Timed wait, so a budget that GREW while we were blocked is noticed even if no
+            // decode finished to pulse us. A budget that shrank simply stops admitting until
             // the excess drains — never cancels work already running.
-            while (_inFlight >= CurrentLimit()) Monitor.Wait(GateLock, 250);
+            while (!Admits(slotBytes)) Monitor.Wait(GateLock, 250);
             _inFlight++;
+            _inFlightBytes += slotBytes;
         }
         try { return decode(); }
         finally
         {
-            lock (GateLock) { _inFlight--; Monitor.PulseAll(GateLock); }
+            lock (GateLock) { _inFlight--; _inFlightBytes -= slotBytes; Monitor.PulseAll(GateLock); }
         }
     }
+
+    private static bool Admits(long slotBytes)
+    {
+        int manual = ManualLimit();
+        if (manual > 0) return _inFlight < manual;
+        if (_inFlight == 0) return true;
+        if (_inFlight >= Math.Min(Environment.ProcessorCount, HardCap)) return false;
+        return _inFlightBytes + slotBytes <= CurrentBudget();
+    }
+
+    /// <summary>A full-quality decode's weight.</summary>
+    private static T Gated<T>(Func<T> decode) => Gated(FullSlotBytes, decode);
+
+    /// <summary>A preview decode's weight — light only when it really is a half-size LibRaw
+    /// decode. A TIFF preview still passes through the full frame, and the DNG backend's
+    /// linear sources come back full size whatever was asked.</summary>
+    private static T GatedPreview<T>(string path, Func<T> decode)
+        => Gated(RawDecode.IsRawExtension(path) && Settings.Current.DecodeBackend != RawDecode.RawBackend.Dng
+                     ? PreviewSlotBytes
+                     : FullSlotBytes,
+                 decode);
 
     /// <summary>Load any supported file into a linear ImageBuffer (RAW → LibRaw/UniWB,
     /// otherwise a linear TIFF). RAW honours the user's backend + FBDD preferences.</summary>
@@ -241,7 +293,7 @@ public static class ImageIo
     /// a linear TIFF roll is not the case that runs the machine out of memory.
     /// </summary>
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) LoadPreviews(
-        string path, params int[] maxEdges) => Gated(() =>
+        string path, params int[] maxEdges) => GatedPreview(path, () =>
     {
         if (!RawDecode.IsRawExtension(path))
         {
@@ -251,11 +303,11 @@ public static class ImageIo
             return (outs, full.Width, full.Height);
         }
         var s = Settings.Current;
-        // PPG, not AHD. Everything this produces is on its way through a 6× box downsample to a
-        // 1600 px preview, and a box average is exactly the operation that destroys the detail an
-        // edge-adaptive demosaic exists to protect. Costs ~1.2 s per 60 MP frame instead of ~2.4 s.
-        // The export path (LoadLinear) and the Path A calibration ROI (RoiMeanFull) stay on AHD —
-        // see RawDecode.Demosaic for the measured impact on the Stage-1 numbers.
+        // Half-size, not a demosaic. Everything this produces is on its way through a box
+        // downsample to a 1600 px preview, and a box average is exactly the operation that
+        // destroys the detail a demosaic exists to protect. The export path (LoadLinear) and the
+        // Path A calibration ROI (RoiMeanFull) stay on full AHD — see RawDecode.Demosaic for the
+        // measured impact on the Stage-1 numbers.
         return RawDecode.DecodeRawDownsampled(path, s.DecodeBackend, s.FbddMode, maxEdges,
                                               RawDecode.Demosaic.Preview);
     });
@@ -267,7 +319,7 @@ public static class ImageIo
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
         TiffInputAssumption tiffInputAssumption,
-        params int[] maxEdges) => Gated(() =>
+        params int[] maxEdges) => GatedPreview(path, () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -395,7 +447,7 @@ public static class ImageIo
     /// it that way.
     /// </summary>
     public static (ImageBuffer Preview, int SourceWidth, int SourceHeight) LoadPreviewRegion(
-        string path, (double X, double Y, double W, double H) rect, int maxEdge) => Gated(() =>
+        string path, (double X, double Y, double W, double H) rect, int maxEdge) => GatedPreview(path, () =>
     {
         if (RawDecode.IsRawExtension(path))
         {
@@ -426,7 +478,7 @@ public static class ImageIo
         int maxEdge,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
-        TiffInputAssumption tiffInputAssumption) => Gated(() =>
+        TiffInputAssumption tiffInputAssumption) => GatedPreview(path, () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);

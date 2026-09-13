@@ -58,7 +58,11 @@ public partial class MainViewModel
 
     /// <summary>Render one frame's thumbnail off an already-decoded preview. Never decodes: every
     /// caller resolves the preview through <see cref="PreviewAsync"/> first, so the strip and the
-    /// main view are guaranteed to be looking at the same pixels.</summary>
+    /// main view are guaranteed to be looking at the same pixels.
+    ///
+    /// The strip is an SDR surface — an Avalonia bitmap, composited with no headroom on any
+    /// platform — so on an HDR roll it shows the roll's SDR rendition (D-031), not the extended
+    /// render clipped at white: that would blow every highlight the preview keeps.</summary>
     /// <param name="margin">The region of the file <paramref name="preview"/> was decoded from, or
     /// null if it is the whole file. The stored rect is normalised against the whole scan, so on a
     /// region decode it has to be re-expressed against the box — left alone it cuts a fraction of a
@@ -67,7 +71,7 @@ public partial class MainViewModel
                                             (double X, double Y, double W, double H)? margin,
                                             CancellationToken ct)
     {
-        FrameParams p = ForRegion(f.Params, f, margin);
+        FrameParams p = ForRegion(f.Params, f, margin).SdrRendition();
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         Bitmap bmp = await Task.Run(() =>
         {
@@ -84,7 +88,7 @@ public partial class MainViewModel
     {
         if (_previewWorking is null) return;
         // _previewLinear may be a region decode — same rule as RenderPreviewAsync.
-        FrameParams p = ForRegion(frame.Params, frame, _previewMargin);
+        FrameParams p = ForRegion(frame.Params, frame, _previewMargin).SdrRendition();
         WorkingFrame preview = _previewWorking.WithPixels(
             Resample.Box(_previewWorking.Pixels, ThumbMaxEdge));
         RenderedFrame rendered = Pipeline.Render(
@@ -134,12 +138,14 @@ public partial class MainViewModel
             if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre));
         }
 
-        // A few workers, not one per core: each in-flight decode holds a few hundred MB
-        // transiently, and the UI still needs a core to stay responsive while this runs.
+        // Most of the cores, not a fixed few: LibRaw unpacks one file on one thread, so the
+        // roll only gets faster by running files side by side, and ImageIo's memory gate is
+        // what keeps that many in-flight decodes from outrunning free memory — this is how
+        // many are ASKING, not how many run. Two cores stay free for the UI.
         var opts = new ParallelOptions
         {
             CancellationToken = ct,
-            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
+            MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
         };
 
         try

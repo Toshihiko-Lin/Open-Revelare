@@ -209,12 +209,25 @@ public static class Sprocket
     /// ≈1.0: a low copy-stand exposure can put the board at ≈0.9 and the orange base at
     /// ≈0.2, with picture content filling the gap. So a FIXED cut misses the real gap and
     /// lets the board pollute T_base. Instead: board peak = tallest bin above luma 0.55;
-    /// base peak = tallest bin left of it; threshold = the deepest valley between them.
+    /// base peak = tallest bin left of it; the gap between them is where the cut goes.
     /// Scanning from the bright end is deliberate — a frame that copied true black has a
     /// SECOND valley down in the shadows, and we want the board↔base one, always the
     /// brighter of the two.
+    ///
+    /// Two questions are answered here and they are kept apart. "Are these two populations?"
+    /// is decided at the gap's deepest bin, which is where a genuine gap and a smooth roll-off
+    /// differ most. "Where to cut?" is NOT: the cut is placed at the CENTRE of the gap, because
+    /// the deepest bin of a gap is noise. What lies between film and board is the soft edge of
+    /// every sprocket hole — a blend of hole and film at a luma neither has — and a hole edge
+    /// spreads those pixels evenly across the gap, so its floor is a plateau, not a V. On a
+    /// thin-base stock (09-Alien2460: base 0.38, board 0.67, a plateau at 0.4-0.9% of the peak
+    /// from 0.42 to 0.60) the argmin landed at 0.43 on half the roll and at 0.49-0.50 on the
+    /// other half — hugging the base's own toe, where any slightly brighter patch of base goes
+    /// over the line, or forty bins away, on the strength of a few hundred pixels either way.
+    /// The centre of the gap is the same answer on every frame (0.51) and is the cut the user
+    /// arrived at by hand.
     /// </summary>
-    /// <returns>The valley luma, or <see cref="NoBoard"/> (0.99) when no clear board/base
+    /// <returns>The cut luma, or <see cref="NoBoard"/> (0.99) when no clear board/base
     /// two-peak structure exists (board absent, degenerate histogram). Callers treat
     /// &gt;= 0.99 as "no board".</returns>
     public static double EstimateSprocketThreshold(ImageBuffer image)
@@ -291,7 +304,10 @@ public static class Sprocket
                               && Centre(boardPk) / filmTopLuma >= MinBoardOverFilm;
         if (!brightAbsolute && !brightRelative) return NoBoard;
 
-        return Math.Clamp(valleyLuma, 0.1, 0.99);
+        // 4. The cut: the middle of the gap, not its deepest bin — see the summary. Equidistant
+        //    from the film's brightest populated bin and the board's foot, so a stray bright patch
+        //    of base and a soft hole edge each have the same margin.
+        return Math.Clamp((Centre(filmTop) + Centre(boardFoot)) / 2.0, 0.1, 0.99);
     }
 
     /// <summary>

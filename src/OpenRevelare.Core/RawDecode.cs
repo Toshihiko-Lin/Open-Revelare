@@ -180,21 +180,29 @@ public static class RawDecode
     /// was measured against. Everything whose VALUES matter uses it: the export, and the Path A
     /// calibration ROI means the whole colour basis rests on.
     ///
-    /// <see cref="Demosaic.Preview"/> is PPG, ~2.5× faster on the demosaic step (measured on a
-    /// 60 MP ARW: 1931 ms → 782 ms, taking the whole decode 3117 → 1916 ms). It is for buffers
-    /// that get box-downsampled by 6× on their way to a 1600 px preview, where an edge-adaptive
-    /// demosaic's advantage is averaged away long before anyone sees it.
+    /// <see cref="Demosaic.Preview"/> is LibRaw's <c>half_size</c>: no demosaic at all — each
+    /// 2×2 Bayer quad becomes one RGB pixel (R, mean of the two greens, B), the way darktable's
+    /// preview pipe does it. It is for buffers that get box-downsampled by 3–7× on their way to
+    /// a 1600 px preview, where a demosaic's interpolated detail is averaged away long before
+    /// anyone sees it — and the binning IS a 2× box average, so it is the same operation the
+    /// preview was about to apply anyway. Measured on an 80 MP ORF: the process step drops from
+    /// 946 ms (PPG) to 235 ms, the output buffer from 480 MB to 120 MB, and a whole preview
+    /// decode from 3.2 s to 2.2 s (the remaining 1.9 s is LibRaw's single-threaded Olympus
+    /// unpack, which nothing here can shorten). The smaller peak is what lets more decodes run
+    /// side by side during an import.
     ///
-    /// The choice is NOT free of consequences and the split is deliberate: measured on a real
-    /// frame, PPG vs AHD previews differ in 83% of samples (mean 7.8 / max 1034 of 65535), but
-    /// the aggregate statistics Stage 1 actually reads move by only ~0.016% (per-channel p99.9).
-    /// So: fine for anything reduced to a mean or a percentile, not for the export itself.
+    /// The choice is NOT free of consequences and the split is deliberate: measured on real
+    /// frames, half-size vs PPG previews move the aggregate statistics Stage 1 reads by
+    /// ~0.03–0.05% (per-channel mean and p99.9) — the same order as the PPG-vs-AHD gap this
+    /// path already accepted (~0.016%). So: fine for anything reduced to a mean or a
+    /// percentile, not for the export itself. FBDD does not apply under half-size (LibRaw only
+    /// runs it ahead of a demosaic), which for a 2×2-binned preview is moot.
+    ///
+    /// LibRaw ignores <c>half_size</c> for a source that has no CFA — the DNG backend's linear
+    /// DNGs come back at full size — so a caller must size its downsample from the buffer it
+    /// actually got, never from the flag.
     /// </summary>
     public enum Demosaic { Full, Preview }
-
-    private static DemosaicAlgorithm Algorithm(Demosaic d) => d == Demosaic.Preview
-        ? DemosaicAlgorithm.PatternedPixelGrouping
-        : DemosaicAlgorithm.AdaptiveHomogeneityDirected;
 
 
     /// <summary>
@@ -390,27 +398,87 @@ public static class RawDecode
         }
     }
 
-    // NOTE: there is deliberately no public half-size DECODE entry point any more
-    // (raw_decode.py::decode_raw_fast has no live C# counterpart). It existed and became
-    // unreachable once the roll warm-up started sharing ONE full-quality decode between the
-    // preview cache and the thumbnail pass — which is also the behaviour we want, because
-    // whether the warm-up or a frame switch got there first must not change which pixels every
-    // Stage-1 measurement is taken on. Half-size survives only inside RoiMeanProbe, whose
-    // result feeds nothing but an argmax.
+    // NOTE: there is deliberately no public half-size FULL-FRAME decode entry point
+    // (raw_decode.py::decode_raw_fast has no live C# counterpart). Half-size is reached only
+    // through <see cref="Demosaic.Preview"/> — every preview decode takes it, so whether the
+    // warm-up or a frame switch got there first cannot change which pixels a Stage-1
+    // measurement is taken on — and inside RoiMeanProbe, whose result feeds nothing but an
+    // argmax.
+
+    /// <summary>
+    /// An opened LibRaw context together with the file bytes it is reading from.
+    ///
+    /// LibRaw is handed the whole file in memory rather than a path. Its own file stream reads
+    /// in 4 KB pieces, and on a DRAM-less SATA SSD that pattern ran at 9 MB/s on a file the OS
+    /// had not cached yet — an 80 MP ORF took 17.5 s to unpack cold against 1.9 s warm, and a
+    /// 487 MB linear DNG 50 s against 1.8 s. One sequential read of the file goes at the
+    /// drive's real speed (the same ORF: 190 ms), after which the unpack is pure CPU. So the
+    /// import pays the disk once, at full bandwidth, instead of per 4 KB.
+    ///
+    /// <c>libraw_open_buffer</c> keeps a pointer into the buffer and reads from it during unpack,
+    /// so the array is allocated on the pinned heap and held here for as long as the context
+    /// lives — that is the whole reason this type exists rather than returning the context bare.
+    /// </summary>
+    /// <param name="FrameWidth">Width of the frame a FULL-SIZE decode of this context produces:
+    /// the camera's inset crop when it declares one, else LibRaw's visible width. Recorded before
+    /// processing, because a half-size process rewrites the context's size fields to the shrunk
+    /// buffer, and callers need the full-resolution size for crop and region geometry.</param>
+    private sealed class RawSession(RawContext context, byte[] bytes, int frameWidth, int frameHeight)
+        : IDisposable
+    {
+        public RawContext Context { get; } = context;
+        public int FrameWidth { get; } = frameWidth;
+        public int FrameHeight { get; } = frameHeight;
+        private byte[]? _bytes = bytes;   // kept alive, and pinned, until the context is gone
+
+        public void Dispose()
+        {
+            Context.Dispose();
+            _bytes = null;
+        }
+    }
+
+    /// <summary>The whole file, in one sequential read, on the pinned object heap (see
+    /// <see cref="RawSession"/>).</summary>
+    private static byte[] ReadFilePinned(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                      bufferSize: 1, FileOptions.SequentialScan);
+        long length = fs.Length;
+        if (length > int.MaxValue) throw new NotSupportedException(CoreText.T("RAW 文件超过 2 GB"));
+        byte[] bytes = GC.AllocateUninitializedArray<byte>((int)length, pinned: true);
+        int read = 0;
+        while (read < bytes.Length)
+        {
+            int n = fs.Read(bytes, read, bytes.Length - read);
+            if (n <= 0) throw new EndOfStreamException(path);
+            read += n;
+        }
+        return bytes;
+    }
 
     /// <summary>Open + unpack + dcraw_process on the shared UniWB baseline. The caller owns
-    /// the returned context and pulls the processed image out of it.</summary>
-    private static RawContext OpenAndProcess(string path, FbddMode fbdd, bool halfSize,
+    /// the returned session and pulls the processed image out of its context.</summary>
+    private static RawSession OpenAndProcess(string path, FbddMode fbdd, bool halfSize,
                                              Demosaic demosaic = Demosaic.Full,
                                              System.Drawing.Rectangle? regionInFrame = null)
     {
-        RawContext ctx = RawContext.OpenFile(path);
+        byte[] bytes = ReadFilePinned(path);
+        RawContext ctx = RawContext.FromBuffer(bytes);
         try
         {
             ctx.Unpack();
 
-            // Half-size skips demosaic, so the inset-crop pixel geometry no longer applies.
-            System.Drawing.Rectangle? cropbox = halfSize ? null : CameraInsetCrop(ctx);
+            // The inset crop is applied under half-size too. LibRaw takes params.cropbox in
+            // full-resolution sensor coordinates whatever the shrink, and halves it itself:
+            // verified on an 80 MP ORF that a half-size decode with the crop is bit-identical
+            // to the uncropped half-size decode shifted by half the crop origin (0 of 60 M
+            // samples differ). So a preview covers exactly the frame the export covers, at
+            // half the pixels — which is what the crop overlay and the sharp patch assume.
+            System.Drawing.Rectangle? cropbox = CameraInsetCrop(ctx);
+            // A region decode is always full size: the sharp patch exists to show real pixels.
+            halfSize |= demosaic == Demosaic.Preview && regionInFrame is null;
+            int frameW = cropbox?.Width ?? ctx.Width, frameH = cropbox?.Height ?? ctx.Height;
 
             // A region request is expressed in the INSET-CROPPED frame's coordinates (the frame
             // every other part of the app sees), so it composes with the camera's own inset
@@ -439,13 +507,13 @@ public static class RawDecode
                 p.OutputColor = (LibRawColorSpace)0;                // 0 = raw / camera-native, no matrix
                 p.OutputBps = 16;
                 p.NoAutoBright = true;                              // no histogram stretch
-                p.UserQual = Algorithm(demosaic);                   // AHD, or PPG for previews
+                p.UserQual = DemosaicAlgorithm.AdaptiveHomogeneityDirected;   // moot under half_size
                 p.Gamma = new[] { 1.0, 1.0, 0.0, 0.0, 0.0, 0.0 };   // linear (gamm[0]=gamm[1]=1)
                 p.FbddNoiserd = (int)fbdd;                          // FBDD off / light / full
-                p.HalfSize = halfSize;                              // fast preview path
+                p.HalfSize = halfSize;                              // 2×2 binning, no demosaic
                 if (cropbox is System.Drawing.Rectangle cb) p.Cropbox = cb;
             });
-            return ctx;
+            return new RawSession(ctx, bytes, frameW, frameH);
         }
         catch { ctx.Dispose(); throw; }
     }
@@ -463,8 +531,8 @@ public static class RawDecode
     /// </summary>
     public static double[] RoiMeanProbe(string path)
     {
-        using RawContext ctx = OpenAndProcess(path, FbddMode.Off, halfSize: true);
-        using ProcessedImage img = ctx.MakeDcrawMemoryImage();
+        using RawSession session = OpenAndProcess(path, FbddMode.Off, halfSize: true);
+        using ProcessedImage img = session.Context.MakeDcrawMemoryImage();
         if (img.Bits != 16)
             throw new NotSupportedException($"expected 16-bit RAW output, got {img.Bits}-bit");
 
@@ -491,34 +559,58 @@ public static class RawDecode
     }
 
     /// <summary>
+    /// The finished 16-bit image plus the size of the full-resolution frame it was decoded from.
+    /// The two differ under half-size, where the image is the frame at half the pixels, and on
+    /// the DNG backend's linear sources, where LibRaw ignores the half-size request.
+    /// </summary>
+    private readonly struct Decoded(ProcessedImage image, int frameWidth, int frameHeight) : IDisposable
+    {
+        public ProcessedImage Image { get; } = image;
+        public int FrameWidth { get; } = frameWidth;
+        public int FrameHeight { get; } = frameHeight;
+        public void Dispose() => Image.Dispose();
+    }
+
+    /// <summary>
     /// Run the decode and hand back ONLY the finished 16-bit image, with the LibRaw context already
     /// torn down.
     ///
-    /// The context holds its own copies of the frame — the unpacked Bayer data plus the demosaiced
-    /// 4-channel working image, together roughly twice the size of the result — and
-    /// <c>MakeDcrawMemoryImage</c> returns an independently allocated buffer that outlives it. So
-    /// disposing here, BEFORE the caller allocates its output, keeps those two from being resident
-    /// at the same time. With several decodes in flight during an import that ordering is worth
-    /// hundreds of megabytes of peak.
+    /// The context holds its own copies of the frame — the file bytes, the unpacked Bayer data
+    /// plus the demosaiced 4-channel working image, together roughly twice the size of the result
+    /// — and <c>MakeDcrawMemoryImage</c> returns an independently allocated buffer that outlives
+    /// it. So disposing here, BEFORE the caller allocates its output, keeps those from being
+    /// resident at the same time. With several decodes in flight during an import that ordering
+    /// is worth hundreds of megabytes of peak.
     /// </summary>
-    private static ProcessedImage Process(string path, FbddMode fbdd, bool halfSize,
-                                          Demosaic demosaic = Demosaic.Full,
-                                          System.Drawing.Rectangle? regionInFrame = null)
+    private static Decoded Process(string path, FbddMode fbdd, bool halfSize,
+                                   Demosaic demosaic = Demosaic.Full,
+                                   System.Drawing.Rectangle? regionInFrame = null)
     {
         ProcessedImage img;
-        using (RawContext ctx = OpenAndProcess(path, fbdd, halfSize, demosaic, regionInFrame))
-            img = ctx.MakeDcrawMemoryImage();
+        int frameW, frameH;
+        using (RawSession session = OpenAndProcess(path, fbdd, halfSize, demosaic, regionInFrame))
+        {
+            img = session.Context.MakeDcrawMemoryImage();
+            frameW = session.FrameWidth; frameH = session.FrameHeight;
+        }
         if (img.Bits != 16)
         {
             img.Dispose();
             throw new NotSupportedException("expected 16-bit RAW output");
         }
-        return img;
+        // A full-size decode is the frame by definition — LibRaw's clamping of the crop box is
+        // the authority, not the metadata we derived the size from. Only a shrunk buffer has to
+        // trust the recorded frame size, and even then only when it is consistent with what
+        // came back (a source LibRaw declined to shrink, such as a linear DNG, is full size).
+        bool shrunk = img.Width < frameW && img.Width == (frameW + 1) / 2 && img.Height == (frameH + 1) / 2;
+        if (!shrunk) { frameW = img.Width; frameH = img.Height; }
+        return new Decoded(img, frameW, frameH);
     }
 
     private static ImageBuffer DecodeLibRaw(string path, FbddMode fbdd, bool halfSize)
     {
-        using ProcessedImage img = Process(path, fbdd, halfSize);
+        using Decoded decoded = Process(path, fbdd, halfSize);
+        ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
 
         ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
@@ -590,22 +682,9 @@ public static class RawDecode
         string path, RawBackend backend, FbddMode fbdd,
         int x, int y, int width, int height, int frameWidth, int frameHeight,
         Demosaic demosaic = Demosaic.Full)
-    {
-        if (UseDngBackend(backend))
-        {
-            try
-            {
-                return WithDngLinear(path, p => DecodeRegionLibRaw(
-                    p, fbdd, demosaic, x, y, width, height, frameWidth, frameHeight));
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or TimeoutException)
-            {
-                // Same fallback rule as every other DNG entry point: a converter failure drops
-                // to LibRaw rather than failing the operation.
-            }
-        }
-        return DecodeRegionLibRaw(path, fbdd, demosaic, x, y, width, height, frameWidth, frameHeight);
-    }
+        => WithBackend(path, backend,
+                       p => DecodeRegionLibRaw(p, fbdd, demosaic, x, y, width, height, frameWidth, frameHeight),
+                       out _);
 
     private static (ImageBuffer Slice, int X0, int Y0)? DecodeRegionLibRaw(
         string path, FbddMode fbdd, Demosaic demosaic,
@@ -616,8 +695,9 @@ public static class RawDecode
         int x1 = Math.Clamp(x + width + RegionDemosaicMargin, x0 + 1, frameWidth);
         int y1 = Math.Clamp(y + height + RegionDemosaicMargin, y0 + 1, frameHeight);
 
-        using ProcessedImage img = Process(path, fbdd, halfSize: false, demosaic,
-                                           new System.Drawing.Rectangle(x0, y0, x1 - x0, y1 - y0));
+        using Decoded decoded = Process(path, fbdd, halfSize: false, demosaic,
+                                        new System.Drawing.Rectangle(x0, y0, x1 - x0, y1 - y0));
+        ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
         ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
         var buf = new ImageBuffer(w, h);
@@ -640,28 +720,35 @@ public static class RawDecode
     /// Decode a RAW straight to one or more BOX-DOWNSAMPLED buffers, never materialising the
     /// full-resolution float frame.
     ///
-    /// Same decode as <see cref="DecodeRaw(string, FbddMode)"/> — full AHD demosaic, same UniWB
-    /// baseline, same camera crop — but the box average is accumulated off LibRaw's 16-bit buffer.
-    /// The per-sample arithmetic and summation order match <see cref="Resample.Box"/> exactly
-    /// (each sample scaled to float by 1/65535 first, then summed, then divided by factor²), so a
-    /// frame decoded this way is bit-identical to one decoded whole and downsampled afterwards.
-    /// That equality is the point: the previews carry every Stage-1 measurement.
+    /// Same UniWB baseline and same camera crop as <see cref="DecodeRaw(string, FbddMode)"/>, but
+    /// the box average is accumulated off LibRaw's 16-bit buffer. The per-sample arithmetic and
+    /// summation order match <see cref="Resample.Box"/> exactly (each sample scaled to float by
+    /// 1/65535 first, then summed, then divided by factor²). Under <see cref="Demosaic.Full"/>
+    /// the result is therefore bit-identical to a frame decoded whole and downsampled afterwards;
+    /// under <see cref="Demosaic.Preview"/> the first 2× of the reduction is LibRaw's own quad
+    /// binning and the box factor is chosen from the half-size buffer, so the total reduction
+    /// rounds up to an even factor (an 80 MP frame lands at 1296 px instead of 1481 for a
+    /// 1600 px request). Every preview takes the same route, so all Stage-1 measurements are
+    /// still taken on the same pixels.
     ///
     /// Several edges in one call because the import needs two sizes of the same frame (the cached
     /// preview and a smaller chroma-measurement buffer) and decoding twice would cost more than
     /// the buffer we are avoiding.
     /// </summary>
-    /// <returns>One buffer per entry of <paramref name="maxEdges"/>, plus the source dimensions.</returns>
+    /// <returns>One buffer per entry of <paramref name="maxEdges"/>, plus the FULL-RESOLUTION
+    /// frame dimensions — what a full decode would produce, whatever size the buffer LibRaw
+    /// handed back — so crop overlays and region requests keep working in frame pixels.</returns>
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) DecodeRawDownsampled(
         string path, FbddMode fbdd, IReadOnlyList<int> maxEdges, Demosaic demosaic = Demosaic.Full)
     {
-        using ProcessedImage img = Process(path, fbdd, halfSize: false, demosaic);
+        using Decoded decoded = Process(path, fbdd, halfSize: false, demosaic);
+        ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
 
         var outs = new ImageBuffer[maxEdges.Count];
         for (int e = 0; e < maxEdges.Count; e++)
             outs[e] = BoxFromRaw(img, w, h, ch, Resample.BoxFactor(w, h, maxEdges[e]));
-        return (outs, w, h);
+        return (outs, decoded.FrameWidth, decoded.FrameHeight);
     }
 
     /// <summary>Box-average LibRaw's 16-bit output into a linear float buffer.</summary>
@@ -709,18 +796,12 @@ public static class RawDecode
     /// never allocates the ~300–500 MB float frame that mean was being extracted from.
     /// </summary>
     public static double[] RoiMeanFull(string path, RawBackend backend, FbddMode fbdd)
-    {
-        if (UseDngBackend(backend))
-        {
-            try { return WithDngLinear(path, p => RoiMeanFullLibRaw(p, fbdd)); }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or TimeoutException) { }
-        }
-        return RoiMeanFullLibRaw(path, fbdd);
-    }
+        => WithBackend(path, backend, p => RoiMeanFullLibRaw(p, fbdd), out _);
 
     private static double[] RoiMeanFullLibRaw(string path, FbddMode fbdd)
     {
-        using ProcessedImage img = Process(path, fbdd, halfSize: false);
+        using Decoded decoded = Process(path, fbdd, halfSize: false);
+        ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
         const float Inv = 1.0f / 65535.0f;
 
@@ -838,9 +919,50 @@ public static class RawDecode
         }
     }
 
-    private static bool UseDngBackend(RawBackend backend)
-        => backend == RawBackend.Dng
-           || (backend == RawBackend.Auto && OperatingSystem.IsWindows() && IsDngConverterAvailable());
+    /// <summary>
+    /// Whether a decode should START on the DNG Converter: only when the user chose it outright.
+    ///
+    /// AUTO used to mean "DNG Converter whenever it is installed", inherited from the Python
+    /// version. That made every preview decode two Adobe subprocess launches plus a 487 MB
+    /// linear DNG written and read back — 8.7 s a frame on an 80 MP ORF against 2.2 s through
+    /// LibRaw directly — and the 5 GB cache holds eleven such files, so a 41-file roll re-paid
+    /// the conversion on every later pass. Neither Lightroom nor darktable converts anything
+    /// on import, and that gap was the whole of why import felt slow. AUTO now means LibRaw,
+    /// with the converter kept as a rescue for a file LibRaw cannot open (see
+    /// <see cref="DngRescues"/>); a user who wants Adobe's demosaic for every frame still has
+    /// <see cref="RawBackend.Dng"/>.
+    /// </summary>
+    private static bool UseDngBackend(RawBackend backend) => backend == RawBackend.Dng;
+
+    /// <summary>Whether a LibRaw failure under AUTO may be retried through the converter.</summary>
+    private static bool DngRescues(RawBackend backend)
+        => backend == RawBackend.Auto && OperatingSystem.IsWindows() && IsDngConverterAvailable();
+
+    /// <summary>
+    /// Run a LibRaw read on <paramref name="path"/> under the backend preference: DNG first when
+    /// chosen (falling back to LibRaw when the converter fails), else LibRaw, with the converter
+    /// as a rescue under AUTO when LibRaw itself rejects the file — a body its 0.21 camera table
+    /// does not know, typically. <paramref name="dngFellBack"/> is true only for the first case,
+    /// where a requested DNG decode silently became a LibRaw one.
+    /// </summary>
+    private static T WithBackend<T>(string path, RawBackend backend, Func<string, T> read, out bool dngFellBack)
+    {
+        dngFellBack = false;
+        if (UseDngBackend(backend))
+        {
+            try { return WithDngLinear(path, read); }
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or TimeoutException)
+            {
+                dngFellBack = true;
+                return read(path);
+            }
+        }
+        try { return read(path); }
+        catch (LibRawException) when (DngRescues(backend))
+        {
+            return WithDngLinear(path, read);
+        }
+    }
 
     private static void RunConverter(string exe, string[] args)
     {
@@ -856,20 +978,11 @@ public static class RawDecode
         if (proc.ExitCode != 0) throw new InvalidOperationException(CoreText.F($"DNG Converter 退出码 {proc.ExitCode}"));
     }
 
-    /// <summary>Decode honouring a backend preference. AUTO uses DNG Converter on Windows when
-    /// available, else LibRaw; DNG failures fall back to LibRaw. <paramref name="dngFellBack"/>
-    /// reports when a requested DNG decode silently fell back. Port of raw_decode.py::decode_raw.</summary>
+    /// <summary>Decode honouring a backend preference — see <see cref="UseDngBackend"/> for what
+    /// AUTO means. <paramref name="dngFellBack"/> reports when a requested DNG decode silently
+    /// fell back to LibRaw. Port of raw_decode.py::decode_raw.</summary>
     public static ImageBuffer DecodeRaw(string path, RawBackend backend, FbddMode fbdd, out bool dngFellBack)
-    {
-        dngFellBack = false;
-        if (!UseDngBackend(backend)) return DecodeLibRaw(path, fbdd, halfSize: false);
-        try { return WithDngLinear(path, p => DecodeLibRaw(p, fbdd, halfSize: false)); }
-        catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or TimeoutException)
-        {
-            dngFellBack = true;
-            return DecodeLibRaw(path, fbdd, halfSize: false);
-        }
-    }
+        => WithBackend(path, backend, p => DecodeLibRaw(p, fbdd, halfSize: false), out dngFellBack);
 
     /// <summary>
     /// M1 typed RAW boundary. The v1 pipeline admits camera-native numbers for compatibility, but
@@ -928,14 +1041,8 @@ public static class RawDecode
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) DecodeRawDownsampled(
         string path, RawBackend backend, FbddMode fbdd, IReadOnlyList<int> maxEdges,
         Demosaic demosaic = Demosaic.Full)
-    {
-        if (UseDngBackend(backend))
-        {
-            // The DNG path hands LibRaw an ALREADY-DEMOSAICED linear DNG, so UserQual is moot
-            // there — Adobe did the demosaic. The quality choice only bites on the LibRaw path.
-            try { return WithDngLinear(path, p => DecodeRawDownsampled(p, fbdd, maxEdges, demosaic)); }
-            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException or TimeoutException) { }
-        }
-        return DecodeRawDownsampled(path, fbdd, maxEdges, demosaic);
-    }
+        // The DNG path hands LibRaw an ALREADY-DEMOSAICED linear DNG, so the half-size request is
+        // ignored there — Adobe did the demosaic, and the buffer comes back full size. The
+        // Preview choice only bites on the LibRaw path.
+        => WithBackend(path, backend, p => DecodeRawDownsampled(p, fbdd, maxEdges, demosaic), out _);
 }

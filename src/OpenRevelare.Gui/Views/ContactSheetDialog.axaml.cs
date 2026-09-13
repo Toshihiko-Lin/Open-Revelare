@@ -22,6 +22,7 @@ namespace OpenRevelare.Gui.Views;
 public partial class ContactSheetDialog : Window
 {
     private readonly IReadOnlyList<ImageBuffer> _thumbs = new List<ImageBuffer>();
+    private readonly bool _hdrAvailable;
     private RollNotes? _notes;
     private bool _ready;
     private SheetComposer.Grid? _grid;
@@ -41,13 +42,31 @@ public partial class ContactSheetDialog : Window
     /// <summary>Which way round that proportion is read.</summary>
     public SheetOrientation Orientation { get; private set; } = Settings.Current.SheetOrientation;
 
+    /// <summary>
+    /// Write the HDR sheet (D-031): the frames at the roll's HDR target, the paper at SDR white —
+    /// a gain-map JPEG or a float32 TIFF. Its own switch rather than the roll's, because the sheet
+    /// is a deliverable of its own: a lab print of an HDR roll is a perfectly good thing to want.
+    /// Follows the roll on opening; not remembered, since it is a per-roll fact and not a taste.
+    /// The preview here is an SDR surface and shows the SDR sheet either way — the switch changes
+    /// what the FILE is.
+    /// </summary>
+    public bool WriteHdr { get; private set; }
+
     public ContactSheetDialog() { InitializeComponent(); }
 
-    public ContactSheetDialog(IReadOnlyList<ImageBuffer> thumbs, RollNotes notes) : this()
+    /// <param name="hdrAvailable">Whether the caller can write an HDR sheet at all — an HDR roll
+    /// with its extended cells rendered. Off, the switch is hidden rather than greyed: on an SDR
+    /// roll there is nothing to explain.</param>
+    public ContactSheetDialog(IReadOnlyList<ImageBuffer> thumbs, RollNotes notes, bool hdrAvailable = false) : this()
     {
         _thumbs = thumbs;
         _notes = notes;
+        _hdrAvailable = hdrAvailable;
         DataContext = notes;
+
+        HdrPanel.IsVisible = hdrAvailable;
+        WriteHdr = hdrAvailable;
+        HdrBox.IsChecked = WriteHdr;
 
         if (Style == SheetStyle.Light) StyleLight.IsChecked = true; else StyleDark.IsChecked = true;
         AspectBox.SelectedIndex = (int)Aspect;
@@ -93,6 +112,14 @@ public partial class ContactSheetDialog : Window
         Recompose();
     }
 
+    private void OnHdrChanged(object? sender, RoutedEventArgs e)
+    {
+        if (!_ready) return;
+        WriteHdr = _hdrAvailable && HdrBox.IsChecked == true;
+        // Nothing to recompose: the page is the same, only the file changes. The label says which.
+        UpdateInfo();
+    }
+
     /// <summary>A square page is the same page either way round, so the choice is greyed there
     /// rather than left live and inert. The stored preference is untouched — switching back to
     /// 4:3 restores whichever way round the user last wanted it.</summary>
@@ -119,11 +146,18 @@ public partial class ContactSheetDialog : Window
         var old = Disp.Source as RenderTargetBitmap;
         Disp.Source = SheetComposer.Compose(_grid, _notes, opt);
         old?.Dispose();
+        UpdateInfo();
+    }
 
+    private void UpdateInfo()
+    {
+        if (_grid is null || _gridOpt is null) return;
         // Report the size the export will be, not the preview's — planning only, no pixels.
-        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048, opt);
-        InfoLbl.Text = Loc.F(
+        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048, _gridOpt);
+        string text = Loc.F(
             $"{_thumbs.Count} 帧 · {_grid.Layout.Cols}×{_grid.Layout.Rows} · 导出 {size.Width}×{size.Height}");
+        if (WriteHdr) text += " · HDR";
+        InfoLbl.Text = text;
     }
 
     protected override void OnClosed(System.EventArgs e)

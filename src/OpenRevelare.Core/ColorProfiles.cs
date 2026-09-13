@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
@@ -27,6 +27,10 @@ public static class BuiltInColorProfiles
 
     public static ColorProfileRef Rec709(ProfileRole role = ProfileRole.Output) =>
         For(ColorSpaces.Rec709, role);
+
+    /// <summary>The DCI cinema target a Resolve "DCI-P3, Gamma 2.6" film look renders to. Input side only in practice.</summary>
+    public static ColorProfileRef DciP3(ProfileRole role = ProfileRole.Input) =>
+        For(ColorSpaces.DciP3, role);
 
     public static ColorProfileRef LinearAcesCg(ProfileRole role = ProfileRole.Working) =>
         For(ColorSpaces.AcesCg, role);
@@ -102,6 +106,8 @@ public static class BuiltInColorProfiles
             return BuiltInProfileId.AdobeRgb1998;
         if (space.Name.Equals(ColorSpaces.Rec709.Name, StringComparison.OrdinalIgnoreCase))
             return BuiltInProfileId.Rec709;
+        if (space.Name.Equals(ColorSpaces.DciP3.Name, StringComparison.OrdinalIgnoreCase))
+            return BuiltInProfileId.DciP3;
         if (space.Name.Equals(ColorSpaces.AcesCg.Name, StringComparison.OrdinalIgnoreCase))
             return BuiltInProfileId.LinearAcesCg;
         if (space.Name.Equals(ColorSpaces.LinearExtendedSrgb.Name, StringComparison.OrdinalIgnoreCase))

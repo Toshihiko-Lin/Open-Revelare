@@ -29,7 +29,7 @@ namespace OpenRevelare.Gui.Controls;
 /// cannot be installed.
 /// </para>
 /// </summary>
-public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
+public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
 {
     public const string PointerInputLimitation =
         "Pointer input is routable only while the NativeControlHost container WndProc bridge is installed.";
@@ -72,7 +72,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
 
     private readonly object _lifecycleGate = new();
     private readonly IWindowsPreviewHostBackendFactory _backendFactory;
-    private readonly IWindowsPreviewDispatcher _dispatcher;
+    private readonly IPreviewDispatcher _dispatcher;
     private readonly WindowsPreviewAirspaceState _airspaceState;
     private IColorManagementEngine? _colorManagement;
     private Runtime? _runtime;
@@ -96,21 +96,21 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
     public WindowsPreviewHost()
         : this(
             WindowsPreviewHostBackendFactory.Instance,
-            AvaloniaWindowsPreviewDispatcher.Instance,
+            AvaloniaPreviewDispatcher.Instance,
             WindowsPreviewNativeAirspace.Instance)
     {
     }
 
     internal WindowsPreviewHost(
         IWindowsPreviewHostBackendFactory backendFactory,
-        IWindowsPreviewDispatcher dispatcher)
+        IPreviewDispatcher dispatcher)
         : this(backendFactory, dispatcher, WindowsPreviewNativeAirspace.Instance)
     {
     }
 
     internal WindowsPreviewHost(
         IWindowsPreviewHostBackendFactory backendFactory,
-        IWindowsPreviewDispatcher dispatcher,
+        IPreviewDispatcher dispatcher,
         IWindowsPreviewNativeVisibility nativeVisibility)
     {
         ArgumentNullException.ThrowIfNull(backendFactory);
@@ -124,6 +124,11 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
         // controller behind it; the HWND airspace itself is handled by WindowsPreviewInputBridge.
         Focusable = false;
         IsHitTestVisible = false;
+
+        // NativeControlHost only materialises its native container while effectively visible.
+        // Off Windows this host has no runtime and would otherwise leave an empty native view
+        // sitting over the viewport, intercepting pointer input and hiding the managed fallback.
+        if (!OperatingSystem.IsWindows()) IsVisible = false;
     }
 
     public DisplayContract? CurrentContract
@@ -185,10 +190,10 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
     }
 
     public event EventHandler<DisplayContract>? ContractChanged;
-    public event EventHandler<WindowsPreviewPresentationFailedEventArgs>? PresentationFailed;
-    internal event EventHandler? PresentationRecoveryRequested;
+    public event EventHandler<PreviewPresentationFailedEventArgs>? PresentationFailed;
+    public event EventHandler? PresentationRecoveryRequested;
 
-    internal void ConfigureColorManagement(IColorManagementEngine colorManagement)
+    public void ConfigureColorManagement(IColorManagementEngine colorManagement)
     {
         ArgumentNullException.ThrowIfNull(colorManagement);
         Dispatcher.UIThread.VerifyAccess();
@@ -355,7 +360,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
         nint topLevelHwnd = RequireHwnd(topLevelHandle, "Avalonia top level");
         nint containerHwnd = RequireHwnd(container, "Avalonia NativeControlHost container");
         double scale = topLevel.RenderScaling;
-        PresentationPixelSize size = WindowsPreviewPhysicalSize.FromBounds(Bounds.Size, scale);
+        PresentationPixelSize size = PreviewPhysicalSize.FromBounds(Bounds.Size, scale);
 
         // Install before creating the presenter child. A bridge failure leaves no active native
         // preview rectangle that could silently consume the viewport's mouse/wheel input.
@@ -388,7 +393,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
             inputBridge.Dispose();
             throw;
         }
-        var mailbox = new WindowsPreviewFrameMailbox(backend, _dispatcher, ReportPresentationFailure);
+        var mailbox = new PreviewFrameMailbox(backend, _dispatcher, ReportPresentationFailure);
         var runtime = new Runtime(
             backend,
             mailbox,
@@ -528,7 +533,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
             if (resize)
             {
                 double scale = runtime.TopLevel.RenderScaling;
-                PresentationPixelSize size = WindowsPreviewPhysicalSize.FromBounds(Bounds.Size, scale);
+                PresentationPixelSize size = PreviewPhysicalSize.FromBounds(Bounds.Size, scale);
                 if (size != runtime.Size || scale != runtime.Scale)
                 {
                     runtime.Backend.Resize(size, scale);
@@ -626,7 +631,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
             // remains the backstop while the DLL/device is unavailable.
             RequestUpdate(metrics: true);
         }
-        PresentationFailed?.Invoke(this, new WindowsPreviewPresentationFailedEventArgs(error));
+        PresentationFailed?.Invoke(this, new PreviewPresentationFailedEventArgs(error));
     }
 
     private void StopWindowsRuntime()
@@ -685,6 +690,55 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
         }
     }
 
+    /// <summary>The Windows-only lines of the copied colour diagnostics (probe, native presenter).</summary>
+    public string DescribePlatformDiagnostics()
+    {
+        var text = new System.Text.StringBuilder();
+        if (DisplayDiagnostics is { } display)
+        {
+            text.AppendLine(
+                $"Display probe: api={display.ProbeApi}; GDI={display.GdiDeviceName}; " +
+                $"path={display.MonitorDevicePath}; name={display.MonitorFriendlyName}");
+            text.AppendLine(
+                $"Advanced Color: active={display.AdvancedColorActive}; mode={display.ActiveColorMode}; " +
+                $"encoding={display.ColorEncoding}; bitsPerChannel={display.BitsPerColorChannel}; " +
+                $"rawFlags={display.AdvancedColorRawFlags}");
+            text.AppendLine(
+                $"SDR white: raw={display.SdrWhiteRaw}; nits={display.SdrWhiteNits}; " +
+                $"failure={display.SdrWhiteFailureReason ?? "none"}");
+            text.AppendLine(
+                $"Panel luminance: min={display.PanelMinNits}; max={display.PanelMaxNits}; " +
+                $"maxFullFrame={display.PanelMaxFullFrameNits}; failure={display.PanelLuminanceFailureReason ?? "none"}");
+            text.AppendLine(
+                $"Display profile probe: status={display.ProfileStatus}; scope={display.ProfileScope}; " +
+                $"file={display.ProfileFileName}; sha256={display.ProfileSha256}");
+            text.AppendLine(
+                $"Display fallback: {display.FallbackReason ?? "none"}; " +
+                $"contractCapableWYSIWYG={display.WysiwygGuaranteed}; " +
+                $"presenterAvailable={IsPresenterAvailable}; " +
+                $"effectiveWYSIWYG={PresentationGuarantee.IsEffective(CurrentContract, IsPresenterAvailable)}; " +
+                $"explicitRefresh={display.RequiresExplicitRefresh}");
+        }
+
+        if (PresenterDiagnostics is { } native)
+        {
+            text.AppendLine(
+                $"Native presenter: ABI={native.AbiVersion}; mode={native.Mode}; " +
+                $"size={native.Size.Width}x{native.Size.Height}; DXGI format=0x{native.DxgiFormat:X}; " +
+                $"colorSpace=0x{native.DxgiColorSpace:X}; colorSpaceSet={native.ColorSpaceWasSet}");
+            text.AppendLine(
+                $"Native adapter: LUID={native.AdapterLuid}; featureLevel=0x{native.FeatureLevel:X}; " +
+                $"WARP={native.UsingWarp}; childHwnd=0x{native.ChildHwnd:X}");
+            text.AppendLine(
+                $"Native presents: ok={native.SuccessfulPresentCount}; rejected={native.RejectedPresentCount}; " +
+                $"lastResult={native.LastResult}; lastRevision={native.LastContractRevision}; " +
+                $"lastDisplay={native.LastDisplayId}");
+        }
+
+        text.AppendLine($"Pointer routing: {PointerInputLimitation}");
+        return text.ToString().TrimEnd();
+    }
+
     private void DisposeOnUiThread()
     {
         Dispatcher.UIThread.VerifyAccess();
@@ -736,7 +790,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
     {
         internal Runtime(
             IWindowsPreviewHostBackend backend,
-            WindowsPreviewFrameMailbox mailbox,
+            PreviewFrameMailbox mailbox,
             WindowsPreviewInputBridge inputBridge,
             WindowsPreviewDisplayChangeBridge displayChangeBridge,
             TopLevel topLevel,
@@ -755,7 +809,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
         }
 
         internal IWindowsPreviewHostBackend Backend { get; }
-        internal WindowsPreviewFrameMailbox Mailbox { get; }
+        internal PreviewFrameMailbox Mailbox { get; }
         internal WindowsPreviewInputBridge InputBridge { get; }
         internal WindowsPreviewDisplayChangeBridge DisplayChangeBridge { get; }
         internal TopLevel TopLevel { get; }
@@ -764,64 +818,8 @@ public sealed class WindowsPreviewHost : NativeControlHost, IDisposable
         internal double Scale { get; set; }
     }
 
-    private sealed class AvaloniaWindowsPreviewDispatcher : IWindowsPreviewDispatcher
-    {
-        internal static AvaloniaWindowsPreviewDispatcher Instance { get; } = new();
-
-        private AvaloniaWindowsPreviewDispatcher() { }
-
-        public void Post(Action action) =>
-            Dispatcher.UIThread.Post(action, DispatcherPriority.Background);
-    }
 }
 
-public sealed class WindowsPreviewPresentationFailedEventArgs : EventArgs
-{
-    public WindowsPreviewPresentationFailedEventArgs(Exception error)
-    {
-        ArgumentNullException.ThrowIfNull(error);
-        Error = error;
-    }
-
-    public Exception Error { get; }
-    public bool IsStaleContract => Error is PresentationContractException;
-}
-
-internal static class WindowsPreviewPhysicalSize
-{
-    internal static PresentationPixelSize FromBounds(Size logicalBounds, double scale)
-    {
-        if (!double.IsFinite(logicalBounds.Width) || logicalBounds.Width < 0d)
-            throw new ArgumentOutOfRangeException(nameof(logicalBounds), "Logical width must be finite and non-negative.");
-        if (!double.IsFinite(logicalBounds.Height) || logicalBounds.Height < 0d)
-            throw new ArgumentOutOfRangeException(nameof(logicalBounds), "Logical height must be finite and non-negative.");
-        if (!double.IsFinite(scale) || scale <= 0d)
-            throw new ArgumentOutOfRangeException(nameof(scale), "Render scaling must be finite and positive.");
-
-        return new PresentationPixelSize(
-            RoundDimension(logicalBounds.Width, scale, nameof(logicalBounds)),
-            RoundDimension(logicalBounds.Height, scale, nameof(logicalBounds)));
-    }
-
-    private static int RoundDimension(double logical, double scale, string parameterName)
-    {
-        double physical = logical * scale;
-        if (!double.IsFinite(physical) || physical > int.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(
-                parameterName,
-                "Scaled preview dimension must fit in a positive Int32 pixel extent.");
-        }
-
-        double rounded = Math.Round(physical, MidpointRounding.AwayFromZero);
-        return Math.Max(1, checked((int)rounded));
-    }
-}
-
-/// <summary>
-/// Controls whether the native HWND airspace island occludes Avalonia's managed emergency
-/// preview. The container is exposed only while a native presenter actually owns visible output.
-/// </summary>
 internal interface IWindowsPreviewNativeVisibility
 {
     void SetVisible(nint hwnd, bool visible);
@@ -866,10 +864,4 @@ internal sealed class WindowsPreviewAirspaceState(IWindowsPreviewNativeVisibilit
         _nativeVisibility.SetVisible(
             containerHwnd,
             ShouldExposeNative(effectivelyVisible));
-}
-
-internal static class WindowsPresentationGuarantee
-{
-    internal static bool IsEffective(DisplayContract? contract, bool presenterAvailable) =>
-        presenterAvailable && contract?.IsWysiwygGuaranteed == true;
 }

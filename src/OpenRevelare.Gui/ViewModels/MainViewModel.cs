@@ -618,6 +618,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _fileName = "";
     [ObservableProperty] private HistogramData? _histogram;   // RGB histogram of the rendered positive
 
+    partial void OnHistogramChanged(HistogramData? value) => OnPropertyChanged(nameof(HistogramTooltip));
+
     // ══ Roll (multi-frame) ══════════════════════════════════════════════════════
     public RollNotes Notes { get; } = new();
     public ObservableCollection<RollFrame> Frames { get; } = new();
@@ -1514,6 +1516,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private double[] TBaseArr() => new[] { TBaseR, TBaseG, TBaseB };
 
+    /// <summary>The render snapshot, for tests that check what the pickers feed the pipeline.</summary>
+    internal FrameParams RenderParamsForTest() => BuildParams();
+
     /// <summary>Snapshot the current state into a FrameParams for a render/export.</summary>
     private FrameParams BuildParams() => new()
     {
@@ -1524,6 +1529,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OutputIntent = OutputIntent.Basic,
         // Step-4 target: the space Stage 2 runs in and the file is written in.
         OutputSpace = OutputSpaces[_outputSpaceIndex].Name,
+        // Whether step 4 keeps anything above diffuse white. Same reason as the output space for
+        // living in this snapshot rather than being read off the frame: the picker's state is what
+        // the preview, the thumbnails and an export all have to agree on.
+        HdrPeakNits = HdrPeakNits,
         // The print-film emulation that runs INSIDE step 4. Like the output space it belongs to
         // this snapshot rather than being read off the frame: this is the state the picker is
         // showing, and the preview, the thumbnails and an export all have to render the same
@@ -1531,6 +1540,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // parameters from here — so the preview stayed pass-through and moving to another frame
         // wrote the pass-through value back over the roll.
         PrintLut = _printLutIndex > 0 ? _printLutPaths[_printLutIndex] : "",
+        // The cube's declared output (D-033) travels with the cube, for the same reason: the
+        // render reads THIS snapshot, so a declaration written only to the frames would never
+        // reach the preview — which is exactly what happened before this line existed.
+        PrintLutOutput = _printLutIndex > 0 ? PrintLutOutputName : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
@@ -1937,6 +1950,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// <see cref="TBaseToDensity"/> 的逆：黑端的绝对密度 → 片基透射率，给高光估计器当参考。
+    /// 估计器于是在「相对片基」的密度（= 跨度）上选帧、抬升，结果再由 <see cref="AddDMin"/>
+    /// 变回绝对密度写入亮端。为什么必须这样，见 AutoInvertRollAsync 第二阶段的说明。
+    /// </summary>
+    private static double[] TBaseFromDensity(double[] dMin)
+    {
+        var t = new double[3];
+        for (int c = 0; c < 3; c++) t[c] = Math.Pow(10.0, -dMin[c]);
+        return t;
+    }
+
+    /// <summary>相对片基的高光密度（跨度）→ 对 T=1 的绝对密度，即 <c>span + D_min</c>。</summary>
+    private static double[] AddDMin(double[] span, double[] dMin)
+    {
+        var d = new double[3];
+        for (int c = 0; c < 3; c++) d[c] = span[c] + dMin[c];
+        return d;
+    }
+
+    /// <summary>
     /// 高光采样：框负片上最浓的区域（= 正片高光），测出亮端三个密度。
     ///
     /// 这里曾有两个按钮——「框选亮部」解白平衡、「框选 D_max」定端点——它们测的是同一个量，
@@ -2139,8 +2172,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// The light-board cut, measured on ONE frame at FULL RESOLUTION — null when the frame has no
-    /// board (<see cref="Sprocket.NoBoard"/>).
+    /// The light-board cut, measured at FULL RESOLUTION on a few frames spread through the roll —
+    /// null when none of them has a board (<see cref="Sprocket.NoBoard"/>).
     ///
     /// Full resolution is load-bearing, and this is the only estimator in the program for which
     /// that is true. Everything else here samples a population — a percentile, a channel mean, a
@@ -2169,19 +2202,62 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// frame (DSC_9239) was a preview-only false positive. Those rolls' gaps were simply wide
     /// enough to survive a cut placed in the wrong part of them.
     ///
-    /// ONE frame, not the roll. The cut is applied roll-wide either way — a roll is one strip of
-    /// one film over one light board — so the extra frames would cost a full-resolution decode each
-    /// to average out a quantity that does not vary between them. The frame is decoded transiently
-    /// and dropped before this returns: it is deliberately NOT put in the preview cache, whose
-    /// entries are preview-sized on purpose (see PreviewAsync — the full-resolution float frame is
-    /// the biggest allocation in the program).
+    /// A FEW frames, not one and not the roll. The cut is applied roll-wide — a roll is one strip
+    /// of one film over one light board — and this used to be measured on the current frame alone
+    /// on the argument that the board↔base gap does not vary between frames. It does not, when the
+    /// frame HAS a base: on 09-Alien2460 the first two frames were fogged during loading, so their
+    /// film is dense everywhere and the base tone (0.38) is simply absent from them; the estimator
+    /// duly read the fogged picture's top (0.26) as "the film" and cut at 0.32 — under the base of
+    /// the other thirty-eight frames, which then had their base painted white as board. No
+    /// estimator can find a base in a frame that has none, so the fix is to look at frames that
+    /// do: the first, the middle and the last (a fogged leader sits at one end of the roll, not in
+    /// its middle), each decoded at full resolution.
+    ///
+    /// Combined by taking the HIGHEST cut, not the median. The base is the thinnest — brightest —
+    /// thing on the film, and the board's foot is the same on every frame, so a frame that shows
+    /// its base reports the cut as high as it can go and a frame that does not can only report it
+    /// lower; the highest answer is therefore the one from the frame that saw the most base, and
+    /// one such frame in three is enough. A median would have needed two.
+    ///
+    /// Each frame is decoded transiently and dropped: none of them is put in the preview cache,
+    /// whose entries are preview-sized on purpose (see PreviewAsync — the full-resolution float
+    /// frame is the biggest allocation in the program).
     /// </summary>
     private double? MeasureBoardCut()
     {
-        // Measured on the frame the preview is currently showing, so the answer describes the
-        // same negative the user is looking at.
-        if (CurrentFrame is not { } frame) return null;
+        if (CurrentFrame is not { } current) return null;
 
+        double? best = null;
+        foreach (RollFrame frame in BoardCutSampleFrames(current))
+        {
+            if (BoardCutOf(frame) is { } cut && (best is null || cut > best)) best = cut;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// The frames <see cref="MeasureBoardCut"/> decodes: the current frame plus the middle and last
+    /// of the roll, by DISTINCT SOURCE FILE — the virtual copies of a split scan are windows on one
+    /// file and would only measure the same negative twice.
+    /// </summary>
+    private IEnumerable<RollFrame> BoardCutSampleFrames(RollFrame current)
+    {
+        var picked = new List<RollFrame> { current };
+        var seen = new HashSet<string> { current.Path };
+        // One representative per file, in roll order.
+        var files = new List<RollFrame>();
+        var filesSeen = new HashSet<string>();
+        foreach (RollFrame f in Frames) if (filesSeen.Add(f.Path)) files.Add(f);
+        if (files.Count == 0) return picked;
+        foreach (RollFrame f in new[] { files[files.Count / 2], files[^1] })
+            if (seen.Add(f.Path)) picked.Add(f);
+        return picked;
+    }
+
+    /// <summary>One frame's board cut at full resolution, or null when it has no board.</summary>
+    private double? BoardCutOf(RollFrame frame)
+    {
+        bool isCurrent = ReferenceEquals(frame, CurrentFrame);
         ImageBuffer full;
         try
         {
@@ -2194,18 +2270,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
         {
             // A file the full decoder cannot open is not a reason to lose the estimate entirely —
-            // the preview is already in hand and its answer, while placed less well, is the one
-            // this code used to give.
-            return PreviewBoardCut();
+            // for the current frame the preview is already in hand and its answer, while placed
+            // less well, is the one this code used to give. The other frames have no preview yet.
+            return isCurrent ? PreviewBoardCut() : null;
         }
 
         // Reproduce the preview's own framing on the full decode. A margin decode is a window
-        // onto a file holding several negatives, so it goes on first; AutoCrop is expressed
+        // onto a file holding several negatives, so it goes on first; the crop is expressed
         // against whichever buffer the preview is (the frame's rect within the box when there is
         // one, the file otherwise), which is exactly what applying the box first leaves behind.
         // Without this a strip scan would be measured with its neighbouring negatives included.
-        ImageBuffer region = _previewMargin is { } box ? Geometry.ApplyCrop(full, box) : full;
-        if (AutoCrop is { } c) region = Geometry.ApplyCrop(region, c);
+        // The current frame's framing is the live one (AutoCrop); the others' is rebuilt from
+        // their stored rects the same way AdoptPreview would.
+        (double X, double Y, double W, double H)? box = isCurrent ? _previewMargin : SplitCropOf(frame);
+        (double X, double Y, double W, double H)? crop = isCurrent
+            ? AutoCrop
+            : box is { } b && SplitRectOf(frame) is { } rect ? Relative(rect, b) : frame.Params.CropRect;
+        ImageBuffer region = box is { } bx ? Geometry.ApplyCrop(full, bx) : full;
+        if (crop is { } c) region = Geometry.ApplyCrop(region, c);
 
         double thr = Sprocket.EstimateSprocketThreshold(region);
         return thr >= Sprocket.NoBoard ? null : thr;
@@ -2369,9 +2451,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await Parallel.ForEachAsync(order, new ParallelOptions
             {
                 CancellationToken = ct,
-                // Same ceiling as the warm-up, and for the same reason: each in-flight decode
-                // holds a few hundred MB and the UI still needs a core.
-                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
+                // Same worker count as the warm-up, and for the same reason: the two passes
+                // share decodes through PreviewAsync, and asking in the same width keeps this
+                // one from queueing behind frames the warm-up has not reached.
+                MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
             }, async (item, token) =>
             {
                 var (path, pre, frame) = item;
@@ -2456,18 +2539,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             rollBase ??= await Task.Run(
                 () => FilmBase.EstimateTBaseFromRoll(baseList, cut), ct);
 
-            // 估计器一律传中性参考，让它们直接产出**对 T=1 的绝对密度**——与 D_min 同一基准。
-            //
-            // 传 rollBase 会得到「相对片基」的密度，而黑端现在是绝对密度，两端基准不一致：
-            // 跨度 = D_max − D_min 会各通道少算一个 D_min，而三通道少得不一样多
-            // （实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。
-            double[] neutralRef = { 1.0, 1.0, 1.0 };
+            // 估计器传**片基**做参考，让它们在「相对片基」的密度上工作——那正是反相消费的量：
+            // 跨度 = D_max − D_min，颜色平衡是三通道跨度之比（DensityEndpoints.FromMeasured）。
+            // 选帧、抬升都只在跨度上才成立；传中性参考得到的是绝对密度，每通道各带一个 D_min，
+            // 抬升 k 倍后跨度多出 (k−1)·D_min——这是片基色的逐通道偏置，整卷因此偏红
+            // （实测诺日士1089：k=1.549，跨度 R/G 从 0.866 掉到 0.767）。
+            // 写回 DMaxPerChannel 时再加回 D_min，两端仍然是同一基准的绝对密度——
+            // 早先「传 rollBase 会让两端基准不一致」的问题，出在没加回，不在传什么。
+            double[] dMin = TBaseToDensity(rollBase);
+            double[] AbsoluteFrom(double[] span) => AddDMin(span, dMin);
 
             double[]? rollWbHigh = null;
             try
             {
-                rollWbHigh = await Task.Run(
-                    () => FilmBase.AutoWbHighFromRoll(masks, neutralRef, cut, valueList), ct);
+                rollWbHigh = AbsoluteFrom(await Task.Run(
+                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, cut, valueList), ct));
             }
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
@@ -2476,7 +2562,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // uses: an opaque film-edge line would inflate the channels unequally and show up as
             // a colour cast.
             double[]? rollDMaxPerCh = await Task.Run(
-                () => FilmBase.DetectDMaxPerChannelFromRoll(values, neutralRef, 90.0, masks, cut), ct);
+                () => FilmBase.DetectDMaxPerChannelFromRoll(values, rollBase, 90.0, masks, cut), ct);
+            if (rollDMaxPerCh is not null) rollDMaxPerCh = AbsoluteFrom(rollDMaxPerCh);
 
             ct.ThrowIfCancellationRequested();
 
@@ -2484,13 +2571,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             try
             {
                 // 片基的绝对密度就是黑端本身。
-                DMinPerChannel = TBaseToDensity(rollBase);
+                DMinPerChannel = dMin;
 
                 // The highlight endpoint, from whichever measurement is available. Both estimators
-                // return the same quantity — three absolute densities — so there is nothing to
-                // reconcile and no second field left to contradict them. The per-channel D-max
-                // detector is preferred: it pools an upper percentile across the roll, where
-                // AutoWbHighFromRoll takes the single densest frame's highlight.
+                // return the same quantity — three densities against the base, made absolute
+                // above — so there is nothing to reconcile and no second field left to contradict
+                // them. The per-channel D-max detector is preferred: it picks the frame the roll
+                // agrees on, where AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
                 if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
                 // The detector's endpoints ARE the placement — both the channels' relative spans
@@ -2628,8 +2715,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
-        // 不再预先除以 t_base：参考透射率恒为 1,1,1，估计器直接产出对 T=1 的绝对密度，
-        // 与 D_min 同基准。（这里曾经按片基归一化，那是旧模型的做法。）
+        // 估计器按当前黑端归一化（参考 = 10^−D_min），在跨度上测量，结果加回 D_min——见下。
         //
         // Masked on the RAW region: both valleys are calibrated on raw luma. Without this the
         // light board and — far more damaging — the opaque blocking card sit inside the
@@ -2655,11 +2741,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // — the neutral default on a fresh roll — while the status line below still printed those
         // stale numbers as though they had just been measured. That is the "单张没把高光段测上"
         // gap: not a wrong measurement but a missing one, reported as success.
+        // Measured against the CURRENT black end, the same way the roll chain measures against
+        // the roll base: the estimators then work on spans, which is what the no-clip lift has
+        // to preserve, and D_min is added back so the endpoint stays absolute. See the roll
+        // chain's stage 2 for the cast that measuring absolute densities produced.
+        double[] dMin = DMinPerChannel;
+        double[] tBase = TBaseFromDensity(dMin);
         double[]? highlight = null;
         if (mask is not null)
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { src }, new[] { 1.0, 1.0, 1.0 }, 90.0, new[] { mask }, cut);
+                new[] { src }, tBase, 90.0, new[] { mask }, cut);
 
             // Fallback: the densest-highlight solve. It answers from the same masked pixels but
             // reduces them differently, so it still produces a triplet where the percentile
@@ -2670,14 +2762,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 try
                 {
                     highlight = FilmBase.AutoWbHighFromRoll(
-                        new[] { mask }, new[] { 1.0, 1.0, 1.0 }, cut,
+                        new[] { mask }, tBase, cut,
                         valueImages: ReferenceEquals(mask, src) ? null : new[] { src });
                 }
                 catch { /* no usable highlight in this frame — say so below */ }
             }
         }
 
-        if (highlight is not null) DMaxPerChannel = highlight;
+        if (highlight is not null) DMaxPerChannel = AddDMin(highlight, dMin);
         _lastHighlightMeasured = highlight is not null;
 
         StatusText = highlight is not null
@@ -2812,14 +2904,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ImageBuffer? val = AutoRegionStage1();
         if (raw is null || val is null) return;
 
-        // 参考一律中性，与【自动（整卷）】和【自动高光】完全一致。
+        // 参考取当前黑端换算的片基透射率，与【自动（整卷）】和【自动高光】完全一致：估计器在
+        // 跨度上工作，结果加回 D_min 写成绝对密度。三条「自动白端」路径必须同一基准，否则
+        // 同一张片子给出不同的亮端。
         //
-        // 这里曾传 TBaseArr()，那会让估计器产出「相对片基」的密度，而黑端是**对 T=1 的绝对
-        // 密度**——两端基准不一致，跨度 D_max − D_min 就会各通道少算一个 D_min，而三通道少得
-        // 不一样多（整卷路径实测 R 少 0.086、B 少 0.538）=> 反差变小且严重偏色。新工程的 TBase
-        // 恒为 1,1,1 所以看不出来，但旧工程会从文件里读回非中性的 TBase，那时这个按钮与另外
-        // 两条路径就给出不同的亮端。
-        double[] neutralRef = { 1.0, 1.0, 1.0 };
+        // 参考不能是 TBaseArr()：新工程的 TBase 恒为 1,1,1，旧工程会从文件读回非中性值，两者
+        // 都不是黑端所在的位置；也不能是中性 1,1,1——那样得到的是绝对密度，抬升系数会把片基色
+        // 掺进跨度，见整卷链第二阶段。
+        double[] dMin = DMinPerChannel;
+        double[] tBase = TBaseFromDensity(dMin);
         IReadOnlyList<ImageBuffer>? values = ReferenceEquals(raw, val) ? null : new[] { val };
         double? cut = AutoBoardCut();
 
@@ -2830,7 +2923,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { val }, neutralRef, 90.0, new[] { raw }, cut);
+                new[] { val }, tBase, 90.0, new[] { raw }, cut);
         }
         catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
 
@@ -2838,7 +2931,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, neutralRef, cut, values);
+                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, tBase, cut, values);
             }
             catch (Exception ex)
             {
@@ -2853,7 +2946,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        DMaxPerChannel = highlight;
+        DMaxPerChannel = AddDMin(highlight, dMin);
         StatusText = Loc.F($"自动白点 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
     }
 
@@ -3472,6 +3565,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
         if (!_filmBaseSampled) FilmBaseText = "";
         foreach (RollFrame f in Frames) f.RefreshText();
+        NotifyHdrText();
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
     }
 
@@ -3732,11 +3826,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // is the one the finished sheet will have.
         ImageBuffer sample = cells.First(c => c.Tile is not null).Tile!.Pixels;
         var list = new List<ImageBuffer>(cells.Count);
+        // The cover is an sRGB JPEG on an SDR card, so an HDR roll's cells are its SDR rendition
+        // (D-031) — the extended render's numbers are linear and unbounded, and read as pixels
+        // they would print a dark, clipped sheet.
         foreach (var (tile, p) in cells)
             list.Add(tile is null ? Placeholder(sample.Width, sample.Height)
                                   : Pipeline.Render(
                                       tile,
-                                      p,
+                                      p.SdrRendition(),
                                       pipelineVersion,
                                       ColorManagement).Pixels);
         return list;

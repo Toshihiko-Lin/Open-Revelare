@@ -1,4 +1,4 @@
-using OpenRevelare.ColorManagement;
+﻿using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -182,7 +182,31 @@ public static class ColorPipeline
     /// shoulder starts at 0.5, which leaves mid-grey, the mid-tone crossing and diffuse white set
     /// by the decode and the response gamma alone.
     /// </summary>
-    public static void CineonToDisplay(float[] data)
+    public static void CineonToDisplay(float[] data) =>
+        CineonToDisplay(data, shoulderAsymptote: 1.0f);
+
+    /// <summary>
+    /// <see cref="CineonToDisplay"/> aimed at an explicit shoulder asymptote.
+    ///
+    /// <para>
+    /// ONE FAMILY, NOT TWO RENDERINGS (D-021). <see cref="HighlightRolloff"/> exists to keep the
+    /// 2.31 stops above Cineon's diffuse white from clipping, and it does that by compressing
+    /// them asymptotically toward a ceiling. For a display-referred target that ceiling can only
+    /// be <c>1.0</c>, which is what <c>shoulderAsymptote: 1.0f</c> means and what the established
+    /// rendering has always done. An extended target has room above one, so it aims the SAME
+    /// curve at its own headroom instead — it does not get a different curve, and it must not,
+    /// because that is what keeps the two agreeing below the knee.
+    /// </para>
+    ///
+    /// <para>
+    /// WHERE THEY AGREE AND WHERE THEY DO NOT. At and below <see cref="HighlightRolloff.Knee"/>
+    /// the curve is the identity for every member of the family, so shadows and mid-tones are
+    /// bit-identical. Above it the renderings diverge progressively, and that divergence IS the
+    /// feature: the SDR path spends the negative's latitude compressing it into <c>[0.5, 1)</c>,
+    /// the extended path spreads the same latitude over <c>[0.5, headroom)</c>.
+    /// </para>
+    /// </summary>
+    internal static void CineonToDisplay(float[] data, float shoulderAsymptote)
     {
         const double refWhite = 685.0;
         // The response gamma folded into the transform, and the source of its contrast. Not the
@@ -213,7 +237,8 @@ public static class ColorPipeline
             for (int i = from; i < to; i++)
             {
                 float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-                data[i] = Shoulder(Toe(MathF.Max((lin - blackLin) / span, 0.0f)));
+                data[i] = HighlightRolloff.Of(
+                    Toe(MathF.Max((lin - blackLin) / span, 0.0f)), shoulderAsymptote);
             }
         });
     }
@@ -271,46 +296,6 @@ public static class ColorPipeline
     }
 
     /// <summary>
-    /// The knee where the shoulder starts, in the normalised linear domain
-    /// <see cref="CineonToDisplay"/> works in. Below it the transform is untouched.
-    ///
-    /// 0.5 is not a free choice: it is what lands code 685 on 0.881 once the output space encodes,
-    /// against the 0.880 measured on the real Kodak 2383 cube. Raising it to 0.6 gives 0.906 and
-    /// lowering it to 0.4 gives 0.854, so this is the value that makes the two renderings agree at
-    /// the diffuse white. In code terms the knee sits at 596, so everything from the film base up
-    /// through the mid-tones passes through unchanged.
-    /// </summary>
-    private const float ShoulderKnee = 0.5f;
-
-    /// <summary>
-    /// Rolls the highlights off instead of letting them clip, so that codes above Cineon's diffuse
-    /// white survive to the screen.
-    ///
-    /// WHAT THIS FIXES. The encoding carries the whole negative: <see cref="FrameParams.DMaxPerChannel"/>
-    /// maps to code 1032, while 685 is only where a PICTURE's white sits, leaving 347 codes — 2.31
-    /// stops — of latitude above it. Without a shoulder that entire span rendered as 1.0 and the
-    /// output space's encoder clamped it away, so the standard rendering was discarding two and a
-    /// third stops of measured data. It showed up on every switch to a print-film cube: the cube
-    /// keeps that latitude (2383 puts 685 at 0.880 and spreads the rest between there and white),
-    /// so a region that had been flat paper-white suddenly acquired detail and read as "the LUT
-    /// darkened my highlights". Nothing was darkened — the standard path had been burning them.
-    ///
-    /// A Reinhard roll-off: everything below <see cref="ShoulderKnee"/> is identity, and above it
-    /// the remaining range is compressed asymptotically toward 1 so nothing ever reaches it. That
-    /// keeps two properties worth having — the mid-tones are bit-identical to what they were
-    /// (code 486 stays at 0.494), and no input, however dense, can clip.
-    ///
-    /// The curve is C¹ at the knee, so there is no visible seam where it engages.
-    /// </summary>
-    private static float Shoulder(float v)
-    {
-        if (v <= ShoulderKnee) return v;
-        const float headroom = 1.0f - ShoulderKnee;
-        float d = v - ShoulderKnee;
-        return ShoulderKnee + headroom * d / (d + headroom);
-    }
-
-    /// <summary>
     /// Step 4 as the roll has configured it — its print-film emulation if it names one, and the
     /// standard display rendering otherwise.
     ///
@@ -357,29 +342,277 @@ public static class ColorPipeline
 
         ArgumentNullException.ThrowIfNull(colorManagement);
         ColorSpaceDef output = cal.ResolvedOutputSpace;
-        CubeLut? lut = PrintLuts.Resolve(cal.PrintLut);
-        if (lut is not null)
-            ToOutputSpaceVia(data, lut, output, pipelineVersion, colorManagement);
-        else if (!string.IsNullOrWhiteSpace(cal.PrintLut))
-        {
-            throw new NotSupportedException(CoreText.F(
-                $"无法载入胶片 LUT「{cal.PrintLut}」，因此无法确定它渲染到哪个色彩空间。"));
-        }
+        if (PrintLutFor(cal, OutputTarget.Sdr(output)) is { } applied)
+            ToOutputSpaceVia(data, applied.Lut, applied.Contract, output, colorManagement);
         else
             ToOutputSpace(data, output);
     }
 
     /// <summary>
-    /// The native space supported for managed print-film rendering. Resolve's two embedded film
-    /// looks are authored to land on Rec709 with a 2.4 display gamma, which their trusted asset
-    /// headers state outright. Generic user cubes are not assumed to share that contract; their
-    /// <see cref="CubeLut.OutputEncoding"/> remains unknown and ManagedV2 rejects them.
+    /// The cube the roll renders through on <paramref name="target"/>, with the contract it is
+    /// rendered under — or null when the roll names no cube, or names an HDR LUT on an SDR
+    /// target, which stands aside (D-033). An SDR print on an extended target is applied, as
+    /// colour (D-034).
     ///
-    /// Hard-coded rather than configurable because it is a fact about the cube, not a choice: a
-    /// stock emulation has one output by construction, and offering a picker would invite the
-    /// user to declare something the file already decided.
+    /// <para>
+    /// THE ONE PLACE THIS IS DECIDED. The render, the recipe that describes it and the GUI's
+    /// hint all ask here, so they cannot disagree about whether the cube was applied.
+    /// </para>
+    ///
+    /// <para>
+    /// Two situations are errors rather than "not applied", because in both the roll asked for
+    /// a rendering nobody can perform: a cube that cannot be loaded, and a cube whose output
+    /// neither its header nor the roll declares. Rendering the standard picture instead would be
+    /// a silent substitution; the exception carries the reason to whoever chose the file.
+    /// </para>
+    /// </summary>
+    public static (CubeLut Lut, LutContract Contract)? PrintLutFor(FrameParams cal, OutputTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(cal);
+        ArgumentNullException.ThrowIfNull(target);
+        if (string.IsNullOrWhiteSpace(cal.PrintLut)) return null;
+
+        CubeLut? lut = PrintLuts.Resolve(cal.PrintLut)
+            ?? throw new NotSupportedException(CoreText.F(
+                $"无法载入胶片 LUT「{cal.PrintLut}」，因此无法确定它渲染到哪个色彩空间。"));
+
+        LutContract contract = cal.LutContractFor(lut);
+        if (contract.Output == LutOutputEncoding.Unknown)
+        {
+            throw new NotSupportedException(
+                CoreText.F($"胶片 LUT「{lut.Title}」的文件头没有声明输出色彩空间，无法确定它渲染到哪个空间。")
+                + CoreText.T("请在「LUT 合同」里声明它的输出（Resolve 生成 LUT 时的输出色彩空间），或改用内置的胶片风格。"));
+        }
+        return contract.AppliesTo(target) ? (lut, contract) : null;
+    }
+
+    /// <summary>
+    /// Step 4 against a parameterized terminal (D-022). This is the single place that decides what
+    /// the render puts above diffuse white, and both consumers — preview on an HDR display and an
+    /// HDR deliverable — go through it.
+    ///
+    /// <para>
+    /// AN SDR TARGET IS NOT REIMPLEMENTED HERE. It delegates to the existing overload verbatim, so
+    /// the established rendering cannot drift by being described twice; the golden renders are the
+    /// gate that proves it.
+    /// </para>
+    /// </summary>
+    public static void ToOutputTargetFor(
+        float[] data,
+        FrameParams cal,
+        OutputTarget target,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(cal);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (!target.IsExtended)
+        {
+            ToOutputSpaceFor(data, cal, pipelineVersion, colorManagement);
+            return;
+        }
+
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Extended targets exist only in ManagedV2.");
+
+        if (PrintLutFor(cal, target) is { } applied)
+        {
+            if (applied.Contract.IsExtendedOutput)
+                ToExtendedOutputTargetVia(data, applied.Lut, applied.Contract, target);
+            else
+                ToExtendedOutputTargetViaPrint(data, applied.Lut, applied.Contract, target, colorManagement);
+        }
+        else
+            ToExtendedOutputTarget(data, target);
+    }
+
+    /// <summary>
+    /// The extended terminal with no cube: scene-linear working RGB → Cineon log → the analytic
+    /// display rendering → the target's primaries, unclamped → highlight shoulder.
+    ///
+    /// <para>
+    /// An SDR print LUT does not run HERE (D-021): a print stock emulation IS a display
+    /// rendering whose shoulder compresses the negative's highlights into paper white, and
+    /// claiming headroom above that white would produce a brighter SDR picture, not an HDR one.
+    /// What a roll with a print stock gets on an extended target is
+    /// <see cref="ToExtendedOutputTargetViaPrint"/> (D-034); a cube whose output IS an HDR
+    /// encoding takes <see cref="ToExtendedOutputTargetVia"/> (D-033).
+    /// </para>
+    ///
+    /// <para>
+    /// NO ENCODING CURVE IS APPLIED. The result is scene-referred linear in the target's
+    /// primaries with diffuse white at <c>1.0</c>. That is what the scRGB/CCCS carrier wants
+    /// verbatim, and it is what a PQ or float-TIFF encoder wants as ITS input; baking a display
+    /// TRC in here would have to be undone by every one of them.
+    /// </para>
+    ///
+    /// <para>
+    /// THE SHOULDER RUNS HERE, IN THE SAME PLACE THE SDR RENDERING RUNS ITS OWN — inside
+    /// <see cref="CineonToDisplay"/>, aimed at this target's headroom instead of at one. What is
+    /// deferred to the end of the render is only the ceiling GUARD: exposure and white balance are
+    /// multiplicative and arrive after step 4 in ManagedV2, so they can push a rendered value back
+    /// past the ceiling the shoulder established. The SDR path ends with exactly the same guard,
+    /// as the clamp into <c>[0,1]</c> at the tail of Stage 2.
+    /// </para>
+    /// </summary>
+    private static void ToExtendedOutputTarget(float[] data, OutputTarget target)
+    {
+        LogEncoding.ToCineon(data);
+        CineonToDisplay(data, target.HighlightHeadroom);
+        OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
+    }
+
+    /// <summary>
+    /// The extended terminal through a cube that renders to an HDR encoding (D-033): the cube's
+    /// declared input is prepared, the cube runs, its PQ output is decoded to absolute luminance
+    /// and rescaled so <see cref="OutputTarget.ReferenceWhiteNits"/> is the carrier's 1.0, and
+    /// the BT.2020 primaries are rotated into the carrier's WITHOUT clamping — negative
+    /// components are how the carrier holds colours outside its own triangle (D-024).
+    ///
+    /// <para>
+    /// THE CUBE IS THE DISPLAY RENDERING, SHOULDER INCLUDED. <see cref="HighlightRolloff"/> is
+    /// not applied on top: a LUT generated from a Resolve HDR grade already carries its tone
+    /// mapping into the peak its author chose, and rolling that off a second time toward the
+    /// roll's headroom would re-grade a finished picture — the same reasoning that keeps the SDR
+    /// cube's own curve untouched on exit. What the roll's headroom still does is bound the
+    /// result (<see cref="HighlightRolloff.BoundAbove"/>, at the tail of the render) and label
+    /// the master; it is a ceiling, not a curve.
+    /// </para>
+    ///
+    /// <para>
+    /// PQ IS ABSOLUTE, SO THE LUT'S WHITE IS THE LUT'S. A cube mastered with diffuse white at
+    /// 203 nits (BT.2408) lands on the carrier's 1.0 and agrees with the roll's SDR rendition
+    /// below the knee; one mastered at 100 nits sits a stop under it. That is the author's
+    /// decision faithfully carried, not something to normalise away here.
+    /// </para>
+    /// </summary>
+    private static void ToExtendedOutputTargetVia(
+        float[] data, CubeLut lut, LutContract contract, OutputTarget target)
+    {
+        if (!contract.IsExtendedOutput)
+            throw new ArgumentException("The cube's declared output is not an HDR encoding.", nameof(contract));
+
+        EncodeLutInput(data, contract.Input);
+        lut.Apply(data);
+        Pq.DecodeToCarrier(data, OutputTarget.ReferenceWhiteNits);
+        OutputRender.Convert(data, ColorSpaces.Rec2020, target.Space, GamutMapping.PreserveExtended);
+    }
+
+    /// <summary>
+    /// The extended terminal through an SDR print stock (D-034): THE PRINT'S COLOUR, THE HDR
+    /// RENDERING'S TONE.
+    ///
+    /// <para>
+    /// The print is rendered exactly as it is on an SDR target — cube, then the CMM into the
+    /// carrier's linear light — and then multiplied, per pixel, by ONE scalar: the ratio between
+    /// the analytic rendering's luminance aimed at this target's headroom and the same
+    /// rendering's luminance aimed at 1.0. Those two are one family of curves (D-021), identical
+    /// at and below the knee, so the ratio is exactly 1 through the shadows and mid-tones and the
+    /// print picture passes through UNTOUCHED there; above the knee the ratio grows toward the
+    /// headroom, and the print's highlights — which its own shoulder had folded into paper
+    /// white — are lifted to where the analytic shoulder would have placed them.
+    /// </para>
+    ///
+    /// <para>
+    /// WHY A SCALAR AND NOT PER CHANNEL. A per-channel ratio would re-saturate the highlights
+    /// the way the analytic path does, i.e. put back colour the print never showed. The print's
+    /// hue and saturation are the look the user chose, highlight desaturation included, so the
+    /// RGB ratios are the print's everywhere and only the luminance opens up. That is also what
+    /// makes this the same picture as its SDR rendition (D-031): the SDR member of this
+    /// rendering is the print itself, bit-identical below the knee, and a luminance-only gain
+    /// map (D-030) carries the whole difference.
+    /// </para>
+    ///
+    /// <para>
+    /// WHY THE ANALYTIC FAMILY'S RATIO AND NOT THE PRINT'S OWN SHOULDER INVERTED. The print's
+    /// shoulder is inside the cube and cannot be undone; nothing above paper white survives it.
+    /// The analytic rendering still has the negative's full latitude, so it is the one that can
+    /// say how much brighter a given pixel should be. Where the analytic SDR luminance is zero
+    /// (the calibrated base and anything below it) the ratio is undefined and taken as 1.
+    /// </para>
+    /// </summary>
+    private static void ToExtendedOutputTargetViaPrint(
+        float[] data, CubeLut lut, LutContract contract, OutputTarget target,
+        IColorManagementEngine colorManagement)
+    {
+        if (contract.IsExtendedOutput)
+            throw new ArgumentException("The cube's declared output is an HDR encoding; use the PQ exit.", nameof(contract));
+        ArgumentNullException.ThrowIfNull(colorManagement);
+
+        // The two members of the analytic family, in the carrier's linear light.
+        float[] sdr = (float[])data.Clone();
+        float[] hdr = (float[])data.Clone();
+        LogEncoding.ToCineon(sdr);
+        CineonToDisplay(sdr, shoulderAsymptote: 1.0f);
+        OutputRender.Convert(sdr, Working, target.Space, GamutMapping.PreserveExtended);
+        LogEncoding.ToCineon(hdr);
+        CineonToDisplay(hdr, target.HighlightHeadroom);
+        OutputRender.Convert(hdr, Working, target.Space, GamutMapping.PreserveExtended);
+
+        // The print, exactly as the SDR target renders it, decoded into the same linear light.
+        EncodeLutInput(data, contract.Input);
+        lut.Apply(data);
+        ConvertPrintLutNativeOutput(data, NativeSpaceOf(contract.Output), target.Space, colorManagement);
+
+        // Luminance weights of the carrier's primaries (sRGB / Rec.709, D65).
+        const float wr = 0.2126f, wg = 0.7152f, wb = 0.0722f;
+        ParallelSweep.OverPixels(data.Length / 3, (from, to) =>
+        {
+            for (int p = from; p < to; p += 3)
+            {
+                float ySdr = wr * sdr[p] + wg * sdr[p + 1] + wb * sdr[p + 2];
+                float yHdr = wr * hdr[p] + wg * hdr[p + 1] + wb * hdr[p + 2];
+                float gain = ySdr > 1e-6f ? MathF.Max(yHdr / ySdr, 1.0f) : 1.0f;
+                data[p] *= gain;
+                data[p + 1] *= gain;
+                data[p + 2] *= gain;
+            }
+        });
+    }
+
+    /// <summary>
+    /// The native space of the LEGACY print-film exit, frozen: v1 only ever knew Rec709 / 2.4,
+    /// the encoding Resolve's shipped film looks render to, and D-013 keeps v1 rendering exactly
+    /// as it did. The managed path asks <see cref="NativeSpaceOf"/> instead.
     /// </summary>
     private static ColorSpaceDef LutOutput => ColorSpaces.Rec709;
+
+    /// <summary>
+    /// The colour space a cube's declared SDR output is decoded as — the source side of the CMM
+    /// transform into the roll's exact output profile.
+    /// </summary>
+    public static ColorSpaceDef NativeSpaceOf(LutOutputEncoding output) => output switch
+    {
+        LutOutputEncoding.Rec709 => ColorSpaces.Rec709,
+        LutOutputEncoding.DciP3 => ColorSpaces.DciP3,
+        LutOutputEncoding.Srgb => ColorSpaces.Srgb,
+        LutOutputEncoding.Rec2020Pq => throw new ArgumentException(
+            "PQ output is absolute and has no ICC display space; it is decoded by Pq.DecodeToCarrier.", nameof(output)),
+        _ => throw new ArgumentOutOfRangeException(nameof(output), output, "Undeclared LUT output."),
+    };
+
+    /// <summary>
+    /// Prepares scene-linear working RGB for a cube's declared input (D-033) — Cineon, the only
+    /// encoding this pipeline feeds a cube: into the cube's own primaries first (Rec709 shares
+    /// sRGB's, so for the common case this is the same matrix the pass-through path applies),
+    /// then the affine log. Order and mapping are the frozen v1 ones, so a Cineon cube renders
+    /// bit-for-bit as before.
+    /// </summary>
+    private static void EncodeLutInput(float[] data, LutInputEncoding input)
+    {
+        switch (input)
+        {
+            case LutInputEncoding.Cineon:
+                OutputRender.Convert(data, Working, ColorSpaces.Rec709, GamutMapping.Clip);
+                LogEncoding.ToCineon(data);
+                return;
+
+            default:
+                throw new NotSupportedException($"未支持的 LUT 输入编码：{input}");
+        }
+    }
 
     /// <summary>
     /// Step 4 with a print-film emulation in the middle: scene-linear positive → Cineon log →
@@ -475,28 +708,45 @@ public static class ColorPipeline
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
 
         ArgumentNullException.ThrowIfNull(colorManagement);
-        if (lut.OutputEncoding != LutOutputEncoding.Rec709)
+        ToOutputSpaceVia(
+            data, lut, new LutContract(lut.InputEncoding, lut.OutputEncoding), output, colorManagement);
+    }
+
+    /// <summary>
+    /// Managed print-film rendering under an explicit contract (D-033): the declared input is
+    /// prepared, the cube runs, and its declared SDR output is converted by the CMM into the
+    /// exact selected output profile. Never preserves native code values while changing only the
+    /// profile label.
+    /// </summary>
+    public static void ToOutputSpaceVia(
+        float[] data,
+        CubeLut lut,
+        LutContract contract,
+        ColorSpaceDef output,
+        IColorManagementEngine colorManagement)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(lut);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (contract.Output == LutOutputEncoding.Unknown)
         {
             throw new NotSupportedException(
                 CoreText.F($"胶片 LUT「{lut.Title}」的文件头没有声明输出色彩空间，无法确定它渲染到哪个空间。")
-                + CoreText.T("请改用内置的胶片风格，或使用头部完整的原始导出文件。"));
+                + CoreText.T("请在「LUT 合同」里声明它的输出（Resolve 生成 LUT 时的输出色彩空间），或改用内置的胶片风格。"));
+        }
+        if (contract.IsExtendedOutput)
+        {
+            throw new NotSupportedException(
+                CoreText.F($"胶片 LUT「{lut.Title}」渲染到 HDR（Rec2020 PQ），不能用于 SDR 目标。"));
         }
 
         // Render only into the cube's declared native output. The legacy overload's manual
         // primaries-only exit is intentionally not called here: it creates the hybrid
         // target-primaries/Rec709-TRC encoding that ManagedV2 exists to remove.
-        OutputRender.Convert(data, Working, LutOutput, GamutMapping.Clip);
-        switch (lut.InputEncoding)
-        {
-            case LutInputEncoding.Cineon:
-                LogEncoding.ToCineon(data);
-                break;
-            default:
-                throw new NotSupportedException($"Unsupported LUT input encoding: {lut.InputEncoding}");
-        }
+        EncodeLutInput(data, contract.Input);
         lut.Apply(data);
 
-        ConvertPrintLutNativeOutput(data, output, colorManagement);
+        ConvertPrintLutNativeOutput(data, NativeSpaceOf(contract.Output), output, colorManagement);
     }
 
     /// <summary>
@@ -507,6 +757,19 @@ public static class ColorPipeline
     internal static void ConvertPrintLutNativeOutput(
         float[] data,
         ColorSpaceDef output,
+        IColorManagementEngine colorManagement) =>
+        ConvertPrintLutNativeOutput(data, ColorSpaces.Rec709, output, colorManagement);
+
+    /// <summary>
+    /// Converts pixels already rendered into the cube's declared native encoding
+    /// (<paramref name="native"/>, from <see cref="NativeSpaceOf"/>) to the exact selected
+    /// profile before target-space Stage 2. The source array is replaced only after transform
+    /// creation and application both succeed.
+    /// </summary>
+    internal static void ConvertPrintLutNativeOutput(
+        float[] data,
+        ColorSpaceDef native,
+        ColorSpaceDef output,
         IColorManagementEngine colorManagement)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -514,7 +777,7 @@ public static class ColorPipeline
         if (data.Length % 3 != 0)
             throw new ArgumentException("Print-LUT RGB data length must be divisible by three.", nameof(data));
 
-        ColorProfileRef nativeProfile = BuiltInColorProfiles.Rec709(ProfileRole.Input);
+        ColorProfileRef nativeProfile = BuiltInColorProfiles.For(native, ProfileRole.Input);
         ColorProfileRef outputProfile = BuiltInColorProfiles.For(output, ProfileRole.Output);
         if (nativeProfile.Identity == outputProfile.Identity)
             return;

@@ -47,11 +47,11 @@ public partial class MainWindow : Window
                 // instead (the same fallback an unsupported display already uses), and the first
                 // ManagedV2 render reports the real reason through the status bar it already has.
                 // LegacyV1 projects never touch the CMM at all and keep working entirely.
-                if (OperatingSystem.IsWindows())
+                if (ActivePreview is { } preview)
                 {
                     try
                     {
-                        WindowsPreview.ConfigureColorManagement(vm.PresentationColorManagement);
+                        preview.ConfigureColorManagement(vm.PresentationColorManagement);
                     }
                     catch (OpenRevelare.ColorManagement.ColorManagementException ex)
                     {
@@ -1774,6 +1774,11 @@ public partial class MainWindow : Window
         if (scans.Count == 0) { Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>()); return true; }
 
         Vm.StatusText = Loc.T("正在识别底片分割 …");
+        // Taken HERE, on the UI thread. `Vm` reads DataContext, which is an Avalonia styled
+        // property and throws "Call from invalid thread" off the UI thread — inside the
+        // Task.Run below that made every split pre-pass fail on the first file, and the roll
+        // then imported unsplit with the failure hidden behind the load's own status line.
+        OpenRevelare.ColorManagement.IColorManagementEngine colorManagement = Vm.PresentationColorManagement;
         // Flat, not grouped by file: one scan can hold several strips side by side, and each
         // becomes its own plan with its own dividers. They share the file's one preview.
         List<(Models.StripPlan Plan, OpenRevelare.Core.ImageBuffer Preview)> detected;
@@ -1788,7 +1793,7 @@ public partial class MainWindow : Window
                     p,
                     1200,
                     OpenRevelare.Core.ColorPipelineVersion.ManagedV2,
-                    Vm.PresentationColorManagement,
+                    colorManagement,
                     cfg.TiffInputAssumption);
                 OpenRevelare.Core.ImageBuffer preview = working.Pixels;
                 return Models.StripPlan.Detect(p, preview)
@@ -1799,7 +1804,18 @@ public partial class MainWindow : Window
         {
             // A failed pre-pass must not block the import: fall through with no splits and let
             // the roll load one frame per file, which is what it did before this feature.
-            Vm.StatusText = Loc.T("分割识别失败，按整张导入：") + ex.Message;
+            //
+            // Said in a dialog, not on the status line. The load that follows overwrites the
+            // status line within a frame ("正在解码 …"), so a status message here was never
+            // readable — the user ticked 分割, got an unsplit strip, and had nothing to report.
+            Vm.StatusText = "";
+            // The trace goes in too: "Call from invalid thread" with no frame is not something
+            // the user can act on or report, and this pass has no log to fall back on.
+            string trace = ex.ToString();
+            if (trace.Length > 1500) trace = trace[..1500] + " …";
+            await new InfoDialog(Loc.T("分割识别失败"),
+                    Loc.F($"识别底片分割时出错，这一卷会按整张导入（每个文件一帧）。\n\n{trace}"))
+                .ShowDialog(this);
             Vm.SetSplitPlans(Array.Empty<(string, IReadOnlyList<(double, double, double, double)>)>());
             return true;
         }
@@ -2009,11 +2025,12 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         // Options first, destination second: the format decides the extension the save dialog
         // should be offering, so asking for a filename first asks in the wrong order.
-        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace);
+        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
+        bool floatTiff = opt.ExportLinear || opt.IsHdr;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.T("导出正片"),
@@ -2021,8 +2038,9 @@ public partial class MainWindow : Window
             FileTypeChoices = new List<FilePickerFileType>
             {
                 jpeg
-                    ? new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } }
-                    : new FilePickerFileType(opt.ExportLinear ? "32-bit float TIFF" : "16-bit TIFF")
+                    ? new FilePickerFileType(opt.WritesGainMap ? Loc.T("HDR JPEG（增益图）") : "JPEG")
+                        { Patterns = new[] { "*.jpg", "*.jpeg" } }
+                    : new FilePickerFileType(floatTiff ? "32-bit float TIFF" : "16-bit TIFF")
                         { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
@@ -2069,7 +2087,7 @@ public partial class MainWindow : Window
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
-        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace);
+        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
@@ -2089,7 +2107,7 @@ public partial class MainWindow : Window
         // Build → show → only then ask where to save. Building costs a pass over the whole roll,
         // so the filename prompt has no business coming first.
         if (await Vm.BuildContactThumbsAsync() is not { } thumbs) return;
-        var dlg = new ContactSheetDialog(thumbs, Vm.Notes);
+        var dlg = new ContactSheetDialog(thumbs.Sdr, Vm.Notes, hdrAvailable: thumbs.HasExtended);
         SheetStyle styleBefore = dlg.Style;
         SheetAspect aspectBefore = dlg.Aspect;
         SheetOrientation orientBefore = dlg.Orientation;
@@ -2107,15 +2125,16 @@ public partial class MainWindow : Window
             Title = Loc.T("导出印样"),
             DefaultExtension = "jpg",
             SuggestedFileName = "contactsheet",
+            // The HDR sheet is a different pair of files (D-031); the labels say which.
             FileTypeChoices = new List<FilePickerFileType>
             {
-                new("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
-                new("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
+                new(dlg.WriteHdr ? "HDR JPEG (gain map)" : "JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
+                new(dlg.WriteHdr ? "32-bit float TIFF" : "16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
         string? path = file?.TryGetLocalPath();
         if (path != null)
-            await Vm.ExportContactSheetAsync(thumbs, dlg.Style, dlg.Aspect, dlg.Orientation, path);
+            await Vm.ExportContactSheetAsync(thumbs, dlg.WriteHdr, dlg.Style, dlg.Aspect, dlg.Orientation, path);
     }
 
     private void OnResetClick(object? sender, RoutedEventArgs e)

@@ -32,14 +32,21 @@ public readonly record struct ExportIccUiState(bool EmbedIcc, bool CanChange)
 /// </summary>
 public static class ExportIccUiPolicy
 {
+    /// <param name="outputSpace">The space the FILE's display-referred pixels are in: the roll's
+    /// output space, or for a gain-map JPEG its base space.</param>
+    /// <param name="exportLinear">Scene-linear ACEScg export; always tagged.</param>
+    /// <param name="requestedEmbedIcc">The persisted preference.</param>
+    /// <param name="hdrMaster">The file is the extended linear carrier (a float32 TIFF of an HDR
+    /// roll); it is only readable with the carrier's exact profile, so the choice is forced.</param>
     public static ExportIccUiState Resolve(
         ColorSpaceDef outputSpace,
         bool exportLinear,
-        bool requestedEmbedIcc)
+        bool requestedEmbedIcc,
+        bool hdrMaster = false)
     {
         // Full record equality is intentional. A space merely named "sRGB" is not proof that its
         // primaries, white point and transfer function are the exact built-in sRGB definition.
-        bool canOmit = !exportLinear && outputSpace == ColorSpaces.Srgb;
+        bool canOmit = !exportLinear && !hdrMaster && outputSpace == ColorSpaces.Srgb;
         return new ExportIccUiState(
             EmbedIcc: canOmit ? requestedEmbedIcc : true,
             CanChange: canOmit);
@@ -111,6 +118,54 @@ public sealed class ExportOptions
     [JsonIgnore]
     public ColorSpaceDef ResolvedColorSpace => ColorSpaces.ByName(ColorSpace, ColorPipeline.DefaultOutput);
 
+    /// <summary>
+    /// The roll's HDR limit in stops above SDR white, zero while HDR is off — CARRIED from the
+    /// roll like <see cref="ColorSpace"/>, for the same reason: it is the render's master
+    /// parameter (D-029), not an export decision. It decides what a format means: a TIFF of an
+    /// HDR roll is the float32 linear master, a JPEG of one is a gain-map JPEG.
+    /// </summary>
+    [JsonIgnore]
+    public double HdrLimitStops { get; set; }
+
+    [JsonIgnore]
+    public bool IsHdr => HdrLimitStops > 0d;
+
+    /// <summary>A JPEG of an HDR roll: SDR base plus gain map (ISO 21496-1 / Adobe).</summary>
+    [JsonIgnore]
+    public bool WritesGainMap => IsHdr && Format == ExportFormat.Jpeg && !ExportLinear;
+
+    /// <summary>
+    /// The colour space of a gain-map JPEG's SDR base, by name — the file's container primaries.
+    /// This IS an export decision, unlike <see cref="ColorSpace"/>: the HDR rendering has no
+    /// output space (its carrier is unbounded, D-024), and which display space the base is
+    /// written in changes the file's compatibility, not the picture. Persisted, because it is a
+    /// delivery preference. sRGB by default: every reader assumes it; Display P3 is what phone
+    /// cameras write and keeps more of a wide-gamut highlight.
+    /// </summary>
+    public string HdrBaseSpace { get; set; } = "sRGB";
+
+    /// <summary>The base spaces a gain-map JPEG may be written in.</summary>
+    [JsonIgnore]
+    public static IReadOnlyList<ColorSpaceDef> GainMapBaseSpaces { get; } =
+        [ColorSpaces.Srgb, ColorSpaces.DisplayP3];
+
+    [JsonIgnore]
+    public ColorSpaceDef ResolvedHdrBaseSpace
+    {
+        get
+        {
+            ColorSpaceDef s = ColorSpaces.ByName(HdrBaseSpace, ColorSpaces.Srgb);
+            return GainMapBaseSpaces.Contains(s) ? s : ColorSpaces.Srgb;
+        }
+    }
+
+    /// <summary>
+    /// The space the file's display-referred pixels are in: the gain-map base for an HDR JPEG,
+    /// otherwise the roll's output space. This is what the ICC policy is resolved against.
+    /// </summary>
+    [JsonIgnore]
+    public ColorSpaceDef FileDisplaySpace => WritesGainMap ? ResolvedHdrBaseSpace : ResolvedColorSpace;
+
     public bool Downsample { get; set; }
 
     /// <summary>Ceiling for the long edge when <see cref="Downsample"/> is on.</summary>
@@ -143,13 +198,23 @@ public sealed class ExportOptions
         string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
         if (ExportLinear)
             return $"{format} · {size} · " + Loc.T("场景线性 ACEScg · 强制嵌入 exact ICC");
-        string space = ResolvedColorSpace.Name;
+        if (IsHdr && Format != ExportFormat.Jpeg)
+        {
+            // The master: the carrier itself, which only its own profile describes.
+            return Loc.F($"32-bit float TIFF · {compression}") + $" · {size} · "
+                + Loc.F($"HDR 母版 +{HdrLimitStops:0.0} 档 · linear extended sRGB · 强制嵌入 exact ICC");
+        }
+        if (WritesGainMap)
+            format = Loc.F($"增益图 JPEG 品质 {JpegQuality}") + " · " + Loc.F($"HDR +{HdrLimitStops:0.0} 档");
+        string space = WritesGainMap
+            ? Loc.F($"基底 {ResolvedHdrBaseSpace.Name}")
+            : ResolvedColorSpace.Name;
         ExportIccUiState icc = ExportIccUiPolicy.Resolve(
-            ResolvedColorSpace,
+            FileDisplaySpace,
             exportLinear: false,
             EmbedIcc);
         string profile = icc.IsForced
-            ? Loc.F($"强制嵌入 exact {space} ICC")
+            ? Loc.F($"强制嵌入 exact {FileDisplaySpace.Name} ICC")
             : icc.EmbedIcc
                 ? Loc.T("嵌入 exact sRGB ICC")
                 : Loc.T("省略 ICC（仅限 exact sRGB）");

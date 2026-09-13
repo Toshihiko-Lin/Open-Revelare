@@ -24,6 +24,11 @@ public partial class ExportDialog : Window
     /// <summary>The roll's output space — reported, not chosen.</summary>
     private readonly ColorSpaceDef _space;
 
+    /// <summary>The roll's HDR limit in stops, zero for an SDR roll — reported, not chosen. It
+    /// changes what the two formats mean; see <see cref="ExportOptions.HdrLimitStops"/>.</summary>
+    private readonly double _hdrLimitStops;
+    private bool IsHdr => _hdrLimitStops > 0d;
+
     /// <summary>
     /// The user's ordinary display-export preference. A forced state is painted into the
     /// checkbox without destroying this value, so toggling scene-linear on and back off restores
@@ -49,14 +54,17 @@ public partial class ExportDialog : Window
     public ExportOptions Options { get; private set; } = new();
 
     // Avalonia needs a parameterless constructor for XAML tooling.
-    public ExportDialog() : this(rollMode: false, ColorPipeline.DefaultOutput) { }
+    public ExportDialog() : this(rollMode: false, ColorPipeline.DefaultOutput, hdrLimitStops: 0d) { }
 
     /// <param name="rollMode">A whole roll goes to a folder unattended, so it needs a conflict
     /// policy. A single frame goes through a save dialog that already asked, so it does not.</param>
     /// <param name="space">The roll's output space, for the summary and the hint.</param>
-    public ExportDialog(bool rollMode, ColorSpaceDef space)
+    /// <param name="hdrLimitStops">The roll's HDR limit in stops above SDR white, zero when HDR
+    /// is off. With it on, TIFF is the float32 master and JPEG is a gain-map JPEG.</param>
+    public ExportDialog(bool rollMode, ColorSpaceDef space, double hdrLimitStops)
     {
         _space = space;
+        _hdrLimitStops = hdrLimitStops;
         InitializeComponent();
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
@@ -78,6 +86,8 @@ public partial class ExportDialog : Window
             _ => 0,
         };
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
+        HdrBaseBox.SelectedIndex = Math.Max(0, ExportOptions.GainMapBaseSpaces.ToList()
+            .FindIndex(space => space == saved.ResolvedHdrBaseSpace));
 
         _displayEmbedIccPreference = saved.EmbedIcc;
         IccChk.IsChecked = saved.EmbedIcc;
@@ -88,16 +98,33 @@ public partial class ExportDialog : Window
         ConflictUnique.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Unique;
     }
 
+    /// <summary>The gain-map base the picker currently shows.</summary>
+    private ColorSpaceDef SelectedHdrBaseSpace =>
+        ExportOptions.GainMapBaseSpaces[Math.Clamp(HdrBaseBox.SelectedIndex, 0, ExportOptions.GainMapBaseSpaces.Count - 1)];
+
+    /// <summary>
+    /// The ICC state for what the dialog currently describes. One resolver for the summary, the
+    /// checkbox and the hint, so the three cannot disagree about which file they are talking about.
+    /// </summary>
+    private ExportIccUiState ResolveIcc(bool jpeg, bool linear)
+    {
+        bool gainMap = IsHdr && jpeg && !linear;
+        bool hdrMaster = IsHdr && !jpeg && !linear;
+        return ExportIccUiPolicy.Resolve(
+            gainMap ? SelectedHdrBaseSpace : _space,
+            linear,
+            _displayEmbedIccPreference,
+            hdrMaster);
+    }
+
     private ExportOptions Collect()
     {
         bool exportLinear = LinearChk.IsChecked == true;
-        ExportIccUiState icc = ExportIccUiPolicy.Resolve(
-            _space,
-            exportLinear,
-            _displayEmbedIccPreference);
+        bool jpeg = FmtJpeg.IsChecked == true;
+        ExportIccUiState icc = ResolveIcc(jpeg, exportLinear);
         return new ExportOptions
         {
-            Format = FmtJpeg.IsChecked == true ? ExportFormat.Jpeg : ExportFormat.Tiff16,
+            Format = jpeg ? ExportFormat.Jpeg : ExportFormat.Tiff16,
             TiffCompression = CompressBox.SelectedIndex switch
             {
                 1 => TiffIO.CompressionMode.Deflate,
@@ -105,8 +132,10 @@ public partial class ExportDialog : Window
                 _ => TiffIO.CompressionMode.Lzw,
             },
             JpegQuality = (int)QualitySlider.Value,
-            // Carried, not chosen: the render already landed in this space.
+            // Carried, not chosen: the render already landed in this space, at this limit.
             ColorSpace = _space.Name,
+            HdrLimitStops = _hdrLimitStops,
+            HdrBaseSpace = SelectedHdrBaseSpace.Name,
             ExportLinear = exportLinear,
             // Normalize here as well as in the visual state. A stale false preset must never
             // escape merely because a control event did not run.
@@ -133,7 +162,8 @@ public partial class ExportDialog : Window
         // Guard: the IsCheckedChanged handlers fire while InitializeComponent is still wiring
         // controls up, before every named field exists.
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
-            || ColorSpaceHint is null || LinearChk is null || IccHint is null) return;
+            || ColorSpaceHint is null || LinearChk is null || IccHint is null
+            || HdrBaseGroup is null || FormatHint is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         TiffGroup.IsEnabled = !jpeg;
@@ -146,10 +176,9 @@ public partial class ExportDialog : Window
         // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
         // the effective value independently of the control so a stale false preset is harmless.
         bool linear = LinearChk.IsChecked == true;
-        ExportIccUiState icc = ExportIccUiPolicy.Resolve(
-            _space,
-            linear,
-            _displayEmbedIccPreference);
+        bool gainMap = IsHdr && jpeg && !linear;
+        bool hdrMaster = IsHdr && !jpeg && !linear;
+        ExportIccUiState icc = ResolveIcc(jpeg, linear);
         ColorSpaceHint.IsEnabled = !linear;
         IccChk.IsEnabled = icc.CanChange;
         if (IccChk.IsChecked != icc.EmbedIcc)
@@ -159,15 +188,32 @@ public partial class ExportDialog : Window
             finally { _syncingIccControl = false; }
         }
 
+        // The base-space picker exists only for an HDR roll — an SDR roll has no second rendition
+        // to relate to — and, like the other per-format groups, greys out rather than vanishing
+        // when the format is TIFF.
+        HdrBaseGroup.IsVisible = IsHdr;
+        HdrBaseGroup.IsEnabled = gainMap;
+
+        FormatHint.Text = IsHdr
+            ? Loc.F($"HDR 已开（+{_hdrLimitStops:0.0} 档）：TIFF 写成 32-bit float 线性母版；JPEG 写成增益图 JPEG——SDR 基底加一张增益图，任何看图软件都能打开，HDR 屏上恢复高光，余量不足的屏幕按比例回落。")
+            : Loc.T("普通输出使用 16-bit TIFF；场景线性输出自动使用 32-bit float TIFF 保留超范围分量。JPEG 适合直接分享。");
+
         ColorSpaceHint.Text = linear
             ? Loc.T("场景线性导出不经过第 4 步；以 32-bit float ACEScg 保留负值和大于 1 的通道。")
-            : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
+            : hdrMaster
+                ? Loc.T("HDR 母版：linear extended sRGB 载体，线性、无上界、不裁色域（D-024）。输出空间不参与。")
+                : gainMap
+                    ? Loc.T("HDR 渲染本身没有输出空间；增益图 JPEG 的 SDR 基底要装进一个显示空间，在下面选。")
+                    : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
 
+        ColorSpaceDef fileSpace = gainMap ? SelectedHdrBaseSpace : _space;
         IccHint.Text = linear
             ? Loc.T("必须嵌入与像素一致的 deterministic linear ACEScg exact ICC。")
-            : icc.IsForced
-                ? Loc.F($"为避免文件被按 sRGB 误解，必须嵌入与像素一致的 exact {_space.Name} ICC。")
-                : Loc.T("仅 exact display-referred sRGB 可省略 ICC；勾选时嵌入与像素一致的 exact sRGB ICC。");
+            : hdrMaster
+                ? Loc.T("必须嵌入载体的 exact ICC：float32 线性数据离开这个配置文件无法被正确解读。")
+                : icc.IsForced
+                    ? Loc.F($"为避免文件被按 sRGB 误解，必须嵌入与像素一致的 exact {fileSpace.Name} ICC。")
+                    : Loc.T("仅 exact display-referred sRGB 可省略 ICC；勾选时嵌入与像素一致的 exact sRGB ICC。");
 
         SummaryLbl.Text = Collect().Summary();
     }
@@ -176,13 +222,9 @@ public partial class ExportDialog : Window
     private void OnAnyChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnIccChanged(object? sender, RoutedEventArgs e)
     {
-        if (!_syncingIccControl)
+        if (!_syncingIccControl && LinearChk is not null && FmtJpeg is not null && HdrBaseBox is not null)
         {
-            bool linear = LinearChk?.IsChecked == true;
-            ExportIccUiState icc = ExportIccUiPolicy.Resolve(
-                _space,
-                linear,
-                _displayEmbedIccPreference);
+            ExportIccUiState icc = ResolveIcc(FmtJpeg.IsChecked == true, LinearChk.IsChecked == true);
             if (icc.CanChange)
                 _displayEmbedIccPreference = IccChk?.IsChecked == true;
         }

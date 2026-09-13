@@ -1,4 +1,4 @@
-using OpenRevelare.ColorManagement;
+﻿using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -138,29 +138,58 @@ public static class Pipeline
         {
             ColorSpaceDef selected = cal.ResolvedOutputSpace;
             requested = BuiltInColorProfiles.For(selected, ProfileRole.Output);
-            bool hasPrintLut = PrintLuts.Resolve(cal.PrintLut) is not null;
-            if (hasPrintLut)
+            OutputTarget target = cal.ResolvedOutputTarget;
+
+            // The same question the render asked, answered by the same function, so the recipe
+            // can never claim a cube the render skipped or omit one it ran (D-033). A cube from a
+            // file is recorded by what it CONTAINED, not where it was: a path is machine-local and
+            // would put a non-portable token into a fingerprint meant to be reproducible.
+            (CubeLut Lut, LutContract Contract)? applied = ColorPipeline.PrintLutFor(cal, target);
+            if (applied is { } lutUse)
             {
-                // Generic external cubes remain uncharacterized and fail in the ManagedV2 step-4
-                // boundary before a RenderedFrame exists. Enforce that invariant again here so a
-                // future resolver change cannot put a machine-specific absolute path into a
-                // portable render recipe/fingerprint by accident.
-                if (!PrintLuts.IsBuiltin(cal.PrintLut))
-                {
-                    throw new InvalidOperationException(
-                        "A successful ManagedV2 print-LUT render must carry a portable built-in " +
-                        "identity, never a filesystem path.");
-                }
-                effectivePrintLut = cal.PrintLut!.ToLowerInvariant();
+                effectivePrintLut = PrintLuts.IsBuiltin(cal.PrintLut)
+                    ? cal.PrintLut!.ToLowerInvariant()
+                    : "sha256:" + lutUse.Lut.ContentIdentity;
             }
-            gamutPolicy = hasPrintLut
-                ? "print-LUT native Rec709 -> exact output ICC (relative colorimetric, BPC off)"
-                : "managed exact built-in output profile";
-            encoding = new CharacterizedPixelEncoding(
-                requested,
-                ColorReference.DisplayReferred,
-                TransferState.ProfileEncoded,
-                NumericRange.Normalized);
+
+            if (target.IsExtended)
+            {
+                // The pixels are LINEAR in the canonical carrier's primaries, so they must be
+                // tagged with the carrier's profile and not with the roll's display-referred
+                // output selection — an sRGB or Adobe RGB profile asserts a TRC these numbers do
+                // not carry, which is exactly the "relabel without converting" failure D-003
+                // exists to prevent. The encoding model already had every term for this; it is
+                // how OutputIntent.None describes scene-linear ACEScg.
+                //
+                // An HDR LUT is the rendering (D-033); an SDR print stock is its colour with the
+                // analytic family's tone (D-034). Either way the recipe says so, contract
+                // included, because the contract changes the pixels.
+                requested = BuiltInColorProfiles.LinearExtendedSrgb(ProfileRole.Output);
+                encoding = new CharacterizedPixelEncoding(
+                    requested,
+                    ColorReference.SceneReferred,
+                    TransferState.LinearInProfilePrimaries,
+                    NumericRange.Extended);
+                gamutPolicy = applied switch
+                {
+                    { Contract.IsExtendedOutput: true } hdrLut =>
+                        $"print-LUT {hdrLut.Contract} -> PQ decoded at {OutputTarget.ReferenceWhiteNits:0} nits = 1.0, BT.2020 -> carrier unclamped, bounded at {target.HighlightHeadroom:0.###}× diffuse white",
+                    { } print =>
+                        $"print-LUT {print.Contract} colour x analytic luminance ratio (D-034), shoulder to {target.HighlightHeadroom:0.###}× diffuse white",
+                    _ => $"scene-referred extended, unclamped primaries, shoulder to {target.HighlightHeadroom:0.###}× diffuse white",
+                };
+            }
+            else
+            {
+                gamutPolicy = applied is { } sdrLut
+                    ? $"print-LUT {sdrLut.Contract} native {ColorPipeline.NativeSpaceOf(sdrLut.Contract.Output).Name} -> exact output ICC (relative colorimetric, BPC off)"
+                    : "managed exact built-in output profile";
+                encoding = new CharacterizedPixelEncoding(
+                    requested,
+                    ColorReference.DisplayReferred,
+                    TransferState.ProfileEncoded,
+                    NumericRange.Normalized);
+            }
         }
 
         var recipe = new OutputRecipe(
@@ -207,7 +236,7 @@ public static class Pipeline
         }
         else
         {
-            ColorSpaceDef selected = cal.ResolvedOutputSpace;
+            OutputTarget target = cal.ResolvedOutputTarget;
 
             // Reuse every frozen operation through Stage 1 and geometry, stopping at the existing
             // OutputIntent.None gate. Managed step 4 then produces exact target-encoded pixels
@@ -215,13 +244,45 @@ public static class Pipeline
             // whose legacy route either bypassed the cube or applied only a target TRC.
             FrameParams scene = cal.Clone();
             scene.OutputIntent = OutputIntent.None;
-            pixels = ProcessFrame(source.Pixels, scene);
-            ColorPipeline.ToOutputSpaceFor(
+            // An extended target needs to know which output pixels are FILL — the sprocket mask
+            // and the rotation's corners — because fill is not picture and must not be rendered
+            // as one (see below). The SDR path never asks, so it stays bit-identical.
+            pixels = ProcessFrame(source.Pixels, scene, target.IsExtended, out bool[]? fill);
+            ColorPipeline.ToOutputTargetFor(
                 pixels.Data,
                 cal,
+                target,
                 ColorPipelineVersion.ManagedV2,
                 colorManagement);
-            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, selected);
+
+            if (target.IsExtended)
+            {
+                // The shoulder itself ran inside step 4, exactly where the SDR rendering runs
+                // its own — they are one family of curves and differ only in where they aim
+                // (D-021). Stage 2 then runs against the roll's own range (D-032), and what is
+                // left is the same guard the display-referred path ends with: exposure is
+                // multiplicative and levels/contrast/curves are open-ended above, so they can push
+                // a rendered value back past the ceiling the shoulder established.
+                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
+                HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
+
+                // FILL IS PAPER WHITE, NOT A HIGHLIGHT. The mask and the rotation corners are
+                // written as linear 1.0 before the log encode, which is the TOP of the Cineon
+                // domain (code 1032): the SDR shoulder squeezes that to paper white, which is what
+                // the fill has always meant, but the extended shoulder aims at the headroom and
+                // would carry the same value to the peak — sprocket holes blazing at the roll's
+                // HDR limit, and a gain map that lights them up on every HDR display. Nothing was
+                // measured there, so there is nothing for the headroom to show; the fill is pinned
+                // to the carrier's diffuse white, where it reads exactly as it does in SDR and the
+                // gain map stays empty. It runs after the guard because exposure is multiplicative
+                // and the fill is not something exposure applies to either.
+                if (fill is not null)
+                    Sprocket.ApplyMask(pixels.Data, fill);
+            }
+            else
+            {
+                Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
+            }
         }
 
         return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.ManagedV2);
@@ -239,7 +300,20 @@ public static class Pipeline
 
     /// <summary>Run Stage 1 and, for BASIC intent, the sRGB exit TRC.</summary>
     public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal)
+        => ProcessFrame(img, cal, trackFill: false, out _);
+
+    /// <summary>
+    /// <see cref="ProcessFrame(ImageBuffer, FrameParams)"/>, optionally reporting which OUTPUT
+    /// pixels are fill rather than picture: the sprocket/light-board mask and the corners the
+    /// straighten rotation uncovers, both carried through the same orientation → rotation → crop
+    /// the pixels go through. Null when not tracked or when the frame has neither.
+    ///
+    /// A pixel the rotation's bilinear blends with fill counts as fill: in the linear domain the
+    /// fill is far above every picture value, so any share of it dominates the blend.
+    /// </summary>
+    private static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal, bool trackFill, out bool[]? fill)
     {
+        fill = null;
         // ── Pre-inversion linear-domain corrections (distortion → vignette) ───────
         // Order mirrors pipeline.py: (lensfun) → distortion → (lcc) → vignette → (decouple).
         //
@@ -331,6 +405,9 @@ public static class Pipeline
         if (cal.CropRect != null)
             result = Geometry.ApplyCrop(result, cal.CropRect.Value);
 
+        if (trackFill && (sprocketMask != null || cal.Rotation != 0.0))
+            fill = MapFillThroughGeometry(sprocketMask, src.Width, src.Height, cal);
+
 
         // ── Output intent gate ────────────────────────────────────────────────
         if (cal.OutputIntent == OutputIntent.None)
@@ -344,5 +421,35 @@ public static class Pipeline
         //    the preview and the exported file use, so the two agree by construction.
         Stage2.ApplyChain(result.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
         return result;
+    }
+
+    /// <summary>
+    /// The fill mask in OUTPUT coordinates. The mask is known on the source grid; the picture
+    /// then goes through the geometry ops, so the mask goes through the very same ops — as a
+    /// 1.0/0.0 image, with the rotation's own fill so its corners are counted — rather than
+    /// through a second, hand-kept copy of their arithmetic. Any non-zero share of fill after the
+    /// rotation's bilinear marks the pixel; see the tracking overload of <c>ProcessFrame</c>.
+    /// </summary>
+    private static bool[] MapFillThroughGeometry(bool[]? sprocketMask, int width, int height, FrameParams cal)
+    {
+        var mask = new ImageBuffer(width, height);
+        if (sprocketMask != null)
+            Sprocket.ApplyMask(mask.Data, sprocketMask);
+
+        if (cal.QuarterTurns != 0 || cal.FlipH || cal.FlipV)
+            mask = Geometry.ApplyOrientation(mask, cal.QuarterTurns, cal.FlipH, cal.FlipV);
+        if (cal.Rotation != 0.0)
+            mask = Geometry.ApplyRotation(mask, cal.Rotation, fill: 1.0f);
+        if (cal.CropRect != null)
+            mask = Geometry.ApplyCrop(mask, cal.CropRect.Value);
+
+        var fill = new bool[mask.PixelCount];
+        float[] data = mask.Data;
+        ParallelSweep.Over(fill.Length, (from, to) =>
+        {
+            for (int p = from; p < to; p++)
+                fill[p] = data[p * 3] > 0.0f;
+        });
+        return fill;
     }
 }

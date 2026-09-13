@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace OpenRevelare.Core;
@@ -298,7 +298,13 @@ public static class Project
             // Absent = false: a project written before the Stage-2 rework keeps the old chain.
             ["display_referred_stage2"] = p.DisplayReferredStage2,
             ["output_space"] = p.OutputSpace,
+            // Absent = 0 = SDR, so every project written before HDR existed loads as the
+            // display-referred rendering it was built against (D-013, D-021).
+            ["hdr_peak_nits"] = p.HdrPeakNits,
             ["print_lut"] = p.PrintLut,
+            // The roll's LUT output declaration (D-033). Absent = "" = defer to the cube's
+            // header, which is what every project written before it existed rendered with.
+            ["print_lut_output"] = p.PrintLutOutput,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["lensfun_override"] = null,                     // C# build has no lensfun
@@ -368,9 +374,13 @@ public static class Project
             // the old one, which means the working space is now ACEScg for them too and step 4 is
             // a real conversion. Their pixels will differ from what the old build produced.
             OutputSpace = Str(d, "output_space", "sRGB"),
+            // Absent means SDR, and an unreachable stored peak degrades to SDR in
+            // ResolvedOutputTarget rather than refusing to open the roll.
+            HdrPeakNits = Dbl(d, "hdr_peak_nits", 0.0),
             // Absent in every project written before print-film emulation existed, and empty
             // means pass-through — so those rolls render bit-identically to before.
             PrintLut = Str(d, "print_lut", ""),
+            PrintLutOutput = Str(d, "print_lut_output", ""),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),

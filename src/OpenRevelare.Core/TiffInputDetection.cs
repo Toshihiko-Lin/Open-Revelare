@@ -1,3 +1,4 @@
+using System.Globalization;
 using BitMiracle.LibTiff.Classic;
 
 namespace OpenRevelare.Core;
@@ -24,6 +25,13 @@ public enum TiffInputEvidence
 
     /// <summary>The Software tag identifies a writer whose untagged output has a known encoding.</summary>
     ScannerSoftware,
+
+    /// <summary>
+    /// The scanner's own settings block declares the encoding gamma it applied — today the
+    /// Flextight plist in tag 50457 (<see cref="FlextightMeta"/>). Conclusive: the decoder undoes
+    /// exactly the declared curve, which is neither of the two-way Linear/sRGB answers.
+    /// </summary>
+    VendorGammaDeclaration,
 
     /// <summary>Nothing in the file said anything. The conventional default was applied.</summary>
     ConventionalDefault,
@@ -192,6 +200,20 @@ public static class TiffInputDetector
                 exifNote);
         }
 
+        // Before the Software-tag table: a per-file declaration of the curve actually applied
+        // outranks a per-writer assumption about what that writer usually does. Same precedence
+        // TiffIO gives it at decode time, so what the notice says and what the pixels got agree.
+        if (TryReadVendorGamma(tif, out string vendorNote))
+        {
+            return new TiffInputDetection(
+                // Display-encoded, not linear — the nearest of the two classes. Never consulted for
+                // the decode itself: TiffIO routes this evidence to the declared curve.
+                TiffInputAssumption.Srgb,
+                CharacterizedSpace: null,
+                TiffInputEvidence.VendorGammaDeclaration,
+                vendorNote);
+        }
+
         if (TryMatchKnownWriter(tif, out TiffInputAssumption writerAssumption, out string writerNote))
         {
             return new TiffInputDetection(
@@ -202,6 +224,29 @@ public static class TiffInputDetector
         }
 
         return ConventionalDefault;
+    }
+
+    /// <summary>
+    /// The Flextight settings plist, read from the file behind <paramref name="tif"/>.
+    ///
+    /// This was the one declaration the detector did not know about: TiffIO honoured it, so a
+    /// Flextight scan decoded correctly, while the detector fell through to the conventional
+    /// default and the GUI then told the user the file had "no colour declaration" and offered
+    /// Linear/sRGB — a choice the decode would go on to ignore. The notice and the decode have
+    /// to read the same evidence.
+    /// </summary>
+    private static bool TryReadVendorGamma(Tiff tif, out string note)
+    {
+        note = string.Empty;
+        string? path = tif.FileName();
+        if (string.IsNullOrEmpty(path)) return false;
+        FlextightMeta.Settings meta = FlextightMeta.Read(path);
+        if (!meta.HasEncodingGamma) return false;
+        note = $"Flextight 设置（tag {FlextightMeta.SettingsPlistTag}）声明编码 gamma "
+             + $"{meta.Gamma!.Value.ToString("0.0#", CultureInfo.InvariantCulture)}"
+             + (meta.ColorSpaceName is { Length: > 0 } name ? $"，设置名 \"{name}\"" : string.Empty)
+             + "，按声明还原为线性";
+        return true;
     }
 
     private static bool IsFloatSampleFormat(Tiff tif)

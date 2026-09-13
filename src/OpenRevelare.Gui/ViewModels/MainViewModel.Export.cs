@@ -38,12 +38,7 @@ public partial class MainViewModel
                     srcPath,
                     pipelineVersion,
                     tiffInputAssumption);
-                RenderedFrame rendered = Pipeline.Render(
-                    working,
-                    ep,
-                    pipelineVersion,
-                    ColorManagement);
-                WriteExport(rendered, path, opt);
+                RenderAndWriteExport(working, ep, path, opt, pipelineVersion);
             });
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
         }

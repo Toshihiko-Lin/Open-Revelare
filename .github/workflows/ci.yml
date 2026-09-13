@@ -102,7 +102,9 @@ jobs:
   # 假 dylib 不能省：Gui.csproj 的 WarnMissingMacLibRaw 在文件缺失时发 Warning，
   # 而下面带 -warnaserror，缺了它这一格会以一条与本次改动无关的错误常红。
   macos:
-    runs-on: macos-latest      # Apple Silicon
+    runs-on: macos-latest      # Apple Silicon。Intel 不在 CI 里：托管代码与垫片源码两边一样，
+                               # Intel 独有的只是 RID 选择（LittleCmsBundle / ColorManagement.csproj），
+                               # 由 release.yml 的 macos-15-intel 那格在真 x86_64 上验，不值得每次 push 都付 ×10 倍率。
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -121,6 +123,12 @@ jobs:
           mkdir -p native/osx-arm64
           echo "placeholder — real dylib is built by packaging/macos/bundle-libraw.sh" \
             > native/osx-arm64/libraw.23.dylib
+      # 原生 presenter 垫片（Obj-C++，src/OpenRevelare.Presentation.MacOS.Native）在这里真编，
+      # 不放占位：只要 clang + SDK，几秒钟，而它是整个 mac HDR 预览唯一没有第二条发现
+      # 渠道的部件 —— 2026-09-13 之前它从没在任何 Mac 上编过一次（见目录 README）。
+      # 编译错误在这一格现形，比等用户报"预览退回 SDR"强。
+      - name: 编 macOS 原生 presenter
+        run: ./packaging/macos/build-macos-presenter.sh
       - run: dotnet publish src/OpenRevelare.Gui -c Release -r osx-arm64 --self-contained true -warnaserror -o /tmp/pub
       - name: 装配 Little CMS manifest
         run: cp native/osx-arm64/lcms2.manifest.json /tmp/pub/lcms2.manifest.json
@@ -134,6 +142,7 @@ jobs:
           test -f /tmp/pub/liblcms2.dylib       || { echo "缺 Little CMS loader alias"; exit 1; }
           test -f /tmp/pub/lcms2.manifest.json  || { echo "缺 Little CMS manifest"; exit 1; }
           cmp -s native/osx-arm64/liblcms2.2.dylib /tmp/pub/liblcms2.2.dylib
+          test -f /tmp/pub/libOpenRevelare.Presentation.MacOS.Native.dylib || { echo "缺 macOS presenter 垫片 —— 没有它 HDR/EDR 预览静默退回 SDR 位图"; exit 1; }
           test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
           ls /tmp/pub/*.dll > /dev/null
       # SystemMemory.TryMacOS 依赖的 sysctl 键是否真的存在、是否真的读得出数。

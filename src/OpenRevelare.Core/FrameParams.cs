@@ -199,6 +199,79 @@ public sealed class FrameParams
     }
 
     /// <summary>
+    /// Peak luminance, in nits, for a scene-referred extended (HDR) render. Zero — the default —
+    /// means the roll renders to the established display-referred SDR terminal.
+    ///
+    /// <para>
+    /// A PLAIN NUMBER RATHER THAN A MODE FLAG, and zero rather than a nullable, so that a project
+    /// written before this existed loads as SDR without a migration and a project written by a
+    /// newer build naming a peak this one cannot reach still loads (D-013's spirit: absent means
+    /// the old behaviour, and the old behaviour is never rewritten underneath the user).
+    /// </para>
+    ///
+    /// <para>
+    /// IT IS A PROPERTY OF THE PROJECT, NOT OF THE MONITOR. Invariant I5 forbids the display
+    /// environment from changing the render, so this is what the user asked the picture to BE.
+    /// An SDR display showing it clips; that is the presentation contract's business.
+    /// </para>
+    /// </summary>
+    public double HdrPeakNits { get; set; }
+
+    /// <summary>
+    /// The resolved step-4 terminal (D-022): an extended target when <see cref="HdrPeakNits"/>
+    /// names a reachable peak, and otherwise the SDR target that reproduces today's rendering
+    /// exactly.
+    ///
+    /// <para>
+    /// A peak at or below <see cref="OutputTarget.ReferenceWhiteNits"/> resolves to SDR rather
+    /// than throwing, for the same reason <see cref="ResolvedOutputSpace"/> falls back instead of
+    /// failing: a stored value this build cannot honour must degrade to the safe rendering, not
+    /// stop the roll from opening.
+    /// </para>
+    /// </summary>
+    public OutputTarget ResolvedOutputTarget =>
+        double.IsFinite(HdrPeakNits) && HdrPeakNits > OutputTarget.ReferenceWhiteNits
+            ? OutputTarget.Hdr((float)HdrPeakNits)
+            : OutputTarget.Sdr(ResolvedOutputSpace);
+
+    /// <summary>
+    /// The SDR member of the rendering these params describe (D-031): the same params with the
+    /// HDR peak removed, an HDR LUT dropped (an SDR print stock is KEPT — it is the SDR member's
+    /// own rendering, D-034), and the output space set to <paramref name="baseSpace"/> (sRGB
+    /// when null). For an SDR roll it is <c>this</c>, untouched, so nothing that was
+    /// bit-identical before HDR existed stops being so.
+    ///
+    /// <para>
+    /// WHY ONE HELPER. An extended render (D-021) has exactly one SDR counterpart — the
+    /// <c>asymptote = 1</c> member of its own shoulder family, bit-identical below the knee — and
+    /// every surface that can only show SDR has to show THAT one, or the roll is a different
+    /// picture in every window: the gain-map JPEG's base (D-030), the film-strip thumbnails, the
+    /// catalog cover and the contact sheet all draw it from here. Clipping the extended render
+    /// at 1.0 instead would blow the highlights that the preview and the export keep. A print
+    /// stock stays: under D-034 the extended render is that very print with its highlights
+    /// opened up, bit-identical below the knee, so the print IS what the HDR display shows in
+    /// the shadows and mid-tones. An HDR LUT (PQ out) has no SDR member and is dropped.
+    /// </para>
+    /// </summary>
+    public FrameParams SdrRendition(ColorSpaceDef? baseSpace = null)
+    {
+        if (!ResolvedOutputTarget.IsExtended) return this;
+        FrameParams q = Clone();
+        q.HdrPeakNits = 0d;
+        q.OutputSpace = (baseSpace ?? ColorSpaces.Srgb).Name;
+        // Resolve rather than parse: whether the cube is an HDR LUT is a fact about the file
+        // (or the roll's declaration), and an unloadable cube is dropped exactly as before so
+        // the SDR surfaces still render.
+        CubeLut? lut = PrintLuts.Resolve(PrintLut);
+        if (lut is null || LutContractFor(lut).IsExtendedOutput)
+        {
+            q.PrintLut = "";
+            q.PrintLutOutput = "";
+        }
+        return q;
+    }
+
+    /// <summary>
     /// The print-film emulation applied between Stage 1 and the output space — a path to a
     /// <c>.cube</c> file, or empty for none.
     ///
@@ -225,6 +298,30 @@ public sealed class FrameParams
     /// stock the user owns without this enum growing a case per film.
     /// </summary>
     public string PrintLut { get; set; } = "";
+
+    /// <summary>
+    /// The roll's declaration of what <see cref="PrintLut"/> emits — a
+    /// <see cref="LutOutputEncoding"/> name, or empty to take whatever the cube's own header
+    /// prefilled (D-033). Empty in every project written before the contract existed, which
+    /// keeps those rendering exactly as they did: the header is what they rendered with. The
+    /// input side has no field: it is Cineon, always (<see cref="LutInputEncoding"/>).
+    /// </summary>
+    public string PrintLutOutput { get; set; } = "";
+
+    /// <summary>
+    /// The contract <paramref name="lut"/> is rendered through on this roll: the roll's own
+    /// output declaration where it has one, else the cube's header. This is the ONLY place the
+    /// two sources meet, so a declaration by the person who chose the file always outranks a
+    /// comment in it, and a file that says nothing is not a file that says Rec709.
+    /// </summary>
+    public LutContract LutContractFor(CubeLut lut)
+    {
+        ArgumentNullException.ThrowIfNull(lut);
+        LutOutputEncoding output = Enum.TryParse(PrintLutOutput, ignoreCase: true, out LutOutputEncoding o)
+                                   && Enum.IsDefined(o)
+            ? o : lut.OutputEncoding;
+        return new LutContract(lut.InputEncoding, output);
+    }
 
 
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
@@ -413,7 +510,9 @@ public sealed class FrameParams
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,
+        HdrPeakNits = HdrPeakNits,
         PrintLut = PrintLut,
+        PrintLutOutput = PrintLutOutput,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,

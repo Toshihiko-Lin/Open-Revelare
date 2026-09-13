@@ -112,12 +112,74 @@ public static class ContactSheet
             }
         }
 
+        PasteCells(canvas, images, layout, 0, 0);
+        return canvas;
+    }
+
+    /// <summary>
+    /// Draw every cell of <paramref name="layout"/> into <paramref name="canvas"/>, the grid's
+    /// top-left at (<paramref name="gridX"/>, <paramref name="gridY"/>). Only the cell rectangles
+    /// are touched — gaps, empty cells and whatever surrounds the grid stay as they were — so a
+    /// caller can lay a second set of thumbnails over a sheet that was composed from a first.
+    /// Numbers are copied as they are: the canvas and the images must agree on what they encode.
+    /// </summary>
+    public static void PasteCells(ImageBuffer canvas, IReadOnlyList<ImageBuffer> images,
+                                  Layout layout, int gridX, int gridY)
+    {
+        if (images.Count < layout.Count)
+            throw new ArgumentException("fewer images than the layout has cells", nameof(images));
+        if (gridX < 0 || gridY < 0 ||
+            gridX + layout.Width > canvas.Width || gridY + layout.Height > canvas.Height)
+            throw new ArgumentException("the grid does not fit inside the canvas at that origin");
         for (int idx = 0; idx < layout.Count; idx++)
         {
             (int x0, int y0) = layout.Origin(idx);
-            BoxResizeInto(images[idx], canvas, x0, y0, layout.ThumbW, layout.ThumbH);
+            BoxResizeInto(images[idx], canvas, gridX + x0, gridY + y0, layout.ThumbW, layout.ThumbH);
         }
-        return canvas;
+    }
+
+    /// <summary>
+    /// The extended (HDR) rendition of a composed sheet (D-031): the finished SDR sheet —
+    /// paper, header, keylines, frame numbers and its SDR cells — taken back to linear, with the
+    /// cells overwritten by <paramref name="extendedThumbs"/>, which are linear in the canonical
+    /// extended carrier and may exceed 1.0.
+    ///
+    /// <para>
+    /// The surround is paper, not picture: nothing above diffuse white was ever measured there,
+    /// so it is pinned at the carrier's 1.0 and below, exactly as the sprocket fill is in the
+    /// frame render — on an HDR display the paper reads as it does in SDR, and a gain map built
+    /// from the pair is empty everywhere but inside the frames. The cells are pasted at the same
+    /// geometry the SDR composer drew them at, so the two renditions are one sheet at two
+    /// headrooms, which is what a gain-map reader requires of them.
+    /// </para>
+    /// </summary>
+    /// <param name="sdrSheet">The composed sheet, encoded in <paramref name="sheetSpace"/>, [0,1].</param>
+    /// <param name="sheetSpace">The display space <paramref name="sdrSheet"/> is encoded in. Its
+    /// primaries must be the carrier's (sRGB): the surround is only linearised, never rotated.</param>
+    /// <param name="extendedThumbs">One extended-carrier thumbnail per cell, same order as the SDR set.</param>
+    /// <param name="layout">The grid the SDR sheet was built from.</param>
+    /// <param name="gridX">Where the composer placed the grid's top-left on the page.</param>
+    /// <param name="gridY">Likewise, vertically.</param>
+    public static ImageBuffer WithExtendedCells(ImageBuffer sdrSheet, ColorSpaceDef sheetSpace,
+                                                IReadOnlyList<ImageBuffer> extendedThumbs,
+                                                Layout layout, int gridX, int gridY)
+    {
+        ArgumentNullException.ThrowIfNull(sdrSheet);
+        ArgumentNullException.ThrowIfNull(sheetSpace);
+        ArgumentNullException.ThrowIfNull(extendedThumbs);
+        ArgumentNullException.ThrowIfNull(layout);
+        ColorSpaceDef carrier = ColorSpaces.Srgb;
+        if (sheetSpace.Red != carrier.Red || sheetSpace.Green != carrier.Green ||
+            sheetSpace.Blue != carrier.Blue || sheetSpace.White != carrier.White)
+        {
+            throw new ArgumentException(
+                $"the sheet is encoded in {sheetSpace.Name}, whose primaries are not the extended carrier's",
+                nameof(sheetSpace));
+        }
+        var linear = new ImageBuffer(sdrSheet.Width, sdrSheet.Height, (float[])sdrSheet.Data.Clone());
+        OutputRender.Decode(linear.Data, sheetSpace);
+        PasteCells(linear, extendedThumbs, layout, gridX, gridY);
+        return linear;
     }
 
     /// <summary>Plan and draw in one call — the plain grid, no surround.</summary>

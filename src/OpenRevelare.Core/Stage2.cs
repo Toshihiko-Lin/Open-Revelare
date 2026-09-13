@@ -308,6 +308,158 @@ public static class Stage2
     /// most importantly, authored curve coordinates are sampled without the legacy private
     /// gamma round trip. The final display-referred result is normalized exactly once here.
     /// </summary>
+    /// <summary>
+    /// True when the roll asks for any Stage 2 operation whose definition is display-referred —
+    /// levels, contrast, highlights/shadows, curves or saturation.
+    ///
+    /// <para>
+    /// These are not merely "tuned for" a display range, they are DEFINED against one: contrast
+    /// pivots about 0.5, levels map a black and white point onto <c>[0,1]</c>, the curves are
+    /// lookups indexed by a normalised value. Handing them scene-referred data with highlights
+    /// at 6.0 does not produce a slightly different picture, it produces a meaningless one.
+    /// </para>
+    ///
+    /// <para>
+    /// An extended-range render therefore gives them a range to be defined against: the roll's
+    /// own <c>[0, headroom]</c>, normalised to <c>[0,1]</c> (D-032, superseding D-023's refusal).
+    /// See <see cref="ApplyManagedToExtendedTarget"/>.
+    /// </para>
+    /// </summary>
+    public static bool HasDisplayReferredAdjustments(FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(cal);
+
+        bool doLevels = (cal.BlackPoint != 0.0 || cal.WhitePoint != 1.0)
+                        && cal.BlackPoint < cal.WhitePoint;
+        bool doContrast = cal.Contrast != 0.0;
+        bool doHighlightsShadows = cal.Highlights != 0.0 || cal.Shadows != 0.0;
+        bool curveEnds = cal.CurveHasEndpoints;
+        bool doCurves = BuildLut(cal.CurvePointsM, curveEnds) != null
+                        || BuildLut(cal.CurvePointsR, curveEnds) != null
+                        || BuildLut(cal.CurvePointsG, curveEnds) != null
+                        || BuildLut(cal.CurvePointsB, curveEnds) != null;
+        bool doSaturation = cal.Saturation != 0.0;
+
+        return doLevels || doContrast || doHighlightsShadows || doCurves || doSaturation;
+    }
+
+    /// <summary>
+    /// Stage 2 for a scene-referred extended render: white balance and exposure in linear light,
+    /// then the perceptual ops against the roll's own range (D-032).
+    ///
+    /// <para>
+    /// WHITE BALANCE AND EXPOSURE SURVIVE THE MOVE BECAUSE THEY ARE MULTIPLICATIVE IN LINEAR
+    /// LIGHT. The managed display-referred form already decodes to linear, multiplies, and
+    /// re-encodes; here the data is linear to begin with, so the decode and encode are simply
+    /// absent rather than skipped. The result is the same operation on the same quantity.
+    /// </para>
+    ///
+    /// <para>
+    /// THE PERCEPTUAL FIVE ARE DEFINED AGAINST A RANGE, SO THEY ARE GIVEN ONE. Levels, contrast,
+    /// highlights/shadows, curves and saturation mean nothing on unbounded linear light (the
+    /// reason D-023 refused them), but the extended target is not unbounded: it has a headroom,
+    /// and <c>[0, headroom]</c> is as much a display range as the SDR terminal's <c>[0,1]</c> —
+    /// it is what the roll's HDR limit says the file will hold. So the carrier is normalised by
+    /// the headroom, encoded with the same sRGB curve the SDR ops run under, and the ops run
+    /// unchanged: contrast still pivots about the encoded midpoint, a curve's right end is now
+    /// the HDR peak, the highlights slider reaches the highlights above SDR white. This is the
+    /// Lightroom definition, where every tone control spans the HDR limit.
+    /// </para>
+    ///
+    /// <para>
+    /// THE COST IS STATED, NOT HIDDEN: the same parameters produce a different SDR-range picture
+    /// on the extended target than on the SDR one, because the range they are defined against
+    /// differs. The roll's SDR rendition (D-031) keeps the SDR definition, so a gain-map JPEG's
+    /// two renditions are each graded against their own range; the gain map carries the
+    /// difference. The user chose this over the alternative — ops confined to <c>[0,1]</c> with
+    /// the HDR range passed through — because a highlights slider that cannot reach the HDR
+    /// highlights is not a highlights slider.
+    /// </para>
+    ///
+    /// <para>
+    /// NEGATIVES ARE NOT CLAMPED, unlike the display-referred form. There a negative component
+    /// could only be an out-of-range artefact of the destination encoding; here it is a colour
+    /// outside the target's primaries, which the extended carrier represents exactly and which
+    /// D-005 keeps on purpose. The encoding is therefore sign-mirrored so those components pass
+    /// through the affine ops intact. Two ops floor them by their own definition — the curve
+    /// step cannot sample a negative and highlights/shadows work on a clamped luma — exactly as
+    /// they do in SDR. Values above the headroom are not clamped here either: the caller's
+    /// <see cref="HighlightRolloff.BoundAbove"/> is the single place that enforces the ceiling.
+    /// </para>
+    /// </summary>
+    /// <param name="headroom">The target's highlight headroom in units of diffuse white — the
+    /// top of the range the perceptual ops are defined against.</param>
+    internal static void ApplyManagedToExtendedTarget(float[] d, FrameParams cal, float headroom)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+        ArgumentNullException.ThrowIfNull(cal);
+        if (!float.IsFinite(headroom) || headroom <= 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(headroom), headroom, "Headroom must be finite and positive.");
+
+        static bool AllOne(double[] values) =>
+            values.All(value => Math.Abs(value - 1.0) <= 1e-8 + 1e-5);
+
+        bool doWhiteBalance = !AllOne(cal.WbGains);
+        bool doExposure = cal.ExposureEv != 0.0;
+        if (doWhiteBalance || doExposure)
+        {
+            float redGain = (float)cal.WbGains[0];
+            float greenGain = (float)cal.WbGains[1];
+            float blueGain = (float)cal.WbGains[2];
+            float exposureGain = (float)Math.Pow(2.0, cal.ExposureEv);
+
+            ParallelSweep.OverPixels(d.Length / 3, (from, to) =>
+            {
+                for (int index = from; index < to; index += 3)
+                {
+                    if (doWhiteBalance)
+                    {
+                        d[index] *= redGain;
+                        d[index + 1] *= greenGain;
+                        d[index + 2] *= blueGain;
+                    }
+                    if (doExposure)
+                    {
+                        d[index] *= exposureGain;
+                        d[index + 1] *= exposureGain;
+                        d[index + 2] *= exposureGain;
+                    }
+                }
+            });
+        }
+
+        if (!HasDisplayReferredAdjustments(cal)) return;
+
+        // Normalise the roll's range onto [0,1] and enter the encoded domain the ops are defined
+        // in. The curve is sRGB's — the same one the SDR ops see when the roll targets sRGB or
+        // Display P3 — applied by the closed form rather than the [0,1] table because the domain
+        // here is open at both ends: overshoot above the headroom (exposure is multiplicative and
+        // lands first) and negative out-of-gamut components both have to come back out intact.
+        float inverseHeadroom = 1.0f / headroom;
+        ParallelSweep.Over(d.Length, (from, to) =>
+        {
+            for (int index = from; index < to; index++)
+                d[index] = Srgb.LinearToSrgbExtended(d[index] * inverseHeadroom);
+        });
+
+        FrameParams perceptual = cal.Clone();
+        perceptual.WbGains = new[] { 1.0, 1.0, 1.0 };
+        perceptual.ExposureEv = 0.0;
+        perceptual.DisplayReferredStage2 = false;
+        ApplyOperationChain(
+            d,
+            perceptual,
+            ColorSpaces.LinearExtendedSrgb,
+            encodeExit: false,
+            curvesAlreadyEncoded: true);
+
+        ParallelSweep.Over(d.Length, (from, to) =>
+        {
+            for (int index = from; index < to; index++)
+                d[index] = Srgb.SrgbToLinearExtended(d[index]) * headroom;
+        });
+    }
+
     internal static void ApplyManagedAfterTargetEncoding(
         float[] d,
         FrameParams cal,

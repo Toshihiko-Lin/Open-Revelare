@@ -194,6 +194,52 @@ public sealed class PresentationBufferBuilderTests
         Assert.Equal(originalScene, scene.LinearExtendedSrgbRgba);
     }
 
+    /// <summary>
+    /// Re-tagging is metadata only. Scene pixels are canonical at the carrier's nominal white and
+    /// the builder applies the policy exactly once while packing, so changing the policy must not
+    /// touch — or copy — a single component. The composition root relies on this to re-tag every
+    /// layer of a frame when the window lands on a display with a different scale (D-020).
+    /// </summary>
+    [Fact]
+    public void Re_tagging_a_scene_changes_only_the_policy_and_shares_the_pixel_storage()
+    {
+        PresentationScene nominal = Scene(referenceWhiteScale: 1f, 0.5f, -0.25f, 1.5f, 1f);
+
+        PresentationScene lifted = nominal.WithReferenceWhiteScale(2.5f);
+
+        Assert.NotSame(nominal, lifted);
+        Assert.Equal(2.5f, lifted.ReferenceWhiteScale);
+        Assert.Equal(1f, nominal.ReferenceWhiteScale);
+        Assert.Equal(nominal.Size, lifted.Size);
+        Assert.True(nominal.LinearExtendedSrgbRgba == lifted.LinearExtendedSrgbRgba);
+        Assert.Same(nominal, nominal.WithReferenceWhiteScale(1f));
+    }
+
+    /// <summary>
+    /// A scene re-tagged for an HDR contract must produce exactly what a scene authored against
+    /// that contract would. If these ever diverged, the same render would look different depending
+    /// on which display it was first built for.
+    /// </summary>
+    [Fact]
+    public void Re_tagged_scene_packs_identically_to_one_authored_for_that_policy()
+    {
+        var cmm = new RecordingColorManagement();
+        DisplayContract hdr = SystemContract(referenceWhiteScale: 2.5f);
+
+        PresentationBuffer viaRetag = PresentationBufferBuilder.Build(
+            Scene(referenceWhiteScale: 1f, 0.5f, -0.25f, 1.5f, 1f).WithReferenceWhiteScale(2.5f),
+            hdr,
+            cmm);
+        PresentationBuffer viaAuthoring = PresentationBufferBuilder.Build(
+            Scene(referenceWhiteScale: 2.5f, 0.5f, -0.25f, 1.5f, 1f),
+            hdr,
+            cmm);
+
+        Assert.Equal(0, cmm.LeaseRequests);
+        Assert.Equal(2.5f, viaRetag.ReferenceWhiteScale);
+        Assert.Equal(viaAuthoring.Bytes.ToArray(), viaRetag.Bytes.ToArray());
+    }
+
     private static PresentationScene Scene(float referenceWhiteScale, params float[] rgba) => new(
         rgba.Select(value => (Half)value).ToArray(),
         new PixelSize(rgba.Length / 4, 1),

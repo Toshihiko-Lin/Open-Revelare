@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Security.Cryptography;
 
 namespace OpenRevelare.ColorManagement;
@@ -67,6 +67,8 @@ public enum BuiltInProfileId
     Rec709,
     LinearAcesCg,
     LinearExtendedSrgb,
+    /// <summary>DCI-P3 primaries, DCI white, gamma 2.6 — a print LUT's native output, never a roll's container.</summary>
+    DciP3,
 }
 
 /// <summary>

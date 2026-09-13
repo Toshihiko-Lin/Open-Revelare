@@ -136,7 +136,7 @@ RenderedFrame(float32 + exact OutputProfile + OutputRecipe)
 | `Core/TiffIO.cs` untagged 路径 | 8-bit inverse-sRGB 或 16-bit 原样即可进入 working | 8-bit 只解 TRC、没有 sRGB→ACEScg primaries transform；16-bit 原色仍未知，两者随后都可能被当 ACEScg |
 | `FrameParams.InputWhitePoint` / `InputTransform` | 缺省白点约定一致 | 注释写 D65，实现使用 working white（约 D60）；这是 null/implicit semantics 已漂移的实例 |
 | `Core/ColorPipeline.ToOutputSpaceVia` | 保留 print cube 的 Rec709 数值，再嵌目标 ICC 就能保留 look | 像素仍带 Rec709 TRC，而 sRGB/P3/Adobe RGB profile 声明另一条 TRC；像素/profile 不匹配，Stage 2 的 decode 也可能用错曲线 |
-| `CubeLut` / `PrintLuts` | 任意用户 `.cube` 都可按 Cineon→Rec709 使用 | `.cube` 的**语法**没有这两个字段，但 Resolve 导出会把 output 写进头部注释（两个内置资产即如此），而解析器把注释丢掉了；当前 UI 接受任意 LUT 却套同一个隐含合同。output 已由 D-018 改为读取文件自述；input 由 D-019 同法处理：声明为非 Cineon 的直接拒绝，未声明的仍按 Cineon 但标注为惯例 |
+| `CubeLut` / `PrintLuts` | 任意用户 `.cube` 都可按 Cineon→Rec709 使用 | `.cube` 的**语法**没有这两个字段，但 Resolve 导出会把 output 写进头部注释（两个内置资产即如此），而解析器把注释丢掉了；当前 UI 接受任意 LUT 却套同一个隐含合同。output 曾由 D-018 改为读取文件自述、input 由 D-019 同法处理——但只有 Resolve 自带的 Film Looks 写这行注释，用户从 Resolve 生成的任何 LUT 都不写，于是整条路只剩 6 个文件能走。**D-033 改为由卷声明合同**（输入/输出编码），文件头只做预填 |
 | legacy `DisplayReferredStage2=false` | 最后加目标 TRC 就是目标空间 | 路径没有完整的 primaries/display render，却仍可能嵌目标 ICC；旧项目需要明确兼容与迁移策略 |
 | CLI JPEG export | GUI/CLI 导出契约相同 | CLI 当前调用默认无 ICC overload；wide-gamut JPEG 即使像素正确也会成为未标记文件 |
 | 用户文档 `THEORY/GUIDE` | “预览数值原样提交，OS 根据已注册显示器 ICC 统一转换” | 对当前无标签 Avalonia surface 不成立；实现完成前这些段落必须视为已知过时说明 |
@@ -193,6 +193,12 @@ linear extended-sRGB 使用 sRGB/D65 原色坐标，但依靠 float 的负值和
 
 显示器、ICC、DPI、窗口所在屏幕、Advanced Color/EDR 状态只能使 presentation generation 失效；
 不得改变 `RenderedFrame`、导出像素或导出 profile hash。
+
+唯一的口子是 D-027：**新建**卷的 `HdrPeakNits` 初值取自导入那一刻的显示器。它随即写进工程，
+成为卷自己的参数；此后显示器变化对它无效，已存在的卷更是丝毫不受影响。
+
+D-028 的高光软校样**不是**口子：它发生在 presentation generation（组合根，`RenderedFrame` 之后），
+正是本条允许显示环境进入的那一步。
 
 ### I6：共享 render 在各平台相同
 
@@ -364,24 +370,49 @@ preview 和 export 必须从同一个 immutable `RenderedFrame` 分叉。exporte
 exporter 只能量化、写 metadata、嵌入 `RenderedFrame.OutputProfile.IccBytes`。它不得重新生成、查找或
 按名称推测另一个 profile。
 
-### 8.2 print LUT
+### 8.2 print LUT 与 LUT 合同（D-033）
 
-print cube 的输入和输出 encoding 是资产本身的事实。output 的这个事实**通常已经写在文件头部注释里**
-（Resolve 的 `# Display: ITU-Rec.709, Gamma 2.4`），因此由 `CubeLut` 在解析时读取，而不是靠外挂描述符
-或内置白名单；头部什么都不声明的 cube 仍为 `Unknown` 并按 D-015 fail closed。判定刻意从严：`Rec709`
-指 709 原色**与** 2.4 gamma 这一对，只写其一不算；第一行 display 声明即为准，避免后面无关注释反过来
-改写文件已经说明的事。input encoding 仍是隐含的 Cineon 假设，尚未显式化。
+`.cube` 的语法没有色彩空间。Resolve 的做法是让用户在 LUT 前后放色彩空间转换节点来声明它；本项目同理，
+但**输入这一端没有选择**：本程序的图像处理基于 Cineon，喂给 cube 的永远是 Cineon（`LutInputEncoding` 只有
+这一个成员；文件头声明别的输入——ACEScct、Log-C、DaVinci Intermediate——在解析时拒绝，因为用户的声明救不了它）。
+要声明的只有**输出**：`FrameParams.PrintLutOutput`（持久化 `print_lut_output`），由 `FrameParams.LutContractFor(lut)`
+解析——卷有声明取卷的，没有取文件头预填的（Resolve Film Looks 的 `# Display: ITU-Rec.709, Gamma 2.4`），再没有
+（Resolve 生成的 LUT 一律不写）：`Unknown` 并 fail closed；GUI 选片时按卷的状态预填——SDR 下 Rec709、HDR 下
+Rec2020 PQ——写进卷并在状态栏说明。
 
-若 cube 输出 Rec709/2.4，而用户选择 sRGB、Display P3 或 Adobe RGB：
+| 端 | 成员 | 本程序做的事（= Resolve 里对应的 CST） |
+|---|---|---|
+| 输入 | `Cineon`（唯一） | working → Rec709 原色（Clip）→ `LogEncoding.ToCineon`。v1 冻结的那条，逐位不变 |
+| 输出 | `Rec709` / `DciP3` / `Srgb` | 以对应 exact profile（`ColorSpaces.Rec709` / `DciP3`（DCI 白、γ2.6）/ `Srgb`）为源，CMM 相对色度转换到卷所选 exact output profile；Stage 2 在目标编码中运行 |
+| 输出 | `Rec2020Pq` | `Pq.DecodeToCarrier`（ST 2084 → nits ÷ 203）→ BT.2020→载体原色（`PreserveExtended`，负分量保留）。**不再套 `HighlightRolloff`**：LUT 自带肩部；卷的 `HdrPeakNits` 只做 `BoundAbove` 的顶与母版标签 |
 
-1. cube 先生成其 native `RenderedFrame`；
-2. 以 cube 的准确 output profile 解码；
-3. 转换至选择的 exact target profile；
-4. Stage 2 只能在它声明的 target encoding 中运行；
-5. 导出嵌该 target profile。
+**LUT 怎么参与由输出决定**（`LutContract.AppliesTo(target)`，唯一裁决点 `ColorPipeline.PrintLutFor(cal, target)`，
+渲染与 recipe 都问它）：SDR 输出的印片在 SDR 目标上就是渲染本身，在扩展目标上按 **D-034** 参与——
+`ToExtendedOutputTargetViaPrint`：印片照 SDR 路径渲染并经 CMM 解进载体线性光，再逐像素乘**一个标量**
+`g = Y(解析 HDR 渲染) / Y(解析 SDR 渲染)`（两者是 D-021 的同一族曲线，拐点以下相同 ⇒ g = 1，印片逐位透传；
+拐点以上 g 向 headroom 增长，印片被自己肩部折进纸白的高光按同一族曲线打开；Y(SDR)=0 处 g := 1）。标量而非逐通道，
+因为印片的 RGB 比例（色相、饱和度、高光去饱和）就是用户选的 look，只让亮度打开；这也让 D-031 的 SDR rendition
+= 印片本身、拐点以下逐位相同，亮度单通道增益图（D-030）承载全部差异——`SdrRendition()` 因此**保留** SDR 印片、
+只剔除 PQ LUT。PQ 输出只在扩展目标上参与、SDR 下让位给标准显示渲染。**GUI**：SDR 下选片器不列 PQ 输出的 cube，
+HDR 下全列；输出按钮两种状态都有（v2），PQ 一项只在 HDR 下可见；未声明的 cube 一律预填 Rec709（世上绝大多数
+cube 是 SDR 的）；带 PQ LUT 关 HDR 的卷仍列出并注明让位；HDR 下选印片旁边注「印片色 · HDR 影调」。
 
-颜色管理保持的是颜色/观感，不是跨不同 TRC 的相同 code value。当前“保留 Rec709 数值再贴目标 ICC”
-明确禁止。
+recipe 的 `PrintLutIdentity`：内置为记号，外部文件为 `sha256:` + `CubeLut.ContentIdentity`（表的内容哈希，
+注释与 TITLE 不计）；合同进 `GamutPolicy`。此前 `DescribeManagedPixels` 对任何外部文件抛
+"must carry a portable built-in identity"，即 D-018 放行的文件在渲染时又被拒——这就是用户看到的
+"达芬奇成品 LUT 用不了"。
+
+**随程序发行的 LUT 文件夹**（2026-09-13 傍晚追加）：`Assets/Luts/*.cube` 原样复制到产物的 `luts/`（`PrintLuts.BundledDir`），
+选片器列在最前，工程存 `:luts/<文件名>` 记号（可移植，`IsBuiltin` 为真、进 fingerprint）。内容：Resolve 的六张
+Rec709 Film Looks（2383 / 3513DI × D55 / D60 / D65）。**不自带 HDR LUT**：市面上没有 Cineon 进、PQ 出的 3D 成品，
+曾烘过两张"HDR Standard N nits"（= 无 LUT 渲染本身），用户指出它和【HDR 上限】重复、选了没变化，已删；HDR LUT 由
+调色人在 Resolve 里以 Cineon Film Log 时间线、Rec.2100 ST2084 输出生成。两张 D65 仍嵌进程序集，`:kodak-2383` /
+`:fujifilm-3513di` 旧记号照旧解析，不再作为固定行出现在选片器里。用户自己的 cube 仍放 per-user 的 `Settings.LutDir`。
+
+颜色管理保持的是颜色/观感，不是跨不同 TRC 的相同 code value。"保留 native 数值再贴目标 ICC"明确禁止。
+PQ 是绝对量：以 203 nits 母版白的 LUT 落在载体 1.0 上、拐点以下与 SDR rendition 一致；以 100 nits 为白的
+落在 1 档之下——那是作者的决定，原样携带。**已知代价**：PQ LUT 卷的 SDR rendition（D-031：缩略图、印样、
+增益图基底）不走 LUT（`SdrRendition()` 清空 `PrintLut`），两个 rendition 不再是同一张画的两个余量。
 
 ### 8.3 文件政策
 
@@ -455,13 +486,25 @@ public sealed record PresentationBuffer(
 
 ### 9.2 平台模式
 
-| Surface / 模式 | 共享层输出 | 最后一次 monitor transform |
-|---|---|---|
-| Windows Advanced Color 主预览 | linear extended-sRGB RGBA16F + reference-white scale | DWM |
-| Windows legacy SDR 主预览 | monitor-device BGRA8 | shared LittleCMS |
-| macOS native 主预览 | linear extended-sRGB RGBA16F + reference-white scale | Core Animation / ColorSync |
-| macOS/Windows Avalonia 次要图像 surface | 优先 monitor-device BGRA8；能力不足则 emergency | shared LittleCMS 或明确无管理 |
-| Linux 初期 | 已验证 profile provider 时 monitor-device BGRA8，否则 emergency | shared LittleCMS 或无 |
+| Surface / 模式 | 共享层输出 | `ReferenceWhiteScale` | 最后一次 monitor transform |
+|---|---|---|---|
+| Windows Advanced Color **WCG**（SDR 屏）主预览 | linear extended-sRGB RGBA16F | `1.0` | DWM |
+| Windows Advanced Color **HDR** 主预览 | linear extended-sRGB RGBA16F | `SdrWhiteNits / 80`（D-020） | DWM |
+| Windows legacy SDR 主预览 | monitor-device BGRA8 | `1.0` | shared LittleCMS |
+| macOS native 主预览 | linear extended-sRGB RGBA16F | SDR/WCG `1.0`；EDR 待 D-012 | Core Animation / ColorSync |
+| macOS/Windows Avalonia 次要图像 surface | **ACM 开启时必然是 sRGB**（见下）；否则优先 monitor-device BGRA8，能力不足则 emergency | `1.0` | ACM 开：DWM 按 sRGB；否则 shared LittleCMS 或明确无管理 |
+| Linux 初期 | 已验证 profile provider 时 monitor-device BGRA8，否则 emergency | `1.0` | shared LittleCMS 或无 |
+
+> [!IMPORTANT]
+> **次要 surface 那一格是 OS 约束，不是应用选择。** Advanced Color 激活时，Windows 的 profile
+> 管理 API 对 `STANDARD` subtype **一律返回「无 profile」**，无论实际装了什么；未打标签、走整数
+> 像素格式的内容一律被当作 sRGB。也就是说 Avalonia 画的任何图像 surface 在 ACM 下拿不到显示器
+> profile，也无法超出 sRGB 色域。微软提供的出口是 per-exe 的兼容助手（可执行文件属性 →
+> 兼容性 → *Use legacy display ICC color management*），而它**没有任何编程启用方式**。
+> 主预览逃过这一条，唯一原因是它打了标签（scRGB FP16 + `SetColorSpace1`）。
+> 若要在 AC 激活时取得**真实**面板 profile（做色域警告/软打样用），须查
+> `CPST_EXTENDED_DISPLAY_COLOR_MODE` 而非当前代码使用的 `CPST_STANDARD_DISPLAY_COLOR_MODE`——
+> 查 `EXTENDED` 等于向 OS 声明本应用是 Advanced Color-aware。
 
 Windows 与 macOS 可以共享同一 D65/linear/RGBA-half 内存布局，但 `1.0` 的物理亮度语义不能默认完全
 相同。`SdrReferenceWhite`/scale 是 contract 数据，由共享 presentation builder 应用，平台 presenter
@@ -549,9 +592,12 @@ GUI composition root 选择实现。Core、ColorManagement、Preview 和 ViewMod
 - 监听 window screen/profile/headroom 变化并递增 revision；
 - `NSScreen.colorSpace` 默认只用于诊断、能力与次要 app-managed surface，不在主 tagged layer 上再手动转一次。
 
-项目目标是 `net8.0` 而不是 `net8.0-macos`。建议用一个 Objective-C++ C ABI dylib 封装 AppKit/Metal，
-沿用 `packaging/macos` 已有的 dylib 拷贝、install-name 和签名流程，避免在 C# 各处散落
-`objc_msgSend` P/Invoke。
+项目目标是 `net8.0` 而不是 `net8.0-macos`。实现为一个 Objective-C++ C ABI dylib
+（`src/OpenRevelare.Presentation.MacOS.Native`，导出 `orwm_probe/create/resize/present/query_diagnostics/destroy`），
+沿用 `packaging/macos` 已有的 dylib 拷贝、install-name 和签名流程（`build-macos-presenter.sh`），
+托管侧 `OpenRevelare.Presentation.MacOS` 镜像 Win32 那一层：`MacOSDisplayEnvironment`（语义键含
+显示器 id、色彩空间名、backing scale、当前/potential EDR 值）、`MacOSDisplayContractProvider`（D-026）、
+`MacOSPreviewPresenter`（stale revision 拒绝、换屏/换 EDR 请求即要求重建）。
 
 `CAMetalLayer.wantsExtendedDynamicRangeContent` 暂不在本文写死。Apple 的 HDR/EDR 示例会设置它，
 但“允许 extended RGB 分量以承载 SDR 广色域”和“让内容使用高于 SDR 白的亮度”不是同一个产品决定。
@@ -685,7 +731,7 @@ compositor。
 | M2 | **完成** | 完整 ICC 输入；修 print LUT/TRC/output ICC、legacy、CLI/export；写 project version/migration | 有效 ICC 原子转换；untagged/坏 ICC 显式 fallback 与项目往返；normalized TIFF16 与 extended TIFF32F round-trip；exact embedded ICC；L2 显式迁移；稳定 render fingerprint |
 | M3 | Windows 切片完成；macOS 待办 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | Windows 主图/patch/masks/crop 单一合成且末跳前无 8-bit/clamp；D-011 已关闭，D-012 留给 macOS |
 | M4 | 代码/自动化完成；硬件人工验收待办 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | transform-count、ABI、recovery/fallback 与当前 EIZO 契约探针已验证；色度计/参考查看器和双屏人工比较待完成 |
-| M5 | 按当前目标延后 | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | Windows PR 合入后另开修复；D-012 随该阶段关闭 |
+| M5 | **托管半边完成，原生半边待真机**（2026-09-12） | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | `OpenRevelare.Presentation.MacOS`（环境 / 契约 / presenter）+ 25 条假件测试全绿；Avalonia 宿主 `MacOSPreviewHost` + backend（5 条 reconcile/recovery 测试）已接入组合根（`IPreviewHost` 按平台选宿主，Windows 回归实测不变）；`Presentation.MacOS.Native` 的 Obj-C++ 源码与 `build-macos-presenter.sh` 已写但**未在 Mac 上编译**；D-026 定了 mac 的 reference-white/headroom 政策，D-012 仍 Open，候选规则见 D-026 |
 | M6 | 部分完成 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux/macOS 部分待后续 |
 
 ### 15.1 提交边界
@@ -712,7 +758,7 @@ compositor。
 | platform adapter 长成第二套引擎 | 依赖图与禁止清单；平台测试只检查 surface contract |
 | Avalonia 升级后 null layer 行为改变，device RGB fallback 双转 | pin/version integration test；无法证明 passthrough 时降为 emergency |
 | 未表征 RAW 被“顺手修成”普通 camera ColorMatrix | explicit `UncharacterizedCapture`；input policy/golden/product decision |
-| HDR/EDR 改变 SDR 亮度 | reference-white contract；D-011/D-012 spike；首期不做 HDR grading |
+| HDR/EDR 改变 SDR 亮度 | reference-white contract；Windows 由 D-020 按模式分流并测试钉死，macOS 仍待 D-012 spike |
 | 外部 profile 文件被替换 | exact bytes/hash 随项目或内容寻址保存 |
 | **进程里已存在同名 lcms2，app-owned 那份被加载器去重掉** | 见下方附注：目前靠**同名覆盖**成立，不是靠隔离 |
 
@@ -746,7 +792,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-008 | Accepted | native GPU API 只 present，不恢复 Core GPU processing backend | 符合现有 CPU 架构与已测性能结论 |
 | D-009 | Accepted | 未表征输入保持 `Uncharacterized`，不得假贴 sRGB/ACEScg | 不用一个新猜测替换旧猜测；保证诊断诚实 |
 | D-010 | Accepted | print LUT native output 必须色度转换到 exact selected output profile | 保颜色而非保 code value，消除 TRC/profile mismatch |
-| D-011 | Accepted（Windows） | Windows scRGB `ReferenceWhiteScale=1.0`；canonical `1.0` 表示 Windows 报告的 SDR reference white（不可用时 80 nits） | 当前 EIZO/WCG 探针报告 80 nits；DWM 拥有唯一 monitor transform；macOS 亮度语义不在此决定中，仍由 D-012 验证 |
+| D-011 | **Superseded by D-020** | Windows scRGB `ReferenceWhiteScale=1.0`；canonical `1.0` 表示 Windows 报告的 SDR reference white（不可用时 80 nits） | 当前 EIZO/WCG 探针报告 80 nits；DWM 拥有唯一 monitor transform；macOS 亮度语义不在此决定中，仍由 D-012 验证 |
 | D-012 | Open | macOS SDR WCG 是否/何时设置 `wantsExtendedDynamicRangeContent` | 需实机验证 extended channel 与 SDR 亮度，不能把 HDR 示例直接当 WCG 规范 |
 | D-013 | Accepted | 采用 L2 显式 opt-in migration：缺字段为 v1 且不自动改写；新工程为 v2；只有用户迁移才写 v2 | 保持旧 look 和工程可逆性，同时让新工程使用完整 managed 链路 |
 | D-014 | Accepted | 首版采用共享自有 CPU F16 compositor；native presenter 只作固定格式上传 | 1600×900 compose/pack 约 12.8/1.2 ms，3840×2160 约 41.8/6.9 ms；场景语义仍只有一份，未引入平台 shader 分叉 |
@@ -755,6 +801,22 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-018 | Accepted | 「声明为 Rec709 output」由解析 cube 头部注释认定，而非内置白名单；读不到声明的仍按 D-015 fail closed | 两个内置资产的 Rec709 原本来自人工阅读同一行注释再硬编码，而解析器对所有其他文件丢弃了这行——用户从 Resolve 导出的 LUT 写着与内置完全相同的话却被拒。读取它不放宽 D-015 的判据，只是让判据可以被文件自己满足；内置资产随之走同一条路径，解析回归会在测试中立刻暴露而不是等用户撞上 |
 | D-019 | Accepted | LUT 的 input encoding 同样由 cube 头部注释认定：声明为非 Cineon 的 cube 在解析时即拒绝，未声明的仍按 Cineon 渲染但记为 `ConventionalDefault` | D-018 只修了 output 一端，而 input 才是无声失败的那一端——ACEScct / Log-C 的 cube 被按 Cineon 喂进去不会报错，只会给出一张看起来正常、颜色是错的图。同一份 Resolve 头部在 `# Display:` 上一行就写着 `#   Input: Cineon Log`，解析器同样把它丢了。拒绝而不是放宽：判据与 D-015 一致，只是让文件能自己推翻一个原本不可见的假设。未声明的不收紧，因为那样会让今天能用的 cube 全部失效，而并没有获得任何新信息——判定刻意从严（注释须以 `input` 开头且紧跟冒号），漏判退回原行为是安全的，误判则是回归 |
 | D-017 | Accepted | ManagedV2 的无/坏 ICC TIFF 使用 roll 级显式 fallback：linear 保持原色未表征并数值透传，sRGB 作为用户指定 exact profile；有效嵌入 ICC 永远优先 | 位深不是色彩声明；选择必须随工程与所有 decode cache 传播，旧项目才保留按位深 compatibility |
+| D-020 | Accepted（**supersedes D-011**） | Windows 的 `ReferenceWhiteScale` 按 Advanced Color **模式**分流，不再是常量：WCG（SDR AC）与 legacy/emergency 仍为 `1.0`；**HDR 为 `SdrWhiteNits / 80`**。HDR 显示不再 fail-closed 到 emergency，走与 WCG 相同的 `LinearExtendedSrgbRgba16F` + `SystemCompositor` | 两种 Advanced Color 的亮度语义是**相反**的，而 D-011 只描述了其中一种。微软规范：SDR AC 是 display-referred，`1.0` 恒为该屏能达到的最大白，reference white **不适用**；HDR 是 scene-referred，`1.0` 恒为 80 nits，应用必须自行把 SDR 内容乘 `SdrWhiteLevelInNits / 80`。D-011 把 `1.0` 钉死，对 WCG 正确、对 HDR 错误，于是 HDR 分支只能 fail-closed——代价是 **HDR 屏用户比普通 SDR 屏用户体验更差**（连 legacy 的 LittleCMS 正确转换都拿不到，直接落无管理 emergency）。分流之后这个倒挂消失，且 `SdrWhiteNits` 早已由 `DISPLAYCONFIG_SDR_WHITE_LEVEL` 探到，管线的三处精确相等校验原样守住"恰好施加一次" |
+| D-021 | Accepted | 显示渲染的肩部改为**一族曲线**，SDR 是其 `asymptote = 1` 的成员：拐点（0.5）以下两者逐位相同，拐点之上 SDR 把负片宽容度压进 `[0.5, 1)`，扩展目标把同样的宽容度铺到 `[0.5, headroom)`。扩展渲染不走印相 LUT。SDR 输出**继续**走印相 LUT，D-010 / D-015 / D-018 / D-019 一字不改 | 印相纸没有镜面高光。把印相 roll-off 原样放进 HDR 容器，得到的只是"一张更亮的 SDR"——HDR headroom 一点没被使用，(a) 等于白做。负片本身约 13 档宽容度，**被印相曲线压掉的高光正是 HDR 唯一有内容可放的地方**，所以放开高光不是加特效，是不再丢弃已经拍到的信息。SDR 保留印相有两条硬理由：它是产品既有的渲染身份，且 D-013 要求旧工程可逆——删掉 SDR 那条会让每个已有工程的渲染结果改变、让全部 golden 无故变红。两者共存的代价是零：D-022 的 target 参数化本来就是一条代码路径 |
+| D-022 | Accepted | 三平台的统一点是**输出变换**（`scene-linear → OutputTarget{primaries, transfer, peakNits, refWhiteNits}`），不是 GPU API。平台 presenter 保持三份、各自原生、只做定格式上传 | 平台之间真正不同的不是"怎么把字节送过去"，是**最后一跳归谁**——`FinalTransformOwner` 那三个值就是这个差异，而 DWM / ColorSync / Wayland CM 各有自己的合成语义、reference white 定义和 profile 来源。统一 GPU API 消不掉任何一个平台相关决定，只会多一层翻译（理由见 §17.1）。反过来，输出变换是唯一**平台无关、且 (a) 预览与 (b) 导出共用**的东西：它住在 `Core`，按 §11.1 的禁令自动三平台一致。今天的行为必须是它的一个特例——`OutputTarget{Rec709, sRGB-TRC, 100, 100}` 逐位复现现有 golden，否则不许合 |
+
+| D-023 | **Superseded by D-032** | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
+| D-024 | Accepted | 扩展渲染的输出空间**恒为 `LinearExtendedSrgb`**（D-005 的 canonical 载体），不跟随工程的 output space 选择 | output space 选择器选的是 display-referred 编码（sRGB / Adobe RGB / Rec709），每一个都同时断言了一个有界范围和一条传递曲线，而扩展渲染两者都没有。载体是线性、Rec709 原色、无界，并且能用 `[0,1]` 之外的分量表示这些原色之外的颜色——选"Adobe RGB HDR"不会让色域变宽（载体本来就比 Adobe RGB 宽），只会多一条需要撤销的曲线。像素因此必须贴载体自己的 profile：给线性数值贴带 TRC 的 ICC 正是 D-003 要防的"只换标签不做转换" |
+| D-027 | Accepted | **新卷**的 `HdrPeakNits` 缺省取当前显示器能完整显示的最高档（`RecommendedHdrPeakIndex`），无 HDR 显示器或读不到面板峰值则 SDR；只在导入那一刻读一次，随后写进工程，显示器变化不再触碰它。已有工程按存的值打开，不受影响。选择器各行同时标注"本机推荐 / 超出本机 x×"——只是标注，不选择 | 用户提出"预览应按检测到的显示屏自动匹配"。三种做法里选了最窄的：显示端软映射（presentation 层 tone-map，I5 不破）代价约一天且要改 WYSIWYG 徽章语义；让 `HdrPeakNits` 跟随显示器则同一卷换台机器导出就不同，工程里存的值失去意义，正是 I5 要防的。"新卷缺省"把对显示器的依赖压缩到创建一刻，之后卷是自己的：I5 的措辞"显示环境不能改变渲染和导出"对**已存在的**卷仍然逐字成立，对新卷则是"决定了初值"而非"改变"。档位同时加了 400：400/203 ≈ 1.97×，在 SDR 白留在 Windows 默认亮度（≈240 nits）的 DisplayHDR 400 面板上（余量 ≈2.2×），它是唯一能完整显示的一档 |
+| D-029 | Accepted | HDR 的 GUI 形态对齐 Lightroom：底栏只有 **SDR / HDR 开关**；开启后直方图下方出现 **HDR 上限**滑块，单位是 SDR 白之上的**档数**（0.5 … +4，步进 0.1，默认 +2.3 = 1000 nits），读数同时给出 nits。工程仍存 `hdr_peak_nits`（= 203 × 2^档），持久化形式不变；超出范围的存档值拉到最近端并公告。D-027 的"新卷缺省"改为：显示器余量向下取到 0.1 档作为上限，无余量则关。四个 nits 预设（400/600/1000/4000）**废止** | 照片交付没有母版监视器那几台设备可挂靠（电影的 1000/4000 由此而来），照片这边的同行——LR 的 HDR Limit、ISO 21496-1 gain map 的 headroom、ACES 2.0 的参数化输出——全是连续值。预设的原始理由是"文本框邀请用户微调一个无从校验的值"，D-028 之后这个值在屏幕上、在直方图直尺上都能校验，理由不再成立。滑块放在直方图下而不是底栏，因为它管的正是直方图右侧那四档；底栏只剩"要不要"这一个决定 |
+| D-030 | Accepted | HDR 卷的 JPEG 导出写成 **gain-map JPEG**（ISO 21496-1 / Adobe `hdrgm`，即 Lightroom 与 Android Ultra HDR 的容器）：SDR 基底 JPEG + MPF 索引 + XMP `Container:Directory`，后接增益图 JPEG（**亮度单通道灰度图**，全分辨率，同品质；逐通道三通道保留为 `GainMapChannels.PerChannel` 选项，GUI 不暴露）。基底 = **同参数、去掉 HDR 峰值、不走印片 LUT** 的 SDR 渲染，即肩部曲线族 `asymptote = 1` 的成员（D-021）；增益在基底的**线性**空间里按亮度取 `log2((Y_hdr + 1/64) / (Y_sdr + 1/64))`（Y 用基底空间自己的权重），范围按内容量出并恒含 0，`HDRCapacityMax = 内容实际最大增益`（libultrahdr 约定：屏幕余量够显示文件里全部高光即全量应用；母版标称峰值仍在卷与 float32 TIFF 上），增益钳到 ≥ 0；HDR 侧超出基底原色的颜色先按亮度守恒**去饱和**进基底色域（`HdrInBaseGamut`），不做硬裁。基底所在的显示空间（sRGB / Display P3）是**导出对话框**里的容器参数（`ExportOptions.HdrBaseSpace`，持久化，缺省 sRGB），不是卷的输出空间；ICC 政策对基底空间求值。TIFF 仍是 float32 载体母版（D-016），HDR 下强制嵌 ICC | 这是唯一"任何看图软件都能打开、HDR 屏上恢复高光、余量不足的屏幕按比例回落"的照片容器，且**不需要新的原生依赖**——两条 JPEG 流由 ImageSharp 出，MPF 段与两段 XMP 手写。基底不走印片 LUT，因为 gain-map 文件的两个 rendition 是**同一张画在两个余量下**，读者按显示余量在两者之间插值：印片基底 + 解析 HDR 会让中等余量的屏幕看到一半印片一半解析、SDR 屏看到 HDR 屏永远看不到的印片。同一族的两个成员在拐点以下逐位相同，所以增益图在阴影与中间调恒为 0，只有高光带增益，文件也因此小。缺省单通道而非逐通道：肩部是逐通道的、逐通道才能精确复现高光色相，但 LR 与所有手机相机写的都是单通道灰度图，读者只在这种形式上被充分验证过，且灰度图小一半以上；单通道精确复现的是亮度，色相取基底的。逐通道形式代码保留。增益图 JPEG 天然受基底原色约束（基底空间外的颜色是负分量，没有 SDR 值也没有对数），这与 D-024 不冲突：载体不裁，母版在 float32 TIFF，JPEG 是交付件。元数据同时以 `hdrgm` XMP 和 **ISO 21496-1 二进制段**（`urn:iso:std:iso:ts:21496:-1`）写出：基底只带版本字段（4 字节），增益图带完整结构——与标准及 Skia 参考文件一致；同一条记录两种形式，libultrahdr 1.3 亦如此；Apple 的读者认后者 |
+| D-031 | Accepted | **SDR 界面统一显示卷的 SDR rendition**：HDR 卷在片夹缩略图、图库封面、印样窗口预览与印样导出（缺省）上一律渲染 `FrameParams.SdrRendition()`——同参数去掉 HDR 峰值、不走印片 LUT、输出空间 sRGB（可指定基底空间），即 D-030 增益图基底的同一定义，SDR 卷返回自身、逐位不变。当前帧的缩略图不再是扩展渲染的缩放副本，HDR 卷下单独渲染一次 256 px 的 SDR rendition。HDR 上限滑块不再重建缩略图（rendition 不含峰值），只有开关变化才重建。**印样有自己的 HDR 开关**（`ContactSheetDialog.WriteHdr`，仅 HDR 卷可见，随卷缺省开、不持久化）：开时印样按 `ContactSheet.WithExtendedCells` 生成——已合成的 SDR 页面线性化，帧格子按 `SheetComposer.GridOrigin` 的同一几何换成扩展渲染，纸面/页眉/框线/帧号钉在 SDR 白——JPEG 写成 gain-map JPEG（基底 = SDR 印样），TIFF 写成 float32 载体。`BuildContactThumbsAsync` 在 HDR 卷上一趟渲染两套 900 px 缩略图（SDR + 扩展），开关只决定文件 | 这些界面都是 Avalonia 的 SDR 位图，任何平台都没有余量：把扩展渲染在 1.0 处裁掉，预览保留的高光在缩略图和印样上就全部炸白，HDR 屏上预览窗口与其余界面、与最终印样三者不一致（用户 2026-09-13 提出）。SDR rendition 是同一肩部曲线族的 `asymptote = 1` 成员，拐点以下逐位相同，所以它是**同一张画的 SDR 版**而非另一套调色；这与 D-030 增益图基底同一定义，因此印样的 HDR 文件与逐帧导出对同一显示器给出同一高光。印样的 HDR 开关独立于卷的开关，因为印样是独立交付件——HDR 卷要一张 SDR 的实验室印样是正常需求；预览窗口是 SDR 界面，开关不改变预览只改变文件，文案说明了这一点。纸面钉在 SDR 白与齿孔填充同理（2026-09-13 的 `cd544d3`）：那里没有测量到任何高于 diffuse white 的东西，增益图在纸面处恒为 0 |
+| D-034 | Accepted（细化 D-021、D-031） | **HDR 下印片：印片的颜色，HDR 的影调。** 扩展目标上选了 SDR 输出的印片 LUT 时，渲染 = 印片的 SDR 渲染（cube → CMM 解进载体线性光）× 逐像素标量 `g = Y(解析 HDR) / Y(解析 SDR)`，g 在拐点以下恒为 1（印片逐位透传）、拐点以上按 D-021 的同一族曲线增长到 headroom，Y(SDR)=0 处取 1。`SdrRendition()` 保留 SDR 印片（只剔除 PQ LUT）；recipe 记 `print-LUT … colour x analytic luminance ratio (D-034)`。切换 LUT / 从标准渲染切换**不再重置 Stage 2** | 用户明确要"HDR 下用 LUT 调颜色"并在两条路（Resolve 里用 `Gamma 2.4 to HDR N nits` 上变换拼一张 / 程序内做新渲染）里选了后者。印片的肩部在 cube 里、不可逆，纸白之上什么都不剩，所以"把印片放进 HDR 容器"没有信息可放（D-021 的理由不变）；能说出"这个像素该亮多少"的只有仍握着负片全部宽容度的解析渲染，而它的 SDR/HDR 两个成员拐点以下相同，比值正好是"只在高光处打开"的那条曲线。用**标量**（亮度比）而非逐通道：逐通道会把印片从未显示过的颜色放回高光——印片的高光去饱和是 look 的一部分，用户选的是它；代价是 HDR 高光的颜色不会比印片里更饱和，明说。用解析族的比值而不是反解印片肩部：后者不存在。同一族、拐点以下逐位相同，正是 D-030 增益图"同一张画两个余量"的定义，所以 SDR rendition 改为保留印片，增益图仍是亮度单通道且拐点以下为 0。Stage 2 不再重置：比较印片是在已调好的帧上做的，每切一次丢一次调色让这件事没法做；数值按新渲染重新解读，与换输出空间时"在当前空间里调这么多"同一逻辑 |
+| D-033 | Accepted（supersedes D-015 / D-018 / D-019 的形式，保留其精神；细化 D-021） | **LUT 合同由卷声明，输入恒为 Cineon**：`FrameParams.PrintLutOutput` 声明 cube 的输出（`Rec709` / `DciP3` / `Srgb` / `Rec2020Pq`），文件头注释只做预填，未声明输出仍 fail closed（GUI 按卷状态预填）；输入没有选择——本程序的处理基于 Cineon，声明别的输入的 cube 在解析时拒绝（用户 2026-09-13 明确：输入只能匹配 Cineon；DWG/DI 与 Rec709 输入路径曾实现，已删）；PQ 用 ST 2084；**LUT 只在其输出所属的动态范围下参与**（SDR 输出 HDR 下让位 = D-021；PQ 输出 SDR 下让位，扩展目标下 LUT 即显示渲染，不再套解析肩部，PQ 以 203 nits = 1.0 解进载体、2020 原色旋进载体不裁）；外部 cube 的 recipe 身份为内容哈希 `sha256:…`，v1 冻结不受合同影响 | `.cube` 没有色彩空间字段，靠头部注释准入只让 Resolve 自带的 6 个 Film Looks 能用——用户在 Resolve 里调完色生成的 LUT 一个都不写这行，另 6 个 DCI-P3 Film Looks 因 γ2.6 也被拒；且 D-018 放行的文件在 `DescribeManagedPixels` 又因"非内置"抛异常，所以此前外部 LUT 在 ManagedV2 上从未真正渲染过。Resolve 本身就是让用户在 LUT 前后放 CST 来声明的，把同一责任交给用户是对齐而不是放宽；误声明的代价是可见、可改的一张错色图，比整条路关门强。HDR 侧：一张出口为 PQ 的 LUT 本身就是 HDR 显示渲染、自带肩部，D-021 拒绝的是把 SDR 印片放进 HDR 容器，不是拒绝 LUT；接口用 BT.2020+PQ 是因为那是 Resolve 的 Rec.2100 ST2084 输出，载体仍是 D-024 的线性扩展 sRGB、不裁。HLG 不做：到 nits 要经 OOTF，依赖显示峰值与系统 γ，一张 cube 说不清自己是多少 nits |
+| D-032 | Accepted（supersedes D-023） | 扩展渲染接受**全部** Stage 2：白平衡与曝光仍在线性光下相乘；色阶／对比度／高光阴影／曲线／饱和度**按卷自己的量程 `[0, headroom]` 定义**——载体先除以 headroom 归一到 `[0,1]`，再用 sRGB 曲线的解析延伸（`Srgb.LinearToSrgbExtended`：上不封顶、关于零镜像）进编码域，跑与 SDR 完全相同的 `ApplyOperationChain`，解码、乘回 headroom，最后仍由 `HighlightRolloff.BoundAbove` 收顶、填充钉回 1.0。SDR 路径逐字节不变。GUI：HDR 上限悬停不再说"会拒绝"，改为说明五项按上限定义、改上限会一起改影调 | D-023 拒绝的理由是"这五项按 display range 定义，喂无界的 scene-referred 数据无意义"；但扩展目标不是无界的——它有 headroom，`[0, headroom]` 与 SDR 终点的 `[0,1]` 一样是一个 display range，正是 HDR 上限声明文件将容纳的量程。归一化后对比度仍绕编码中点取枢轴、曲线右端就是 HDR 峰值、高光滑块能压到 SDR 白以上的高光，与 Lightroom 的 HDR 定义同构（其全部影调控制都跨越 HDR Limit）。**代价明说**：同一组参数在扩展目标与 SDR 目标上得到的 SDR 范围影调不同，因为定义所依的量程不同——SDR rendition（D-031）保留 SDR 定义，因此 gain-map JPEG 的两个 rendition 各按自己的量程调色，差异由增益图承载，不再是"同一张画的两个余量"这一强形式（拐点以下逐位相同不再成立）；改上限档数也会改 HDR 渲染的影调。用户 2026-09-13 在两条路里选了这条而非"只作用于 [0,1]、以上连续透传"：压不到 HDR 高光的高光滑块不是高光滑块。编码域用 sRGB 曲线而非输出空间曲线，因为 HDR 下没有输出空间（D-024），载体是 sRGB 原色；负分量镜像编码是为了让 D-005 保留的域外颜色穿过仿射的三项，曲线与高光阴影按各自定义仍钳负——与 SDR 相同 |
+| D-025 | Accepted（2026-09-12 深夜实机结案） | 扩展渲染**保持 D-021 现状**：拐点以下与 SDR 逐位一致，diffuse white 不另行锚定（code 685 在 SDR 落 0.75、在 +2.3 档落 0.949） | 用户在 VG27AQ1A（HDR 开）上把 `0-RAW` / `21-KG200` 在 SDR 与 HDR 间并排切换，判定通过：中间调没有被抬高的观感，纸白与 SDR 版对得上，高光细节按余量展开。锚定 diffuse white 的替代方案（只让其上展开）不再需要 |
+| D-028 | Accepted | **预览高光软校样**：扩展渲染的目标余量超过当前显示器余量时，组合根在 presentation generation 里用 `HighlightSoftProof.Fit` 把 `(1, 目标余量]` 单调压进 `(1, 显示余量]`——拐点恰在 diffuse white（canonical 1.0），拐点处斜率 1，目标顶端精确落在面板顶端；`RenderedFrame`、直方图、导出一律不动。显示器无余量（SDR 模式 / 滑块拉满）时不做、照旧裁切。状态徽章相应标"（高光软校样）"或"（高光裁切）"。`HdrPeakNits` 仍是工程参数（母版），不随显示器 | 用户要求预览对齐 Lightroom：LR 的 HDR Limit 由用户定档，显示余量由系统探到，预览把超出部分压进可显示范围而不是裁掉。这正好落在 I5 允许的那一格——"显示环境只能影响 presentation generation"——所以不需要改 I5，只需要把这一步放在组合根、放在 RenderedFrame 之后。拐点钉在 1.0 是为了让 SDR 范围逐位不变：软校样只能重塑"因为 HDR 目标才存在"的那部分，不能重新调中间调或移动纸白。无余量时不做，是因为把 `(1, 目标]` 压进"零"只能把拐点挪到 1 以下，那就动了 SDR 范围；诚实的做法是裁切并在徽章上说出来。区分"母版"与"预览"也回答了"既然预览跟屏幕走，为什么还要档位"：档位决定导出文件，屏幕决定你此刻看到多少 |
+| D-026 | Accepted（待真机复核） | macOS 的 `ReferenceWhiteScale` **恒为 1**，`ExtendedHeadroom` = `NSScreen.maximumExtendedDynamicRangeColorComponentValue`（当前值，不取 potential）；只有一种模式（系统所有的 FP16 载体），探不到屏幕即 emergency。presenter 在且仅在 headroom > 1 时置 `wantsExtendedDynamicRangeContent`——这是 D-012 的**候选**答案 | Apple 的 extended-linear-sRGB 载体把 SDR 白定在 canonical 1.0（相对亮度滑块，不是 nits），所以没有什么可乘——这与 Windows HDR（D-020，1.0 = 80 nits，应用自己抬 diffuse white）正好是镜像：同一份载体字节，抬白的归属相反，契约记录归属，builder 按契约行事。headroom 直接用 AppKit 报的当前值：potential 是别的亮度下能到的，不是现在会显示的；错的"安全线"比没有更糟。EDR 请求跟随 headroom：无余量时请求它一无所获且可能多一次 tone map，有余量时不请求则 >1 全被 layer 裁掉。D-012 保持 Open 直到真机证明开启该标记不改变 SDR 亮度 |
 
 ### 17.1 拒绝的替代方案
 
@@ -766,12 +828,41 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
   framework merge 成本；除非 native preview 方案实证不可行，不采用。
 - **Windows/macOS 分别实现 overlay shader**：业务逻辑和几何必然漂移，airspace 问题也没有被统一解决。
 - **用 Electron/Chromium 绕过**：不能消除色彩契约问题，且违背现有基础上的修复目标。
+- **用一套 Vulkan presenter 统一三平台**（`VK_EXT_swapchain_colorspace` / `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT`）：范畴错误。它统一的是"怎么把字节送过去"，而平台差异全在"送过去之后谁做什么"，一个平台相关决定都消不掉。三条具体理由：Windows 上 `EXTENDED_SRGB_LINEAR` 在 **ACM-SDR-WCG**（本应用的头号场景，HDR 关）下能否取得存疑，可能严格劣于 DXGI；macOS 上 MoltenVK 最终仍落到 `CAMetalLayer`，而 EDR 的 `wantsExtendedDynamicRangeContent` / `maximumExtendedDynamicRangeColorComponentValue` 是 layer 属性，**逃不掉原生层**；Linux 上 Mesa 的 Vulkan colorspace **本来就是靠 Wayland CM 协议实现的**，不会让我们提前拿到任何东西。外加丢失现有 WARP 软件回退、对 (b) 导出零帮助、以及一个需要按 D-002 纪律做 app-owned 校验的大型原生依赖。
+- **把预览搬进 Avalonia 自己的合成器**（`ICompositionGpuInterop` + `CompositionDrawingSurface`）：能消掉 airspace 税、让叠加层变成真正的 Avalonia 控件，但导入之后像素归 Avalonia 合成器管，而它是 8-bit sRGB 的——广色域在导入那一刻就死了。**airspace 与色域在 Avalonia 下二选一**，本应用选色域。这也是 D-007（叠加层在共享 F16 场景里合成）的最终理由。
+- **HDR 用 `R10G10B10A2` + HDR10/BT.2100 swapchain**（微软的 Option 2）：只是性能优化，且要求无 alpha 混合、仅 HDR 屏，并**放弃负值与 sRGB 色域外表示**——那正是 D-005 要保的东西。FP16 + scRGB 是唯一对 SDR / WCG / HDR 三者通用的载体。
 
 ---
 
 ## 18. 开放决策的 spike 要求
 
-### D-011 / D-012：reference white 与 macOS EDR
+### D-025（已结案，见 §17）：扩展渲染里 diffuse white 落在哪
+
+> 2026-09-12 深夜用户在真 HDR 屏并排比对通过，维持现状。下文是当时的 spike 要求，留作记录。
+
+D-021 的曲线族让拐点以下逐位一致，但**没有**把 diffuse white 钉在与 SDR 相同的位置：
+code 685（肩部前的线性 1.0）在 `asymptote = 1` 下渲染到 0.75，在 `asymptote = 4.926`
+下渲染到 0.949。也就是说 HDR 渲染整体比 SDR 亮，而不只是高光更高——这正是「HDR 看起来
+就是更亮的 SDR」这个常见陷阱的形状。
+
+单调曲线无法同时满足「拐点以下与 SDR 一致」和「diffuse white 与 SDR 同位」，所以这是一个
+**取舍**而不是缺陷。当前实现选了前者。是否应该改为把 diffuse white 锚定、只让其上的宽容度
+展开，必须在真的 HDR 显示器上并排比对才能判断——**本机（VG27AQ1A）只有 WCG，没有 HDR**。
+
+必须记录：同一张底片在 SDR 与各档 HDR 峰值下的并排观感；中间调是否感觉被抬高；
+纸白是否与 SDR 版本对得上；以及高光细节相对于 `asymptote` 的可见增益。
+
+### D-012：macOS EDR（Windows 侧已由 D-020 结案）
+
+> **候选答案已实现，等真机判定。** D-026 把 `wantsExtendedDynamicRangeContent` 定为"当且仅当
+> 契约 headroom > 1"，`MacOSDisplayContractProvider.ShouldRequestExtendedRange` 就是那条规则，
+> presenter 在它翻转时要求重建（`MacOSPreviewPresenterTests.Headroom_appearing_flips_the_edr_request_and_requires_recreation`）。
+> 下面的 spike 清单现在有了一个具体的被试对象。
+
+> **Windows 的 reference white 不再是开放决策。** D-020 已按 Advanced Color 模式分流并落地：
+> WCG `1.0`、HDR `SdrWhiteNits / 80`，由 `WindowsDisplayEnvironmentTests` 的三条用例钉住。
+> 下面这份 spike 清单只对 **macOS** 仍然有效；其中「Windows Advanced Color 同一 canonical patch
+> 的相对白表现」保留为 macOS 的对照基准，而不再是 Windows 自己的待验项。
 
 必须记录：
 
@@ -781,7 +872,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 - 是否发生 component clamp、整体亮度变化或 tone mapping；
 - Windows Advanced Color 同一 canonical patch 的相对白表现。
 
-结论必须更新 contract 的 scale 语义和 D-011/D-012，不允许只留下实验代码。
+结论必须更新 contract 的 scale 语义和 D-012，不允许只留下实验代码。
 
 ### D-013：legacy migration
 
@@ -827,6 +918,13 @@ latency。只比较共享实现；不得以“平台 shader 更快”为由把�
 | 2026-08-30 | `b7a3324`、`c61c355` | 完成 M1：固定并打包 app-owned LittleCMS 2.19.1；建立 exact profile identity、typed frame 与 transform diagnostics 基础 | 固定来源/哈希/加载路径验证；typed source/working/render 与 canonical fixtures 通过 | M2：统一 managed 输入、渲染、导出和迁移语义 |
 | 2026-08-30 | `a3e82a5` | 完成 M2 主体与 M3/M4 Windows 切片：统一 managed ICC 链、TIFF32F extended export、L2 显式迁移、稳定 fingerprint、共享 F16 compositor，以及 Advanced/legacy/emergency presenter、recovery 和 fallback | Release `-warnaserror` 0 warning/0 error；managed 402/402、Win32 30/30；native ABI/repro/smoke 通过，DLL SHA-256 `57E90A68D9356421F94C7217BDBA36178D2DABFA877495AAD6377E0DA790B0D5`；EIZO CG2700X 探针选出 FP16/scRGB system-owned contract | 收口 untagged TIFF 与导出 ICC 的 fail-closed UI/CLI 契约 |
 | 2026-08-30 | `98fc462` | 收口 M2：新 TIFF 卷显式选择 linear/sRGB fallback，有效 ICC 原子优先，坏 ICC 仅由显式 fallback 接管；选择随项目、完整图/预览/区域/标定/分割/导出及 cache identity 传播；导出 UI 与 exporter 仅允许 exact display-sRGB 省略 ICC；工程/新卷长预处理采用二次 flush 后原子接管，避免跨卷污染或丢编辑 | Release `-warnaserror` 0 warning/0 error；focused TIFF/ICC 16/16、managed 424/424、Win32 30/30；CLI 互斥/fail-closed 进程级检查通过；两轮独立只读复审 0 P0/P1；native ABI 与 legacy/Advanced smoke 再通过 | 推送并提交上游 Windows PR；用参考查看器/色度计与第二显示器关闭 M4 硬件人工门槛；macOS M5 延后 |
+| 2026-09-12 | 分支 `feat/hdr-output-target`，`1deb5a2`…`f4bfae1`（13 个提交，基于 `main`@`a32c868`），工作区干净 | D-020（HDR 不再 fail-closed，scale 按 AC 模式分流）；D-021～D-024（参数化输出终点、肩部一族曲线、Stage 2 扩展路径、载体恒为 LinearExtendedSrgb）；HDR 峰值选择器 + 工程持久化 + v1 工程禁用；DXGI 读面板峰值 → 真 `ExtendedHeadroom`；直方图扩展区与裁切线；D-026 macOS 政策 + `Presentation.MacOS` 托管半边 + `MacOSPreviewHost` 接入组合根 + Obj-C++ 垫片源码与构建脚本 | Release `-warnaserror` 0/0；managed 528、Win32 40、MacOS 25 全绿；Windows 真机（VG27AQ1A，HDR 开、SDR 白 120 nits、面板 520 nits）：HDR 屏走 system-owned FP16 WYSIWYG，真底片 HDR 600 高光出细节，直方图裁切线在 +2.1 档 | **D-025（Open）diffuse white 落点**要在真 HDR 屏并排比对；**Mac**：跑 `build-macos-presenter.sh` 首次编译、按 Native/README 四项验 D-012；之后 PQ/CICP 导出（(b) 的消费端）与合并到 `main` |
+| 2026-09-12 晚 | 分支 `feat/hdr-output-target` rebase 到 `main`@`81678f4`（用户重做了 PR #4 合并提交以修 message 乱码，树相同），20 个提交，工作区干净 | D-027 新卷缺省取显示器余量；D-028 预览高光软校样（`HighlightSoftProof`，presentation generation）；D-029 GUI 对齐 Lightroom：SDR/HDR 开关 + 档数上限滑块，nits 预设废止；直方图细刻度移到图下直尺、扩展轴固定 4 档；HDR 下输出空间/胶片风格槽位让位给说明；显示空间进色彩徽章健康态悬停 | Release `-warnaserror` 0/0；managed 550、Win32 40、MacOS 25 全绿；用户真机看过开关、滑块、直尺、软校样 | **C. PQ/CICP 导出**（先做零原生依赖的 gain-map JPEG，再 `TransferState` PQ/HLG + CICP，最后 AVIF/JXL）；D-025 并排比对仍开；远端分支需 `--force-with-lease`，由用户决定 |
+| 2026-09-12 深夜 | 分支 `feat/hdr-output-target`，续于 `60e50bf`，工作区改动待提交 | **C(b) 第一步：gain-map JPEG 导出**（D-030）：`HdrGainMap`（逐通道 log2 增益 + 元数据、`Reconstruct`/`WeightFor` 读者侧算法）、`GainMapJpegContainer`（MPF APP2 + 两段 XMP 手写）、`JpegIO.ExportGainMapJpeg`；GUI：HDR 卷下 JPEG 自动写成增益图 JPEG，导出对话框多出「增益图基底」（sRGB / Display P3），`ExportOptions.HdrLimitStops` 随卷带入，`ExportIccUiPolicy` 加 `hdrMaster`（HDR TIFF 强制嵌 ICC——此前未勾 ICC 的 HDR TIFF 导出会抛异常）；VM 的 `RenderAndWriteExport` 为增益图第二次渲染 SDR 基底（去峰值、去印片 LUT、换基底空间） | `-warnaserror` 0/0；managed 561、Win32 40、MacOS 25 全绿；`GainMapJpegTests` 含从文件字节走一遍读者算法的往返；Pillow 12 独立解析 MPF 正确。实机：**Chrome 与手机正常，Windows 相册一直只有极微弱效果**——文件与 Skia 参考文件逐字节同形，9 个单变量变体在相册里无一变好，判定为相册问题，不追。追相册期间留下的独立改动：缺省亮度单通道灰度图、HDR 侧超色域去饱和（`HdrInBaseGamut`）、基底 ISO 段只留版本、`HDRCapacityMax` 取内容最大增益并钳增益 ≥ 0。**D-025 用户实机并排比对通过，结案** | 提交本轮改动；PQ/CICP + AVIF/JXL 降为"有需求再做"（跨端观看 gain map 已足够，PQ 是专业交付需求）；Mac 阶段 B 等机器 |
+| 2026-09-13 | 分支 `feat/hdr-output-target`，续于 `cd544d3`，工作区改动待提交 | **D-031：SDR 界面统一显示 SDR rendition + 印样 HDR 开关**：`FrameParams.SdrRendition(baseSpace?)`（Core，D-030 的 `GainMapBaseParams` 改为委托它）；片夹缩略图（`RenderThumbnailAsync` / `RefreshThumbnail` / `RenderPreviewAsync` 的顺带缩略图）、图库封面（`RenderSheetCells`）、印样缩略图全部走它；`ContactSheet.PasteCells` / `WithExtendedCells`（Core）、`SheetComposer.GridOrigin`；`BuildContactThumbsAsync` 返回 `ContactThumbs(Sdr, Extended?, Target)`；`ExportContactSheetAsync(thumbs, hdr, …)` 在 HDR 下写 gain-map JPEG / float32 TIFF；`ContactSheetDialog` 加「动态范围 / HDR 印样」勾选（HDR 卷可见，随卷缺省开）；HDR 上限滑块不再重建缩略图 | `-warnaserror` 0/0；managed 572、Win32 40、MacOS 25 全绿；新增 `SdrRenditionTests`（6 条：SDR 自身/HDR 去峰值去 LUT/拐点以下与扩展渲染一致/格子替换与纸面钉白/异原色拒绝/印样增益图纸面处恒 0）。未实机 | 用户实机看片夹与印样在 HDR 屏上是否与预览一致；提交本轮改动 |
+| 2026-09-13 晚 | 分支 `feat/hdr-output-target`，续于 `a0d2fee`，工作区改动待提交（与 D-033 同一工作区） | **D-034：HDR 下印片 = 印片色 × 解析族亮度比**：`ColorPipeline.ToExtendedOutputTargetViaPrint`（三份数据：解析 SDR、解析 HDR、印片经 CMM 进载体；`ParallelSweep.OverPixels` 逐像素标量）；`LutContract.AppliesTo` SDR 输出对两种目标都为真；`FrameParams.SdrRendition` 保留 SDR 印片、剔除 PQ LUT（需解析 cube）；`Pipeline.DescribeManagedPixels` recipe 三分支；GUI：选片器 SDR 下不列 PQ、HDR 下全列，输出按钮两态可见（PQ 项只 HDR 可见），未声明一律预填 Rec709，「印片色 · HDR 影调」注记；**`ApplyPrintLut` 不再 `ResetScene`**（用户要求）。用户另问"SDR LUT 的输出空间是否该跟着卷的输出空间走"——答否：LUT 输出是文件的事实（Rec709/DCI-P3 之类），卷的输出空间是容器，两者之间本来就由 CMM 转换（D-010），绑在一起就是"保留 Rec709 数值贴 sRGB 标签"那个被禁止的 bug | `-warnaserror` 0/0；managed 613、Win32 40、MacOS 25 全绿；`LutContractTests` 加 `A_print_stock_under_HDR_keeps_its_colour_and_takes_the_HDR_tone`（真 2383 文件：拐点以下与印片逐位相同、以上为同一标量 × 印片、顶端被抬）、`The_SDR_rendition_keeps_a_print_stock_and_drops_an_HDR_LUT`；`OutputTargetTests.Extended_target_does_not_consult_the_print_lut` 改为 `…renders_a_print_stock_as_its_colour_with_the_hdr_tone`。实机两处修复：`BuildParams()` 补 `PrintLutOutput`（此前改输出声明预览无反应）；选片器重建改为行不变不动集合、围绕当前选中行重建（此前 HDR 开关后下拉空白）；`PrintLutPickerTests` 4 条；输出按钮只对文件头未声明输出的 cube 出现（自带印片声明了 Rec709，改成 PQ 只会把 γ2.4 码值当绝对亮度解——用户撞上了）。617 全绿 | 用户实机：HDR 屏上开 HDR 选 2383，看高光是否打开、缩略图/印样是否与预览拐点以下一致；提交 |
+| 2026-09-13 傍晚 | 分支 `feat/hdr-output-target`，续于 `a0d2fee`，工作区改动待提交 | **D-033：LUT 合同由卷声明，对齐 Resolve 色彩规范**：`CubeLut` 输出枚举扩到 4 个 + `LutContract` + `ContentIdentity`（输入仍只有 Cineon）；`Pq.cs`；`ColorSpaces.DciP3 / Rec2020`；`BuiltInProfileId.DciP3`；`ColorPipeline.PrintLutFor`（唯一裁决点）/ `EncodeLutInput` / `NativeSpaceOf` / `ToExtendedOutputTargetVia`；`Pipeline.DescribeManagedPixels` 去掉"非内置即抛"，外部 cube 记 `sha256:`；`FrameParams.PrintLutOutput` + `LutContractFor`，`Project` 持久化；GUI 底栏「输出」按钮（SDR 下三选一；HDR 下无按钮）、让位说明、**选片器按 SDR/HDR 状态过滤**、选片按状态预填+状态栏说明、旧工程未声明输出的迁移提示；CLI `--lut-output`。**同一轮内用户三次收窄**：① "只想用 Cineon 成品 cube"→ 合同按钮只在需要时出现；② "内置换成标准 cube + 安装带 LUT 文件夹"→ `Assets/Luts` 六张 Resolve Rec709 Film Looks（原名）复制到产物 `luts/`，`:luts/<文件名>` 记号，旧记号仍解析；③ "输入只能是 Cineon / 按状态过滤 / LUT 里为什么有 HDR 档位"→ 删 DWG/DI 与 Rec709 输入路径、删烘出来的 HDR Standard cube 与 `CubeBaker`、选片器按状态过滤。THIRD_PARTY_NOTICES §16 更新 | `-warnaserror` 0/0；managed 624、Win32 40、MacOS 25 全绿；新增 `LutContractTests`（24 条：PQ 锚点、头部预填、非 Cineon 输入拒绝、卷声明优先级、工程往返、范围规则、外部 cube 渲染与内容哈希、Cineon 路径逐位不变、DCI-P3 经 CMM、HDR LUT 参与/让位双向、PQ 出口手算复现、随程序六张与预填、旧记号=同一内容哈希）。未实机 | 用户实机：用 Resolve 生成一张 DWG/DI → Rec709 的 LUT 与一张 → Rec.2100 ST2084 的 LUT 各试一次；提交本轮改动 |
+| 2026-09-13 午后 | 分支 `feat/hdr-output-target`，续于 `17e8203`，工作区改动待提交 | **D-032：HDR 下 Stage 2 五项按卷的量程可用**（supersedes D-023）：`Stage2.ApplyManagedToExtendedTarget(d, cal, headroom)` 不再抛 `NotSupportedException`，归一化 → `Srgb.LinearToSrgbExtended` → `ApplyOperationChain`（`LinearExtendedSrgb` 权重）→ 解码 × headroom；`Srgb.LinearToSrgbExtended` / `SrgbToLinearExtended` 新增（公开）；`Pipeline.Render` 与 `RegionRender`（sharp patch）传 `target.HighlightHeadroom`；`HdrLimitHint` 的"会拒绝"改为"按上限定义、改上限一起改影调"（en.json 同步） | `-warnaserror` 0/0；managed 587、Win32 40、MacOS 25 全绿；`OutputTargetTests` 拒绝用例替换为三条：五项各自生效且不越 headroom（5 变体）、高光滑块压得到 SDR 白以上像素、扩展编码往返（含负与 >1，[0,1] 上与 `LinearToSrgb` 逐位相同）。未实机 | 用户实机：HDR 卷拉对比度/高光/曲线看预览与增益图 JPEG；提交本轮改动 |
 
 ---
 

@@ -20,7 +20,9 @@ public static class PrintLuts
     private static readonly ConcurrentDictionary<string, CubeLut?> Cache = new();
 
     /// <summary>
-    /// Print stocks shipped inside the assembly, keyed by the sentinel a project stores.
+    /// The two stocks embedded in the assembly, keyed by the sentinel projects written before
+    /// D-033 store. Kept so those projects open unchanged; new picks come from
+    /// <see cref="Bundled"/>, which offers the same files (and more) from the shipped folder.
     ///
     /// WHY A SENTINEL AND NOT A PATH. A built-in has no stable path: it lives inside the
     /// assembly, and the assembly moves with the install. Storing one would make a project
@@ -38,9 +40,45 @@ public static class PrintLuts
         (":fujifilm-3513di", "Rec709 Fujifilm 3513DI D65"),
     };
 
-    /// <summary>Whether <paramref name="path"/> names a built-in rather than a file on disk.</summary>
+    /// <summary>
+    /// Prefix of the sentinel a project stores for a cube in the shipped folder:
+    /// <c>:luts/Rec709 Kodak 2383 D65.cube</c>. Same reasoning as the embedded sentinels — the
+    /// folder moves with the install, so the project names the file, not the location.
+    /// </summary>
+    public const string BundledPrefix = ":luts/";
+
+    /// <summary>
+    /// The LUT folder shipped beside the executable — <c>luts/</c> under the application base
+    /// directory, filled from <c>Assets/Luts</c> at build time. Read-only in practice (Program
+    /// Files, a signed .app, an AppImage mount); the user's own cubes go in the per-user drop-in
+    /// folder the GUI owns.
+    /// </summary>
+    public static readonly string BundledDir = Path.Combine(AppContext.BaseDirectory, "luts");
+
+    /// <summary>
+    /// The shipped cubes, as (sentinel, display name) in name order. Never throws; an install
+    /// without the folder simply offers none.
+    /// </summary>
+    public static IReadOnlyList<(string Id, string Name)> Bundled()
+    {
+        var list = new List<(string, string)>();
+        foreach (string file in InFolder(BundledDir))
+        {
+            string name = Path.GetFileName(file);
+            list.Add((BundledPrefix + name, Path.GetFileNameWithoutExtension(name)));
+        }
+        return list;
+    }
+
+    /// <summary>Whether <paramref name="path"/> names a built-in or bundled cube rather than a file the user picked.</summary>
     public static bool IsBuiltin(string? path) =>
-        !string.IsNullOrWhiteSpace(path) && path[0] == ':' && FindBuiltin(path) is not null;
+        !string.IsNullOrWhiteSpace(path) && path[0] == ':'
+        && (FindBuiltin(path) is not null || IsBundledSentinel(path));
+
+    private static bool IsBundledSentinel(string path) =>
+        path.StartsWith(BundledPrefix, StringComparison.OrdinalIgnoreCase)
+        && path.Length > BundledPrefix.Length
+        && path.IndexOfAny(new[] { '/', '\\' }, BundledPrefix.Length) < 0;   // a file name, never a path
 
     private static string? FindBuiltin(string path)
     {
@@ -56,12 +94,15 @@ public static class PrintLuts
     /// </summary>
     private static CubeLut LoadBuiltin(string id)
     {
+        if (IsBundledSentinel(id))
+            return CubeLut.Load(Path.Combine(BundledDir, id[BundledPrefix.Length..]));
+
         string name = $"OpenRevelare.Core.Assets.Luts.{id[1..]}.cube";
         var asm = typeof(PrintLuts).Assembly;
         using Stream? stream = asm.GetManifestResourceStream(name)
             ?? throw new InvalidDataException($"内置 LUT 缺失：{name}");
         using var reader = new StreamReader(stream);
-        string fallback = Builtins.First(b => b.Id == id).Name;
+        string fallback = Builtins.First(b => b.Id.Equals(id, StringComparison.OrdinalIgnoreCase)).Name;
         // No out-of-band characterization passed on purpose, on EITHER end. These two assets
         // declare "Input: Cineon Log" and "Display: ITU-Rec.709, Gamma 2.4" in their own headers,
         // and CubeLut now reads both, so hard-coding either answer here would make the built-ins a

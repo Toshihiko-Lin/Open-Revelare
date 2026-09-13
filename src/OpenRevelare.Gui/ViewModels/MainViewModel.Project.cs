@@ -184,6 +184,8 @@ public partial class MainViewModel
         if (_colorPipelineVersion == value) return;
         _colorPipelineVersion = value;
         OnPropertyChanged(nameof(UsesLegacyColorPipeline));
+        OnPropertyChanged(nameof(CanChooseHdrPeak));
+        NotifyHdrText();
         OnPropertyChanged(nameof(ShowLegacyColorPipelineNotice));
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
         OnPropertyChanged(nameof(ColorPipelineDiagnostic));
@@ -577,10 +579,9 @@ public partial class MainViewModel
         int done = 0, total = 3 + nF;
 
         ReportBackground(Loc.F($"解码校正图与内容帧 0/{total} …"));
-        var opts = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
-        };
+        // Same worker count as every other roll-wide pass; ImageIo's gate weighs the three
+        // full-quality decodes and the six previews against free memory as they arrive.
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = ImageIo.PreviewWorkers };
         Parallel.For(0, total, opts, i =>
         {
             if (i < 3)
@@ -696,6 +697,13 @@ public partial class MainViewModel
         // rather than the finished frames keeps each split scan's virtual copies next to their
         // parent, since they are all contributed by one path.
         foreach (string p in SortedByName(paths)) AddFramesForPath(p);
+        // D-027: a new roll starts at the HDR tier this display shows in full. Seeded on the
+        // frames BEFORE the first switch, so LoadParams adopts it like any stored value, and
+        // before RegisterRoll, so the first .ncproj carries it — a default that lived only in the
+        // picker would evaporate when the roll is reopened elsewhere, which is exactly the drift
+        // I5 forbids. OpenProjectAsync never comes through here: an existing roll keeps its own.
+        double newRollPeak = DefaultHdrPeakNitsForNewRoll();
+        foreach (RollFrame f in Frames) f.Params.HdrPeakNits = newRollPeak;
         RefreshSplitPaths();        // before the first switch, which consults it
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
@@ -851,7 +859,8 @@ public partial class MainViewModel
         // Adopt the roll's saved step-4 target without writing it back or dirtying the roll —
         // this is loading, not choosing.
         SyncOutputSpace(p.ResolvedOutputSpace.Name);
-        SyncPrintLut(p.PrintLut);
+        SyncHdrPeak(p.HdrPeakNits);
+        SyncPrintLut(p);
         // Stage 1 — film base
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMinPerChannel = (double[])p.DMinPerChannel.Clone();

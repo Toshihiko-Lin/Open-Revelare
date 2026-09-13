@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.Interop;
@@ -140,7 +141,7 @@ public partial class MainViewModel
             Bitmap fallback = BuildFallbackBitmap(rendered, scene);
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
-            HistogramData histogram = HistogramData.FromBuffer(outImg.Data);
+            HistogramData histogram = HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
             WriteableBitmap? clipping = ShowClipping ? BuildClippingOverlay(outImg) : null;
             PresentationScene? clippingScene = ShowClipping
                 ? BuildClippingPresentationScene(outImg)
@@ -176,7 +177,7 @@ public partial class MainViewModel
             PresentationScene scene = ConvertPreviewScene(rendered);
             ct.ThrowIfCancellationRequested();
             // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
-            HistogramData h = HistogramData.FromBuffer(outImg.Data);
+            HistogramData h = HistogramData.FromFrame(rendered, p.ResolvedOutputTarget.HighlightHeadroom);
             WriteableBitmap? c = wantClipping ? BuildClippingOverlay(outImg) : null;
             PresentationScene? clipScene = wantClipping
                 ? BuildClippingPresentationScene(outImg)
@@ -189,7 +190,17 @@ public partial class MainViewModel
             // (main_window.py::_on_process_done → _film_strip.update_thumbnail(result)) rather
             // than paying for a second inversion. outImg is already cropped and oriented, so the
             // thumbnail matches the frame as composed.
-            RenderedFrame thumbnailFrame = rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
+            //
+            // Not on an HDR roll, though: the strip is an SDR surface and shows the SDR rendition
+            // (D-031), which is a different shoulder, not a scaled copy of the extended render.
+            // A second pass over a 256 px source is a few milliseconds; the SDR roll keeps the copy.
+            RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
+                ? Pipeline.Render(
+                    source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
+                    p.SdrRendition(),
+                    pipelineVersion,
+                    ColorManagement)
+                : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
             var t = BuildFallbackBitmap(thumbnailFrame);
             return (BuildFallbackBitmap(rendered, scene), h, t, c,
                     scene, clipScene, rendered);

@@ -41,6 +41,7 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         string stableId = BuildStableDisplayId(activePath);
         AdvancedColorState advanced = ReadAdvancedColor(activePath);
         (uint? sdrRaw, float sdrNits, string? sdrFailure) = ReadSdrWhite(activePath);
+        (DisplayLuminance? luminance, string? luminanceFailure) = DxgiOutputInterop.Read(monitor);
 
         MonitorProfileData? profile = null;
         string? profileFailure = null;
@@ -64,7 +65,9 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
             sdrFailure,
             profile,
             profileFailure,
-            null);
+            null,
+            luminance,
+            luminanceFailure);
     }
 
     private static ActiveDisplayPath ResolveActivePath(string gdiDeviceName)
@@ -287,7 +290,7 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         {
             return (
                 null,
-                80f,
+                DisplayContract.CanonicalNominalWhiteNits,
                 $"DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL failed with {ErrorCode(result)}; " +
                 "using the 80-nit scRGB default.");
         }
@@ -295,11 +298,11 @@ internal sealed class Win32DisplayProbe : IWindowsDisplayProbe
         {
             return (
                 null,
-                80f,
+                DisplayContract.CanonicalNominalWhiteNits,
                 "DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL returned zero; " +
                 "using the 80-nit scRGB default.");
         }
-        return (white.SdrWhiteLevel, white.SdrWhiteLevel / 1000f * 80f, null);
+        return (white.SdrWhiteLevel, white.SdrWhiteLevel / 1000f * DisplayContract.CanonicalNominalWhiteNits, null);
     }
 
     private (MonitorProfileData? Profile, string? Failure) ReadMonitorProfile(

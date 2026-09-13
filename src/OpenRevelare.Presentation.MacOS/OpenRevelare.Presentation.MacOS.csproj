@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
+    <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />
+  </ItemGroup>
+
+  <!-- The native shim is produced by packaging/macos/build-macos-presenter.sh into native/osx-<arch>/
+       and reaches the publish output through OpenRevelare.Gui.csproj's RID-conditioned
+       native/$(RuntimeIdentifier)/*.dylib glob, the same way libraw does. Nothing is declared here
+       on purpose: a second, OS-conditioned Content item is exactly the silent-duplicate trap that
+       csproj's comment warns about. -->
+
+</Project>
