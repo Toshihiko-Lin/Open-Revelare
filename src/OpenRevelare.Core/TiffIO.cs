@@ -660,26 +660,16 @@ public static class TiffIO
                 ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
             var (width, height, _, encoded, codeStep, sourceRange) = ReadTiffSamples(tif, path);
 
-            // Four private probe pixels estimate the source lattice after the full colour
-            // conversion: black plus one code in each source primary. They travel through the
-            // same single Apply call as the image, avoiding a second transform path. Because a
-            // 3-D colour conversion has no exact scalar lattice, SourceQuantisationStep records
-            // the conservative largest first-code component in working-space units.
-            int imageFloatCount = encoded.Length;
-            float[] encodedWithProbes = new float[checked(imageFloatCount + 12)];
-            encoded.CopyTo(encodedWithProbes, 0);
-            int probe = imageFloatCount;
-            encodedWithProbes[probe + 3] = codeStep;
-            encodedWithProbes[probe + 7] = codeStep;
-            encodedWithProbes[probe + 11] = codeStep;
-
-            float[] convertedWithProbes = new float[encodedWithProbes.Length];
+            // Converted IN PLACE. The transform is per pixel, and the lease documents that source
+            // and destination may be the same buffer, so the frame never exists twice. It used to:
+            // a copy carrying four probe pixels, a second buffer for the output and a third copy
+            // trimming the probes back off — four times the frame at peak, 9 GB for a 190 MP
+            // Flextight strip, which is what put an 8 GB machine into swap (or OutOfMemory) on
+            // every split cell of such a scan.
+            int pixelCount = checked(width * height);
             try
             {
-                transform.Apply(
-                    encodedWithProbes,
-                    convertedWithProbes,
-                    checked(width * height + 4));
+                transform.Apply(encoded, encoded, pixelCount);
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
             {
@@ -689,9 +679,15 @@ public static class TiffIO
                     ex);
             }
 
-            float[] converted = convertedWithProbes.AsSpan(0, imageFloatCount).ToArray();
+            // Four private probe pixels estimate the source lattice after the full colour
+            // conversion: black plus one code in each source primary. Same lease, same native
+            // transform, a second Apply call — a per-pixel conversion gives the same answer for a
+            // pixel whether it is batched with the image or on its own. Because a 3-D colour
+            // conversion has no exact scalar lattice, SourceQuantisationStep records the
+            // conservative largest first-code component in working-space units.
             double quantisationStep = ManagedQuantisationStep(
-                convertedWithProbes.AsSpan(imageFloatCount, 12));
+                ConvertProbes(transform, codeStep, path));
+            float[] converted = encoded;
             var pixels = new ImageBuffer(width, height, converted)
             {
                 SourceQuantisationStep = quantisationStep,
@@ -862,6 +858,31 @@ public static class TiffIO
         throw new NotSupportedException(
             $"unsupported TIFF sample storage: BitsPerSample={bitsPerSample}, " +
             $"SampleFormat={describedFormat} (need uint8, uint16, or IEEE-float32)");
+    }
+
+    /// <summary>
+    /// The four lattice probes — black, then one source code in each primary — through
+    /// <paramref name="transform"/>. Twelve floats in, twelve out; see the caller for why they
+    /// no longer ride along with the image.
+    /// </summary>
+    private static float[] ConvertProbes(IColorTransformLease transform, float codeStep, string path)
+    {
+        var probes = new float[12];
+        probes[3] = codeStep;
+        probes[7] = codeStep;
+        probes[11] = codeStep;
+        try
+        {
+            transform.Apply(probes, probes, 4);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            throw new ColorManagementException(
+                $"Managed TIFF input failed while applying the ICC transform to the lattice " +
+                $"probes for '{Path.GetFileName(path)}'.",
+                ex);
+        }
+        return probes;
     }
 
     private static double ManagedQuantisationStep(ReadOnlySpan<float> convertedProbes)
