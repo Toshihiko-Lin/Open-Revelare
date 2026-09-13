@@ -206,7 +206,23 @@ public static class RegionRender
     public static (ImageBuffer Image, Roi Realised) RenderFromSlice(
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
         FrameParams cal, Roi roi, bool negative = false, double[]? negativeWb = null)
+        => RenderFromSlice(source, sourceX0, sourceY0, frameW, frameH, cal, roi, negative,
+                           negativeWb, trackFill: false, out _);
+
+    /// <summary>
+    /// <see cref="RenderFromSlice(ImageBuffer,int,int,int,int,FrameParams,Roi,bool,double[]?)"/>,
+    /// optionally reporting which OUTPUT pixels are fill — the regional twin of the tracking
+    /// overload of <c>Pipeline.ProcessFrame</c>. The mask is known on the slice; it goes through
+    /// the same composed geometry map the picture does, with the map's own corner fill, rather
+    /// than through a second copy of its arithmetic. Null when not tracked or when the frame has
+    /// neither a sprocket mask nor a rotation.
+    /// </summary>
+    private static (ImageBuffer Image, Roi Realised) RenderFromSlice(
+        ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
+        FrameParams cal, Roi roi, bool negative, double[]? negativeWb,
+        bool trackFill, out bool[]? fill)
     {
+        fill = null;
         var (rect, realised) = Realise(frameW, frameH, cal, roi);
         var b = SourceBounds(frameW, frameH, cal, rect);
 
@@ -280,6 +296,23 @@ public static class RegionRender
 
         // ── Geometry: one composed inverse map, output rect → source coordinate ──
         ImageBuffer outImg = MapGeometry(inverted, b.X0, b.Y0, frameW, frameH, cal, rect);
+
+        if (trackFill && (mask != null || cal.Rotation != 0.0))
+        {
+            var maskImg = new ImageBuffer(sw, sh);
+            if (mask != null) Sprocket.ApplyMask(maskImg.Data, mask);
+            // MapGeometry writes 1.0 into the corners the rotation uncovers — the same rule
+            // Pipeline.MapFillThroughGeometry gets from Geometry.ApplyRotation(fill: 1.0f).
+            ImageBuffer mapped = MapGeometry(maskImg, b.X0, b.Y0, frameW, frameH, cal, rect);
+            var outFill = new bool[mapped.PixelCount];
+            float[] md = mapped.Data;
+            ParallelSweep.Over(outFill.Length, (from, to) =>
+            {
+                for (int p = from; p < to; p++)
+                    outFill[p] = md[p * 3] > 0.0f;
+            });
+            fill = outFill;
+        }
 
         // ── Step 4 + Stage 2 (pointwise; no region dependence) ───────────────────
         if (cal.OutputIntent == OutputIntent.Basic)
@@ -428,17 +461,36 @@ public static class RegionRender
         // gate being closed here.
         FrameParams scene = cal.Clone();
         scene.OutputIntent = OutputIntent.None;
+        OutputTarget target = cal.ResolvedOutputTarget;
         var (pixels, realised) = RenderFromSlice(
-            source, sourceX0, sourceY0, frameW, frameH, scene, roi);
+            source, sourceX0, sourceY0, frameW, frameH, scene, roi,
+            negative: false, negativeWb: null, trackFill: target.IsExtended, out bool[]? fill);
 
         if (cal.OutputIntent == OutputIntent.Basic)
         {
-            ColorPipeline.ToOutputSpaceFor(
+            // THE SAME TERMINAL AS THE WHOLE FRAME (D-022). The patch is composited over the
+            // preview and described with the roll's target, so it has to be rendered to that
+            // target too: an HDR roll's patch that took the SDR exit would be sRGB-encoded pixels
+            // labelled as the linear extended carrier — the "relabel without converting" failure
+            // D-003 exists to prevent — and the highlights would vanish the moment the user
+            // zoomed in. Each branch mirrors Pipeline.Render step for step.
+            ColorPipeline.ToOutputTargetFor(
                 pixels.Data,
                 cal,
+                target,
                 ColorPipelineVersion.ManagedV2,
                 colorManagement);
-            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, cal.ResolvedOutputSpace);
+            if (target.IsExtended)
+            {
+                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal);
+                HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
+                if (fill is not null)
+                    Sprocket.ApplyMask(pixels.Data, fill);
+            }
+            else
+            {
+                Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
+            }
         }
 
         return (pixels, realised);

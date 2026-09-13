@@ -155,6 +155,80 @@ public sealed class ManagedRegionRenderTests
         Assert.Equal(0, neverCalled.LeaseCalls);
     }
 
+    /// <summary>
+    /// An HDR roll's sharp patch is composited over an extended preview and described as the
+    /// linear extended carrier, so it must be RENDERED to that carrier: the same pixels the whole
+    /// frame produces, highlights above diffuse white intact. Taking the SDR exit here used to
+    /// hand the presentation sRGB-encoded numbers under an extended label — the picture changed
+    /// colour and lost its HDR the moment the user zoomed in.
+    /// </summary>
+    [Theory]
+    [InlineData(false, 0.0)]
+    [InlineData(true, 0.0)]
+    [InlineData(false, 9.0)]
+    [InlineData(true, 9.0)]
+    public void Hdr_roll_sharp_patch_matches_the_extended_full_frame(bool sprocket, double rotation)
+    {
+        // The gradient fixture never gets thin enough to clear diffuse white; a few very thin
+        // (dark) negative pixels inside the requested region give the extended target a real
+        // highlight to carry.
+        ImageBuffer negative = MakeNegative(18, 13);
+        foreach (int x in new[] { 10, 11 })
+        {
+            int offset = (8 * negative.Width + x) * 3;
+            negative.Data[offset] = 0.008f;
+            negative.Data[offset + 1] = 0.0015f;
+            negative.Data[offset + 2] = 0.00012f;
+        }
+        WorkingFrame source = MakeWorkingFrame(negative);
+        var parameters = new FrameParams
+        {
+            OutputSpace = "sRGB",
+            PrintLut = "",
+            HdrPeakNits = 1000d,
+            ExposureEv = 0.7,
+            SprocketEnabled = sprocket,
+            SprocketThreshold = sprocket ? 0.5 : null,
+            Rotation = rotation,
+        };
+        var requested = new RegionRender.Roi(0.3, 0.25, 0.7, 0.75);
+        using var engine = new LittleCmsEngine();
+
+        RenderedFrame full = Pipeline.Render(
+            source,
+            parameters,
+            ColorPipelineVersion.ManagedV2,
+            engine);
+        RenderedRegion patch = RegionRender.Render(
+            source,
+            parameters,
+            requested,
+            ColorPipelineVersion.ManagedV2,
+            engine);
+
+        Assert.True(full.Encoding.Range == NumericRange.Extended);
+        Assert.Contains(full.Pixels.Data, value => value > 1f);
+        ImageBuffer expected = CropRealised(full.Pixels, patch.Realised);
+        Assert.Equal(expected.Width, patch.Image.Width);
+        Assert.Equal(expected.Height, patch.Image.Height);
+        AssertPixelsClose(expected.Data, patch.Image.Data, 2e-5f, "hdr sharp patch");
+        Assert.Contains(patch.Image.Data, value => value > 1f);
+        AssertSameRenderSemantics(full, patch.Frame, compareFingerprint: false);
+
+        if (sprocket || rotation != 0.0)
+        {
+            // Fill is pinned to diffuse white in the patch exactly where it is in the full frame.
+            int pinned = 0;
+            for (int p = 0; p < expected.PixelCount; p++)
+            {
+                if (expected.Data[p * 3] != 1f || expected.Data[p * 3 + 1] != 1f) continue;
+                pinned++;
+                for (int c = 0; c < 3; c++) Assert.Equal(1f, patch.Image.Data[p * 3 + c]);
+            }
+            Assert.True(pinned > 0, "the fixture must put some fill inside the patch");
+        }
+    }
+
     [Fact]
     public void Legacy_v1_false_region_carries_the_ACEScg_selected_TRC_compatibility_profile()
     {
