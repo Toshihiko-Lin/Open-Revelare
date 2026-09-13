@@ -2165,8 +2165,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// The light-board cut, measured on ONE frame at FULL RESOLUTION — null when the frame has no
-    /// board (<see cref="Sprocket.NoBoard"/>).
+    /// The light-board cut, measured at FULL RESOLUTION on a few frames spread through the roll —
+    /// null when none of them has a board (<see cref="Sprocket.NoBoard"/>).
     ///
     /// Full resolution is load-bearing, and this is the only estimator in the program for which
     /// that is true. Everything else here samples a population — a percentile, a channel mean, a
@@ -2195,19 +2195,62 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// frame (DSC_9239) was a preview-only false positive. Those rolls' gaps were simply wide
     /// enough to survive a cut placed in the wrong part of them.
     ///
-    /// ONE frame, not the roll. The cut is applied roll-wide either way — a roll is one strip of
-    /// one film over one light board — so the extra frames would cost a full-resolution decode each
-    /// to average out a quantity that does not vary between them. The frame is decoded transiently
-    /// and dropped before this returns: it is deliberately NOT put in the preview cache, whose
-    /// entries are preview-sized on purpose (see PreviewAsync — the full-resolution float frame is
-    /// the biggest allocation in the program).
+    /// A FEW frames, not one and not the roll. The cut is applied roll-wide — a roll is one strip
+    /// of one film over one light board — and this used to be measured on the current frame alone
+    /// on the argument that the board↔base gap does not vary between frames. It does not, when the
+    /// frame HAS a base: on 09-Alien2460 the first two frames were fogged during loading, so their
+    /// film is dense everywhere and the base tone (0.38) is simply absent from them; the estimator
+    /// duly read the fogged picture's top (0.26) as "the film" and cut at 0.32 — under the base of
+    /// the other thirty-eight frames, which then had their base painted white as board. No
+    /// estimator can find a base in a frame that has none, so the fix is to look at frames that
+    /// do: the first, the middle and the last (a fogged leader sits at one end of the roll, not in
+    /// its middle), each decoded at full resolution.
+    ///
+    /// Combined by taking the HIGHEST cut, not the median. The base is the thinnest — brightest —
+    /// thing on the film, and the board's foot is the same on every frame, so a frame that shows
+    /// its base reports the cut as high as it can go and a frame that does not can only report it
+    /// lower; the highest answer is therefore the one from the frame that saw the most base, and
+    /// one such frame in three is enough. A median would have needed two.
+    ///
+    /// Each frame is decoded transiently and dropped: none of them is put in the preview cache,
+    /// whose entries are preview-sized on purpose (see PreviewAsync — the full-resolution float
+    /// frame is the biggest allocation in the program).
     /// </summary>
     private double? MeasureBoardCut()
     {
-        // Measured on the frame the preview is currently showing, so the answer describes the
-        // same negative the user is looking at.
-        if (CurrentFrame is not { } frame) return null;
+        if (CurrentFrame is not { } current) return null;
 
+        double? best = null;
+        foreach (RollFrame frame in BoardCutSampleFrames(current))
+        {
+            if (BoardCutOf(frame) is { } cut && (best is null || cut > best)) best = cut;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// The frames <see cref="MeasureBoardCut"/> decodes: the current frame plus the middle and last
+    /// of the roll, by DISTINCT SOURCE FILE — the virtual copies of a split scan are windows on one
+    /// file and would only measure the same negative twice.
+    /// </summary>
+    private IEnumerable<RollFrame> BoardCutSampleFrames(RollFrame current)
+    {
+        var picked = new List<RollFrame> { current };
+        var seen = new HashSet<string> { current.Path };
+        // One representative per file, in roll order.
+        var files = new List<RollFrame>();
+        var filesSeen = new HashSet<string>();
+        foreach (RollFrame f in Frames) if (filesSeen.Add(f.Path)) files.Add(f);
+        if (files.Count == 0) return picked;
+        foreach (RollFrame f in new[] { files[files.Count / 2], files[^1] })
+            if (seen.Add(f.Path)) picked.Add(f);
+        return picked;
+    }
+
+    /// <summary>One frame's board cut at full resolution, or null when it has no board.</summary>
+    private double? BoardCutOf(RollFrame frame)
+    {
+        bool isCurrent = ReferenceEquals(frame, CurrentFrame);
         ImageBuffer full;
         try
         {
@@ -2220,18 +2263,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
         {
             // A file the full decoder cannot open is not a reason to lose the estimate entirely —
-            // the preview is already in hand and its answer, while placed less well, is the one
-            // this code used to give.
-            return PreviewBoardCut();
+            // for the current frame the preview is already in hand and its answer, while placed
+            // less well, is the one this code used to give. The other frames have no preview yet.
+            return isCurrent ? PreviewBoardCut() : null;
         }
 
         // Reproduce the preview's own framing on the full decode. A margin decode is a window
-        // onto a file holding several negatives, so it goes on first; AutoCrop is expressed
+        // onto a file holding several negatives, so it goes on first; the crop is expressed
         // against whichever buffer the preview is (the frame's rect within the box when there is
         // one, the file otherwise), which is exactly what applying the box first leaves behind.
         // Without this a strip scan would be measured with its neighbouring negatives included.
-        ImageBuffer region = _previewMargin is { } box ? Geometry.ApplyCrop(full, box) : full;
-        if (AutoCrop is { } c) region = Geometry.ApplyCrop(region, c);
+        // The current frame's framing is the live one (AutoCrop); the others' is rebuilt from
+        // their stored rects the same way AdoptPreview would.
+        (double X, double Y, double W, double H)? box = isCurrent ? _previewMargin : SplitCropOf(frame);
+        (double X, double Y, double W, double H)? crop = isCurrent
+            ? AutoCrop
+            : box is { } b && SplitRectOf(frame) is { } rect ? Relative(rect, b) : frame.Params.CropRect;
+        ImageBuffer region = box is { } bx ? Geometry.ApplyCrop(full, bx) : full;
+        if (crop is { } c) region = Geometry.ApplyCrop(region, c);
 
         double thr = Sprocket.EstimateSprocketThreshold(region);
         return thr >= Sprocket.NoBoard ? null : thr;

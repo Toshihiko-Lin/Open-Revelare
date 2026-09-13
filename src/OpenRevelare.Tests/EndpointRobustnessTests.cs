@@ -329,8 +329,18 @@ public class EndpointRobustnessTests
     // ── 2. The board shoulder is measured, not assumed ──────────────────────────────
 
     /// <summary>
-    /// Builds a frame with a bright light board down the left edge, a soft penumbra of
-    /// <paramref name="shoulder"/> pixels, then film.
+    /// Builds a frame with a bright light board down the left edge, an OPAQUE rim of
+    /// <paramref name="shoulder"/> pixels — the film holder's edge, or the punched edge of a
+    /// sprocket hole, seen dense against the board — then film.
+    ///
+    /// The rim is dark, not a bright ramp, because dark is what the dilation measures: it walks
+    /// outward from the board by each ring's DENSITY extreme (see BoardShoulderRadius), so a
+    /// shoulder that is merely brighter than film is invisible to it. The fixture used to ramp
+    /// from board down to film, and these tests passed only because the board cut then happened
+    /// to sit at the film's own toe and took the whole ramp with it — the measured radius was 1
+    /// in every case. Now that the cut sits in the middle of the board↔film gap, a bright ramp
+    /// straddles it, and the tests would be asserting a property of the cut's placement rather
+    /// than of the shoulder measurement they are named for.
     /// </summary>
     private static ImageBuffer BoardFrame(int shoulder, int boardWidth = 12)
     {
@@ -341,12 +351,7 @@ public class EndpointRobustnessTests
             {
                 float v;
                 if (x < boardWidth) v = 0.95f;                       // board: blown white
-                else if (x < boardWidth + shoulder)
-                {
-                    // Linear ramp from board down to film across the penumbra.
-                    double t = (x - boardWidth + 1.0) / (shoulder + 1.0);
-                    v = (float)(0.95 - t * (0.95 - 0.20));
-                }
+                else if (x < boardWidth + shoulder) v = 0.02f;       // opaque rim
                 else v = 0.20f;                                      // film base
                 int i = (y * w + x) * 3;
                 data[i] = v; data[i + 1] = v * 0.6f; data[i + 2] = v * 0.3f;
@@ -359,7 +364,7 @@ public class EndpointRobustnessTests
     ///
     /// The dilation used to be a flat 5% of the short edge — on a 200 px frame, 10 px, whatever
     /// the penumbra actually measured. Measuring it instead keeps the film that a fixed radius
-    /// would have discarded: with a 2 px shoulder the mask should drop the board and its ramp and
+    /// would have discarded: with a 2 px shoulder the mask should drop the board and its rim and
     /// then stop, leaving the overwhelming majority of the frame in.
     /// </summary>
     [Fact]
@@ -388,7 +393,7 @@ public class EndpointRobustnessTests
 
         bool[] keep = FilmBase.HighDensityKeepMask(f, null);
 
-        // Sample the middle row: every column inside board+shoulder must be excluded.
+        // Sample the middle row: every column inside board+rim must be excluded.
         const int w = 200;
         int row = 100 * w;
         for (int x = 0; x < 12 + 6; x++)
