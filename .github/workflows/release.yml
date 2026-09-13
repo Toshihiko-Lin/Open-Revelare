@@ -109,9 +109,11 @@ jobs:
           $installed = Join-Path $env:RUNNER_TEMP "openrevelare-installed"
           $arguments = @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER",
-            "/DIR=$installed")
-          & $setups[0].FullName @arguments
-          if ($LASTEXITCODE -ne 0) { throw "Silent setup failed ($LASTEXITCODE)" }
+            "/DIR=`"$installed`"")
+          # setup.exe / unins000.exe 是 GUI 子系统程序：`&` 调用不等它结束，$LASTEXITCODE
+          # 也不会被设置（为 $null，于是 -ne 0 恒真）。必须 Start-Process -Wait 拿 ExitCode。
+          $setup = Start-Process -FilePath $setups[0].FullName -ArgumentList $arguments -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Silent setup failed ($($setup.ExitCode))" }
           ./packaging/windows/verify-win32-presenter.ps1 -Directory $installed -RepositoryRoot $PWD
           ./packaging/windows/smoke-win32-presenter.ps1 -Directory $installed
           if (-not (Test-Path -LiteralPath (Join-Path $installed "OpenRevelare.exe"))) { throw "Installed app executable is missing" }
@@ -119,8 +121,8 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $installed "lcms2.manifest.json"))) { throw "Installed Little CMS manifest is missing" }
           $uninstaller = Join-Path $installed "unins000.exe"
           if (-not (Test-Path -LiteralPath $uninstaller)) { throw "Installed uninstaller is missing" }
-          & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ($LASTEXITCODE -ne 0) { throw "Installer-check uninstall failed ($LASTEXITCODE)" }
+          $unins = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($unins.ExitCode -ne 0) { throw "Installer-check uninstall failed ($($unins.ExitCode))" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
