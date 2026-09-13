@@ -2444,9 +2444,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await Parallel.ForEachAsync(order, new ParallelOptions
             {
                 CancellationToken = ct,
-                // Same ceiling as the warm-up, and for the same reason: each in-flight decode
-                // holds a few hundred MB and the UI still needs a core.
-                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
+                // Same worker count as the warm-up, and for the same reason: the two passes
+                // share decodes through PreviewAsync, and asking in the same width keeps this
+                // one from queueing behind frames the warm-up has not reached.
+                MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
             }, async (item, token) =>
             {
                 var (path, pre, frame) = item;

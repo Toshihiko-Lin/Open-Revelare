@@ -138,12 +138,14 @@ public partial class MainViewModel
             if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre));
         }
 
-        // A few workers, not one per core: each in-flight decode holds a few hundred MB
-        // transiently, and the UI still needs a core to stay responsive while this runs.
+        // Most of the cores, not a fixed few: LibRaw unpacks one file on one thread, so the
+        // roll only gets faster by running files side by side, and ImageIo's memory gate is
+        // what keeps that many in-flight decodes from outrunning free memory — this is how
+        // many are ASKING, not how many run. Two cores stay free for the UI.
         var opts = new ParallelOptions
         {
             CancellationToken = ct,
-            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
+            MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
         };
 
         try

@@ -90,7 +90,7 @@ public sealed class PreferencesDialog : Window
     {
         Title = Loc.T("偏好设置");
 
-        _backend = Combo(new[] { Loc.T("自动（Windows 有 DNG Converter 则用之）"), "LibRaw", "Adobe DNG Converter" }, v.Backend);
+        _backend = Combo(new[] { Loc.T("自动（LibRaw；打不开的文件才用 DNG Converter）"), "LibRaw", "Adobe DNG Converter" }, v.Backend);
         _fbdd = Combo(new[] { Loc.T("关闭", "FBDD"), Loc.T("轻度"), Loc.T("完全") }, v.Fbdd);
         _theme = Combo(new[] { Loc.T("深色"), Loc.T("浅色") }, v.Theme);
         // Each language names ITSELF, untranslated — someone who lands in the wrong one has to be
@@ -223,7 +223,7 @@ public sealed class PreferencesDialog : Window
     /// and without it the setting is a black box the user has no way to sanity-check.</summary>
     private void UpdateConcurrencyNote()
     {
-        var (auto, free) = ImageIo.AutoConcurrencyInfo();
+        var (autoPreview, autoFull, free) = ImageIo.AutoConcurrencyInfo();
         string freeText = free is long f
             ? Loc.F($"当前可用内存 {f / 1073741824.0:F1} GB")
             : Loc.T("本平台无法读取可用内存，退回按总内存估算");
@@ -231,8 +231,8 @@ public sealed class PreferencesDialog : Window
         // One interpolated literal apiece, not a concatenation: `$"…" + "…"` collapses to a plain
         // string before Loc.F could see the composite format, and the overload would not bind.
         _concurrencyNote.Text = _concurrency.SelectedIndex <= 0
-            ? Loc.F($"{freeText} → 自动使用 {auto} 张并发。每张解码中的 RAW 约占 1.2 GB，导入过程中会随可用内存变化自动升降。")
-            : Loc.F($"手动固定 {_concurrency.SelectedIndex} 张（当前自动会选 {auto} 张）。{freeText}；每张解码中的 RAW 约占 1.2 GB，设高了会让机器换页变慢。");
+            ? Loc.F($"{freeText} → 自动：导入预览 {autoPreview} 张并发、全尺寸解码 {autoFull} 张。预览解码约占 0.5 GB/张，全尺寸约 1.2 GB/张，导入过程中会随可用内存变化自动升降。")
+            : Loc.F($"手动固定 {_concurrency.SelectedIndex} 张（当前自动会选：预览 {autoPreview} 张、全尺寸 {autoFull} 张）。{freeText}；预览解码约占 0.5 GB/张，全尺寸约 1.2 GB/张，设高了会让机器换页变慢。");
     }
 
     private static readonly int[] CacheBudgets = { 2, 5, 10, 20, 50 };

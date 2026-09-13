@@ -579,10 +579,9 @@ public partial class MainViewModel
         int done = 0, total = 3 + nF;
 
         ReportBackground(Loc.F($"解码校正图与内容帧 0/{total} …"));
-        var opts = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 3, 1, 3),
-        };
+        // Same worker count as every other roll-wide pass; ImageIo's gate weighs the three
+        // full-quality decodes and the six previews against free memory as they arrive.
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = ImageIo.PreviewWorkers };
         Parallel.For(0, total, opts, i =>
         {
             if (i < 3)
