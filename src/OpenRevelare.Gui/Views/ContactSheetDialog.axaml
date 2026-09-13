@@ -56,6 +56,15 @@
                                      IsCheckedChanged="OnOrientChanged" />
                     </StackPanel>
 
+                    <!-- Only shown for an HDR roll. The switch is about the FILE: the preview to
+                         the left is an SDR surface and shows the SDR sheet either way (D-031). -->
+                    <StackPanel Name="HdrPanel" Spacing="3" Margin="0,0,0,10">
+                        <TextBlock Text="{i18n:T '动态范围'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
+                        <CheckBox Name="HdrBox" Content="{i18n:T 'HDR 印样'}" IsCheckedChanged="OnHdrChanged" />
+                        <TextBlock Classes="groupHint"
+                                   Text="{i18n:T '开：帧按本卷的 HDR 上限保留高光，纸面仍是 SDR 白——JPEG 写成增益图 JPEG，TIFF 写成 32-bit float。关：与预览一致的 SDR 印样。本窗口的预览是 SDR 界面，两种都显示 SDR 版。'}" />
+                    </StackPanel>
+
                     <TextBlock Text="{i18n:T '卷信息'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
                     <TextBlock Classes="groupHint" Text="{i18n:T '印在页眉与底部标识条上；留空显示为「—」。'}" />
                     <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">

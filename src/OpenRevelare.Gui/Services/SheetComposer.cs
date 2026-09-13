@@ -218,6 +218,19 @@ public static class SheetComposer
         return PaddedSize(l, padX, padY);
     }
 
+    /// <summary>
+    /// The page pixel the grid's top-left lands on, as <see cref="Compose"/> places it. Whole
+    /// pixels by construction — every metric it is built from is rounded — so the grid is drawn
+    /// 1:1 and a second set of cells can be laid over the composed page at exactly the same spot
+    /// (the HDR sheet, <see cref="ContactSheet.WithExtendedCells"/>).
+    /// </summary>
+    public static (int X, int Y) GridOrigin(ContactSheet.Layout layout, Options opt)
+    {
+        Metrics m = Metrics.Of(layout.Width);
+        (int padX, int padY) = PadFor(layout, opt);
+        return ((int)(m.Margin + padX), (int)(m.Margin + padY + m.HeaderH));
+    }
+
     /// <summary>Compose the finished sheet. Must run on the UI thread (Avalonia rasteriser).</summary>
     public static RenderTargetBitmap Compose(Grid grid, RollNotes notes, Options opt)
     {
@@ -232,6 +245,7 @@ public static class SheetComposer
         (int padX, int padY) = PadFor(grid.Layout, opt);
         double marginX = m.Margin + padX, marginY = m.Margin + padY;
 
+        // Kept identical to GridOrigin: the HDR sheet pastes its cells where these say.
         double gridX = marginX;
         double gridY = marginY + m.HeaderH;
 

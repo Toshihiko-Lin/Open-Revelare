@@ -172,7 +172,7 @@ public partial class MainViewModel
             // stock (D-021), so a roll that had either set changes more than its highlights.
             if (value && (_outputSpaceIndex != 0 || _printLutIndex != 0))
                 StatusText = Loc.T("HDR 开启：输出空间与胶片风格不参与扩展渲染（载体恒为线性扩展 sRGB，印片 LUT 不走）；关闭 HDR 即恢复。");
-            ApplyHdrToRoll(rebuildThumbnailsNow: true);
+            ApplyHdrToRoll(rebuildThumbnails: true);
         }
     }
 
@@ -189,7 +189,7 @@ public partial class MainViewModel
             if (Math.Abs(_hdrLimitStops - v) < 1e-9) return;
             _hdrLimitStops = v;
             OnPropertyChanged(nameof(HdrLimitStops));
-            if (_hdrEnabled) ApplyHdrToRoll(rebuildThumbnailsNow: false);
+            if (_hdrEnabled) ApplyHdrToRoll(rebuildThumbnails: false);
             else NotifyHdrText();
         }
     }
@@ -201,42 +201,26 @@ public partial class MainViewModel
     public double ExportHdrLimitStops => _hdrEnabled ? _hdrLimitStops : 0d;
 
     /// <summary>
-    /// Writes the roll's peak onto every frame and re-renders. Thumbnails are rebuilt — after a
-    /// pause when the change came from the slider, which fires on every tick of a drag and would
-    /// otherwise restart the whole roll's decode pass a dozen times per second.
+    /// Writes the roll's peak onto every frame and re-renders. The thumbnails are rebuilt only
+    /// when the SWITCH moved: the strip shows the SDR rendition (D-031), which the limit does not
+    /// enter — a drag of the slider used to restart the roll's thumbnail pass for a strip that
+    /// came back pixel for pixel the same. The switch does change it, because with HDR on the
+    /// rendition drops the roll's output space and print stock (D-021/D-024).
     /// </summary>
-    private void ApplyHdrToRoll(bool rebuildThumbnailsNow)
+    private void ApplyHdrToRoll(bool rebuildThumbnails)
     {
         double nits = HdrPeakNits;
         foreach (RollFrame f in Frames) f.Params.HdrPeakNits = nits;
         if (Frames.Count > 0) MarkRollDirty();
         NotifyHdrText();
         ScheduleRender();
-        if (rebuildThumbnailsNow) RebuildThumbnails();
-        else ScheduleThumbnailRebuild();
+        if (rebuildThumbnails) RebuildThumbnails();
     }
 
     private void RebuildThumbnails()
     {
-        _thumbRebuildCts?.Cancel();
         foreach (RollFrame f in Frames) SetThumbnail(f, null);
         RestartThumbnails();
-    }
-
-    private CancellationTokenSource? _thumbRebuildCts;
-
-    private async void ScheduleThumbnailRebuild()
-    {
-        _thumbRebuildCts?.Cancel();
-        var cts = new CancellationTokenSource();
-        _thumbRebuildCts = cts;
-        try
-        {
-            await Task.Delay(500, cts.Token);
-            foreach (RollFrame f in Frames) SetThumbnail(f, null);
-            RestartThumbnails();
-        }
-        catch (OperationCanceledException) { }
     }
 
     private void NotifyHdrText()
@@ -1024,8 +1008,8 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// The SDR base of a gain-map JPEG: the same params with the HDR peak removed, in the base
-    /// space the export chose, and WITHOUT the print LUT.
+    /// The SDR base of a gain-map JPEG: the roll's SDR rendition (<see cref="FrameParams.SdrRendition"/>,
+    /// D-031) in the base space the export chose.
     ///
     /// The two renditions of a gain-map file are one picture at two headrooms — a reader blends
     /// between them by how much headroom its display has — so they must be members of one
@@ -1035,14 +1019,8 @@ public partial class MainViewModel
     /// is therefore the asymptote-1 member of the same shoulder family, bit-identical to the HDR
     /// rendition below the knee, which is also what makes the map nearly empty.
     /// </summary>
-    private static FrameParams GainMapBaseParams(FrameParams hdr, ColorSpaceDef baseSpace)
-    {
-        FrameParams q = hdr.Clone();
-        q.HdrPeakNits = 0d;
-        q.OutputSpace = baseSpace.Name;
-        q.PrintLut = "";
-        return q;
-    }
+    private static FrameParams GainMapBaseParams(FrameParams hdr, ColorSpaceDef baseSpace) =>
+        hdr.SdrRendition(baseSpace);
 
     /// <summary>
     /// Renders and writes one export. A JPEG of an extended render is a gain-map JPEG and needs a
@@ -1172,12 +1150,32 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// The thumbnails a contact sheet is laid out from. <see cref="Sdr"/> is what every sheet is
+    /// composed and previewed from — the roll's SDR rendition (D-031). <see cref="Extended"/> is
+    /// the same frames rendered to the roll's HDR target, in the linear extended carrier, and is
+    /// null on an SDR roll; it exists so the export can write the sheet as a gain-map JPEG or a
+    /// float32 TIFF whose frames keep the highlights the preview shows. <see cref="Target"/> is
+    /// the HDR target they were rendered for.
+    /// </summary>
+    public sealed record ContactThumbs(
+        IReadOnlyList<ImageBuffer> Sdr,
+        IReadOnlyList<ImageBuffer>? Extended,
+        OutputTarget Target)
+    {
+        /// <summary>Whether an HDR sheet can be written from these.</summary>
+        public bool HasExtended => Extended is not null;
+    }
+
+    /// <summary>
     /// Process every frame down to a contact-sheet thumbnail. Returns null if there is nothing to
     /// build. Deliberately stops at the thumbnails rather than the finished sheet: this is the
     /// expensive half (a pass over the whole roll), while laying them out and printing the
     /// surround is cheap — so restyling the sheet in the dialog must not come back through here.
+    ///
+    /// On an HDR roll the pass renders each frame twice — SDR rendition and extended — so the
+    /// dialog's HDR switch is a choice about the FILE and never sends the roll back through here.
     /// </summary>
-    public async Task<IReadOnlyList<ImageBuffer>?> BuildContactThumbsAsync()
+    public async Task<ContactThumbs?> BuildContactThumbsAsync()
     {
         if (Frames.Count == 0) return null;
         CommitLiveParams(CurrentFrame);
@@ -1208,20 +1206,30 @@ public partial class MainViewModel
                 ReportBackground(Loc.F($"印样 {++done}/{total} …"));
             }
 
-            List<ImageBuffer> thumbs = await Task.Run(() =>
+            // The roll's target, off the params the cells are rendered with. A LegacyV1 roll
+            // ignores its peak (D-013) and would come back normalized, so it gets no extended set.
+            OutputTarget target = cellParams[0].ResolvedOutputTarget;
+            bool extended = target.IsExtended && pipelineVersion == ColorPipelineVersion.ManagedV2;
+            ContactThumbs thumbs = await Task.Run(() =>
             {
-                var t = new List<ImageBuffer>(total);
+                var sdr = new List<ImageBuffer>(total);
+                var hdr = extended ? new List<ImageBuffer>(total) : null;
                 for (int i = 0; i < total; i++)
                 {
                     WorkingFrame source = sources[i].WithPixels(
                         Resample.Box(sources[i].Pixels, 900));
-                    t.Add(Pipeline.Render(
+                    sdr.Add(Pipeline.Render(
+                        source,
+                        cellParams[i].SdrRendition(),
+                        pipelineVersion,
+                        ColorManagement).Pixels);
+                    hdr?.Add(Pipeline.Render(
                         source,
                         cellParams[i],
                         pipelineVersion,
                         ColorManagement).Pixels);
                 }
-                return t;
+                return new ContactThumbs(sdr, hdr, target);
             });
             StatusText = Loc.F($"印样已生成（{total} 帧）");
             return thumbs;
@@ -1233,7 +1241,10 @@ public partial class MainViewModel
     /// <summary>Compose the finished sheet at export resolution and write it. Must be called from
     /// the UI thread: the surround goes through Avalonia's rasteriser. Only the grid pass and the
     /// encode move to a worker.</summary>
-    public async Task ExportContactSheetAsync(IReadOnlyList<ImageBuffer> thumbs, SheetStyle style,
+    /// <param name="hdr">Write the HDR sheet (D-031): the same page with the frames at the roll's
+    /// HDR target — a gain-map JPEG whose base is the SDR sheet, or a float32 TIFF. Ignored when
+    /// <paramref name="thumbs"/> carries no extended set.</param>
+    public async Task ExportContactSheetAsync(ContactThumbs thumbs, bool hdr, SheetStyle style,
                                               SheetAspect aspect, SheetOrientation orient,
                                               string path)
     {
@@ -1245,22 +1256,40 @@ public partial class MainViewModel
             // Laid out at full width so the header, frame numbers and strip are rendered at
             // export resolution rather than upscaled from the dialog's cheap preview.
             SheetComposer.Grid grid = await Task.Run(
-                () => SheetComposer.BuildGrid(thumbs, maxLong: 2048, opt));
+                () => SheetComposer.BuildGrid(thumbs.Sdr, maxLong: 2048, opt));
 
             using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
             ImageBuffer outImg = SheetComposer.ToBuffer(composed);
+            // The page is composed ONCE, from the SDR cells: the HDR sheet is that page taken
+            // back to linear with the frames swapped for their extended renders at the same
+            // geometry, so the two files (or the two halves of one gain-map file) are one sheet.
+            IReadOnlyList<ImageBuffer>? extendedCells = hdr ? thumbs.Extended : null;
+            (int gridX, int gridY) = SheetComposer.GridOrigin(grid.Layout, opt);
 
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() =>
             {
                 string ext = Path.GetExtension(path).ToLowerInvariant();
+                bool jpeg = ext is ".jpg" or ".jpeg";
                 RenderedFrame rendered = ContactSheetRenderedFrame(outImg);
-                if (ext is ".jpg" or ".jpeg")
-                    JpegIO.ExportJpeg(rendered, path, quality: 92);
+                if (extendedCells is null)
+                {
+                    if (jpeg) JpegIO.ExportJpeg(rendered, path, quality: 92);
+                    else TiffIO.ExportTiff(rendered, path, TiffIO.CompressionMode.Lzw);
+                    return;
+                }
+                RenderedFrame extendedSheet = ExtendedContactSheetRenderedFrame(
+                    ContactSheet.WithExtendedCells(
+                        outImg, ColorSpaces.Srgb, extendedCells, grid.Layout, gridX, gridY),
+                    thumbs.Target);
+                if (jpeg)
+                    JpegIO.ExportGainMapJpeg(rendered, extendedSheet, ColorSpaces.Srgb, thumbs.Target, path, quality: 92);
                 else
-                    TiffIO.ExportTiff(rendered, path, TiffIO.CompressionMode.Lzw);
+                    TiffIO.ExportTiffFloat32(extendedSheet, path, TiffIO.CompressionMode.Lzw);
             });
-            StatusText = Loc.F($"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）");
+            StatusText = extendedCells is null
+                ? Loc.F($"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）")
+                : Loc.F($"HDR 印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）");
         }
         catch (Exception ex) { StatusText = Loc.T("印样导出失败：") + ex.Message; }
         finally { IsBusy = false; }
@@ -1280,6 +1309,31 @@ public partial class MainViewModel
             RenderingIntent.RelativeColorimetric,
             blackPointCompensation: false,
             "contact sheet fixed exact sRGB",
+            printLutIdentity: string.Empty,
+            pixelProfileMismatch: false);
+        return new RenderedFrame(
+            pixels,
+            encoding,
+            recipe,
+            RenderFingerprint.ComputeManaged(pixels, encoding, recipe));
+    }
+
+    /// <summary>The HDR sheet, typed the way an extended frame render is (linear in the canonical
+    /// carrier, unbounded above) so the gain-map and float32 writers accept it as one.</summary>
+    private static RenderedFrame ExtendedContactSheetRenderedFrame(ImageBuffer pixels, OutputTarget target)
+    {
+        ColorProfileRef profile = BuiltInColorProfiles.LinearExtendedSrgb(ProfileRole.Output);
+        var encoding = new CharacterizedPixelEncoding(
+            profile,
+            ColorReference.SceneReferred,
+            TransferState.LinearInProfilePrimaries,
+            NumericRange.Extended);
+        var recipe = new OutputRecipe(
+            ColorPipelineVersion.ManagedV2,
+            profile,
+            RenderingIntent.RelativeColorimetric,
+            blackPointCompensation: false,
+            $"contact sheet: frames scene-referred extended to {target.HighlightHeadroom:0.###}× diffuse white, surround pinned at diffuse white",
             printLutIdentity: string.Empty,
             pixelProfileMismatch: false);
         return new RenderedFrame(

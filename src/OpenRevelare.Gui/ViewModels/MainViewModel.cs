@@ -3769,11 +3769,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // is the one the finished sheet will have.
         ImageBuffer sample = cells.First(c => c.Tile is not null).Tile!.Pixels;
         var list = new List<ImageBuffer>(cells.Count);
+        // The cover is an sRGB JPEG on an SDR card, so an HDR roll's cells are its SDR rendition
+        // (D-031) — the extended render's numbers are linear and unbounded, and read as pixels
+        // they would print a dark, clipped sheet.
         foreach (var (tile, p) in cells)
             list.Add(tile is null ? Placeholder(sample.Width, sample.Height)
                                   : Pipeline.Render(
                                       tile,
-                                      p,
+                                      p.SdrRendition(),
                                       pipelineVersion,
                                       ColorManagement).Pixels);
         return list;

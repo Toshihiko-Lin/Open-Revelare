@@ -235,6 +235,32 @@ public sealed class FrameParams
             : OutputTarget.Sdr(ResolvedOutputSpace);
 
     /// <summary>
+    /// The SDR member of the rendering these params describe (D-031): the same params with the
+    /// HDR peak removed, the print LUT dropped, and the output space set to
+    /// <paramref name="baseSpace"/> (sRGB when null). For an SDR roll it is <c>this</c>, untouched,
+    /// so nothing that was bit-identical before HDR existed stops being so.
+    ///
+    /// <para>
+    /// WHY ONE HELPER. An extended render (D-021) has exactly one SDR counterpart — the
+    /// <c>asymptote = 1</c> member of its own shoulder family, bit-identical below the knee — and
+    /// every surface that can only show SDR has to show THAT one, or the roll is a different
+    /// picture in every window: the gain-map JPEG's base (D-030), the film-strip thumbnails, the
+    /// catalog cover and the contact sheet all draw it from here. Clipping the extended render
+    /// at 1.0 instead would blow the highlights that the preview and the export keep; running the
+    /// print stock would show a print the HDR display never shows.
+    /// </para>
+    /// </summary>
+    public FrameParams SdrRendition(ColorSpaceDef? baseSpace = null)
+    {
+        if (!ResolvedOutputTarget.IsExtended) return this;
+        FrameParams q = Clone();
+        q.HdrPeakNits = 0d;
+        q.OutputSpace = (baseSpace ?? ColorSpaces.Srgb).Name;
+        q.PrintLut = "";
+        return q;
+    }
+
+    /// <summary>
     /// The print-film emulation applied between Stage 1 and the output space — a path to a
     /// <c>.cube</c> file, or empty for none.
     ///

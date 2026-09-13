@@ -2107,7 +2107,7 @@ public partial class MainWindow : Window
         // Build → show → only then ask where to save. Building costs a pass over the whole roll,
         // so the filename prompt has no business coming first.
         if (await Vm.BuildContactThumbsAsync() is not { } thumbs) return;
-        var dlg = new ContactSheetDialog(thumbs, Vm.Notes);
+        var dlg = new ContactSheetDialog(thumbs.Sdr, Vm.Notes, hdrAvailable: thumbs.HasExtended);
         SheetStyle styleBefore = dlg.Style;
         SheetAspect aspectBefore = dlg.Aspect;
         SheetOrientation orientBefore = dlg.Orientation;
@@ -2125,15 +2125,16 @@ public partial class MainWindow : Window
             Title = Loc.T("导出印样"),
             DefaultExtension = "jpg",
             SuggestedFileName = "contactsheet",
+            // The HDR sheet is a different pair of files (D-031); the labels say which.
             FileTypeChoices = new List<FilePickerFileType>
             {
-                new("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
-                new("16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
+                new(dlg.WriteHdr ? "HDR JPEG (gain map)" : "JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
+                new(dlg.WriteHdr ? "32-bit float TIFF" : "16-bit TIFF") { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
         string? path = file?.TryGetLocalPath();
         if (path != null)
-            await Vm.ExportContactSheetAsync(thumbs, dlg.Style, dlg.Aspect, dlg.Orientation, path);
+            await Vm.ExportContactSheetAsync(thumbs, dlg.WriteHdr, dlg.Style, dlg.Aspect, dlg.Orientation, path);
     }
 
     private void OnResetClick(object? sender, RoutedEventArgs e)
