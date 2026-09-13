@@ -2457,6 +2457,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var baseSources = new List<ImageBuffer>();
             var gate = new object();
             int done = 0;
+            // Frames whose decode threw, and what the last one said. They do not vote, but they
+            // must not vanish either — see the catch below.
+            int failed = 0;
+            string? failReason = null;
             ReportBackground(Loc.F($"整卷分析 0/{order.Count} …"));
             await Parallel.ForEachAsync(order, new ParallelOptions
             {
@@ -2471,9 +2475,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 ImageBuffer raw;
                 try { raw = (await PreviewAsync(path, pre).WaitAsync(token)).Preview; }
                 catch (OperationCanceledException) { throw; }
-                catch
+                catch (Exception ex)
                 {
-                    // Undecodable frame → it simply does not vote.
+                    // Undecodable frame → it does not vote. It is COUNTED, though, and the roll
+                    // is told at the end. This used to be a bare swallow, and on an 8 GB machine
+                    // splitting a Flextight strip it swallowed OutOfMemoryException: a split
+                    // scan's cells each decode the whole file (2.3 GB of float for a 190 MP
+                    // strip) and run PreviewWorkers wide, so some cells failed to allocate and
+                    // silently dropped out. The roll then took wb_high from whichever cells
+                    // survived — a different answer on every import, and no hint that the vote
+                    // was short. The pooled result is still the best available; the silence was
+                    // the bug.
+                    Interlocked.Increment(ref failed);
+                    failReason = ex is OutOfMemoryException ? Loc.T("内存不足") : ex.Message;
                     ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                     return;
                 }
@@ -2527,7 +2541,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             });
             ReportBackground("");
             ct.ThrowIfCancellationRequested();
-            if (masks.Count == 0) { FinishAutoInvert(); return; }
+            if (masks.Count == 0)
+            {
+                // Nothing voted at all: stage 1's single-frame answer stays, and the user is told
+                // why the roll pass had nothing to add rather than shown a completed-looking
+                // status line over a provisional result.
+                RollAnalysisPending = false;
+                StatusText = failed > 0
+                    ? Loc.F($"整卷分析未完成：{failed} 帧解码失败（{failReason}），保留当前帧的结果")
+                    : Loc.T("整卷分析未完成：没有可用的帧，保留当前帧的结果");
+                return;
+            }
 
             bool sameDomain = masks.Count == values.Count
                               && !masks.Where((m, i) => !ReferenceEquals(m, values[i])).Any();
@@ -2606,7 +2630,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 : Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
             ApplyAutoChainToRoll();
             NeedsRecalibration = false;   // 重跑过了，提示可以撤下
-            FinishAutoInvert(masks.Count);
+            FinishAutoInvert(masks.Count, failed, failReason);
         }
         // Both failure paths clear the notice as well as the progress line. A cancelled or failed
         // analysis is exactly the case where "正在分析" must stop being displayed: the roll is
@@ -2668,11 +2692,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         MarkRollDirty();
     }
 
-    private void FinishAutoInvert(int voted = 1)
+    private void FinishAutoInvert(int voted = 1, int failed = 0, string? failReason = null)
     {
         // The roll-wide numbers are in: what is on screen is no longer provisional.
         RollAnalysisPending = false;
-        StatusText = Loc.F($"整卷去色罩完成（{voted} 帧参与）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
+        // A short vote is reported as such. The numbers are still applied — they are the best
+        // the roll could give — but "N 帧参与" alone read as complete when cells had been dropped.
+        string voteText = failed > 0
+            ? Loc.F($"{voted} 帧参与，{failed} 帧解码失败：{failReason}")
+            : Loc.F($"{voted} 帧参与");
+        StatusText = Loc.F($"整卷去色罩完成（{voteText}）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
         ScheduleRender();
         // Drop the existing thumbnails before asking for new ones. DecodeThumbnailsAsync skips
         // any frame that already HAS a thumbnail — it exists to fill gaps during import — so
