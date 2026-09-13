@@ -4,7 +4,7 @@
 
 > 本版属于测试性质：HDR 和色彩管理都是大改，macOS 的 HDR / EDR 预览更是第一次上真机，可能不稳定或有显示错误；遇到问题可以先关掉 HDR 开关继续用，欢迎回报。
 >
-> 感谢 **Ranalp**（小红书）贡献 PR #4：本版的色彩管理重做以它为基础。
+> 感谢 **@Ranalp**贡献 PR #4：本版的色彩管理重做基础。
 
 **新增**
 
@@ -32,7 +32,7 @@
 
 > Treat this release as a beta: HDR and colour management are both large changes, and the macOS HDR / EDR preview is running on real hardware for the first time, so it may be unstable or render incorrectly. If it misbehaves, switch HDR off and carry on — and please report what you saw.
 >
-> Thanks to **Ranalp** (Xiaohongshu) for PR #4, the foundation of this release's colour management rebuild.
+> Thanks to **@Ranalp**  for PR #4, the foundation of this release's colour management rebuild.
 
 **Added**
 
