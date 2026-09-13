@@ -2258,14 +2258,43 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private double? BoardCutOf(RollFrame frame)
     {
         bool isCurrent = ReferenceEquals(frame, CurrentFrame);
-        ImageBuffer full;
+
+        // Reproduce the preview's own framing on the full decode. A margin decode is a window
+        // onto a file holding several negatives, so it goes on first; the crop is expressed
+        // against whichever buffer the preview is (the frame's rect within the box when there is
+        // one, the file otherwise), which is exactly what applying the box first leaves behind.
+        // Without this a strip scan would be measured with its neighbouring negatives included.
+        // The current frame's framing is the live one (AutoCrop); the others' is rebuilt from
+        // their stored rects the same way AdoptPreview would.
+        (double X, double Y, double W, double H)? box = isCurrent ? _previewMargin : SplitCropOf(frame);
+        (double X, double Y, double W, double H)? crop = isCurrent
+            ? AutoCrop
+            : box is { } b && SplitRectOf(frame) is { } rect ? Relative(rect, b) : frame.Params.CropRect;
+
+        ImageBuffer region;
         try
         {
-            full = ImageIo.LoadWorking(
-                frame.Path,
-                _colorPipelineVersion,
-                ColorManagement,
-                _tiffInputAssumption).Pixels;
+            // A split cell decodes only its box: a TIFF window at full resolution is the same
+            // pixels as the whole decode cropped to the box, and holds only the cell — a third
+            // of a 190 MP Flextight strip instead of all 2.3 GB of it. A whole-file frame (no
+            // box) or a RAW still takes the full decode.
+            WorkingFrame? window = box is { } bx
+                ? ImageIo.LoadWorkingTiffRegionFull(
+                    frame.Path, bx, _colorPipelineVersion, ColorManagement, _tiffInputAssumption)
+                : null;
+            if (window is not null)
+            {
+                region = window.Pixels;
+            }
+            else
+            {
+                ImageBuffer full = ImageIo.LoadWorking(
+                    frame.Path,
+                    _colorPipelineVersion,
+                    ColorManagement,
+                    _tiffInputAssumption).Pixels;
+                region = box is { } bx2 ? Geometry.ApplyCrop(full, bx2) : full;
+            }
         }
         catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException
                                    or OutOfMemoryException)
@@ -2284,19 +2313,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // The preview answer is second best; no answer at all was the bug.
             return isCurrent ? PreviewBoardCut() : null;
         }
-
-        // Reproduce the preview's own framing on the full decode. A margin decode is a window
-        // onto a file holding several negatives, so it goes on first; the crop is expressed
-        // against whichever buffer the preview is (the frame's rect within the box when there is
-        // one, the file otherwise), which is exactly what applying the box first leaves behind.
-        // Without this a strip scan would be measured with its neighbouring negatives included.
-        // The current frame's framing is the live one (AutoCrop); the others' is rebuilt from
-        // their stored rects the same way AdoptPreview would.
-        (double X, double Y, double W, double H)? box = isCurrent ? _previewMargin : SplitCropOf(frame);
-        (double X, double Y, double W, double H)? crop = isCurrent
-            ? AutoCrop
-            : box is { } b && SplitRectOf(frame) is { } rect ? Relative(rect, b) : frame.Params.CropRect;
-        ImageBuffer region = box is { } bx ? Geometry.ApplyCrop(full, bx) : full;
         if (crop is { } c) region = Geometry.ApplyCrop(region, c);
 
         double thr = Sprocket.EstimateSprocketThreshold(region);

@@ -176,14 +176,26 @@ public static class ImageIo
     private static T GatedFull<T>(string path, Func<T> decode)
         => Gated(RawDecode.IsRawExtension(path) ? FullSlotBytes : TiffFullBytes(path), decode);
 
-    /// <summary>A preview decode's weight — light only when it really is a half-size LibRaw
-    /// decode. A TIFF preview still passes through the full frame, and the DNG backend's
-    /// linear sources come back full size whatever was asked.</summary>
+    /// <summary>A preview decode's weight — light when it is a half-size LibRaw decode or a
+    /// TIFF window (which streams: the output plus one scanline, whatever the file's size — see
+    /// <see cref="TiffIO.LoadWorkingRegion"/>); full when the DNG backend's linear sources come
+    /// back full size whatever was asked.</summary>
     private static T GatedPreview<T>(string path, Func<T> decode)
-        => Gated(RawDecode.IsRawExtension(path)
-                     ? Settings.Current.DecodeBackend != RawDecode.RawBackend.Dng ? PreviewSlotBytes : FullSlotBytes
-                     : TiffFullBytes(path),
+        => Gated(RawDecode.IsRawExtension(path) && Settings.Current.DecodeBackend == RawDecode.RawBackend.Dng
+                     ? FullSlotBytes
+                     : PreviewSlotBytes,
                  decode);
+
+    /// <summary>
+    /// A full-resolution decode of one rectangle of <paramref name="path"/>: its share of the
+    /// frame, since a TIFF window streams and holds only its own pixels.
+    /// </summary>
+    private static T GatedTiffRegion<T>(string path, (double X, double Y, double W, double H) rect, Func<T> decode)
+    {
+        double share = Math.Clamp(rect.W, 0.0, 1.0) * Math.Clamp(rect.H, 0.0, 1.0);
+        long bytes = Math.Max((long)(TiffFullBytes(path) * share), 64L << 20);
+        return Gated(bytes, decode);
+    }
 
     /// <summary>
     /// What a TIFF decode will hold resident, from its header: the float frame (12 bytes a
@@ -329,18 +341,19 @@ public static class ImageIo
     /// is bit-identical to averaging the float frame (same order, same arithmetic) while cutting
     /// the per-decode peak by that whole buffer.
     ///
-    /// Non-RAW still goes through the full frame — TIFF decoding has no streaming entry point, and
-    /// a linear TIFF roll is not the case that runs the machine out of memory.
+    /// A TIFF is streamed the same way: the box average is taken scanline by scanline off the
+    /// decoder (<see cref="TiffIO.LoadTiffPreviews"/>), bit-identical to boxing the full frame,
+    /// which is never allocated. A whole Flextight strip is 1.5–2.3 GB as float; that WAS the
+    /// case that ran an 8 GB machine out of memory.
     /// </summary>
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) LoadPreviews(
         string path, params int[] maxEdges) => GatedPreview(path, () =>
     {
         if (!RawDecode.IsRawExtension(path))
         {
-            ImageBuffer full = TiffIO.LoadTiff(path, inputIsSrgb: false);
-            var outs = new ImageBuffer[maxEdges.Length];
-            for (int i = 0; i < maxEdges.Length; i++) outs[i] = Resample.Box(full, maxEdges[i]);
-            return (outs, full.Width, full.Height);
+            var (fullW, fullH) = TiffIO.ReadTiffSize(path);
+            ImageBuffer[] outs = TiffIO.LoadTiffPreviews(path, inputIsSrgb: false, maxEdges);
+            return (outs, fullW, fullH);
         }
         var s = Settings.Current;
         // Half-size, not a demosaic. Everything this produces is on its way through a box
@@ -368,15 +381,16 @@ public static class ImageIo
 
         if (!RawDecode.IsRawExtension(path))
         {
-            WorkingFrame full = TiffIO.LoadWorkingFrame(
+            // Streamed: every size off one pass, none of them via the full-resolution frame.
+            var (fullW, fullH) = TiffIO.ReadTiffSize(path);
+            WorkingFrame[] previews = TiffIO.LoadWorkingRegions(
                 path,
+                (0, 0, 1, 1),
+                maxEdges,
                 tiffInputAssumption,
                 pipelineVersion,
                 colorManagement);
-            var previews = new WorkingFrame[maxEdges.Length];
-            for (int index = 0; index < maxEdges.Length; index++)
-                previews[index] = full.WithPixels(Resample.Box(full.Pixels, maxEdges[index]));
-            return (previews, full.Pixels.Width, full.Pixels.Height);
+            return (previews, fullW, fullH);
         }
 
         var settings = Settings.Current;
@@ -508,9 +522,13 @@ public static class ImageIo
     });
 
     /// <summary>
-    /// Versioned typed region preview. Managed profiled TIFFs currently decode/convert atomically
-    /// before cropping; this trades peak memory for the invariant that a split scan never takes a
-    /// partial ICC path. A future streaming implementation must preserve the same result/metadata.
+    /// Versioned typed region preview. Streamed: the window is decoded, converted and boxed
+    /// scanline by scanline (<see cref="TiffIO.LoadWorkingRegion"/>), bit-identical to decoding
+    /// the whole frame and cropping it, on every route including the exact-ICC one — a split scan
+    /// still never takes a partial ICC path — but the frame itself is never allocated. This used
+    /// to decode the whole file per cell: eight cells of a 190 MP Flextight strip were eight
+    /// 2.3 GB decodes, which is what put 8 GB machines into swap and dropped cells from the
+    /// roll-wide vote.
     /// </summary>
     public static (WorkingFrame Preview, int SourceWidth, int SourceHeight) LoadWorkingPreviewRegion(
         string path,
@@ -540,17 +558,44 @@ public static class ImageIo
             return (working, fullWidth, fullHeight);
         }
 
-        WorkingFrame full = TiffIO.LoadWorkingFrame(
+        var (fullW, fullH) = TiffIO.ReadTiffSize(path);
+        WorkingFrame preview = TiffIO.LoadWorkingRegion(
             path,
+            rect,
+            maxEdge,
             tiffInputAssumption,
             pipelineVersion,
             colorManagement);
-        ImageBuffer region = Geometry.ApplyCrop(full.Pixels, rect);
-        ImageBuffer preview = Resample.Box(region, maxEdge);
-        int sourceWidth = Math.Max(1, (int)Math.Round(rect.W * full.Pixels.Width));
-        int sourceHeight = Math.Max(1, (int)Math.Round(rect.H * full.Pixels.Height));
-        return (full.WithPixels(preview), sourceWidth, sourceHeight);
+        // The file's own dimensions rather than back-computed from the returned buffer: the box
+        // factor truncates, so that route loses up to a factor's worth of pixels.
+        int sourceWidth = Math.Max(1, (int)Math.Round(rect.W * fullW));
+        int sourceHeight = Math.Max(1, (int)Math.Round(rect.H * fullH));
+        return (preview, sourceWidth, sourceHeight);
     });
+
+    /// <summary>
+    /// One rectangle of a TIFF at FULL resolution, typed — what <see cref="LoadWorking"/> then
+    /// <see cref="Geometry.ApplyCrop"/> would give, pixel for pixel, holding only the rectangle.
+    /// Null for RAW, which has its own region decoder (<see cref="LoadWorkingRegion"/>).
+    /// </summary>
+    public static WorkingFrame? LoadWorkingTiffRegionFull(
+        string path,
+        (double X, double Y, double W, double H) rect,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (RawDecode.IsRawExtension(path)) return null;
+        return GatedTiffRegion(path, rect, () => TiffIO.LoadWorkingRegion(
+            path,
+            rect,
+            maxEdge: 0,
+            tiffInputAssumption,
+            pipelineVersion,
+            colorManagement));
+    }
 
     private static void RequirePipelineVersion(ColorPipelineVersion version)
     {

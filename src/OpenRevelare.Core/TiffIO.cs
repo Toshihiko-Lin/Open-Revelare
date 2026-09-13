@@ -222,6 +222,172 @@ public static class TiffIO
         => (int)(Math.Clamp(v, 0.0f, 1.0f) * 65535.0f + 0.5f);
 
     /// <summary>
+    /// One rectangle of a TIFF, box-averaged to one or more sizes — what a preview or a split
+    /// cell asks for. Several sizes cost one pass over the file (see <see cref="ReadWindows"/>).
+    /// </summary>
+    /// <param name="Rect">Normalised (x, y, w, h) of the full image, origin top-left.</param>
+    /// <param name="MaxEdges">Long edge of each result; 0 or less keeps full resolution.</param>
+    public readonly record struct RegionRequest(
+        (double X, double Y, double W, double H) Rect,
+        int[] MaxEdges)
+    {
+        public RegionRequest((double X, double Y, double W, double H) rect, int maxEdge)
+            : this(rect, new[] { maxEdge }) { }
+    }
+
+    /// <summary>
+    /// The pixels a decode produces, in source coordinates: a crop box and an integer box
+    /// factor. Resolved from a <see cref="RegionRequest"/> against the file's dimensions with the
+    /// SAME arithmetic as <see cref="Geometry.ApplyCrop"/> and <see cref="Resample.BoxFactor"/>,
+    /// so that decoding a window and decoding the whole frame then cropping and boxing it land on
+    /// the same pixel grid — every Stage-1 measurement is taken on the preview, so a grid that
+    /// moved with the decode path would silently move the numbers.
+    /// </summary>
+    private readonly record struct SampleWindow(int X0, int Y0, int X1, int Y1, int Factor)
+    {
+        public int OutWidth => (X1 - X0) / Factor;
+        public int OutHeight => (Y1 - Y0) / Factor;
+
+        public static SampleWindow Whole(int width, int height) => new(0, 0, width, height, 1);
+
+        /// <summary>One window per requested edge, all on the same crop; the whole frame at
+        /// full resolution when there is no request.</summary>
+        public static SampleWindow[] Resolve(int width, int height, RegionRequest? region)
+        {
+            if (region is not { } r) return new[] { Whole(width, height) };
+            if (r.MaxEdges is not { Length: > 0 })
+                throw new ArgumentException("a region request needs at least one edge", nameof(region));
+            var rect = r.Rect;
+            // Geometry.ApplyCrop, verbatim — including its refusal of an empty crop.
+            int x0 = Math.Max(0, (int)Math.Round(rect.X * width));
+            int y0 = Math.Max(0, (int)Math.Round(rect.Y * height));
+            int x1 = Math.Min(width, (int)Math.Round((rect.X + rect.W) * width));
+            int y1 = Math.Min(height, (int)Math.Round((rect.Y + rect.H) * height));
+            if (x1 <= x0 || y1 <= y0)
+                throw new ArgumentException($"crop rect {rect} yields empty region for {width}×{height}");
+            var windows = new SampleWindow[r.MaxEdges.Length];
+            for (int k = 0; k < windows.Length; k++)
+            {
+                int factor = r.MaxEdges[k] > 0 ? Resample.BoxFactor(x1 - x0, y1 - y0, r.MaxEdges[k]) : 1;
+                windows[k] = new SampleWindow(x0, y0, x1, y1, factor);
+            }
+            return windows;
+        }
+    }
+
+    /// <summary>A per-row hook on the decoded, scaled samples of one window row — <c>count</c>
+    /// pixels, interleaved RGB — before they are stored or averaged.</summary>
+    private delegate void RowTransform(Span<float> rgb, int count);
+
+    /// <summary>
+    /// The one scanline loop every TIFF decode here runs through.
+    ///
+    /// Reads the rows the windows cover, scales each sample to its encoded range (1/255, 1/65535,
+    /// or 1.0 for IEEE float), hands the row's crop segment to <paramref name="transform"/>, then
+    /// for each window either stores it (factor 1) or folds it into that window's box
+    /// accumulator. The accumulator is <see cref="Resample.Box"/> unrolled: the same float sums
+    /// in the same order (row by row, left to right within a row) and the same final multiply by
+    /// <c>1/factor²</c>, so the result is bit-identical to boxing a full decode — that identity
+    /// is what lets a split scan or a preview be decoded WITHOUT the full frame ever existing.
+    /// Rows below the crop are still decoded (a TIFF's strips are not randomly addressable in
+    /// general) but never converted.
+    ///
+    /// Several windows share ONE pass so that a caller wanting two preview sizes of the same crop
+    /// (the roll's opening frames want the editor size and the strip size) pays for the file and
+    /// the colour transform once; all windows must share the crop and differ only in factor.
+    ///
+    /// Memory is the outputs plus one scanline. That is the point: a whole Flextight strip is
+    /// 127–190 MP, 1.5–2.3 GB as float, and the previous shape of every preview — decode the
+    /// frame, crop it, box it — could not be run on an 8 GB machine, let alone eight cells of it
+    /// side by side.
+    /// </summary>
+    private static float[][] ReadWindows(
+        Tiff tif,
+        string path,
+        int spp,
+        int bps,
+        float sampleScale,
+        SampleWindow[] windows,
+        RowTransform? transform)
+    {
+        if (windows.Length == 0) throw new ArgumentException("at least one window", nameof(windows));
+        SampleWindow crop = windows[0];
+        foreach (SampleWindow w in windows)
+            if (w.X0 != crop.X0 || w.X1 != crop.X1 || w.Y0 != crop.Y0 || w.Y1 != crop.Y1)
+                throw new ArgumentException("windows sharing one pass must share the crop", nameof(windows));
+
+        int segW = crop.X1 - crop.X0;
+        var outputs = new float[windows.Length][];
+        int lastRow = crop.Y0;   // exclusive: the first row no window needs
+        for (int k = 0; k < windows.Length; k++)
+        {
+            outputs[k] = new float[checked(windows[k].OutWidth * windows[k].OutHeight * 3)];
+            lastRow = Math.Max(lastRow, crop.Y0 + windows[k].OutHeight * windows[k].Factor);
+        }
+        var row = new float[checked(segW * 3)];
+        byte[] scanline = new byte[tif.ScanlineSize()];
+
+        for (int y = 0; y < lastRow; y++)
+        {
+            if (!tif.ReadScanline(scanline, y))
+                throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
+            if (y < crop.Y0) continue;
+
+            for (int x = 0; x < segW; x++)
+            {
+                int sx = (crop.X0 + x) * spp, d = x * 3;
+                if (spp >= 3)
+                {
+                    row[d] = Sample(scanline, sx, bps) * sampleScale;
+                    row[d + 1] = Sample(scanline, sx + 1, bps) * sampleScale;
+                    row[d + 2] = Sample(scanline, sx + 2, bps) * sampleScale;
+                }
+                else
+                {
+                    float grey = Sample(scanline, sx, bps) * sampleScale;   // grey -> replicate
+                    row[d] = grey; row[d + 1] = grey; row[d + 2] = grey;
+                }
+            }
+            transform?.Invoke(row, segW);
+
+            for (int k = 0; k < windows.Length; k++)
+            {
+                SampleWindow win = windows[k];
+                int factor = win.Factor, outW = win.OutWidth;
+                int oy = (y - crop.Y0) / factor;
+                if (oy >= win.OutHeight) continue;          // trailing rows outside this box
+                float[] data = outputs[k];
+                if (factor == 1)
+                {
+                    Array.Copy(row, 0, data, oy * outW * 3, outW * 3);
+                    continue;
+                }
+                int rowBase = oy * outW * 3;
+                for (int ox = 0; ox < outW; ox++)
+                {
+                    int di = rowBase + ox * 3, si = ox * factor * 3;
+                    float r = data[di], g = data[di + 1], b = data[di + 2];
+                    for (int fx = 0; fx < factor; fx++, si += 3)
+                    {
+                        r += row[si]; g += row[si + 1]; b += row[si + 2];
+                    }
+                    data[di] = r; data[di + 1] = g; data[di + 2] = b;
+                }
+            }
+        }
+
+        for (int k = 0; k < windows.Length; k++)
+        {
+            int factor = windows[k].Factor;
+            if (factor == 1) continue;
+            float inv = 1.0f / (factor * factor);
+            float[] data = outputs[k];
+            for (int i = 0; i < data.Length; i++) data[i] *= inv;
+        }
+        return outputs;
+    }
+
+    /// <summary>
     /// One code step of the source file expressed in the LINEAR units the buffer actually holds —
     /// measured at the shadow end, which is the only place it matters.
     ///
@@ -262,6 +428,11 @@ public static class TiffIO
     /// atomic LittleCMS transform.
     /// </summary>
     public static WorkingFrame LoadWorkingFrame(string path, bool inputIsSrgb)
+        => LoadWorkingFrame(path, inputIsSrgb, region: null)[0];
+
+    /// <summary>One frame per window of <paramref name="region"/> (one, the whole frame, when
+    /// there is no request); every frame carries the same descriptor and admission.</summary>
+    private static WorkingFrame[] LoadWorkingFrame(string path, bool inputIsSrgb, RegionRequest? region)
     {
         SuppressLibTiffWarnings();
         string stableId = FrameSourceIds.ForPath(path);
@@ -329,17 +500,26 @@ public static class TiffIO
             }
         }
 
-        ImageBuffer pixels = LoadTiff(path, inputIsSrgb);
+        ImageBuffer[] pixels = LoadTiff(path, inputIsSrgb, region);
         var source = new SourceDescriptor(
             stableId,
             Path.GetFileName(path),
             original,
             decodeRecipe);
-        return new WorkingFrame(
-            pixels,
-            WorkingSpaceId.LinearAcesCgV1,
-            admission,
-            source);
+        return Frames(pixels, WorkingSpaceId.LinearAcesCgV1, admission, source);
+    }
+
+    /// <summary>One <see cref="WorkingFrame"/> per window, sharing everything but the pixels.</summary>
+    private static WorkingFrame[] Frames(
+        ImageBuffer[] windows,
+        WorkingSpaceId space,
+        WorkingAdmission admission,
+        SourceDescriptor source)
+    {
+        var frames = new WorkingFrame[windows.Length];
+        for (int k = 0; k < windows.Length; k++)
+            frames[k] = new WorkingFrame(windows[k], space, admission, source);
+        return frames;
     }
 
     /// <summary>
@@ -389,13 +569,63 @@ public static class TiffIO
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
 
         ArgumentNullException.ThrowIfNull(colorManagement);
-        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement);
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region: null)[0];
     }
 
-    private static WorkingFrame LoadManagedWorkingFrame(
+    /// <summary>
+    /// One window of a TIFF as a typed working frame: what <see cref="LoadWorkingFrame(string, TiffInputAssumption, ColorPipelineVersion, IColorManagementEngine)"/>
+    /// followed by <see cref="Geometry.ApplyCrop"/> and <see cref="Resample.Box"/> would return —
+    /// the same pixels bit for bit, the same admission, descriptor and decode recipe, the same
+    /// source lattice — decoded without the whole frame.
+    ///
+    /// Every route the whole-frame decode can take (exact embedded ICC, detected tags, explicit
+    /// linear/sRGB, vendor gamma, legacy compatibility) is resolved by the SAME code and only the
+    /// sample reader differs, so a split scan never takes a partial ICC path here either; see
+    /// <see cref="ReadWindow"/> for the identity and the memory it buys.
+    /// </summary>
+    public static WorkingFrame LoadWorkingRegion(
+        string path,
+        (double X, double Y, double W, double H) rect,
+        int maxEdge,
+        TiffInputAssumption inputAssumption,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+        => LoadWorkingRegions(path, rect, new[] { maxEdge }, inputAssumption, pipelineVersion, colorManagement)[0];
+
+    /// <summary>
+    /// <see cref="LoadWorkingRegion"/> at several sizes off ONE pass over the file: element
+    /// <c>k</c> is the window boxed to <c>maxEdges[k]</c>. What a caller that wants both an
+    /// editor preview and a strip thumbnail of the same frame uses, so the file and its colour
+    /// transform are paid for once.
+    /// </summary>
+    public static WorkingFrame[] LoadWorkingRegions(
+        string path,
+        (double X, double Y, double W, double H) rect,
+        int[] maxEdges,
+        TiffInputAssumption inputAssumption,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement)
+    {
+        if (!Enum.IsDefined(inputAssumption))
+            throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null);
+        ArgumentNullException.ThrowIfNull(maxEdges);
+        if (maxEdges.Length == 0)
+            throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
+        var region = new RegionRequest(rect, (int[])maxEdges.Clone());
+        if (pipelineVersion == ColorPipelineVersion.LegacyV1)
+            return LoadWorkingFrame(path, inputIsSrgb: inputAssumption == TiffInputAssumption.Srgb, region);
+        if (pipelineVersion != ColorPipelineVersion.ManagedV2)
+            throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
+
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region);
+    }
+
+    private static WorkingFrame[] LoadManagedWorkingFrame(
         string path,
         TiffInputAssumption inputAssumption,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        RegionRequest? region)
     {
         SuppressLibTiffWarnings();
         string stableId = FrameSourceIds.ForPath(path);
@@ -431,7 +661,8 @@ public static class TiffIO
                     embeddedProfile,
                     ColorReference.SceneReferred,
                     "managed v2 exact embedded ICC -> LittleCMS -> linear ACEScg",
-                    colorManagement);
+                    colorManagement,
+                    region);
             }
             catch (Exception ex)
                 // A transform-creation failure is deliberately NOT caught here: the embedded
@@ -456,20 +687,22 @@ public static class TiffIO
             && FlextightMeta.Read(path).HasEncodingGamma)
             return LoadManagedCompatibility(
                 path,
-                "managed v2 scanner-vendor gamma declaration; primaries uncharacterized");
+                "managed v2 scanner-vendor gamma declaration; primaries uncharacterized",
+                region);
 
         return inputAssumption switch
         {
             TiffInputAssumption.Linear => DecodeManagedLinearAssumption(
-                path, stableId, ExplicitPrefix("linear", fallbackDiagnostic)),
+                path, stableId, ExplicitPrefix("linear", fallbackDiagnostic), region),
             TiffInputAssumption.Srgb => DecodeManagedSrgbAssumption(
-                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement),
+                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement, region),
             TiffInputAssumption.LegacyByBitDepthCompatibility when fallbackDiagnostic is null =>
                 LoadManagedCompatibility(
                     path,
-                    "managed v2 versioned legacy-by-bit-depth compatibility"),
+                    "managed v2 versioned legacy-by-bit-depth compatibility",
+                    region),
             TiffInputAssumption.Unspecified => DecodeManagedDetected(
-                path, stableId, fallbackDiagnostic, colorManagement),
+                path, stableId, fallbackDiagnostic, colorManagement, region),
             TiffInputAssumption.LegacyByBitDepthCompatibility =>
                 throw MissingTiffInputAssumption(path, fallbackDiagnostic),
             _ => throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null),
@@ -483,11 +716,12 @@ public static class TiffIO
     /// the two assumption routes below, carrying the detector's reason into the decode recipe so
     /// the choice stays auditable.
     /// </summary>
-    private static WorkingFrame DecodeManagedDetected(
+    private static WorkingFrame[] DecodeManagedDetected(
         string path,
         string stableId,
         string? fallbackDiagnostic,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        RegionRequest? region)
     {
         TiffInputDetection detection = TiffInputDetector.Detect(path);
         string prefix = fallbackDiagnostic is null
@@ -511,7 +745,8 @@ public static class TiffIO
                     ? ColorReference.SceneReferred
                     : ColorReference.DisplayReferred,
                 $"{prefix} [{reason}] -> exact profile from file tags -> LittleCMS -> linear ACEScg",
-                colorManagement);
+                colorManagement,
+                region);
         }
 
         // Normally unreachable — LoadManagedWorkingFrame honours the vendor declaration before
@@ -520,11 +755,12 @@ public static class TiffIO
         if (detection.Evidence == TiffInputEvidence.VendorGammaDeclaration)
             return LoadManagedCompatibility(
                 path,
-                $"{prefix} [{reason}] -> scanner-vendor gamma declaration; primaries uncharacterized");
+                $"{prefix} [{reason}] -> scanner-vendor gamma declaration; primaries uncharacterized",
+                region);
 
         return detection.Assumption == TiffInputAssumption.Linear
-            ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]")
-            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement);
+            ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]", region)
+            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement, region);
     }
 
     /// <summary>Recipe wording for a user-selected roll override.</summary>
@@ -534,11 +770,12 @@ public static class TiffIO
             : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); " +
               $"explicit roll fallback {kind}";
 
-    private static WorkingFrame DecodeManagedSrgbAssumption(
+    private static WorkingFrame[] DecodeManagedSrgbAssumption(
         string path,
         string stableId,
         string prefix,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        RegionRequest? region)
     {
         return DecodeManagedWithProfile(
             path,
@@ -546,22 +783,21 @@ public static class TiffIO
             BuiltInColorProfiles.Srgb(ProfileRole.Input),
             ColorReference.DisplayReferred,
             $"{prefix} -> exact built-in sRGB -> LittleCMS -> linear ACEScg",
-            colorManagement);
+            colorManagement,
+            region);
     }
 
-    private static WorkingFrame DecodeManagedLinearAssumption(
+    private static WorkingFrame[] DecodeManagedLinearAssumption(
         string path,
         string stableId,
-        string prefix)
+        string prefix,
+        RegionRequest? region)
     {
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
-        (int width, int height, int bitsPerSample, float[] encoded, float codeStep, NumericRange range) =
-            ReadTiffSamples(tif, path);
-        var pixels = new ImageBuffer(width, height, encoded)
-        {
-            SourceQuantisationStep = codeStep,
-        };
+        (SampleWindow[] windows, int bitsPerSample, float[][] encoded, float codeStep, NumericRange range) =
+            ReadTiffSamples(tif, path, region, transform: null);
+        ImageBuffer[] pixels = Buffers(windows, encoded, codeStep);
         CaptureKind captureKind = bitsPerSample switch
         {
             8 => CaptureKind.TiffUntagged8Bit,
@@ -579,26 +815,41 @@ public static class TiffIO
             Path.GetFileName(path),
             original,
             $"{prefix}; primaries uncharacterized; numeric working-space passthrough");
-        return new WorkingFrame(
-            pixels,
-            WorkingSpaceId.LinearAcesCgV1,
-            WorkingAdmission.ExplicitUncharacterizedPassthrough,
-            source);
+        return Frames(pixels, WorkingSpaceId.LinearAcesCgV1, WorkingAdmission.ExplicitUncharacterizedPassthrough, source);
     }
 
-    private static WorkingFrame LoadManagedCompatibility(string path, string prefix)
+    /// <summary>The windows' samples as buffers, each stamped with the same source lattice.</summary>
+    private static ImageBuffer[] Buffers(SampleWindow[] windows, float[][] samples, double quantisationStep)
     {
-        WorkingFrame legacy = LoadWorkingFrame(path, inputIsSrgb: false);
+        var buffers = new ImageBuffer[windows.Length];
+        for (int k = 0; k < windows.Length; k++)
+        {
+            buffers[k] = new ImageBuffer(windows[k].OutWidth, windows[k].OutHeight, samples[k])
+            {
+                SourceQuantisationStep = quantisationStep,
+            };
+        }
+        return buffers;
+    }
+
+    private static WorkingFrame[] LoadManagedCompatibility(string path, string prefix, RegionRequest? region)
+    {
+        WorkingFrame[] legacy = LoadWorkingFrame(path, inputIsSrgb: false, region);
         var source = new SourceDescriptor(
-            legacy.Source.StableSourceId,
-            legacy.Source.DisplayName,
-            legacy.Source.OriginalEncoding,
-            $"{prefix} -> {legacy.Source.DecodeRecipe}");
-        return new WorkingFrame(
-            legacy.Pixels,
-            legacy.Space,
-            WorkingAdmission.LegacyUncharacterizedPassthrough,
-            source);
+            legacy[0].Source.StableSourceId,
+            legacy[0].Source.DisplayName,
+            legacy[0].Source.OriginalEncoding,
+            $"{prefix} -> {legacy[0].Source.DecodeRecipe}");
+        var frames = new WorkingFrame[legacy.Length];
+        for (int k = 0; k < legacy.Length; k++)
+        {
+            frames[k] = new WorkingFrame(
+                legacy[k].Pixels,
+                legacy[k].Space,
+                WorkingAdmission.LegacyUncharacterizedPassthrough,
+                source);
+        }
+        return frames;
     }
 
     private static ColorManagementException MissingTiffInputAssumption(
@@ -617,13 +868,14 @@ public static class TiffIO
     private static string OneLine(string text) =>
         string.Join(" ", text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
 
-    private static WorkingFrame DecodeManagedWithProfile(
+    private static WorkingFrame[] DecodeManagedWithProfile(
         string path,
         string stableId,
         ColorProfileRef sourceProfile,
         ColorReference sourceReference,
         string decodeRecipe,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        RegionRequest? region)
     {
         ColorProfileRef workingProfile = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Working);
 
@@ -658,7 +910,6 @@ public static class TiffIO
         {
             using Tiff tif = Tiff.Open(path, "r")
                 ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
-            var (width, height, _, encoded, codeStep, sourceRange) = ReadTiffSamples(tif, path);
 
             // Converted IN PLACE. The transform is per pixel, and the lease documents that source
             // and destination may be the same buffer, so the frame never exists twice. It used to:
@@ -666,13 +917,32 @@ public static class TiffIO
             // trimming the probes back off — four times the frame at peak, 9 GB for a 190 MP
             // Flextight strip, which is what put an 8 GB machine into swap (or OutOfMemory) on
             // every split cell of such a scan.
-            int pixelCount = checked(width * height);
+            //
+            // A WINDOW is converted row by row as the reader produces it, before the box average,
+            // because the average has to be taken in the working space — the same order as the
+            // whole-frame route (convert, then crop and box), so the pixels agree bit for bit.
+            // Row by row rather than one call is the only difference, and a per-pixel transform
+            // does not know how many neighbours it was batched with.
+            SampleWindow[] windows;
+            float[][] encoded;
+            float codeStep;
+            NumericRange sourceRange;
             try
             {
-                transform.Apply(encoded, encoded, pixelCount);
+                (windows, _, encoded, codeStep, sourceRange) = ReadTiffSamples(
+                    tif,
+                    path,
+                    region,
+                    region is null ? null : (rgb, count) => transform.Apply(rgb, rgb, count));
+                if (region is null)
+                    transform.Apply(encoded[0], encoded[0], checked(windows[0].OutWidth * windows[0].OutHeight));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException
+                                       and not IOException and not NotSupportedException
+                                       and not ArgumentException)
             {
+                // The reader's own failures (file, layout, an empty window) pass through as they
+                // always did; anything the transform raised is reported as the transform's.
                 throw new ColorManagementException(
                     $"Managed TIFF input failed while applying the atomic ICC transform for " +
                     $"'{Path.GetFileName(path)}'; no legacy or partial result was admitted.",
@@ -687,11 +957,7 @@ public static class TiffIO
             // conservative largest first-code component in working-space units.
             double quantisationStep = ManagedQuantisationStep(
                 ConvertProbes(transform, codeStep, path));
-            float[] converted = encoded;
-            var pixels = new ImageBuffer(width, height, converted)
-            {
-                SourceQuantisationStep = quantisationStep,
-            };
+            ImageBuffer[] pixels = Buffers(windows, encoded, quantisationStep);
             var original = new CharacterizedPixelEncoding(
                 sourceProfile,
                 sourceReference,
@@ -702,11 +968,7 @@ public static class TiffIO
                 Path.GetFileName(path),
                 original,
                 decodeRecipe);
-            return new WorkingFrame(
-                pixels,
-                WorkingSpaceId.LinearAcesCgV1,
-                WorkingAdmission.ConvertedFromCharacterized,
-                source);
+            return Frames(pixels, WorkingSpaceId.LinearAcesCgV1, WorkingAdmission.ConvertedFromCharacterized, source);
         }
     }
 
@@ -789,8 +1051,14 @@ public static class TiffIO
         }
     }
 
-    private static (int Width, int Height, int BitsPerSample, float[] Encoded, float CodeStep, NumericRange Range)
-        ReadTiffSamples(Tiff tif, string path)
+    /// <summary>
+    /// The managed decode's sample reader: the whole frame, or the window <paramref name="region"/>
+    /// resolves to, through <see cref="ReadWindow"/>. <paramref name="transform"/> runs on each
+    /// window row before it is stored or averaged — the hook a per-row colour transform needs.
+    /// One sample array per window, sized by that window.
+    /// </summary>
+    private static (SampleWindow[] Windows, int BitsPerSample, float[][] Encoded, float CodeStep, NumericRange Range)
+        ReadTiffSamples(Tiff tif, string path, RegionRequest? region, RowTransform? transform)
     {
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
         int h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
@@ -807,33 +1075,9 @@ public static class TiffIO
 
         float codeStep = isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
         float sampleScale = isFloat ? 1.0f : codeStep;
-        float[] encoded = new float[checked(w * h * 3)];
-        byte[] scanline = new byte[tif.ScanlineSize()];
-        for (int y = 0; y < h; y++)
-        {
-            if (!tif.ReadScanline(scanline, y))
-                throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
-
-            int row = y * w * 3;
-            for (int x = 0; x < w; x++)
-            {
-                int destination = row + x * 3;
-                if (spp >= 3)
-                {
-                    encoded[destination] = Sample(scanline, x * spp, bps) * sampleScale;
-                    encoded[destination + 1] = Sample(scanline, x * spp + 1, bps) * sampleScale;
-                    encoded[destination + 2] = Sample(scanline, x * spp + 2, bps) * sampleScale;
-                }
-                else
-                {
-                    float grey = Sample(scanline, x * spp, bps) * sampleScale;
-                    encoded[destination] = grey;
-                    encoded[destination + 1] = grey;
-                    encoded[destination + 2] = grey;
-                }
-            }
-        }
-        return (w, h, bps, encoded, codeStep,
+        SampleWindow[] windows = SampleWindow.Resolve(w, h, region);
+        float[][] encoded = ReadWindows(tif, path, spp, bps, sampleScale, windows, transform);
+        return (windows, bps, encoded, codeStep,
             isFloat ? NumericRange.Extended : NumericRange.Normalized);
     }
 
@@ -901,7 +1145,28 @@ public static class TiffIO
     }
 
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
-    public static ImageBuffer LoadTiff(string path, bool inputIsSrgb)
+    public static ImageBuffer LoadTiff(string path, bool inputIsSrgb) => LoadTiff(path, inputIsSrgb, null)[0];
+
+    /// <summary>
+    /// The frozen v1 decode boxed to each of <paramref name="maxEdges"/> off one pass —
+    /// <see cref="Resample.Box"/> of <see cref="LoadTiff(string, bool)"/> pixel for pixel, with
+    /// the full frame never allocated.
+    /// </summary>
+    public static ImageBuffer[] LoadTiffPreviews(string path, bool inputIsSrgb, int[] maxEdges)
+    {
+        ArgumentNullException.ThrowIfNull(maxEdges);
+        if (maxEdges.Length == 0)
+            throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
+        return LoadTiff(path, inputIsSrgb, new RegionRequest((0, 0, 1, 1), (int[])maxEdges.Clone()));
+    }
+
+    /// <summary>
+    /// The frozen v1 decode, over the whole frame or one <see cref="RegionRequest"/>. The window
+    /// form is what <see cref="Geometry.ApplyCrop"/> then <see cref="Resample.Box"/> of the whole
+    /// decode would give, pixel for pixel — see <see cref="ReadWindow"/> — without the whole
+    /// decode.
+    /// </summary>
+    private static ImageBuffer[] LoadTiff(string path, bool inputIsSrgb, RegionRequest? region)
     {
         SuppressLibTiffWarnings();
         using Tiff tif = Tiff.Open(path, "r")
@@ -922,55 +1187,33 @@ public static class TiffIO
 
         IccTransform icc = ResolveIcc(tif, inputIsSrgb, path, bps);
 
-        var data = new float[w * h * 3];
-        int scanlineSize = tif.ScanlineSize();
-        byte[] buf = new byte[scanlineSize];
         float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
         float codeStep = isFloat ? 0.0f : inv;
 
-        for (int y = 0; y < h; y++)
+        RowTransform? transform = null;
+        if (inputIsSrgb)
         {
-            if (!tif.ReadScanline(buf, y))
-                throw new IOException($"failed reading TIFF scanline {y}");
-
-            int o = y * w * 3;
-            for (int x = 0; x < w; x++)
+            transform = (rgb, count) =>
             {
-                float r, g, b;
-                if (spp >= 3)
-                {
-                    r = Sample(buf, x * spp + 0, bps) * inv;
-                    g = Sample(buf, x * spp + 1, bps) * inv;
-                    b = Sample(buf, x * spp + 2, bps) * inv;
-                }
-                else
-                {
-                    float grey = Sample(buf, x * spp, bps) * inv; // grey -> replicate
-                    r = g = b = grey;
-                }
-
-                if (inputIsSrgb)
-                {
-                    r = Srgb.SrgbToLinear(r);
-                    g = Srgb.SrgbToLinear(g);
-                    b = Srgb.SrgbToLinear(b);
-                }
-                else if (!icc.IsIdentity)
-                {
-                    ApplyIcc(icc, ref r, ref g, ref b, preserveExtendedRange: isFloat);
-                }
-
-                int j = o + x * 3;
-                data[j] = r; data[j + 1] = g; data[j + 2] = b;
-            }
+                for (int i = 0; i < count * 3; i++) rgb[i] = Srgb.SrgbToLinear(rgb[i]);
+            };
+        }
+        else if (!icc.IsIdentity)
+        {
+            transform = (rgb, count) =>
+            {
+                for (int i = 0; i < count * 3; i += 3)
+                    ApplyIcc(icc, ref rgb[i], ref rgb[i + 1], ref rgb[i + 2], preserveExtendedRange: isFloat);
+            };
         }
 
+        SampleWindow[] windows = SampleWindow.Resolve(w, h, region);
+        float[][] data = ReadWindows(tif, path, spp, bps, inv, windows, transform);
+
         // Stamp the source lattice while the bit depth is still in scope; see
-        // ImageBuffer.SourceQuantisationStep for why this cannot be recovered downstream.
-        return new ImageBuffer(w, h, data)
-        {
-            SourceQuantisationStep = ShadowStep(codeStep, icc, inputIsSrgb),
-        };
+        // ImageBuffer.SourceQuantisationStep for why this cannot be recovered downstream. A
+        // boxed window inherits it unchanged, exactly as Resample.Box would have.
+        return Buffers(windows, data, ShadowStep(codeStep, icc, inputIsSrgb));
     }
 
     /// <summary>Pixel dimensions from the header alone — no image data is decoded.</summary>
