@@ -2267,11 +2267,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 ColorManagement,
                 _tiffInputAssumption).Pixels;
         }
-        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException
+                                   or OutOfMemoryException)
         {
             // A file the full decoder cannot open is not a reason to lose the estimate entirely —
             // for the current frame the preview is already in hand and its answer, while placed
             // less well, is the one this code used to give. The other frames have no preview yet.
+            //
+            // OutOfMemory is in the list on purpose. This is the one decode on the import path
+            // that is allowed to be full resolution, and a 190 MP Flextight strip is 2.3 GB of
+            // float — on an 8 GB machine, with the thumbnail warm-up decoding alongside, it is
+            // exactly the allocation that fails. Letting it escape does not merely lose the cut:
+            // it escapes through ApplySprocketAutoAsync BEFORE AutoInvertOnImportRun is reached,
+            // so the whole auto chain never starts and the roll sits on pipeline defaults
+            // (t_base 1, D_min 0, D_max 2 — a blown-white negative) with nothing to say why.
+            // The preview answer is second best; no answer at all was the bug.
             return isCurrent ? PreviewBoardCut() : null;
         }
 
