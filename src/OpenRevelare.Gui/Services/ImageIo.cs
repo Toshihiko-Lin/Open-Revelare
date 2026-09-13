@@ -51,7 +51,11 @@ public static class ImageIo
     // old rule — a fixed three slots chosen once from TotalAvailableMemoryBytes — would happily
     // start three 1 GB decodes into it. Re-checking also means a long import backs off when
     // something else on the machine grows, and opens back up when it exits.
-    private const long FullSlotBytes = 1_200L << 20;     // ~1.2 GB per in-flight full-quality decode
+    //
+    // The two slot sizes are CAMERA numbers. A TIFF is weighed from its own header instead
+    // (<see cref="TiffFullBytes"/>): scanner files range from a few MP to a whole 190 MP strip,
+    // and no fixed slot describes both.
+    private const long FullSlotBytes = 1_200L << 20;     // ~1.2 GB per in-flight full-quality RAW decode
     private const long PreviewSlotBytes = 512L << 20;    // ~0.5 GB per in-flight half-size preview
     private const long ReserveBytes = 2L << 30;          // leave the OS and the rest of the app room
     private const int HardCap = 8;                       // beyond this, decode is not the bottleneck
@@ -161,21 +165,57 @@ public static class ImageIo
         return _inFlightBytes + slotBytes <= CurrentBudget();
     }
 
-    /// <summary>A full-quality decode's weight.</summary>
+    /// <summary>A full-quality RAW decode's weight.</summary>
     private static T Gated<T>(Func<T> decode) => Gated(FullSlotBytes, decode);
+
+    /// <summary>
+    /// A full-quality decode of <paramref name="path"/>: the RAW slot for RAW, the file's own
+    /// size for a TIFF — see <see cref="TiffFullBytes"/> for why the fixed slot could not stand
+    /// in for it.
+    /// </summary>
+    private static T GatedFull<T>(string path, Func<T> decode)
+        => Gated(RawDecode.IsRawExtension(path) ? FullSlotBytes : TiffFullBytes(path), decode);
 
     /// <summary>A preview decode's weight — light only when it really is a half-size LibRaw
     /// decode. A TIFF preview still passes through the full frame, and the DNG backend's
     /// linear sources come back full size whatever was asked.</summary>
     private static T GatedPreview<T>(string path, Func<T> decode)
-        => Gated(RawDecode.IsRawExtension(path) && Settings.Current.DecodeBackend != RawDecode.RawBackend.Dng
-                     ? PreviewSlotBytes
-                     : FullSlotBytes,
+        => Gated(RawDecode.IsRawExtension(path)
+                     ? Settings.Current.DecodeBackend != RawDecode.RawBackend.Dng ? PreviewSlotBytes : FullSlotBytes
+                     : TiffFullBytes(path),
                  decode);
+
+    /// <summary>
+    /// What a TIFF decode will hold resident, from its header: the float frame (12 bytes a
+    /// pixel) plus a quarter for the crop or box that every caller builds from it before
+    /// letting it go.
+    ///
+    /// Read from the file rather than assumed, because a TIFF has no typical size. The RAW slot
+    /// is measured on a camera frame and a 60 MP camera frame is the large end of that range;
+    /// a scanner file is not on the same scale at all — a Flextight strip scanned whole is
+    /// 127–190 MP, 1.5–2.3 GB of float, and charging it as 1.2 GB let an 8 GB machine admit
+    /// two of them side by side and swap or fail on the allocation. A gate that does not know
+    /// what it is admitting is not a gate. Falls back to the RAW slot only when the header
+    /// cannot be read; the decode itself will then report the file properly.
+    /// </summary>
+    private static long TiffFullBytes(string path)
+    {
+        try
+        {
+            var (w, h) = TiffIO.ReadTiffSize(path);
+            long frame = checked((long)w * h * 12);
+            return Math.Max(frame + frame / 4, 64L << 20);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A gate probe must never be what stops a decode; the decode reports the file.
+            return FullSlotBytes;
+        }
+    }
 
     /// <summary>Load any supported file into a linear ImageBuffer (RAW → LibRaw/UniWB,
     /// otherwise a linear TIFF). RAW honours the user's backend + FBDD preferences.</summary>
-    public static ImageBuffer LoadLinear(string path) => Gated(() =>
+    public static ImageBuffer LoadLinear(string path) => GatedFull(path, () =>
     {
         if (!RawDecode.IsRawExtension(path)) return TiffIO.LoadTiff(path, inputIsSrgb: false);
         var s = Settings.Current;
@@ -191,7 +231,7 @@ public static class ImageIo
         string path,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
-        TiffInputAssumption tiffInputAssumption) => Gated(() =>
+        TiffInputAssumption tiffInputAssumption) => GatedFull(path, () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -217,7 +257,7 @@ public static class ImageIo
     /// contribution. Streams off the decoder rather than decoding to a full float frame and then
     /// averaging a fifth of it; the mean is identical (see <see cref="RawDecode.RoiMeanFull"/>).
     /// </summary>
-    public static double[] RoiMeanFull(string path) => Gated(() =>
+    public static double[] RoiMeanFull(string path) => GatedFull(path, () =>
     {
         if (!RawDecode.IsRawExtension(path))
             return DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false));
@@ -231,7 +271,7 @@ public static class ImageIo
         string path,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
-        TiffInputAssumption tiffInputAssumption) => Gated(() =>
+        TiffInputAssumption tiffInputAssumption) => GatedFull(path, () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
