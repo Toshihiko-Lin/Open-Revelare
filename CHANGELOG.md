@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.7.1（未发布）
+
+**修复**
+
+- **修复了灯板亮度不均时整卷检不到齿孔的问题**。灯板绿通道削顶、红蓝在板面上有渐变时，灯板在直方图里是两个挨着的峰，旧判定停在两峰之间的小凹里，把整卷判成没有灯板、齿孔遮罩静默关闭（18-KODAK GOLD200）。薄片基胶卷的判定结果不变。
+
+---
+
+**Fixed**
+
+- **Fixed sprocket detection failing on a whole roll when the light board is unevenly bright.** With the green channel clipped and red and blue drifting across the panel, the board shows up as two adjacent peaks in the histogram; the old walk stopped in the dip between them and reported the roll boardless, silently switching the sprocket mask off (18-KODAK GOLD200). Thin-base rolls are unaffected.
+
 ## v1.7.0（2026-09-13）
 
 > 本版属于测试性质：HDR 和色彩管理都是大改，macOS 的 HDR / EDR 预览更是第一次上真机，可能不稳定或有显示错误；遇到问题可以先关掉 HDR 开关继续用，欢迎回报。

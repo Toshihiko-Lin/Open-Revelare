@@ -362,8 +362,35 @@ public static class Sprocket
 
         // Down the cluster's lower flank to its foot: the bin where the histogram stops falling
         // and starts rising again into whatever lies below the board.
+        //
+        // Not every rise is the foot. A board's histogram can be bimodal: on 18-KODAK GOLD200 the
+        // green channel is clipped on the panel and red and blue vary across it, so the board is
+        // two humps, at 0.58 and 0.62, with a dip of a bin or two between them. Taken literally,
+        // the first local minimum below the peak is that dip, and "the gap" is then empty — film
+        // top, foot and valley all at 0.588, a separation of 0.03 — and every frame of a
+        // perfectly ordinary roll was reported boardless, with the real gap (0.17 to 0.55, with
+        // nothing in it) never looked at. What tells the dip from the foot is that the dip is
+        // still POPULATED: a fold inside a cluster stands on the cluster's own pixels (0.04-0.05
+        // of the global peak here), whereas the foot is where the flank reaches the gap, below
+        // the same floor that decides whether a bin holds a cluster at all. So a populated local
+        // minimum close under the peak is a fold, and the walk carries on over the hump beyond
+        // it. Two limits keep the walk from wandering off into a photograph, whose histogram is
+        // nothing but humps and folds: the fold must lie within MinBoardSeparation of the peak
+        // (a fold that close could never have been accepted as the valley anyway, so crossing
+        // it changes no answer this used to give), and the hump climbed must not be taller than
+        // the peak — the topmost cluster's peak is its summit by construction, and a taller hump
+        // below is another population, a picture body under its highlight mode, so the walk
+        // stops in the fold before it exactly as it always did.
         int f = pk;
-        while (f > 0 && smooth[f - 1] <= smooth[f]) f--;
+        while (true)
+        {
+            while (f > 0 && smooth[f - 1] <= smooth[f]) f--;
+            if (f == 0 || smooth[f] <= floor || Centre(pk) - Centre(f) >= MinBoardSeparation) break;
+            int hump = f;
+            while (hump > 0 && smooth[hump - 1] >= smooth[hump]) hump--;
+            if (smooth[hump] > smooth[pk]) break;
+            f = hump;
+        }
         foot = f;
         return pk;
     }
