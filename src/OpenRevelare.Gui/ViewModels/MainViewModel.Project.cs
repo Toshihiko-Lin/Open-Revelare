@@ -860,7 +860,7 @@ public partial class MainViewModel
         // this is loading, not choosing.
         SyncOutputSpace(p.ResolvedOutputSpace.Name);
         SyncHdrPeak(p.HdrPeakNits);
-        SyncPrintLut(p.PrintLut);
+        SyncPrintLut(p);
         // Stage 1 — film base
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMinPerChannel = (double[])p.DMinPerChannel.Clone();

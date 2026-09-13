@@ -321,8 +321,11 @@ public sealed class OutputTargetTests
     /// print.
     /// </summary>
     [Fact]
-    public void Extended_target_does_not_consult_the_print_lut()
+    public void Extended_target_renders_a_print_stock_as_its_colour_with_the_hdr_tone()
     {
+        // D-021 said the extended target ignores the print LUT; D-034 replaced that with "the
+        // print's colour, the HDR tone". So the two renders now differ — and the print's own
+        // shoulder is no longer the ceiling: the brightest fixture rows reach above 1.0.
         OutputTarget target = OutputTarget.Hdr(peakNits: 1000f);
         float[] withLut = SceneLinearFixture();
         float[] withoutLut = SceneLinearFixture();
@@ -341,7 +344,9 @@ public sealed class OutputTargetTests
             ColorPipelineVersion.ManagedV2,
             cmm);
 
-        AssertSameFloatBits(withoutLut, withLut, "extended target must ignore the print LUT");
+        Assert.NotEqual(withoutLut, withLut);
+        Assert.True(withLut[^3..].Max() > 1.0f, "the print's highlights must open above SDR white under HDR");
+        Assert.All(withLut, v => Assert.True(v <= target.HighlightHeadroom + 1e-4f));
     }
 
     [Fact]

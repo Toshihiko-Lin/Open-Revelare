@@ -717,11 +717,12 @@
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                         <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出空间'}" Margin="2,0,8,0" />
-                        <!-- 两个下拉在 HDR 开启时让位给一行说明，而不是灰着还显示 "sRGB" / "Kodak 2383"：
-                             扩展渲染不用它们（D-024 / D-021），灰掉的旧值会被读成"HDR 被裁到 sRGB"，
-                             而事实相反——载体不裁色域。原因也写在 HDR 开关的 tooltip 与上限滑块的 hint 里。 -->
+                        <!-- 输出空间下拉在 HDR 开启时让位给一行说明，而不是灰着还显示 "sRGB"：
+                             扩展渲染不用它（D-024），灰掉的旧值会被读成"HDR 被裁到 sRGB"，
+                             而事实相反——载体不裁色域。原因也写在 HDR 开关的 tooltip 与上限滑块的 hint 里。
+                             胶片风格下拉不再随之隐藏：声明为 PQ 输出的 LUT 就是 HDR 渲染（D-033）。 -->
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
-                                  IsVisible="{Binding CanChooseOutputSpaceAndPrintLut}"
+                                  IsVisible="{Binding CanChooseOutputSpace}"
                                   ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
                             <ComboBoxItem Content="{i18n:T 'sRGB（通用）'}" />
                             <ComboBoxItem Content="{i18n:T 'Display P3（宽色域）'}" />
@@ -736,14 +737,40 @@
                              PrintLuts.Builtins），其余条目是用户自己选的文件，名字取自各自
                              cube 的 TITLE。 -->
                         <TextBlock Grid.Column="2" Classes="fieldLabel" Text="{i18n:T '胶片风格'}" Margin="16,0,8,0" />
-                        <ComboBox Grid.Column="3" VerticalAlignment="Center" MinWidth="150"
-                                  IsVisible="{Binding CanChooseOutputSpaceAndPrintLut}"
-                                  ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                  ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;内置 Rec709 Kodak 2383 D65 与 Rec709 Fujifilm 3513DI D65，开箱即用。也可以自己选一个以 Cineon log 为输入的 .cube 文件——DaVinci Resolve 用户可在其安装目录的 LUT/Film Looks/ 中找到。&#10;&#10;想一次加好几张：把 .cube 复制进 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。'}" />
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <ComboBox VerticalAlignment="Center" MinWidth="150"
+                                      ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
+                                      ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;随程序带了 Resolve 的六张 Rec709 Film Looks（Kodak 2383 / Fujifilm 3513DI × D55 / D60 / D65）。也可以选任何以 Cineon Film Log 为时间线做的 .cube——Resolve 里调完色「生成 LUT」导出的直接能用；输出若不是 Rec.709 2.4，在旁边的「输出」按钮里改。&#10;&#10;HDR 开启时印片照常可选：取印片的颜色，影调由解析肩部打开（D-034）。Resolve 以 Rec.2100 ST2084 输出生成的 HDR LUT 也能用（在「输出」里声明为 Rec.2100 PQ），只在 HDR 开启时列出。&#10;&#10;想一次加好几张：把 .cube 复制进你自己的 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。&#10;&#10;HDR LUT 是 HDR 渲染本身，肩部由它决定，【HDR 上限】只做封顶（D-033）。'}" />
 
-                        <TextBlock Grid.Column="3" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center" MinWidth="150"
-                                   Text="{i18n:T '解析肩部 · 不走印片'}" Foreground="{DynamicResource TextDimBrush}"
-                                   ToolTip.Tip="{i18n:T 'HDR 开启时不走印片 LUT（D-021）：印片是把高光收进纸白的显示参考表，与 HDR 互斥；扩展渲染用与 SDR 同一族的解析肩部，拐点以下逐位相同、拐点以上铺到所设上限。关闭 HDR 即恢复本卷所选的胶片风格。'}" />
+                            <!-- LUT 的输出声明（D-033）：.cube 不携带色彩空间；输入恒为 Cineon（本程序的处理基于
+                                 Cineon），要声明的只有输出。只对文件头没写输出的 cube（Resolve 生成的）出现——
+                                 文件头写了的（自带的 Film Looks）是文件的事实，不给改。PQ 那一项只在 HDR 开启时
+                                 可见（SDR 下它只会让位）。v1 工程没有按钮：冻结的 v1 出口只认 Rec709。 -->
+                            <Button IsVisible="{Binding CanEditPrintLutContract}"
+                                    Content="{Binding PrintLutContractText}" Padding="8,3" VerticalAlignment="Center"
+                                    ToolTip.Tip="{i18n:T '这张 LUT 出来的是什么编码——它的文件头没写，所以要你来声明（自带的印片文件头写明了 Rec.709 2.4，不会出现这个按钮）。.cube 文件本身不带色彩空间，Resolve 也是靠 LUT 后面的色彩空间转换来声明的——这里同理。填 Resolve 生成这张 LUT 时的输出色彩空间：Rec.709 Gamma 2.4（Resolve 自带的 Film Looks、多数成品 LUT）、DCI-P3 Gamma 2.6（影院版 Film Looks）、sRGB，或 Rec.2100 ST2084（HDR LUT，只在 HDR 开启时可选）。&#10;&#10;输入不用选：本程序的处理基于 Cineon，LUT 必须是以 Cineon Film Log 为时间线做的。声明错了不会报错，只会得到颜色是错的图。随卷保存进工程。'}">
+                                <Button.Flyout>
+                                    <Flyout Placement="Top">
+                                        <StackPanel Spacing="6" MinWidth="220">
+                                            <TextBlock Classes="fieldLabel" Text="{i18n:T 'LUT 的输出（Resolve 输出色彩空间）'}" />
+                                            <ComboBox SelectedIndex="{Binding PrintLutOutputIndex}" HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Content="Rec.709 Gamma 2.4" />
+                                                <ComboBoxItem Content="DCI-P3 Gamma 2.6" />
+                                                <ComboBoxItem Content="sRGB" />
+                                                <ComboBoxItem Content="{i18n:T 'Rec.2100 ST2084（HDR · PQ）'}" IsVisible="{Binding HdrEnabled}" />
+                                            </ComboBox>
+                                            <TextBlock TextWrapping="Wrap" MaxWidth="300" Foreground="{DynamicResource TextDimBrush}"
+                                                       Text="{i18n:T '按 Resolve 里生成这张 LUT 时的输出色彩空间如实填；输入恒为 Cineon Film Log。'}" />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+
+                            <TextBlock IsVisible="{Binding PrintLutTargetNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Text="{Binding PrintLutTargetNote}" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextDimBrush}"
+                                       ToolTip.Tip="{i18n:T 'HDR 开启时印片这样参与：颜色是印片的（色相、饱和度、高光去饱和都按印片），影调由解析肩部铺到【HDR 上限】——拐点以下与印片逐位相同，高光按同一族曲线打开（D-034）。缩略图、印样、增益图基底显示的就是这张印片的 SDR 版。&#10;&#10;声明为 PQ 输出的 LUT 是 HDR 渲染本身，在 SDR 下让位给标准显示渲染（D-033）；开启 HDR 即恢复。'}" />
+                        </StackPanel>
 
                         <!-- HDR 与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成什么样，
                              输出空间决定装进哪个容器，HDR 决定纸白之上还留不留东西。关即 SDR，

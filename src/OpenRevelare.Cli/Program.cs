@@ -87,6 +87,7 @@ static int Run(string[] args)
             case "--wb-target": opts["wb-target"] = Next(args, ref i, a); break;
             case "--color-space": opts["color-space"] = Next(args, ref i, a); break;
             case "--print-lut": opts["print-lut"] = Next(args, ref i, a); break;
+            case "--lut-output": opts["lut-output"] = Next(args, ref i, a); break;
             case "--description": opts["description"] = Next(args, ref i, a); break;
             case "--sprocket": opts["sprocket"] = Next(args, ref i, a); break;
             case "-h": case "--help": PrintUsage(); return 0;
@@ -195,14 +196,27 @@ static int Run(string[] args)
         try
         {
             CubeLut lut = PrintLuts.Validate(lutPath);
-            // Say WHERE the input encoding came from, not just what it is: "Cineon (assumed)" is
-            // the one case a batch operator can act on, by checking the cube really is a Cineon
-            // stock before trusting a few hundred exports to it.
-            string inSource = lut.InputEncodingSource == LutInputEncodingSource.ConventionalDefault
-                ? "assumed" : "declared";
-            Console.WriteLine(
-                $"print LUT: {lut.Title} ({lut.Size}^3, {lut.InputEncoding} in [{inSource}])");
             cal.PrintLut = lutPath;
+            // The contract (D-033): --lut-output declares what the cube emits, the way a Resolve
+            // user puts a colour space transform after it (the input is always Cineon). Omitted,
+            // the cube's own header decides; a cube that declares no output anywhere is refused by
+            // the render, so say so here where the operator can act on it.
+            if (opts.TryGetValue("lut-output", out var lutOut))
+            {
+                if (!Enum.TryParse(lutOut, ignoreCase: true, out LutOutputEncoding parsedOut) || !Enum.IsDefined(parsedOut) || parsedOut == LutOutputEncoding.Unknown)
+                    throw new ArgumentException($"--lut-output: unknown encoding '{lutOut}' (Rec709, DciP3, Srgb, Rec2020Pq).");
+                cal.PrintLutOutput = parsedOut.ToString();
+            }
+            LutContract contract = cal.LutContractFor(lut);
+            if (contract.Output == LutOutputEncoding.Unknown)
+                throw new ArgumentException("the cube's header declares no output colour space; pass --lut-output (Rec709, DciP3, Srgb, Rec2020Pq).");
+            // Say WHERE each half came from, not just what it is: "assumed" is the one case a
+            // batch operator can act on, by checking the cube before trusting a few hundred
+            // exports to it.
+            string inSource = lut.InputEncodingSource == LutInputEncodingSource.ConventionalDefault ? "assumed" : "header";
+            string outSource = !string.IsNullOrEmpty(cal.PrintLutOutput) ? "--lut-output" : "header";
+            Console.WriteLine(
+                $"print LUT: {lut.Title} ({lut.Size}^3, {contract.Input} in [{inSource}] -> {contract.Output} out [{outSource}])");
         }
         catch (Exception ex)
         {
@@ -662,7 +676,9 @@ static void PrintUsage()
         "  --pivot <v>                 mid-tone anchor\n" +
         "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
         "  --color-space <name>        step-4 target / output space (default: sRGB)\n" +
-        "  --print-lut <path.cube>     print-film emulation; a 3D LUT taking Cineon log in.\n" +
+        "  --print-lut <path.cube>     print-film emulation / look; a 3D LUT taking Cineon log in.\n" +
+        "  --lut-output <enc>          what the cube emits: Rec709 | DciP3 | Srgb | Rec2020Pq\n" +
+        "                              (default: the cube's header; required if it has none).\n" +
         "                              Built in: :kodak-2383, :fujifilm-3513di\n" +
         "  --lcc <path>                LCC flat-field reference (RAW/TIFF); per-channel divide\n" +
         "  --lcc-linear                treat the LCC TIFF as linear (default: sRGB gamma)\n" +

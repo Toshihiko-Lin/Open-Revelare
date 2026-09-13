@@ -1,4 +1,4 @@
-namespace OpenRevelare.Core;
+﻿namespace OpenRevelare.Core;
 
 /// <summary>
 /// A colour space's ENCODING TRANSFER FUNCTION — the curve that takes linear light to the
@@ -203,6 +203,33 @@ public static class ColorSpaces
     public static readonly ColorSpaceDef AcesCg = new(
         "ACEScg", (0.7130, 0.2930), (0.1650, 0.8300), (0.1280, 0.0440), (0.32168, 0.33767),
         TransferFunction.Linear);
+
+    /// <summary>
+    /// DCI-P3 as a cinema projector shows it: P3 primaries on the DCI white (x 0.314, y 0.351)
+    /// with a 2.6 power curve — SMPTE RP 431-2. NOT Display P3, which puts the same primaries on
+    /// D65 under sRGB's curve; the two differ in white AND in TRC.
+    ///
+    /// Exists because Resolve ships a second set of its film looks rendered to exactly this
+    /// ("# Display: DCI-P3, Gamma 2.6"), and a LUT that declares it has to be decoded as it. It
+    /// is a LUT's native output, never a roll's container, so it is deliberately absent from
+    /// <see cref="All"/>: the output picker offers spaces a file can be tagged with, and no
+    /// still-image reader expects a DCI white.
+    /// </summary>
+    public static readonly ColorSpaceDef DciP3 = new(
+        "DCI-P3", (0.6800, 0.3200), (0.2650, 0.6900), (0.1500, 0.0600), (0.3140, 0.3510),
+        TransferFunction.Power, 2.6);
+
+    /// <summary>
+    /// ITU-R BT.2020 primaries on D65, linear. The container primaries of every HDR delivery
+    /// (BT.2100 is these primaries under PQ or HLG), and therefore what a LUT that declares an
+    /// HDR output emits. The transfer that goes with it is <see cref="Pq"/>, kept out of
+    /// <see cref="TransferFunction"/> on purpose: PQ is absolute (a code value IS a luminance in
+    /// cd/m²), which none of the display-relative curves there are, and letting
+    /// <see cref="OutputRender.Encode"/> apply it would need a reference white it does not have.
+    /// </summary>
+    public static readonly ColorSpaceDef Rec2020 = new(
+        "Rec2020", (0.7080, 0.2920), (0.1700, 0.7970), (0.1310, 0.0460), (0.3127, 0.3290),
+        TransferFunction.Linear, 1.0);
 
     /// <summary>Every registered space, keyed by <see cref="ColorSpaceDef.Name"/>.</summary>
     public static readonly IReadOnlyDictionary<string, ColorSpaceDef> All =

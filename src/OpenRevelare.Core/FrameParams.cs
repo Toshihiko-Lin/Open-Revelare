@@ -236,9 +236,10 @@ public sealed class FrameParams
 
     /// <summary>
     /// The SDR member of the rendering these params describe (D-031): the same params with the
-    /// HDR peak removed, the print LUT dropped, and the output space set to
-    /// <paramref name="baseSpace"/> (sRGB when null). For an SDR roll it is <c>this</c>, untouched,
-    /// so nothing that was bit-identical before HDR existed stops being so.
+    /// HDR peak removed, an HDR LUT dropped (an SDR print stock is KEPT — it is the SDR member's
+    /// own rendering, D-034), and the output space set to <paramref name="baseSpace"/> (sRGB
+    /// when null). For an SDR roll it is <c>this</c>, untouched, so nothing that was
+    /// bit-identical before HDR existed stops being so.
     ///
     /// <para>
     /// WHY ONE HELPER. An extended render (D-021) has exactly one SDR counterpart — the
@@ -246,8 +247,10 @@ public sealed class FrameParams
     /// every surface that can only show SDR has to show THAT one, or the roll is a different
     /// picture in every window: the gain-map JPEG's base (D-030), the film-strip thumbnails, the
     /// catalog cover and the contact sheet all draw it from here. Clipping the extended render
-    /// at 1.0 instead would blow the highlights that the preview and the export keep; running the
-    /// print stock would show a print the HDR display never shows.
+    /// at 1.0 instead would blow the highlights that the preview and the export keep. A print
+    /// stock stays: under D-034 the extended render is that very print with its highlights
+    /// opened up, bit-identical below the knee, so the print IS what the HDR display shows in
+    /// the shadows and mid-tones. An HDR LUT (PQ out) has no SDR member and is dropped.
     /// </para>
     /// </summary>
     public FrameParams SdrRendition(ColorSpaceDef? baseSpace = null)
@@ -256,7 +259,15 @@ public sealed class FrameParams
         FrameParams q = Clone();
         q.HdrPeakNits = 0d;
         q.OutputSpace = (baseSpace ?? ColorSpaces.Srgb).Name;
-        q.PrintLut = "";
+        // Resolve rather than parse: whether the cube is an HDR LUT is a fact about the file
+        // (or the roll's declaration), and an unloadable cube is dropped exactly as before so
+        // the SDR surfaces still render.
+        CubeLut? lut = PrintLuts.Resolve(PrintLut);
+        if (lut is null || LutContractFor(lut).IsExtendedOutput)
+        {
+            q.PrintLut = "";
+            q.PrintLutOutput = "";
+        }
         return q;
     }
 
@@ -287,6 +298,30 @@ public sealed class FrameParams
     /// stock the user owns without this enum growing a case per film.
     /// </summary>
     public string PrintLut { get; set; } = "";
+
+    /// <summary>
+    /// The roll's declaration of what <see cref="PrintLut"/> emits — a
+    /// <see cref="LutOutputEncoding"/> name, or empty to take whatever the cube's own header
+    /// prefilled (D-033). Empty in every project written before the contract existed, which
+    /// keeps those rendering exactly as they did: the header is what they rendered with. The
+    /// input side has no field: it is Cineon, always (<see cref="LutInputEncoding"/>).
+    /// </summary>
+    public string PrintLutOutput { get; set; } = "";
+
+    /// <summary>
+    /// The contract <paramref name="lut"/> is rendered through on this roll: the roll's own
+    /// output declaration where it has one, else the cube's header. This is the ONLY place the
+    /// two sources meet, so a declaration by the person who chose the file always outranks a
+    /// comment in it, and a file that says nothing is not a file that says Rec709.
+    /// </summary>
+    public LutContract LutContractFor(CubeLut lut)
+    {
+        ArgumentNullException.ThrowIfNull(lut);
+        LutOutputEncoding output = Enum.TryParse(PrintLutOutput, ignoreCase: true, out LutOutputEncoding o)
+                                   && Enum.IsDefined(o)
+            ? o : lut.OutputEncoding;
+        return new LutContract(lut.InputEncoding, output);
+    }
 
 
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
@@ -477,6 +512,7 @@ public sealed class FrameParams
         OutputSpace = OutputSpace,
         HdrPeakNits = HdrPeakNits,
         PrintLut = PrintLut,
+        PrintLutOutput = PrintLutOutput,
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,

@@ -1,4 +1,4 @@
-using OpenRevelare.ColorManagement;
+﻿using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
@@ -138,22 +138,20 @@ public static class Pipeline
         {
             ColorSpaceDef selected = cal.ResolvedOutputSpace;
             requested = BuiltInColorProfiles.For(selected, ProfileRole.Output);
-            bool hasPrintLut = PrintLuts.Resolve(cal.PrintLut) is not null;
-            if (hasPrintLut)
-            {
-                // Generic external cubes remain uncharacterized and fail in the ManagedV2 step-4
-                // boundary before a RenderedFrame exists. Enforce that invariant again here so a
-                // future resolver change cannot put a machine-specific absolute path into a
-                // portable render recipe/fingerprint by accident.
-                if (!PrintLuts.IsBuiltin(cal.PrintLut))
-                {
-                    throw new InvalidOperationException(
-                        "A successful ManagedV2 print-LUT render must carry a portable built-in " +
-                        "identity, never a filesystem path.");
-                }
-                effectivePrintLut = cal.PrintLut!.ToLowerInvariant();
-            }
             OutputTarget target = cal.ResolvedOutputTarget;
+
+            // The same question the render asked, answered by the same function, so the recipe
+            // can never claim a cube the render skipped or omit one it ran (D-033). A cube from a
+            // file is recorded by what it CONTAINED, not where it was: a path is machine-local and
+            // would put a non-portable token into a fingerprint meant to be reproducible.
+            (CubeLut Lut, LutContract Contract)? applied = ColorPipeline.PrintLutFor(cal, target);
+            if (applied is { } lutUse)
+            {
+                effectivePrintLut = PrintLuts.IsBuiltin(cal.PrintLut)
+                    ? cal.PrintLut!.ToLowerInvariant()
+                    : "sha256:" + lutUse.Lut.ContentIdentity;
+            }
+
             if (target.IsExtended)
             {
                 // The pixels are LINEAR in the canonical carrier's primaries, so they must be
@@ -163,22 +161,28 @@ public static class Pipeline
                 // exists to prevent. The encoding model already had every term for this; it is
                 // how OutputIntent.None describes scene-linear ACEScg.
                 //
-                // The print LUT is not part of this rendering (D-021), so the recipe must not
-                // claim one: the effective identity stays empty whatever the roll selected.
+                // An HDR LUT is the rendering (D-033); an SDR print stock is its colour with the
+                // analytic family's tone (D-034). Either way the recipe says so, contract
+                // included, because the contract changes the pixels.
                 requested = BuiltInColorProfiles.LinearExtendedSrgb(ProfileRole.Output);
                 encoding = new CharacterizedPixelEncoding(
                     requested,
                     ColorReference.SceneReferred,
                     TransferState.LinearInProfilePrimaries,
                     NumericRange.Extended);
-                gamutPolicy =
-                    $"scene-referred extended, unclamped primaries, shoulder to {target.HighlightHeadroom:0.###}× diffuse white";
-                effectivePrintLut = string.Empty;
+                gamutPolicy = applied switch
+                {
+                    { Contract.IsExtendedOutput: true } hdrLut =>
+                        $"print-LUT {hdrLut.Contract} -> PQ decoded at {OutputTarget.ReferenceWhiteNits:0} nits = 1.0, BT.2020 -> carrier unclamped, bounded at {target.HighlightHeadroom:0.###}× diffuse white",
+                    { } print =>
+                        $"print-LUT {print.Contract} colour x analytic luminance ratio (D-034), shoulder to {target.HighlightHeadroom:0.###}× diffuse white",
+                    _ => $"scene-referred extended, unclamped primaries, shoulder to {target.HighlightHeadroom:0.###}× diffuse white",
+                };
             }
             else
             {
-                gamutPolicy = hasPrintLut
-                    ? "print-LUT native Rec709 -> exact output ICC (relative colorimetric, BPC off)"
+                gamutPolicy = applied is { } sdrLut
+                    ? $"print-LUT {sdrLut.Contract} native {ColorPipeline.NativeSpaceOf(sdrLut.Contract.Output).Name} -> exact output ICC (relative colorimetric, BPC off)"
                     : "managed exact built-in output profile";
                 encoding = new CharacterizedPixelEncoding(
                     requested,

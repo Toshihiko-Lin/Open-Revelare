@@ -170,15 +170,19 @@ The licenses below apply to all of them.
     Includes Tmds.DBus.Protocol (MIT) on the Linux build.
 
 -------------------------------------------------------------------------------
-16. Resolve Film Look LUTs  (built-in 胶片风格)
+16. Resolve Film Look LUTs  (shipped 胶片风格, luts/ beside the executable)
     ⚠ NOT COVERED BY THIS PROGRAM'S GPL-3.0 LICENCE — SEE BELOW
     Author   : Blackmagic Design Pty Ltd
     Source   : Shipped with DaVinci Resolve, under LUT/Film Looks/
-               ("Rec709 Kodak 2383 D65.cube", "Rec709 Fujifilm 3513DI D65.cube")
+               ("Rec709 Kodak 2383 D55/D60/D65.cube",
+                "Rec709 Fujifilm 3513DI D55/D60/D65.cube")
 
-    src/OpenRevelare.Core/Assets/Luts/*.cube are these files, embedded in the
-    OpenRevelare.Core assembly. Only a TITLE line has been added so the picker
-    can name each stock; the lattice data is unmodified.
+    src/OpenRevelare.Core/Assets/Luts/Rec709 *.cube are these files, copied
+    unmodified into the luts/ folder of every build (the two D65 files are
+    additionally embedded in the OpenRevelare.Core assembly so projects written
+    before 2026-09-13 still resolve their :kodak-2383 / :fujifilm-3513di
+    sentinels). The two D65 files carry an added TITLE line; the lattice data
+    of all six is unmodified.
 
     These are a third-party asset shipped alongside OpenRevelare, not a part of
     it. OpenRevelare's own GPL-3.0 grant does not extend to them and could not:
@@ -186,9 +190,9 @@ The licenses below apply to all of them.
     Design under the DaVinci Resolve licence terms, which do not grant a general
     right of redistribution; anyone redistributing OpenRevelare — and especially
     anyone doing so commercially — should satisfy themselves of their own
-    position, or delete src/OpenRevelare.Core/Assets/Luts/ and rebuild.
-    Everything except the two built-in 胶片风格 entries works without them, and
-    the picker still accepts any Cineon-log .cube the user supplies.
+    position, or delete src/OpenRevelare.Core/Assets/Luts/Rec709 *.cube and
+    rebuild. Everything except those six 胶片风格 entries works without them,
+    and the picker still accepts any .cube the user supplies.
 
     "Kodak" and "2383" are trademarks of Eastman Kodak Company; "Fujifilm" and
     "3513DI" are trademarks of FUJIFILM Corporation. Neither company is

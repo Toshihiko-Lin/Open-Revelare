@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace OpenRevelare.Core;
@@ -302,6 +302,9 @@ public static class Project
             // display-referred rendering it was built against (D-013, D-021).
             ["hdr_peak_nits"] = p.HdrPeakNits,
             ["print_lut"] = p.PrintLut,
+            // The roll's LUT output declaration (D-033). Absent = "" = defer to the cube's
+            // header, which is what every project written before it existed rendered with.
+            ["print_lut_output"] = p.PrintLutOutput,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["lensfun_override"] = null,                     // C# build has no lensfun
@@ -377,6 +380,7 @@ public static class Project
             // Absent in every project written before print-film emulation existed, and empty
             // means pass-through — so those rolls render bit-identically to before.
             PrintLut = Str(d, "print_lut", ""),
+            PrintLutOutput = Str(d, "print_lut_output", ""),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),

@@ -6,21 +6,18 @@ namespace OpenRevelare.Core;
 /// What encoding a LUT expects on its input, i.e. what has to be true of the data before the
 /// cube is sampled.
 ///
-/// This is a property OF THE LUT, not a global constant, and it is declared here rather than
-/// assumed because the assumption is exactly what breaks when the second LUT arrives. Print-film
-/// emulations (2383, 3513) are authored against Cineon printing density and are the reason this
-/// path exists at all; other vendors' cubes are authored against ACEScct or Log-C, and feeding
-/// one of those a Cineon-encoded signal produces a plausible-looking but wrong picture — the
-/// worst failure mode there is, because nothing errors.
+/// ONLY CINEON, BY DECISION (D-033). This pipeline's image processing is Cineon-based: Stage 1
+/// ends in the shape Cineon names, and every cube it renders through is fed that signal. A LUT
+/// authored against anything else — ACEScct, Log-C, DaVinci Intermediate, a finished Rec709
+/// picture — would produce a plausible-looking but wrong picture, the worst failure mode there
+/// is, because nothing errors. So the input side is not a choice the user is offered: a cube is
+/// either made for Cineon (Resolve: timeline colour space <c>Cineon Film Log</c>) or it is not
+/// usable here, and a header that declares otherwise is refused at parse time
+/// (<see cref="CubeLut.NoteDeclaredInput"/>). The output side is where the contract lives
+/// (<see cref="LutOutputEncoding"/>).
 ///
-/// Only Cineon is implemented today. The enum exists so that adding another is a new case in
-/// <see cref="LogEncoding"/> rather than a rethink of where the encoding decision lives.
-///
-/// <para>
-/// A cube that declares a DIFFERENT input in its header is refused at parse time rather than
-/// admitted as Cineon — see <see cref="CubeLut.NoteDeclaredInput"/>. That is the same fail-closed
-/// rule D-015 applies to the output side, applied to the end where the silent failure lives.
-/// </para>
+/// Kept as an enum rather than a constant so the declaration has a name and a source
+/// (<see cref="LutInputEncodingSource"/>) and so a second member is an addition, not a rethink.
 /// </summary>
 public enum LutInputEncoding
 {
@@ -59,20 +56,68 @@ public enum LutInputEncodingSource
 }
 
 /// <summary>
-/// What the cube's output numbers are characterized as.
+/// What the cube's output numbers are characterized as — which display encoding the LUT
+/// renders INTO, so the pipeline knows how to decode it and where it may be used.
 ///
 /// <para>
-/// The <c>.cube</c> grammar has no field for this, but that is not the same as the file being
-/// silent: Resolve's film-look exports state it in the header comment, which is exactly where the
-/// two built-in stocks say it. So a cube is Unknown only when it genuinely declares nothing —
-/// not merely because the format lacks a keyword. Managed colour conversion still fails closed
-/// for <see cref="Unknown"/> rather than treating an undeclared cube as Rec709.
+/// The <c>.cube</c> grammar has no field for this. Resolve's film-look exports state it in a
+/// header comment and that is read as a prefill; a LUT generated from a grade says nothing, and
+/// the roll declares it (<see cref="FrameParams.PrintLutOutput"/>, D-033). A cube whose output
+/// is <see cref="Unknown"/> at render time — neither file nor roll says — still fails closed:
+/// rendering through it would mean guessing what its numbers are.
+/// </para>
+///
+/// <para>
+/// THE OUTPUT DECIDES HOW THE LUT IS USED. The SDR members are display renderings that end in
+/// paper white: on an SDR target they ARE the rendering; on an extended target their colour is
+/// kept and their tone is opened up by the analytic shoulder family (D-034,
+/// <see cref="ColorPipeline.ToExtendedOutputTargetViaPrint"/>). <see cref="Rec2020Pq"/> is an
+/// HDR rendering with its own shoulder; it is used on an extended target and stands aside on an
+/// SDR one, because an absolute-luminance picture has no SDR member to fall back to.
 /// </para>
 /// </summary>
 public enum LutOutputEncoding
 {
     Unknown,
+
+    /// <summary>ITU-R BT.709 primaries under the BT.1886 2.4 power curve. Resolve: <c>Rec.709 Gamma 2.4</c>.</summary>
     Rec709,
+
+    /// <summary>
+    /// DCI-P3 primaries on the DCI white under a 2.6 power curve — the cinema projector target,
+    /// and the other half of Resolve's shipped film looks. Not Display P3.
+    /// </summary>
+    DciP3,
+
+    /// <summary>sRGB, IEC 61966-2-1 — primaries and piecewise curve. Resolve: <c>sRGB</c>.</summary>
+    Srgb,
+
+    /// <summary>
+    /// BT.2020 primaries under ST 2084 PQ, absolute luminance — Resolve: <c>Rec.2100 ST2084</c>.
+    /// The only HDR output; decoded to the linear extended carrier at 203 nits = 1.0.
+    /// </summary>
+    Rec2020Pq,
+}
+
+/// <summary>
+/// The two facts a LUT needs stated before it can be rendered through: what it expects (always
+/// Cineon here) and what it emits. Resolved per roll by <see cref="FrameParams.LutContractFor"/>
+/// from the roll's own output declaration, falling back to whatever the cube's header prefilled.
+/// </summary>
+public readonly record struct LutContract(LutInputEncoding Input, LutOutputEncoding Output)
+{
+    /// <summary>Whether the cube renders into an HDR encoding, i.e. serves an extended target.</summary>
+    public bool IsExtendedOutput => Output == LutOutputEncoding.Rec2020Pq;
+
+    /// <summary>
+    /// Whether the cube is applied on a target of the given range: an SDR print serves both
+    /// (as the rendering on SDR, as the colour on HDR — D-034); an HDR LUT serves only an
+    /// extended target (see <see cref="LutOutputEncoding"/>).
+    /// </summary>
+    public bool AppliesTo(OutputTarget target) =>
+        Output != LutOutputEncoding.Unknown && (target.IsExtended || !IsExtendedOutput);
+
+    public override string ToString() => $"{Input}->{Output}";
 }
 
 /// <summary>
@@ -128,6 +173,15 @@ public sealed class CubeLut
     /// <summary>Display name, from the file's <c>TITLE</c> or else its filename.</summary>
     public string Title { get; }
 
+    /// <summary>
+    /// SHA-256 over the parsed table — size, domain and every sample — as lowercase hex. What a
+    /// render recipe records for a cube that came from a file: a path is where the file was on
+    /// one machine, this is what it contained, so the same cube fingerprints the same anywhere
+    /// (<see cref="OutputRecipe.PrintLutIdentity"/>). Comments and TITLE are excluded on
+    /// purpose: they do not change a pixel.
+    /// </summary>
+    public string ContentIdentity { get; }
+
     private CubeLut(int size, float[] data, float[] domainMin, float[] domainMax,
                     LutInputEncoding encoding, LutInputEncodingSource encodingSource,
                     LutOutputEncoding outputEncoding, string title)
@@ -140,6 +194,19 @@ public sealed class CubeLut
         InputEncodingSource = encodingSource;
         OutputEncoding = outputEncoding;
         Title = title;
+        ContentIdentity = HashContent(size, domainMin, domainMax, data);
+    }
+
+    private static string HashContent(int size, float[] domainMin, float[] domainMax, float[] data)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
+        Span<byte> word = stackalloc byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(word, size);
+        hash.AppendData(word);
+        foreach (float[] block in new[] { domainMin, domainMax, data })
+            hash.AppendData(System.Runtime.InteropServices.MemoryMarshal.AsBytes(block.AsSpan()));
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
     /// <summary>
@@ -329,12 +396,26 @@ public sealed class CubeLut
         if (!text.Contains("display", StringComparison.Ordinal)) return;
 
         seen = true;
-        if (text.Contains("709", StringComparison.Ordinal)
-            && text.Contains("gamma", StringComparison.Ordinal)
-            && text.Contains("2.4", StringComparison.Ordinal))
-        {
-            declared = LutOutputEncoding.Rec709;
-        }
+        declared = ParseDisplayDeclaration(text);
+    }
+
+    /// <summary>
+    /// The encodings a header's display line can name. Each needs BOTH halves — primaries and
+    /// curve — because each member of <see cref="LutOutputEncoding"/> is a pair, and a line that
+    /// names one half with some other partner is evidence against the pair, not for it.
+    /// </summary>
+    private static LutOutputEncoding ParseDisplayDeclaration(string text)
+    {
+        bool gamma24 = text.Contains("gamma", StringComparison.Ordinal) && text.Contains("2.4", StringComparison.Ordinal);
+        bool gamma26 = text.Contains("gamma", StringComparison.Ordinal) && text.Contains("2.6", StringComparison.Ordinal);
+        bool pq = text.Contains("2084", StringComparison.Ordinal) || text.Contains("pq", StringComparison.Ordinal);
+
+        if (text.Contains("709", StringComparison.Ordinal) && gamma24) return LutOutputEncoding.Rec709;
+        if (text.Contains("p3", StringComparison.Ordinal) && gamma26) return LutOutputEncoding.DciP3;
+        if (text.Contains("srgb", StringComparison.Ordinal)) return LutOutputEncoding.Srgb;
+        if ((text.Contains("2020", StringComparison.Ordinal) || text.Contains("2100", StringComparison.Ordinal)) && pq)
+            return LutOutputEncoding.Rec2020Pq;
+        return LutOutputEncoding.Unknown;
     }
 
     /// <summary>
@@ -400,7 +481,7 @@ public sealed class CubeLut
         throw new InvalidDataException(
             CoreText.F($"这个 LUT 的文件头声明它的输入是「{declared}」，而本程序只能提供 Cineon 编码的输入。")
             + CoreText.T("按 Cineon 喂给它会得到一张看起来正常、但颜色是错的图，所以这里直接拒绝。"
-                         + "请改用为 Cineon 输入制作的 LUT（例如内置的胶片风格）。"));
+                         + "请在 Resolve 里把时间线色彩空间设为 Cineon Film Log 后重新生成 LUT。"));
     }
 
     private static void ReadTriple(string[] tok, string line, float[] into)

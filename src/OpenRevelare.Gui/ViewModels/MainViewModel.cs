@@ -1516,6 +1516,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private double[] TBaseArr() => new[] { TBaseR, TBaseG, TBaseB };
 
+    /// <summary>The render snapshot, for tests that check what the pickers feed the pipeline.</summary>
+    internal FrameParams RenderParamsForTest() => BuildParams();
+
     /// <summary>Snapshot the current state into a FrameParams for a render/export.</summary>
     private FrameParams BuildParams() => new()
     {
@@ -1537,6 +1540,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // parameters from here — so the preview stayed pass-through and moving to another frame
         // wrote the pass-through value back over the roll.
         PrintLut = _printLutIndex > 0 ? _printLutPaths[_printLutIndex] : "",
+        // The cube's declared output (D-033) travels with the cube, for the same reason: the
+        // render reads THIS snapshot, so a declaration written only to the frames would never
+        // reach the preview — which is exactly what happened before this line existed.
+        PrintLutOutput = _printLutIndex > 0 ? PrintLutOutputName : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
         VignetteAmount = VignetteAmount,
