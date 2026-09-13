@@ -1,5 +1,59 @@
 # OpenRevelare — 更新日志
 
+## v1.7.0-beta（2026-09-13）
+
+> 测试版。macOS 的 HDR / EDR 预览是第一次在真机上跑，可能不稳定或有显示错误；遇到问题可以先关掉 HDR 开关继续用。
+
+**新增**
+
+- **支持 HDR**。底栏新增 SDR/HDR 开关与「HDR 上限」滑块（按档数，与 Lightroom 同刻度）。开启后负片被印相曲线压掉的高光得以保留，预览在 HDR 显示器上按实际余量软校样，直方图扩展出 HDR 区；JPEG 导出为 gain-map JPEG（不支持的设备照常看到 SDR），TIFF 导出为 float32；印样可单独选择是否 HDR；HDR 下也能用印片 LUT。目前 Windows 与 macOS 可以 HDR 预览，Linux 暂按 SDR 显示。
+
+- **macOS 预览支持广色域与 EDR**（测试阶段，见上），并补上 Intel Mac 安装包。
+
+- **随程序附带六张 DaVinci Resolve Film Looks LUT**。外部 .cube 文件也能直接使用，可在界面里声明它的输出色彩空间。
+
+**改进**
+
+- **重做了色彩管理**。整条色彩链统一由自带的 LittleCMS 驱动；修复了 Windows 宽色域显示器上预览偏色的问题；TIFF 输入色彩空间改为从文件自动检测，导入时不再强制选择；帮助菜单新增色彩诊断。旧工程打开时会提示迁移到新色彩管线（可关闭，也可以一直留在旧管线）；**用新管线保存的工程，v1.6.3 及更早版本无法打开**。
+
+- **RAW 导入快得多**。预览解码提速，自动后端改为优先使用 LibRaw，装了 DNG Converter 的机器也不再每帧都转一遍。
+
+- **优化了薄片基胶卷的齿孔判定**，以及**整卷自动标定的亮端选帧**：橙罩胶卷不再整卷偏红，微调裁切也不再让选帧翻到另一张。
+
+**修复**
+
+- **修复了命令行或双击打开文件时强弹导入对话框的问题**。
+
+- **修复了若干界面问题**：裁切拖拽中途报错、短文案对话框撑出空白、提示卡挤占预览高度、缺少色彩引擎时无声崩溃。
+
+---
+
+> Beta. The macOS HDR / EDR preview is running on real hardware for the first time and may be unstable or render incorrectly; if it misbehaves, switch HDR off and carry on.
+
+**Added**
+
+- **HDR support.** The bottom bar gains an SDR/HDR switch and an "HDR limit" slider (in stops, same scale as Lightroom). Turned on, the highlights the print curve used to crush are kept; the preview soft-proofs to whatever headroom your display actually has, and the histogram grows an HDR zone. JPEG exports become gain-map JPEGs (devices without HDR simply see the SDR picture), TIFF exports become float32, contact sheets get their own HDR checkbox, and print LUTs still work under HDR. HDR preview is available on Windows and macOS for now; Linux shows SDR.
+
+- **Wide-gamut and EDR preview on macOS** (beta, see above), plus an Intel Mac build.
+
+- **Six DaVinci Resolve Film Looks LUTs ship with the app.** External .cube files load directly, and you can declare their output colour space in the UI.
+
+**Improved**
+
+- **Colour management rebuilt.** The whole colour chain now runs on a bundled LittleCMS; the colour cast in previews on wide-gamut Windows displays is fixed; a TIFF's input colour space is detected from the file, so the import dialog no longer forces a choice; a colour diagnostics entry is added to the Help menu. Existing projects are offered a migration to the new pipeline (dismissable, and staying on the old pipeline is fine); **projects saved on the new pipeline cannot be opened by v1.6.3 or earlier**.
+
+- **Much faster RAW import.** Preview decoding is quicker and the automatic backend now prefers LibRaw, so machines with DNG Converter installed no longer convert every frame.
+
+- **Better sprocket detection on thin-base film**, and **better bright-end frame selection in roll-wide calibration**: orange-mask films no longer come out red across the roll, and a small crop change no longer flips the choice to another frame.
+
+**Fixed**
+
+- **Fixed the import dialog being forced open when a file is opened from the command line or by double-click.**
+
+- **Fixed several UI issues**: an error mid crop-drag, short dialogs padded with blank space, notice cards squeezing the preview, and a silent crash when the colour engine is missing.
+
+---
+
 ## v1.6.3（2026-08-30）
 
 **新增**
