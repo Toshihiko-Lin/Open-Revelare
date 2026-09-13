@@ -185,6 +185,12 @@ jobs:
         run: brew install jpeg-turbo little-cms2 librsvg
       - name: 编 + 装配 libraw.23.dylib
         run: ./packaging/macos/bundle-libraw.sh
+      # HDR/EDR 预览的原生半边。产物与 libraw 同路：native/osx-arm64/*.dylib → publish →
+      # Contents/MacOS。缺了它程序照跑，只是预览退回 Avalonia 的 SDR 位图，徽章报 emergency ——
+      # 正是 2026-09-13 之前每个 mac 发布件的实际状态。运行时行为（D-012 / D-026 四项）
+      # 未经真机验证，用户 2026-09-13 决定按可用发布。
+      - name: 编 macOS 原生 presenter
+        run: ./packaging/macos/build-macos-presenter.sh
       # bundle-libraw 会把 Homebrew 的 lcms 依赖一并复制；固定版本必须在它之后写入，
       # 这样最终 app-owned 文件确定来自上面校验过 SHA-256 的官方 2.19.1 源码。
       - name: 构建固定 Little CMS 2.19.1
@@ -209,6 +215,10 @@ jobs:
           # 签名前的 native 文件；上一个步骤已在签名前做过逐字节比较，这里验证签名与 ID。
           codesign -v publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib
           otool -D publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib | grep -F '@loader_path/liblcms2.2.dylib'
+          P=publish/OpenRevelare.app/Contents/MacOS/libOpenRevelare.Presentation.MacOS.Native.dylib
+          test -f "$P" || { echo ".app 缺 macOS presenter 垫片"; exit 1; }
+          codesign -v "$P"
+          otool -D "$P" | grep -F '@loader_path/libOpenRevelare.Presentation.MacOS.Native.dylib'
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64

@@ -3,10 +3,12 @@
 // linear extended sRGB and what leaves is the same bytes on a tagged CAMetalLayer; ColorSync
 // performs the only monitor transform (D-006, I3).
 //
-// NOT YET COMPILED ON HARDWARE. This file was written against the AppKit / Metal / Core Animation
-// headers as documented; the first real build will happen on a Mac. Everything the managed side
-// depends on — result codes, struct layouts, the create/present contract — is pinned by tests on
-// both sides so that build is a compile, not a design session.
+// COMPILED BY CI, NEVER RUN ON HARDWARE. This file was written against the AppKit / Metal /
+// Core Animation headers as documented; ci.yml and release.yml build it on GitHub's macOS
+// runner (packaging/macos/build-macos-presenter.sh). Everything the managed side depends on —
+// result codes, struct layouts, the create/present contract — is pinned by tests on both sides.
+// What no test covers is whether the window server does with these bytes what the docs say
+// (README, D-012 / D-026 checklist); shipping without that verification is a user decision.
 
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>

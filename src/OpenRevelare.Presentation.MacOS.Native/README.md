@@ -14,12 +14,16 @@ macOS 原生 presenter 垫片：一层 Objective-C++，对外只有 6 个 C ABI 
 - `orwm_probe` 读 `NSScreen` 的 EDR 三个值、`backingScaleFactor`、`colorSpace` 与显示器名。
   托管侧据此建 `DisplayContract`（D-026）。
 
-## 状态：**尚未在真机上编译**
+## 状态：**由 CI 编译，未经真机运行验证，按可用发布**
 
-本目录的源码是按 AppKit / Metal / Core Animation 文档写的，第一次真实编译要在 Mac 上跑
-`packaging/macos/build-macos-presenter.sh`。托管侧对它的全部依赖——结果码、结构体布局、
-create/present 的合同——已由两边的测试钉住（`MacOSNativeAbiTests` 的 `Marshal.SizeOf` ↔ 头文件
-的 `static_assert`），所以第一次编译应当是一次编译，而不是一次设计。
+本目录的源码是按 AppKit / Metal / Core Animation 文档写的。2026-09-13 起 `ci.yml` 与 `release.yml`
+的 macos job 都跑 `packaging/macos/build-macos-presenter.sh`（GitHub 的 macos-latest runner 自带
+Xcode CLT），编译错误在 CI 现形，产物随 .dmg 发布。在此之前每个 mac 发布件都没有这个 dylib，
+预览静默退回 SDR 位图。托管侧对它的全部依赖——结果码、结构体布局、create/present 的合同——
+由两边的测试钉住（`MacOSNativeAbiTests` 的 `Marshal.SizeOf` ↔ 头文件的 `static_assert`）。
+
+**没有人在 Mac 上开过一次程序。** 托管侧只兜 C# 层的异常（dlopen 失败 → 退回位图）；垫片里的
+指针/布局错误会是 segfault，不是颜色怪。用户 2026-09-13 决定接受这个风险、按可用发布。
 
 真机上要验的（对应 D-012 与 D-026）：
 
