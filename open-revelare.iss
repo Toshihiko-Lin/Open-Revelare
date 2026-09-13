@@ -10,7 +10,7 @@
 ; 编译：ISCC.exe open-revelare.iss（先跑 README「从源码构建」里的 dotnet publish）
 
 #define MyAppName "OpenRevelare"
-#define MyAppVersion "1.6.3"
+#define MyAppVersion "1.7.0-beta"
 #define MyAppPublisher "Toshihiko-Lin"
 #define MyAppURL "https://github.com/Toshihiko-Lin/Open-Revelare"
 #define MyAppExeName "OpenRevelare.exe"
@@ -18,8 +18,11 @@
 
 ; 版本号有两处（csproj 的 <Version> 和上面这行），编译期核对，防止只改了一处。
 ; 报错说明忘了 dotnet publish 或忘了改 MyAppVersion。
+; exe 的文件版本只有数字，预发布后缀（1.7.0-beta）比对前要先去掉。
+#define Dash Pos("-", MyAppVersion)
+#define MyAppNumericVersion Dash > 0 ? Copy(MyAppVersion, 1, Dash - 1) : MyAppVersion
 #define ExeVersion GetVersionNumbersString(MyAppSourceDir + "\" + MyAppExeName)
-#if ExeVersion != MyAppVersion + ".0"
+#if ExeVersion != MyAppNumericVersion + ".0"
   ; ISPP 的 #error 不做宏展开，所以这里只能写死一句话，不带具体版本号。
   #error 版本号不一致：本文件的 MyAppVersion 与 publish\win-x64\OpenRevelare.exe 的文件版本对不上。先跑 dotnet publish，再核对 csproj 的 <Version> 和上面的 MyAppVersion。
 #endif
