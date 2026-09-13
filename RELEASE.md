@@ -7,7 +7,7 @@
 |---|---|---|
 | GitHub Releases API | 新版（≥1.0.0）能连上 github.com 的用户 | 打 tag，CI 自动建 draft，**人工点发布** |
 | Gitee Releases API | 新版（≥1.0.0）所有用户 | **人工**把 GitHub release 搬到 `Toshihiko-Lin/revelare-release` |
-| `version.json` | **官网**（版号 + 6 个下载按钮）<br>+ 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
+| `version.json` | **官网**（版号 + 8 个下载按钮）<br>+ 旧版 Python 0.8.0 构建 | **人工**推 Gitee `Toshihiko-Lin/revelare-release` |
 
 新版客户端 (≥1.0.0) 两条 Release API 并发查、**两条都等**，见 [`Updater`](src/OpenRevelare.Gui/Services/Updater.cs)。
 两边都有这一版时，弹窗同时给「前往下载」（GitHub）和「国内镜像下载」（Gitee），由用户自己选——
@@ -16,8 +16,8 @@
 旧版 (0.8.0) 仍走 `version.json`。
 
 > **`version.json` 不是只给 0.8.0 的。** `revelare.netlify.app` 的首页和 `/download` 页
-> 都在运行时 `fetch('/version.json')`，页面上的版号和全部 6 个下载按钮
-> （Gitee ×3 + GitHub ×3）都由它驱动。不推它，官网就一直挂着上一版的号和上一版的包链接。
+> 都在运行时 `fetch('/version.json')`，页面上的版号和全部 8 个下载按钮
+> （Gitee ×4 + GitHub ×4）都由它驱动。不推它，官网就一直挂着上一版的号和上一版的包链接。
 > 取不到时页面回落到 HTML 里写死的兜底值——也是上一版。所以这一步**每次发版都要做**，
 > 与还管不管 0.8.0 无关。
 
@@ -78,7 +78,7 @@ git tag v1.0.0 && git push origin v1.0.0        # tag 必须是 v + csproj 的 <
 ## 四、推 manifest —— 官网靠它，**别忘了这步**
 
 这一步不影响 ≥1.0.0 的更新弹窗（那个走 Release API，见第三步），但**官网整个跟着它走**：
-首页和 `/download` 页运行时 `fetch('/version.json')`，版号和 6 个下载按钮都由它填。
+首页和 `/download` 页运行时 `fetch('/version.json')`，版号和 8 个下载按钮都由它填。
 漏了这步，客户端能弹「发现新版本」，用户点到官网却下到上一版的包。
 旧版 Python 构建 (0.8.0) 也还在轮询同一个文件。
 
@@ -103,12 +103,12 @@ Gitee 仓库 `Toshihiko-Lin/revelare-release` 的 `version.json`（`main` 分支
 }
 ```
 
-- [ ] **`downloads` / `downloads_github` 两组六个链接全部更新**，别只改 `version`。
+- [ ] **`downloads` / `downloads_github` 两组八个链接全部更新**，别只改 `version`。
       官网按 `downloads.*`（Gitee，主按钮）和 `downloads_github.*`（次按钮）分别填；
       **某个平台的键缺了或为空，那个按钮就变成灰的「即将发布」**，不是回落到旧链接。
       三个平台的文件名见第三步。
-      **Intel dmg 目前没有对应的键**：官网只读 `downloads.macos`（填 arm64 那个），Intel 用户
-      要从 release 页面自己拿。要在官网加按钮得先改站点再加键，站点没改之前加了键也没人读。
+      **1.7.0 起两组各四个键**：`macos` 填 arm64 dmg，`macos_intel` 填 x86_64 dmg，官网 macOS
+      一节按芯片分两行按钮各自读。
 - [ ] `download_url` 是**给旧版 0.8.0 和首页用的单一入口**，指向 `https://revelare.netlify.app/download`
       这个落地页而不是某个 exe——首页的「下载」按钮和 0.8.0 的更新弹窗都用它，
       落地页再按平台分流。分平台的精确链接在上面两组里。
@@ -142,7 +142,7 @@ curl -s https://gitee.com/api/v5/repos/Toshihiko-Lin/revelare-release/releases/l
 - [ ] **官网 + 旧版 (0.8.0) 通道**——同一个 manifest，一起验：
 
 ```bash
-# 版号对不对，6 个下载链接在不在、指没指向新 tag
+# 版号对不对，8 个下载链接在不在、指没指向新 tag
 curl -sL https://revelare.netlify.app/version.json | python3 -c "
 import json,sys; d=json.load(sys.stdin)
 print('version:', d['version'], '| download_url:', d['download_url'])
@@ -153,7 +153,7 @@ for k in ('downloads','downloads_github'):
 ```
 
 - [ ] 开 `https://revelare.netlify.app/download` 看一眼：标题版号是新的，
-      6 个按钮都可点、没有灰的「即将发布」。页面有 HTML 兜底值，
+      8 个按钮都可点、没有灰的「即将发布」。页面有 HTML 兜底值，
       **manifest 没推成功时页面不会报错，只会安静地显示上一版**——所以必须眼看。
 - [ ] 拿上一个版本的安装包装一台干净机器，等 3 秒看有没有弹「发现新版本」。
       **两条 Release API 任何一条通就会弹**——在能连 GitHub 的机器上这一步必过，
