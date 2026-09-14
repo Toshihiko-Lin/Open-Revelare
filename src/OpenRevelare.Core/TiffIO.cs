@@ -280,26 +280,45 @@ public static class TiffIO
     private delegate void RowTransform(Span<float> rgb, int count);
 
     /// <summary>
+    /// A row transform bound to the thread that asked for it, plus whatever must be released
+    /// when that thread is done with it. A stateless transform (the v1 TRC/matrix, sRGB) has no
+    /// owner; a LittleCMS lease is thread-affine and IS the owner.
+    /// </summary>
+    private readonly record struct RowStage(RowTransform? Transform, IDisposable? Owner);
+
+    /// <summary>Makes the <see cref="RowStage"/> for the calling thread. Called once per worker.</summary>
+    private delegate RowStage RowStageFactory();
+
+    /// <summary>
     /// The one scanline loop every TIFF decode here runs through.
     ///
     /// Reads the rows the windows cover, scales each sample to its encoded range (1/255, 1/65535,
-    /// or 1.0 for IEEE float), hands the row's crop segment to <paramref name="transform"/>, then
-    /// for each window either stores it (factor 1) or folds it into that window's box
-    /// accumulator. The accumulator is <see cref="Resample.Box"/> unrolled: the same float sums
-    /// in the same order (row by row, left to right within a row) and the same final multiply by
-    /// <c>1/factor²</c>, so the result is bit-identical to boxing a full decode — that identity
-    /// is what lets a split scan or a preview be decoded WITHOUT the full frame ever existing.
-    /// Rows below the crop are still decoded (a TIFF's strips are not randomly addressable in
-    /// general) but never converted.
+    /// or 1.0 for IEEE float), hands the row's crop segment to the row transform, then for each
+    /// window either stores it (factor 1) or folds it into that window's box accumulator. The
+    /// accumulator is <see cref="Resample.Box"/> unrolled: the same float sums in the same order
+    /// (row by row, left to right within a row) and the same final multiply by <c>1/factor²</c>,
+    /// so the result is bit-identical to boxing a full decode — that identity is what lets a
+    /// split scan or a preview be decoded WITHOUT the full frame ever existing.
     ///
     /// Several windows share ONE pass so that a caller wanting two preview sizes of the same crop
     /// (the roll's opening frames want the editor size and the strip size) pays for the file and
     /// the colour transform once; all windows must share the crop and differ only in factor.
     ///
-    /// Memory is the outputs plus one scanline. That is the point: a whole Flextight strip is
-    /// 127–190 MP, 1.5–2.3 GB as float, and the previous shape of every preview — decode the
-    /// frame, crop it, box it — could not be run on an 8 GB machine, let alone eight cells of it
-    /// side by side.
+    /// IN PARALLEL, by bands of rows, when the file lets rows be reached without decoding
+    /// everything above them (<see cref="ParallelBands"/>). Each band has its own LibTiff handle
+    /// (a <see cref="Tiff"/> is not thread-safe) and its own <see cref="RowStage"/> (a LittleCMS
+    /// lease is thread-affine). The bands are cut on multiples of every window's factor, so each
+    /// output row's sum is formed by exactly one band from exactly its own input rows, in the
+    /// same order as before — the identity above survives the parallelism untouched, and the
+    /// tests that pin it are the regression suite for this loop. Measured on a 12-core machine:
+    /// a 127 MP Flextight strip's preview from 2.5 s to under a second, and a 61 MP FlexColor
+    /// export carrying the scanner's LUT profile — where LittleCMS was 13 s of a 14 s decode —
+    /// to about 2 s.
+    ///
+    /// Memory is the outputs plus one scanline per band. That is the point: a whole Flextight
+    /// strip is 127–190 MP, 1.5–2.3 GB as float, and the previous shape of every preview —
+    /// decode the frame, crop it, box it — could not be run on an 8 GB machine, let alone eight
+    /// cells of it side by side.
     /// </summary>
     private static float[][] ReadWindows(
         Tiff tif,
@@ -308,7 +327,7 @@ public static class TiffIO
         int bps,
         float sampleScale,
         SampleWindow[] windows,
-        RowTransform? transform)
+        RowStageFactory? stage)
     {
         if (windows.Length == 0) throw new ArgumentException("at least one window", nameof(windows));
         SampleWindow crop = windows[0];
@@ -316,64 +335,42 @@ public static class TiffIO
             if (w.X0 != crop.X0 || w.X1 != crop.X1 || w.Y0 != crop.Y0 || w.Y1 != crop.Y1)
                 throw new ArgumentException("windows sharing one pass must share the crop", nameof(windows));
 
-        int segW = crop.X1 - crop.X0;
         var outputs = new float[windows.Length][];
         int lastRow = crop.Y0;   // exclusive: the first row no window needs
+        int unit = 1;            // band boundaries must be ≡ Y0 modulo every factor
         for (int k = 0; k < windows.Length; k++)
         {
             outputs[k] = new float[checked(windows[k].OutWidth * windows[k].OutHeight * 3)];
             lastRow = Math.Max(lastRow, crop.Y0 + windows[k].OutHeight * windows[k].Factor);
+            unit = Lcm(unit, windows[k].Factor);
         }
-        var row = new float[checked(segW * 3)];
-        byte[] scanline = new byte[tif.ScanlineSize()];
 
-        for (int y = 0; y < lastRow; y++)
+        // A compressed strip can only be read from its first row (the codec has no random
+        // access), so a band that starts inside one starts reading at the strip's top and drops
+        // the rows above its own. Uncompressed rows are addressed directly.
+        int rowsPerStrip = RowsPerStrip(tif);
+        bool compressed = CompressionOf(tif) != BitMiracle.LibTiff.Classic.Compression.NONE;
+        int SeekBase(int y) => compressed ? y / rowsPerStrip * rowsPerStrip : y;
+
+        int rows = lastRow - crop.Y0;
+        int bands = ParallelBands(rows, unit, compressed, rowsPerStrip);
+        if (bands <= 1)
         {
-            if (!tif.ReadScanline(scanline, y))
-                throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
-            if (y < crop.Y0) continue;
-
-            for (int x = 0; x < segW; x++)
+            ReadBand(tif, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(crop.Y0), crop.Y0, lastRow);
+        }
+        else
+        {
+            int bandRows = (rows + bands - 1) / bands;
+            bandRows = (bandRows + unit - 1) / unit * unit;
+            int bandCount = (rows + bandRows - 1) / bandRows;
+            Parallel.For(0, bandCount, band =>
             {
-                int sx = (crop.X0 + x) * spp, d = x * 3;
-                if (spp >= 3)
-                {
-                    row[d] = Sample(scanline, sx, bps) * sampleScale;
-                    row[d + 1] = Sample(scanline, sx + 1, bps) * sampleScale;
-                    row[d + 2] = Sample(scanline, sx + 2, bps) * sampleScale;
-                }
-                else
-                {
-                    float grey = Sample(scanline, sx, bps) * sampleScale;   // grey -> replicate
-                    row[d] = grey; row[d + 1] = grey; row[d + 2] = grey;
-                }
-            }
-            transform?.Invoke(row, segW);
-
-            for (int k = 0; k < windows.Length; k++)
-            {
-                SampleWindow win = windows[k];
-                int factor = win.Factor, outW = win.OutWidth;
-                int oy = (y - crop.Y0) / factor;
-                if (oy >= win.OutHeight) continue;          // trailing rows outside this box
-                float[] data = outputs[k];
-                if (factor == 1)
-                {
-                    Array.Copy(row, 0, data, oy * outW * 3, outW * 3);
-                    continue;
-                }
-                int rowBase = oy * outW * 3;
-                for (int ox = 0; ox < outW; ox++)
-                {
-                    int di = rowBase + ox * 3, si = ox * factor * 3;
-                    float r = data[di], g = data[di + 1], b = data[di + 2];
-                    for (int fx = 0; fx < factor; fx++, si += 3)
-                    {
-                        r += row[si]; g += row[si + 1]; b += row[si + 2];
-                    }
-                    data[di] = r; data[di + 1] = g; data[di + 2] = b;
-                }
-            }
+                int y0 = crop.Y0 + band * bandRows;
+                int y1 = Math.Min(lastRow, y0 + bandRows);
+                using Tiff own = Tiff.Open(path, "r")
+                    ?? throw new IOException($"could not open TIFF: {path}");
+                ReadBand(own, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(y0), y0, y1);
+            });
         }
 
         for (int k = 0; k < windows.Length; k++)
@@ -385,6 +382,132 @@ public static class TiffIO
             for (int i = 0; i < data.Length; i++) data[i] *= inv;
         }
         return outputs;
+    }
+
+    /// <summary>Rows <paramref name="yFrom"/> (inclusive) to <paramref name="yTo"/> (exclusive) of
+    /// every window, on the calling thread with the given handle, reading from
+    /// <paramref name="readFrom"/> (≤ <paramref name="yFrom"/>; the rows between are decoded and
+    /// dropped). See <see cref="ReadWindows"/>.</summary>
+    private static void ReadBand(
+        Tiff tif,
+        string path,
+        int spp,
+        int bps,
+        float sampleScale,
+        SampleWindow[] windows,
+        float[][] outputs,
+        RowStageFactory? stage,
+        int readFrom,
+        int yFrom,
+        int yTo)
+    {
+        SampleWindow crop = windows[0];
+        int segW = crop.X1 - crop.X0;
+        var row = new float[checked(segW * 3)];
+        byte[] scanline = new byte[tif.ScanlineSize()];
+        RowStage rowStage = stage?.Invoke() ?? default;
+        try
+        {
+            for (int y = readFrom; y < yTo; y++)
+            {
+                if (!tif.ReadScanline(scanline, y))
+                    throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
+                if (y < yFrom) continue;
+
+                for (int x = 0; x < segW; x++)
+                {
+                    int sx = (crop.X0 + x) * spp, d = x * 3;
+                    if (spp >= 3)
+                    {
+                        row[d] = Sample(scanline, sx, bps) * sampleScale;
+                        row[d + 1] = Sample(scanline, sx + 1, bps) * sampleScale;
+                        row[d + 2] = Sample(scanline, sx + 2, bps) * sampleScale;
+                    }
+                    else
+                    {
+                        float grey = Sample(scanline, sx, bps) * sampleScale;   // grey -> replicate
+                        row[d] = grey; row[d + 1] = grey; row[d + 2] = grey;
+                    }
+                }
+                rowStage.Transform?.Invoke(row, segW);
+
+                for (int k = 0; k < windows.Length; k++)
+                {
+                    SampleWindow win = windows[k];
+                    int factor = win.Factor, outW = win.OutWidth;
+                    int oy = (y - crop.Y0) / factor;
+                    if (oy >= win.OutHeight) continue;          // trailing rows outside this box
+                    float[] data = outputs[k];
+                    if (factor == 1)
+                    {
+                        Array.Copy(row, 0, data, oy * outW * 3, outW * 3);
+                        continue;
+                    }
+                    int rowBase = oy * outW * 3;
+                    for (int ox = 0; ox < outW; ox++)
+                    {
+                        int di = rowBase + ox * 3, si = ox * factor * 3;
+                        float r = data[di], g = data[di + 1], b = data[di + 2];
+                        for (int fx = 0; fx < factor; fx++, si += 3)
+                        {
+                            r += row[si]; g += row[si + 1]; b += row[si + 2];
+                        }
+                        data[di] = r; data[di + 1] = g; data[di + 2] = b;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            rowStage.Owner?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// How many bands <see cref="ReadWindows"/> may cut <paramref name="rows"/> into.
+    ///
+    /// Parallel reading needs a band's first row to be reachable without decoding the rows above
+    /// it. An uncompressed file always is: LibTiff addresses any row of an uncompressed strip
+    /// directly (and chops oversized strips on open). A compressed strip is decoded from its
+    /// start, so a band beginning inside one pays for the strip's rows above it; that is cheap
+    /// while strips are small against the band and ruinous when the whole image is one strip —
+    /// every band would decode from row 0. So compressed files parallelise only when a strip is
+    /// at most a quarter of a band, and a single-strip LZW/Deflate scan stays sequential, as it
+    /// always was. Never more bands than cores or than <paramref name="unit"/>-sized pieces.
+    /// </summary>
+    private static int ParallelBands(int rows, int unit, bool compressed, int rowsPerStrip)
+    {
+        int cores = Environment.ProcessorCount;
+        int maxByRows = Math.Max(1, rows / Math.Max(unit, MinBandRows));
+        int bands = Math.Min(cores, maxByRows);
+        if (bands <= 1 || !compressed) return bands;
+        int bandRows = (rows + bands - 1) / bands;
+        return rowsPerStrip * 4 <= bandRows ? bands : 1;
+    }
+
+    private static Compression CompressionOf(Tiff tif)
+        => tif.GetField(TiffTag.COMPRESSION) is { Length: > 0 } c
+            ? (Compression)c[0].ToInt()
+            : BitMiracle.LibTiff.Classic.Compression.NONE;
+
+    /// <summary>Rows per strip as LibTiff reports it after opening (an oversized uncompressed
+    /// strip has been chopped by then); the whole image when the tag is absent.</summary>
+    private static int RowsPerStrip(Tiff tif)
+    {
+        FieldValue[]? rps = tif.GetField(TiffTag.ROWSPERSTRIP);
+        int height = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+        int rows = rps is { Length: > 0 } ? rps[0].ToInt() : height;
+        return rows <= 0 ? height : Math.Min(rows, height);
+    }
+
+    /// <summary>A band shorter than this is not worth a thread and a file handle.</summary>
+    private const int MinBandRows = 64;
+
+    private static int Lcm(int a, int b)
+    {
+        int x = a, y = b;
+        while (y != 0) (x, y) = (y, x % y);
+        return checked(a / x * b);
     }
 
     /// <summary>
@@ -796,7 +919,7 @@ public static class TiffIO
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
         (SampleWindow[] windows, int bitsPerSample, float[][] encoded, float codeStep, NumericRange range) =
-            ReadTiffSamples(tif, path, region, transform: null);
+            ReadTiffSamples(tif, path, region, stage: null);
         ImageBuffer[] pixels = Buffers(windows, encoded, codeStep);
         CaptureKind captureKind = bitsPerSample switch
         {
@@ -890,86 +1013,87 @@ public static class TiffIO
             blackPointCompensation: false,
             adaptationState: 1.0);
 
-        IColorTransformLease transform;
+        // Lease creation constructs the complete native transform. It happens before any
+        // scanline is decoded, so failure cannot leave a half-transformed frame to fall back
+        // into the legacy path.
+        IColorTransformLease LeaseTransform()
+        {
+            try
+            {
+                return colorManagement.Lease(request);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            {
+                throw new ColorTransformCreationException(
+                    $"Managed TIFF input could not create the complete ICC transform for " +
+                    $"'{Path.GetFileName(path)}' ({sourceProfile.Identity} -> {workingProfile.Identity}).",
+                    ex);
+            }
+        }
+
+        using Tiff tif = Tiff.Open(path, "r")
+            ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
+        float codeStep = ProbeCodeStep(tif);
+
+        using IColorTransformLease transform = LeaseTransform();
+
+        // Four private probe pixels estimate the source lattice after the full colour
+        // conversion: black plus one code in each source primary. Same lease, same native
+        // transform, their own Apply call — a per-pixel conversion gives the same answer for a
+        // pixel whether it is batched with the image or on its own. Because a 3-D colour
+        // conversion has no exact scalar lattice, SourceQuantisationStep records the
+        // conservative largest first-code component in working-space units.
+        double quantisationStep = ManagedQuantisationStep(ConvertProbes(transform, codeStep, path));
+
+        // Converted row by row as the reader produces it, in place, before any box average —
+        // the average has to be taken in the working space, the same order as converting the
+        // whole frame and then cropping and boxing it, so the pixels agree bit for bit. The
+        // reader may cut the rows into bands on several threads; a LittleCMS lease is
+        // thread-affine, so a band on THIS thread uses the lease above and a band on any other
+        // leases the same transform for itself and releases it with its rows. Nothing partial is
+        // ever admitted: a failure anywhere throws and the frame is not produced.
+        int ownerThread = Environment.CurrentManagedThreadId;
+        SampleWindow[] windows;
+        float[][] encoded;
+        NumericRange sourceRange;
         try
         {
-            // Lease creation constructs the complete native transform. It happens before any
-            // scanline is decoded, so failure cannot leave a half-transformed frame to fall back
-            // into the legacy path.
-            transform = colorManagement.Lease(request);
+            (windows, _, encoded, _, sourceRange) = ReadTiffSamples(
+                tif,
+                path,
+                region,
+                () =>
+                {
+                    if (Environment.CurrentManagedThreadId == ownerThread)
+                        return new RowStage((rgb, count) => transform.Apply(rgb, rgb, count), null);
+                    IColorTransformLease lease = LeaseTransform();
+                    return new RowStage((rgb, count) => lease.Apply(rgb, rgb, count), lease);
+                });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException
+                                   and not IOException and not NotSupportedException
+                                   and not ArgumentException and not ColorTransformCreationException)
         {
-            throw new ColorTransformCreationException(
-                $"Managed TIFF input could not create the complete ICC transform for " +
-                $"'{Path.GetFileName(path)}' ({sourceProfile.Identity} -> {workingProfile.Identity}).",
+            // The reader's own failures (file, layout, an empty window) pass through as they
+            // always did; anything the transform raised is reported as the transform's.
+            throw new ColorManagementException(
+                $"Managed TIFF input failed while applying the atomic ICC transform for " +
+                $"'{Path.GetFileName(path)}'; no legacy or partial result was admitted.",
                 ex);
         }
 
-        using (transform)
-        {
-            using Tiff tif = Tiff.Open(path, "r")
-                ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
-
-            // Converted IN PLACE. The transform is per pixel, and the lease documents that source
-            // and destination may be the same buffer, so the frame never exists twice. It used to:
-            // a copy carrying four probe pixels, a second buffer for the output and a third copy
-            // trimming the probes back off — four times the frame at peak, 9 GB for a 190 MP
-            // Flextight strip, which is what put an 8 GB machine into swap (or OutOfMemory) on
-            // every split cell of such a scan.
-            //
-            // A WINDOW is converted row by row as the reader produces it, before the box average,
-            // because the average has to be taken in the working space — the same order as the
-            // whole-frame route (convert, then crop and box), so the pixels agree bit for bit.
-            // Row by row rather than one call is the only difference, and a per-pixel transform
-            // does not know how many neighbours it was batched with.
-            SampleWindow[] windows;
-            float[][] encoded;
-            float codeStep;
-            NumericRange sourceRange;
-            try
-            {
-                (windows, _, encoded, codeStep, sourceRange) = ReadTiffSamples(
-                    tif,
-                    path,
-                    region,
-                    region is null ? null : (rgb, count) => transform.Apply(rgb, rgb, count));
-                if (region is null)
-                    transform.Apply(encoded[0], encoded[0], checked(windows[0].OutWidth * windows[0].OutHeight));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException
-                                       and not IOException and not NotSupportedException
-                                       and not ArgumentException)
-            {
-                // The reader's own failures (file, layout, an empty window) pass through as they
-                // always did; anything the transform raised is reported as the transform's.
-                throw new ColorManagementException(
-                    $"Managed TIFF input failed while applying the atomic ICC transform for " +
-                    $"'{Path.GetFileName(path)}'; no legacy or partial result was admitted.",
-                    ex);
-            }
-
-            // Four private probe pixels estimate the source lattice after the full colour
-            // conversion: black plus one code in each source primary. Same lease, same native
-            // transform, a second Apply call — a per-pixel conversion gives the same answer for a
-            // pixel whether it is batched with the image or on its own. Because a 3-D colour
-            // conversion has no exact scalar lattice, SourceQuantisationStep records the
-            // conservative largest first-code component in working-space units.
-            double quantisationStep = ManagedQuantisationStep(
-                ConvertProbes(transform, codeStep, path));
-            ImageBuffer[] pixels = Buffers(windows, encoded, quantisationStep);
-            var original = new CharacterizedPixelEncoding(
-                sourceProfile,
-                sourceReference,
-                TransferState.ProfileEncoded,
-                sourceRange);
-            var source = new SourceDescriptor(
-                stableId,
-                Path.GetFileName(path),
-                original,
-                decodeRecipe);
-            return Frames(pixels, WorkingSpaceId.LinearAcesCgV1, WorkingAdmission.ConvertedFromCharacterized, source);
-        }
+        ImageBuffer[] pixels = Buffers(windows, encoded, quantisationStep);
+        var original = new CharacterizedPixelEncoding(
+            sourceProfile,
+            sourceReference,
+            TransferState.ProfileEncoded,
+            sourceRange);
+        var source = new SourceDescriptor(
+            stableId,
+            Path.GetFileName(path),
+            original,
+            decodeRecipe);
+        return Frames(pixels, WorkingSpaceId.LinearAcesCgV1, WorkingAdmission.ConvertedFromCharacterized, source);
     }
 
     private static bool TryReadIccPayloadStrict(Tiff tif, string path, out byte[]? payload)
@@ -1054,11 +1178,12 @@ public static class TiffIO
     /// <summary>
     /// The managed decode's sample reader: the whole frame, or the window <paramref name="region"/>
     /// resolves to, through <see cref="ReadWindow"/>. <paramref name="transform"/> runs on each
-    /// window row before it is stored or averaged — the hook a per-row colour transform needs.
-    /// One sample array per window, sized by that window.
+    /// window row before it is stored or averaged — the hook a per-row colour transform needs;
+    /// <paramref name="stage"/> makes one per reading thread. One sample array per window, sized
+    /// by that window.
     /// </summary>
     private static (SampleWindow[] Windows, int BitsPerSample, float[][] Encoded, float CodeStep, NumericRange Range)
-        ReadTiffSamples(Tiff tif, string path, RegionRequest? region, RowTransform? transform)
+        ReadTiffSamples(Tiff tif, string path, RegionRequest? region, RowStageFactory? stage)
     {
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
         int h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
@@ -1076,7 +1201,7 @@ public static class TiffIO
         float codeStep = isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
         float sampleScale = isFloat ? 1.0f : codeStep;
         SampleWindow[] windows = SampleWindow.Resolve(w, h, region);
-        float[][] encoded = ReadWindows(tif, path, spp, bps, sampleScale, windows, transform);
+        float[][] encoded = ReadWindows(tif, path, spp, bps, sampleScale, windows, stage);
         return (windows, bps, encoded, codeStep,
             isFloat ? NumericRange.Extended : NumericRange.Normalized);
     }
@@ -1102,6 +1227,14 @@ public static class TiffIO
         throw new NotSupportedException(
             $"unsupported TIFF sample storage: BitsPerSample={bitsPerSample}, " +
             $"SampleFormat={describedFormat} (need uint8, uint16, or IEEE-float32)");
+    }
+
+    /// <summary>The encoded-domain code step the probes are built from, off the header alone.</summary>
+    private static float ProbeCodeStep(Tiff tif)
+    {
+        int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+        bool isFloat = ValidateSampleStorage(tif, bps);
+        return isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
     }
 
     /// <summary>
@@ -1223,7 +1356,10 @@ public static class TiffIO
         }
 
         SampleWindow[] windows = SampleWindow.Resolve(w, h, region);
-        float[][] data = ReadWindows(tif, path, spp, bps, inv, windows, transform);
+        // The v1 transforms are stateless — read-only LUTs and a matrix — so every band shares
+        // the one delegate and there is nothing to release.
+        RowStageFactory? stage = transform is null ? null : () => new RowStage(transform, null);
+        float[][] data = ReadWindows(tif, path, spp, bps, inv, windows, stage);
 
         // Stamp the source lattice while the bit depth is still in scope; see
         // ImageBuffer.SourceQuantisationStep for why this cannot be recovered downstream. A

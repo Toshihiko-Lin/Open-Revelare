@@ -226,6 +226,74 @@ public sealed class TiffRegionDecodeTests
         }
     }
 
+    /// <summary>
+    /// A tall image is read in parallel bands (one LibTiff handle and, on the ICC route, one
+    /// LittleCMS lease per band); the bands must reproduce the sequential <see cref="Resample.Box"/>
+    /// sum bit for bit. Small factors keep the band unit small enough for several bands on any
+    /// core count; uncompressed, LZW in small strips (parallel), and LZW in one strip (sequential
+    /// by policy) all have to agree.
+    /// </summary>
+    [Theory]
+    [InlineData(16, true, false, 8)]     // ICC, uncompressed
+    [InlineData(16, false, false, 8)]    // untagged, uncompressed
+    [InlineData(8, true, true, 8)]       // ICC, LZW in 8-row strips → parallel
+    [InlineData(16, false, true, 1500)]  // untagged, LZW in one strip → sequential
+    public void Parallel_bands_match_the_sequential_box(int bitsPerSample, bool embedIcc, bool lzw, int rowsPerStrip)
+    {
+        const int tallWidth = 61, tallHeight = 1500;
+        string path = WriteTiff(
+            bitsPerSample, embedIcc, tallWidth, tallHeight, lzw ? Compression.LZW : Compression.NONE, rowsPerStrip);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            WorkingFrame full = TiffIO.LoadWorkingFrame(
+                path, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine);
+            var rects = new (double X, double Y, double W, double H)[]
+            {
+                (0, 0, 1, 1), (0.1, 0.23, 0.7, 0.6), (0.3, 0.71, 0.5, 0.29),
+            };
+            foreach (var rect in rects)
+            foreach (int maxEdge in new[] { 0, 400, 130, 50 })
+            {
+                ImageBuffer expected = Geometry.ApplyCrop(full.Pixels, rect);
+                if (maxEdge > 0) expected = Resample.Box(expected, maxEdge);
+                WorkingFrame window = TiffIO.LoadWorkingRegion(
+                    path, rect, maxEdge, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine);
+                Assert.Equal((expected.Width, expected.Height), (window.Pixels.Width, window.Pixels.Height));
+                AssertFloatBitsEqual(expected.Data, window.Pixels.Data, $"rect {rect}, maxEdge {maxEdge}");
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>The Flextight route (v1 gamma LUT, one stateless stage shared by all bands).</summary>
+    [Fact]
+    public void Parallel_bands_on_the_vendor_gamma_route_match()
+    {
+        string path = WriteFlextightTiff(61, 1500);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            WorkingFrame full = TiffIO.LoadWorkingFrame(
+                path, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine);
+            Assert.Contains("vendor gamma", full.Source.DecodeRecipe, StringComparison.Ordinal);
+            foreach (int maxEdge in new[] { 0, 130 })
+            {
+                ImageBuffer expected = maxEdge > 0 ? Resample.Box(full.Pixels, maxEdge) : full.Pixels;
+                WorkingFrame window = TiffIO.LoadWorkingRegion(
+                    path, (0, 0, 1, 1), maxEdge, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine);
+                AssertFloatBitsEqual(expected.Data, window.Pixels.Data, $"maxEdge {maxEdge}");
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>An empty window is refused the way <see cref="Geometry.ApplyCrop"/> refuses it.</summary>
     [Fact]
     public void Empty_window_is_rejected()
@@ -289,19 +357,23 @@ public sealed class TiffRegionDecodeTests
     /// deterministic hash of its position), so a window landing one pixel off cannot match.
     /// </summary>
     private static string WriteTiff(int bitsPerSample, bool embedIcc)
+        => WriteTiff(bitsPerSample, embedIcc, Width, Height, Compression.NONE, rowsPerStrip: 7);
+
+    private static string WriteTiff(
+        int bitsPerSample, bool embedIcc, int width, int height, Compression compression, int rowsPerStrip)
     {
         string path = Path.Combine(Path.GetTempPath(), $"openrevelare-region-{Guid.NewGuid():N}.tif");
         using Tiff tif = Tiff.Open(path, "w")
             ?? throw new IOException($"could not create test TIFF: {path}");
-        tif.SetField(TiffTag.IMAGEWIDTH, Width);
-        tif.SetField(TiffTag.IMAGELENGTH, Height);
+        tif.SetField(TiffTag.IMAGEWIDTH, width);
+        tif.SetField(TiffTag.IMAGELENGTH, height);
         tif.SetField(TiffTag.SAMPLESPERPIXEL, 3);
         tif.SetField(TiffTag.BITSPERSAMPLE, bitsPerSample);
         tif.SetField(TiffTag.ORIENTATION, Orientation.TOPLEFT);
         tif.SetField(TiffTag.PLANARCONFIG, PlanarConfig.CONTIG);
         tif.SetField(TiffTag.PHOTOMETRIC, Photometric.RGB);
-        tif.SetField(TiffTag.COMPRESSION, Compression.NONE);
-        tif.SetField(TiffTag.ROWSPERSTRIP, 7);
+        tif.SetField(TiffTag.COMPRESSION, compression);
+        tif.SetField(TiffTag.ROWSPERSTRIP, rowsPerStrip);
         if (bitsPerSample == 32) tif.SetField(TiffTag.SAMPLEFORMAT, SampleFormat.IEEEFP);
         if (embedIcc)
         {
@@ -309,10 +381,10 @@ public sealed class TiffRegionDecodeTests
             tif.SetField(TiffTag.ICCPROFILE, icc.Length, icc);
         }
 
-        byte[] row = new byte[Width * 3 * (bitsPerSample / 8)];
-        for (int y = 0; y < Height; y++)
+        byte[] row = new byte[width * 3 * (bitsPerSample / 8)];
+        for (int y = 0; y < height; y++)
         {
-            for (int x = 0; x < Width; x++)
+            for (int x = 0; x < width; x++)
             for (int c = 0; c < 3; c++)
             {
                 // Spread over the full range, never uniform along a row or a column.
@@ -343,7 +415,9 @@ public sealed class TiffRegionDecodeTests
     /// A Flextight-shaped 16-bit TIFF: no ICC, the settings plist in private tag 50457 declaring
     /// gamma 2.0. Written by hand because LibTiff will not emit an unregistered private tag.
     /// </summary>
-    private static string WriteFlextightTiff()
+    private static string WriteFlextightTiff() => WriteFlextightTiff(Width, Height);
+
+    private static string WriteFlextightTiff(int width, int height)
     {
         byte[] plist = Encoding.UTF8.GetBytes("""
             <?xml version="1.0" encoding="UTF-8"?>
@@ -361,7 +435,7 @@ public sealed class TiffRegionDecodeTests
         uint bitsOffset = ifdOffset + 2 + entryCount * 12 + 4;
         uint plistOffset = bitsOffset + 6;
         uint stripOffset = plistOffset + checked((uint)plist.Length);
-        uint stripBytes = checked((uint)(Width * Height * 3 * 2));
+        uint stripBytes = checked((uint)(width * height * 3 * 2));
 
         using var bytes = new MemoryStream();
         using (var writer = new BinaryWriter(bytes, Encoding.UTF8, leaveOpen: true))
@@ -380,14 +454,14 @@ public sealed class TiffRegionDecodeTests
                 writer.Write(value);
             }
 
-            Entry(256, 4, 1, Width);                    // ImageWidth
-            Entry(257, 4, 1, Height);                   // ImageLength
+            Entry(256, 4, 1, (uint)width);              // ImageWidth
+            Entry(257, 4, 1, (uint)height);             // ImageLength
             Entry(258, 3, 3, bitsOffset);               // BitsPerSample (16,16,16) out of line
             Entry(259, 3, 1, 1);                        // Compression none
             Entry(262, 3, 1, 2);                        // Photometric RGB
             Entry(273, 4, 1, stripOffset);              // StripOffsets
             Entry(277, 3, 1, 3);                        // SamplesPerPixel
-            Entry(278, 4, 1, Height);                   // RowsPerStrip
+            Entry(278, 4, 1, (uint)height);             // RowsPerStrip
             Entry(279, 4, 1, stripBytes);               // StripByteCounts
             Entry(284, 3, 1, 1);                        // PlanarConfig contig
             Entry(50457, 1, checked((uint)plist.Length), plistOffset);   // Flextight settings
@@ -395,8 +469,8 @@ public sealed class TiffRegionDecodeTests
 
             writer.Write((ushort)16); writer.Write((ushort)16); writer.Write((ushort)16);
             writer.Write(plist);
-            for (int y = 0; y < Height; y++)
-            for (int x = 0; x < Width; x++)
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
             for (int c = 0; c < 3; c++)
             {
                 uint hash = (uint)(x * 2654435761u + y * 40503u + c * 97u);
