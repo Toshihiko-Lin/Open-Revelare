@@ -78,7 +78,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -122,7 +122,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -147,7 +147,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -179,7 +179,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -199,7 +199,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -229,7 +229,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -253,7 +253,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -277,8 +277,8 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(first);
-            File.Delete(second);
+            DeleteTestFile(first);
+            DeleteTestFile(second);
         }
     }
 
@@ -298,7 +298,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -321,7 +321,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -358,17 +358,30 @@ public sealed class ManagedUntaggedTiffAssumptionTests
                 engine,
                 assumption);
 
+            // The previews are decoded at PREVIEW precision: on a route that runs a CMM
+            // transform (sRGB here) that is the 16-bit optimised transform, which the recipe
+            // says so, and the pixels agree with the exact decode to ~1e-4 rather than to the
+            // bit. A route with no transform (linear) is untouched by the precision and stays
+            // identical. Either way the ASSUMPTION and the route are the same — that is what
+            // this test pins.
+            bool cmm = assumption == TiffInputAssumption.Srgb;
+            string previewRecipe = cmm
+                ? full.Source.DecodeRecipe + " [preview precision: 16-bit optimised transform]"
+                : full.Source.DecodeRecipe;
             Assert.Equal((2, 1), (width, height));
-            Assert.Equal(full.Pixels.Data, previews[0].Pixels.Data);
-            Assert.Equal(full.Source.DecodeRecipe, previews[0].Source.DecodeRecipe);
+            Assert.Equal(previewRecipe, previews[0].Source.DecodeRecipe);
             Assert.Equal((1, 1), (regionWidth, regionHeight));
-            Assert.Equal(full.Pixels.Data.AsSpan(0, 3).ToArray(), region.Pixels.Data);
-            Assert.Equal(full.Source.DecodeRecipe, region.Source.DecodeRecipe);
+            Assert.Equal(previewRecipe, region.Source.DecodeRecipe);
             Assert.Equal(full.Admission, region.Admission);
+            float tolerance = cmm ? 1e-3f : 0f;
+            for (int i = 0; i < 6; i++)
+                Assert.InRange(previews[0].Pixels.Data[i], full.Pixels.Data[i] - tolerance, full.Pixels.Data[i] + tolerance);
+            for (int i = 0; i < 3; i++)
+                Assert.InRange(region.Pixels.Data[i], full.Pixels.Data[i] - tolerance, full.Pixels.Data[i] + tolerance);
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
         }
     }
 
@@ -397,7 +410,7 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         }
         finally
         {
-            File.Delete(path);
+            DeleteTestFile(path);
             File.Delete(path + ".tmp");
         }
     }
@@ -419,6 +432,24 @@ public sealed class ManagedUntaggedTiffAssumptionTests
         Assert.Equal(
             TiffInputAssumption.Unspecified,
             TiffInputAssumptionPolicy.FromExplicitChoice(linear: false, srgb: false));
+    }
+
+    /// <summary>
+    /// Delete a test file once nothing holds it. A roll load returns as soon as its first frame is
+    /// on screen and leaves the warm-up decoding in the background; disposing the view model
+    /// cancels that work but does not wait for a decode already inside LibTiff to let go of the
+    /// file, so a plain File.Delete in the finally block raced it (Windows refuses to delete an
+    /// open file) — and the parallel band reader, which opens several handles per decode, made
+    /// the race far more likely. A leftover temp file is not worth failing the test over, so the
+    /// last resort is to leave it.
+    /// </summary>
+    private static void DeleteTestFile(string path)
+    {
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            try { File.Delete(path); return; }
+            catch (IOException) { Thread.Sleep(50); }
+        }
     }
 
     private static string WriteTiff(
