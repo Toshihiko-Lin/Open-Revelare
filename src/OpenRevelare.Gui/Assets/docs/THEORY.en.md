@@ -408,13 +408,22 @@ above the clamp. The step is folded into the write stage of the inversion.
 RGB light-box rolls take the luminance/chroma decomposition here in order to apply the chroma
 compensation matrix or per-channel amp produced by the decouple calibration.
 
-With a matrix, the matrix output is multiplied by a single scalar (the mean of the three channel
-slopes). The matrix maps the sum-zero plane to itself, and a single multiplier keeps the result
-summing to zero, i.e. pure chroma; luminance is determined by the endpoint affine and is not
-disturbed by the chroma compensation.
+The decomposition acts on the ENDPOINT-NORMALISED density $a_c = S_c D_c + b_c$, not on the raw
+density $D_c$. Raw density chroma $D_c - \bar D$ is not scene colour: it carries the orange mask and
+the three layers' unequal contrast, and at the calibrated white it is far from zero (blue densest,
+by about 0.3). The matrix only ever shrinks chroma (it is built from $1/\text{amp}$), so applied to
+raw chroma it also shrank the white point's own cast: a calibrated white rendered R 1.59 / G 1.00 /
+B 0.72 at amp 1.6, the black end drifted the same way, and the roll came out yellow-red with no
+D-max measurement able to correct it — the render was not honouring the endpoints being measured.
+After normalisation a neutral tone has equal channels, so chroma $a_c - \bar a$ is zero at both ends
+and on every grey between them, and the matrix touches only the scene saturation the decouple
+matrix widened.
 
-With a per-channel amp only, chroma follows its own channel's slope (identical to the result of
-the plain per-channel affine), is divided by the amp, and has its mean removed again.
+With a matrix, the matrix acts on that chroma directly, with no slope scalar ($a$ is already in
+output-density units). The matrix maps the sum-zero plane to itself, so the result is still pure
+chroma; luminance $\bar a$ is untouched.
+
+With a per-channel amp only, that chroma is divided by the amp and has its mean removed again.
 
 The matrix and the amp are alternatives: the chroma compensation matrix is built from
 $1/\text{amp}_{Yb}$ and $1/\text{amp}_{Rg}$ and already carries the amplification per chroma axis.

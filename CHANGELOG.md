@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## 未发布
+
+**修复**
+
+- **修复了 RGB 分光（Path A）导入的卷自动结果整体偏黄偏红的问题**。解耦标定的色度补偿矩阵此前作用在原始密度的色度上，把片基和三层反差差异一并当作场景色彩压掉，标定出的白点和黑点都落不到中性，重测 D-max 也修不回来。现在矩阵作用在端点归一之后的色度上，两端与其间每一级灰严格中性，矩阵只压解耦放大的场景饱和度。白光/扫描（Path B）卷逐字节不变；已保存的 Path A 工程重新打开即生效。
+
+---
+
+**Fixed**
+
+- **Fixed a yellow-red cast over the whole roll on RGB narrow-band (Path A) imports.** The decouple calibration's chroma-compensation matrix used to act on raw-density chroma, so it compressed the film base and the layers' unequal contrast as if they were scene colour, and neither calibrated endpoint landed on neutral — re-measuring D-max could not correct it. The matrix now acts on the endpoint-normalised chroma: both ends and every grey between them stay neutral, and the matrix only compresses the saturation the decouple widened. White-light / scanner (Path B) rolls are byte-identical; saved Path A projects pick the fix up on reopen.
+
 ## v1.7.1（2026-09-14）
 
 **改进**

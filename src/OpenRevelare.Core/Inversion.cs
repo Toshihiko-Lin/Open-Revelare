@@ -99,11 +99,6 @@ public static class Inversion
         DensityEndpoints endpoints = DensityEndpoints.For(cal);
         double es0 = endpoints.Scale[0], es1 = endpoints.Scale[1], es2 = endpoints.Scale[2];
         double eo0 = endpoints.Offset[0], eo1 = endpoints.Offset[1], eo2 = endpoints.Offset[2];
-        // The single multiplier the chroma matrix is scaled by. Under the legacy parameters every
-        // channel's slope IS grade, so this reduces to grade exactly; under measured endpoints the
-        // slopes differ and their mean is the scalar that keeps M's output inside the sum-zero
-        // plane (see the useMatrix branch).
-        double chromaSlope = (es0 + es1 + es2) / 3.0;
 
         static double DirectDensity(double v, double tb, double flr)
             => -Math.Log10(Math.Max(v / tb, flr));
@@ -132,62 +127,70 @@ public static class Inversion
                 double d1 = v1 <= 1.0f ? lut1[ToIndex(v1)] : DirectDensity(v1, tb1, floorV1);
                 double d2 = v2 <= 1.0f ? lut2[ToIndex(v2)] : DirectDensity(v2, tb2, floorV2);
 
-                // 5: density-domain inversion.
-                double a0, a1, a2;
+                // 5: density-domain inversion — the canonical per-channel affine
+                // (DensityEndpoints). For a legacy roll these coefficients reduce to
+                // pivot + (d-pivot)*grade - d_max exactly, gating included; for a roll with
+                // measured per-channel endpoints it is the endpoint normalisation itself, with
+                // no grade anywhere in it. EVERY roll goes through this line first: it is what
+                // pins dMin_c to black and dMax_c to white for each channel.
+                double a0 = es0 * d0 + eo0;
+                double a1 = es1 * d1 + eo1;
+                double a2 = es2 * d2 + eo2;
+
                 if (needDecomp)
                 {
-                    double dMean = (d0 + d1 + d2) / 3.0;
-                    double c0 = d0 - dMean, c1 = d1 - dMean, c2 = d2 - dMean;
+                    // Path A chroma compensation (and the per-channel chroma scale) act on the
+                    // chroma of the ENDPOINT-NORMALISED density, not of the raw density. The
+                    // difference is the whole of the Path A colour cast that used to be here.
+                    //
+                    // Raw density chroma d_c - mean(d) is not scene colour: it carries the orange
+                    // mask and the three layers' unequal contrast, so at the calibrated white
+                    // (d = dMax) it is far from zero — blue densest by ~0.3. Compressing THAT by
+                    // M (built from 1/amp, so it only ever shrinks) pulled the white point off
+                    // neutral: at amp 1.6 a calibrated white rendered R 1.59 / G 1.00 / B 0.72,
+                    // and the black end drifted the same way — a yellow-red cast over the whole
+                    // roll that no D-max measurement could remove, because the render was not
+                    // honouring the endpoints being measured. Path B never showed it, having no
+                    // matrix. Before the endpoint model wb_high was folded into steps 1–4, so the
+                    // raw chroma at white already WAS zero and M had nothing to shrink there;
+                    // moving the per-channel slope to step 5 (bd8a1aa) put the decomposition
+                    // ahead of the balance without moving the balance ahead of it.
+                    //
+                    // After the affine, a neutral tone has a_0 = a_1 = a_2 by construction, so
+                    // chroma = a - mean(a) is zero at both endpoints and on every grey between
+                    // them, and M only touches what it was measured to touch — scene saturation
+                    // the decouple matrix widened. No slope multiplier either: `a` is already in
+                    // output-density units, and M maps the sum-zero plane to itself, so the
+                    // result is still pure chroma and mean(a) — the luminance — is untouched.
+                    double aMean = (a0 + a1 + a2) / 3.0;
+                    double c0 = a0 - aMean, c1 = a1 - aMean, c2 = a2 - aMean;
 
                     if (channelScaleActive) { c0 *= cs0; c1 *= cs1; c2 *= cs2; }
 
-                    // The matrix REPLACES chromaAmp, it does not stack with it: this branch uses
-                    // the bare chroma_grade and never reads effChroma. That is correct, not an
-                    // oversight — ChromaAxisCompensationMatrix is built from 1/ampYb and 1/ampRg,
-                    // so it already carries the amplification, resolved per chroma axis instead
-                    // of per RGB channel. Passing both leaves the amp silently unused; the else
-                    // branch below is the only consumer, for callers with no matrix.
+                    // The matrix REPLACES chromaAmp, it does not stack with it: this branch never
+                    // reads amp. That is correct, not an oversight — ChromaAxisCompensationMatrix
+                    // is built from 1/ampYb and 1/ampRg, so it already carries the amplification,
+                    // resolved per chroma axis instead of per RGB channel. Passing both leaves the
+                    // amp silently unused; the else branch below is the only consumer, for callers
+                    // with no matrix.
                     if (useMatrix)
                     {
-                        // ONE scalar on the matrix output, not the per-channel slopes. M maps the
-                        // sum-zero plane to itself, so a single multiplier keeps the result summing
-                        // to zero — i.e. pure chroma. Scaling per channel instead would break that
-                        // (measured leak ~9e-3 on a typical pixel) and quietly push luminance
-                        // around, undoing the balance the endpoints just established.
-                        double n0 = (m00 * c0 + m01 * c1 + m02 * c2) * chromaSlope;
-                        double n1 = (m10 * c0 + m11 * c1 + m12 * c2) * chromaSlope;
-                        double n2 = (m20 * c0 + m21 * c1 + m22 * c2) * chromaSlope;
+                        double n0 = m00 * c0 + m01 * c1 + m02 * c2;
+                        double n1 = m10 * c0 + m11 * c1 + m12 * c2;
+                        double n2 = m20 * c0 + m21 * c1 + m22 * c2;
                         c0 = n0; c1 = n1; c2 = n2;
                     }
-                    else
+                    else if (!ampIdentity)
                     {
-                        // No matrix: chroma follows its own channel's slope, which is exactly what
-                        // the plain per-channel affine would have done (lum + S·c reconstructs
-                        // S·d + b identically), then the per-channel amp is applied on top.
-                        c0 *= es0 / ampC0; c1 *= es1 / ampC1; c2 *= es2 / ampC2;
-                        if (!ampIdentity)
-                        {
-                            double cm = (c0 + c1 + c2) / 3.0;
-                            c0 -= cm; c1 -= cm; c2 -= cm;
-                        }
+                        // Per-channel amp, then re-centre so the result stays pure chroma.
+                        c0 /= ampC0; c1 /= ampC1; c2 /= ampC2;
+                        double cm = (c0 + c1 + c2) / 3.0;
+                        c0 -= cm; c1 -= cm; c2 -= cm;
                     }
 
-                    // Luminance carries the per-channel endpoint affine — that is where the
-                    // highlight colour balance lives, so it must NOT collapse to one channel.
-                    a0 = es0 * dMean + eo0 + c0;
-                    a1 = es1 * dMean + eo1 + c1;
-                    a2 = es2 * dMean + eo2 + c2;
-                }
-                else
-                {
-                    // Canonical per-channel affine (DensityEndpoints). For a legacy roll these
-                    // coefficients reduce to pivot + (d-pivot)*grade - d_max exactly, gating
-                    // included, so this path is bit-identical to what it replaced; for a roll
-                    // with measured per-channel endpoints it is the endpoint normalisation
-                    // itself, with no grade anywhere in it.
-                    a0 = es0 * d0 + eo0;
-                    a1 = es1 * d1 + eo1;
-                    a2 = es2 * d2 + eo2;
+                    a0 = aMean + c0;
+                    a1 = aMean + c1;
+                    a2 = aMean + c2;
                 }
 
                 // 6: back to linear (+ black floor, when folded in).
