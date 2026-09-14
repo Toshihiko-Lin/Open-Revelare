@@ -32,13 +32,12 @@ public partial class MainViewModel
             FrameParams ep = ForExport(p, opt);
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
+            var exportBox = SplitCropOf(frame);
             await Task.Run(() =>
             {
-                WorkingFrame working = LoadFullWorking(
-                    srcPath,
-                    pipelineVersion,
-                    tiffInputAssumption);
-                RenderAndWriteExport(working, ep, path, opt, pipelineVersion);
+                var (working, boxed) = LoadForExport(
+                    srcPath, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: true);
+                RenderAndWriteExport(working, boxed, path, opt, pipelineVersion);
             });
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
         }
@@ -162,7 +161,8 @@ public partial class MainViewModel
             frameW,
             frameH,
             pipelineVersion,
-            ColorManagement);
+            ColorManagement,
+            tiffInputAssumption);
         if (decoded is not ({ } working, int gx, int gy)) return null;
         _regionSlot = new RegionSlot(
             path,
@@ -323,8 +323,8 @@ public partial class MainViewModel
                 }
                 else
                 {
-                    // TIFF, or the DNG-Converter backend — neither can region-decode. Fall back
-                    // to the whole frame, which is what this path always used to do.
+                    // The DNG-Converter backend cannot region-decode. Fall back to the whole
+                    // frame, which is what this path always used to do.
                     WorkingFrame full = LoadFullWorking(
                         srcPath,
                         pipelineVersion,

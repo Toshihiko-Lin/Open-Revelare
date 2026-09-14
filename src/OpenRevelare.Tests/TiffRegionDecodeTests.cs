@@ -159,6 +159,44 @@ public sealed class TiffRegionDecodeTests
         }
     }
 
+    /// <summary>
+    /// The sharp patch asks in PIXELS. Every pixel rectangle of the image must come back as
+    /// exactly those pixels — the normalised round trip through <see cref="TiffIO.RegionRequest"/>
+    /// may not land a column over anywhere, including at the far edge.
+    /// </summary>
+    [Fact]
+    public void Pixel_rectangles_come_back_exact()
+    {
+        string path = WriteTiff(16, embedIcc: false);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            WorkingFrame full = TiffIO.LoadWorkingFrame(
+                path, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine);
+            for (int x = 0; x < Width; x += 5)
+            for (int y = 0; y < Height; y += 4)
+            for (int w = 1; x + w <= Width; w += 7)
+            for (int h = 1; y + h <= Height; h += 5)
+            {
+                var slice = OpenRevelare.Gui.Services.ImageIo.LoadWorkingRegion(
+                    path, x, y, w, h, Width, Height,
+                    ColorPipelineVersion.ManagedV2, engine, TiffInputAssumption.Unspecified);
+                Assert.NotNull(slice);
+                var (working, x0, y0) = slice.Value;
+                Assert.Equal((x, y), (x0, y0));
+                Assert.Equal((w, h), (working.Pixels.Width, working.Pixels.Height));
+                var expected = new float[w * h * 3];
+                for (int row = 0; row < h; row++)
+                    Array.Copy(full.Pixels.Data, ((y + row) * Width + x) * 3, expected, row * w * 3, w * 3);
+                AssertFloatBitsEqual(expected, working.Pixels.Data, $"rect {x},{y} {w}×{h}");
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>An empty window is refused the way <see cref="Geometry.ApplyCrop"/> refuses it.</summary>
     [Fact]
     public void Empty_window_is_rejected()

@@ -429,6 +429,13 @@ public static class ImageIo
                                                      x, y, w, h, frameW, frameH));
     }
 
+    /// <summary>
+    /// Typed counterpart of <see cref="LoadRegion"/>. A TIFF answers too: the rectangle is
+    /// streamed at full resolution (<see cref="TiffIO.LoadWorkingRegion"/>), the same pixels as
+    /// the whole decode cut to that rectangle, holding only the rectangle — so the sharp patch
+    /// on a scan no longer needs the whole file resident. Null only for the DNG-Converter
+    /// backend, whose linear sources come back whole.
+    /// </summary>
     public static (WorkingFrame Slice, int X0, int Y0)? LoadWorkingRegion(
         string path,
         int x,
@@ -438,11 +445,28 @@ public static class ImageIo
         int frameWidth,
         int frameHeight,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption)
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
-        if (!RawDecode.IsRawExtension(path)) return null;
+        if (!RawDecode.IsRawExtension(path))
+        {
+            if (frameWidth <= 0 || frameHeight <= 0 || width <= 0 || height <= 0) return null;
+            // Pixel bounds as a normalised rect. SampleWindow rounds rect × size back to the
+            // nearest integer, and x/W × W lands within an ulp or two of x, so the window is
+            // exactly the pixels asked for.
+            var rect = ((double)x / frameWidth, (double)y / frameHeight,
+                        (double)width / frameWidth, (double)height / frameHeight);
+            WorkingFrame slice = GatedTiffRegion(path, rect, () => TiffIO.LoadWorkingRegion(
+                path,
+                rect,
+                maxEdge: 0,
+                tiffInputAssumption,
+                pipelineVersion,
+                colorManagement));
+            return (slice, x, y);
+        }
         var settings = Settings.Current;
         return Gated<(WorkingFrame Slice, int X0, int Y0)?>(() =>
         {

@@ -1221,6 +1221,53 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// The pixels an export renders from, and the params rewritten to match them.
+    ///
+    /// A split TIFF frame decodes only its margin box — the same box its preview is rendered
+    /// from — at full resolution (<see cref="ImageIo.LoadWorkingTiffRegionFull"/>), and its crop
+    /// is re-expressed against that box exactly as <see cref="ForPreview"/> does for the editor.
+    /// The export therefore frames the picture the way the preview showed it, and holds one
+    /// cell of the strip rather than all of it: a whole Flextight strip is 1.5–2.3 GB as float,
+    /// and decoding it to export a third of it is what an 8 GB machine could not do. Anything
+    /// else — a whole-file frame, a RAW — still takes the full decode, through the single
+    /// full-resolution slot when <paramref name="sharedSlot"/> asks for it (the editor's
+    /// export → tweak → re-export loop) and transiently otherwise (the roll export, which visits
+    /// every frame once).
+    /// </summary>
+    private (WorkingFrame Working, FrameParams Params) LoadForExport(
+        string sourcePath,
+        (double X, double Y, double W, double H)? box,
+        FrameParams ep,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption tiffInputAssumption,
+        bool sharedSlot)
+    {
+        if (box is { } bx
+            && ImageIo.LoadWorkingTiffRegionFull(
+                sourcePath, bx, pipelineVersion, ColorManagement, tiffInputAssumption) is { } window)
+            return (window, ForBox(ep, bx));
+
+        WorkingFrame full = sharedSlot
+            ? LoadFullWorking(sourcePath, pipelineVersion, tiffInputAssumption)
+            : ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement, tiffInputAssumption);
+        return (full, ep);
+    }
+
+    /// <summary>
+    /// <see cref="ForRegion"/> for params that already carry the frame's LIVE crop and orientation
+    /// (<see cref="BuildParams"/>, or a stored frame's own params): the crop, stored against the
+    /// whole file, re-expressed against <paramref name="box"/>, the file-space rect that was
+    /// decoded. Down to file space, in against the box, back out to oriented space.
+    /// </summary>
+    private static FrameParams ForBox(FrameParams p, (double X, double Y, double W, double H) box)
+    {
+        if (p.CropRect is not { } rect) return p;
+        p = p.Clone();
+        p.CropRect = OrientRect(Relative(UnorientRect(rect, p)!.Value, box), p);
+        return p;
+    }
+
+    /// <summary>
     /// The SDR base of a gain-map JPEG: the roll's SDR rendition (<see cref="FrameParams.SdrRendition"/>,
     /// D-031) in the base space the export chose.
     ///
@@ -1343,14 +1390,12 @@ public partial class MainViewModel
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
                 FrameParams ep = ForExport(p, opt);
+                var exportBox = SplitCropOf(f);
                 await Task.Run(() =>
                 {
-                    WorkingFrame working = ImageIo.LoadWorking(
-                        f.Path,
-                        pipelineVersion,
-                        ColorManagement,
-                        tiffInputAssumption);
-                    RenderAndWriteExport(working, ep, outPath, opt, pipelineVersion);
+                    var (working, boxed) = LoadForExport(
+                        f.Path, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: false);
+                    RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion);
                 });
             }
             string detail = "";
