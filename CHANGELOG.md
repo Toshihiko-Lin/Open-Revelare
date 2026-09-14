@@ -4,7 +4,7 @@
 
 **改进**
 
-- **TIFF 导入快得多**。扫描 TIFF 改为多线程按行带解码，预览、分格、导出一起受益；12 核机器上一条 127 MP 的 Flextight 扫描预览从 2.5 s 到 0.6 s，带扫描仪 LUT 配置文件的 FlexColor 导出从 14 s 到 2 s。结果与之前逐位相同。
+- **TIFF 导入快得多**。扫描 TIFF 改为多线程按行带解码，预览、分格、导出一起受益，结果与之前逐位相同；嵌了 ICC 的 TIFF 预览另走色彩引擎的 16-bit 快速路径（与精确路径相差约 1e-4，只用于预览与测量，导出仍是精确变换）。12 核机器上一条 127 MP 的 Flextight 扫描预览从 2.5 s 到 0.6 s，8-bit Adobe RGB 的 121 MP 导出件从 49 s 到 0.9 s。
 
 **修复**
 
@@ -16,7 +16,7 @@
 
 **Improved**
 
-- **Much faster TIFF import.** Scanner TIFFs are now decoded in parallel bands of rows, which speeds up previews, split cells and exports alike: on a 12-core machine a 127 MP Flextight strip previews in 0.6 s instead of 2.5 s, and a FlexColor export carrying the scanner's LUT profile in 2 s instead of 14 s. Results are bit-identical to before.
+- **Much faster TIFF import.** Scanner TIFFs are now decoded in parallel bands of rows, which speeds up previews, split cells and exports alike with results bit-identical to before; previews of ICC-tagged TIFFs additionally take the colour engine's fast 16-bit path (within about 1e-4 of the exact transform; used for previews and measurements only — exports still use the exact transform). On a 12-core machine a 127 MP Flextight strip previews in 0.6 s instead of 2.5 s, and a 121 MP 8-bit Adobe RGB export in 0.9 s instead of 49 s.
 
 **Fixed**
 
