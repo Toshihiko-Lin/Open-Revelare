@@ -73,6 +73,25 @@ public static class DecoupleCalibration
     }
 
     /// <summary>
+    /// <see cref="RoiMean"/> over EVERY pixel of <paramref name="img"/> — for a buffer that already
+    /// IS the ROI (a region decode of the central 40–60%). Same float32 accumulation, same
+    /// row-major order, same float32 divide, so it returns the bits <see cref="RoiMean"/> would
+    /// have returned from the whole frame.
+    /// </summary>
+    public static double[] MeanAll(ImageBuffer img)
+    {
+        float s0 = 0, s1 = 0, s2 = 0;
+        int n = 0;
+        float[] d = img.Data;
+        for (int i = 0; i < img.Width * img.Height * 3; i += 3)
+        {
+            s0 += d[i]; s1 += d[i + 1]; s2 += d[i + 2];
+            n++;
+        }
+        return new double[] { s0 / (float)n, s1 / (float)n, s2 / (float)n };
+    }
+
+    /// <summary>
     /// Linear-domain decoupling matrix from three calibration images (row-normalised
     /// inverse of the ROI observation matrix). Result M satisfies decoupled = raw · Mᵀ.
     /// Throws if the observation matrix is near-singular (bad lighting / wrong assignment).

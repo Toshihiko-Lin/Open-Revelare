@@ -1148,6 +1148,21 @@ public static class TiffIO
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb) => LoadTiff(path, inputIsSrgb, null)[0];
 
     /// <summary>
+    /// The frozen v1 decode of one PIXEL rectangle at full resolution — the same pixels the whole
+    /// decode holds there, and only those.
+    /// </summary>
+    public static ImageBuffer LoadTiffRegionExact(string path, bool inputIsSrgb, (int X, int Y, int W, int H) px)
+    {
+        var (w, h) = ReadTiffSize(path);
+        if (px.W <= 0 || px.H <= 0 || px.X < 0 || px.Y < 0 || px.X + px.W > w || px.Y + px.H > h)
+            throw new ArgumentOutOfRangeException(nameof(px), px, $"outside the {w}×{h} image");
+        // SampleWindow rounds rect × size back to the nearest integer; x/W × W lands within an ulp
+        // or two of x, so the window is exactly the pixels asked for.
+        var rect = ((double)px.X / w, (double)px.Y / h, (double)px.W / w, (double)px.H / h);
+        return LoadTiff(path, inputIsSrgb, new RegionRequest(rect, 0))[0];
+    }
+
+    /// <summary>
     /// The frozen v1 decode boxed to each of <paramref name="maxEdges"/> off one pass —
     /// <see cref="Resample.Box"/> of <see cref="LoadTiff(string, bool)"/> pixel for pixel, with
     /// the full frame never allocated.

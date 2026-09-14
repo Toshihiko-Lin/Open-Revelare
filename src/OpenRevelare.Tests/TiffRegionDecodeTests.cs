@@ -197,6 +197,35 @@ public sealed class TiffRegionDecodeTests
         }
     }
 
+    /// <summary>
+    /// The Path A calibration mean off the ROI alone is the mean off the whole frame, bit for
+    /// bit — same pixels, same float32 order — on both the frozen and the typed route.
+    /// </summary>
+    [Theory]
+    [InlineData(8, false)]
+    [InlineData(16, true)]
+    public void Roi_mean_off_the_region_equals_the_whole_frame(int bitsPerSample, bool embedIcc)
+    {
+        string path = WriteTiff(bitsPerSample, embedIcc);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            double[] wholeLegacy = DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false));
+            double[] regionLegacy = OpenRevelare.Gui.Services.ImageIo.RoiMeanFull(path);
+            Assert.Equal(wholeLegacy, regionLegacy);
+
+            double[] wholeTyped = DecoupleCalibration.RoiMean(TiffIO.LoadWorkingFrame(
+                path, TiffInputAssumption.Unspecified, ColorPipelineVersion.ManagedV2, engine).Pixels);
+            double[] regionTyped = OpenRevelare.Gui.Services.ImageIo.RoiMeanFull(
+                path, ColorPipelineVersion.ManagedV2, engine, TiffInputAssumption.Unspecified);
+            Assert.Equal(wholeTyped, regionTyped);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>An empty window is refused the way <see cref="Geometry.ApplyCrop"/> refuses it.</summary>
     [Fact]
     public void Empty_window_is_rejected()

@@ -269,13 +269,40 @@ public static class ImageIo
     /// contribution. Streams off the decoder rather than decoding to a full float frame and then
     /// averaging a fifth of it; the mean is identical (see <see cref="RawDecode.RoiMeanFull"/>).
     /// </summary>
-    public static double[] RoiMeanFull(string path) => GatedFull(path, () =>
+    public static double[] RoiMeanFull(string path)
     {
         if (!RawDecode.IsRawExtension(path))
-            return DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false));
-        var s = Settings.Current;
-        return RawDecode.RoiMeanFull(path, s.DecodeBackend, s.FbddMode);
-    });
+        {
+            // Only the ROI is decoded — the same pixels RoiMean would have read out of the whole
+            // frame, summed in the same order — so the TIFF is never resident in full.
+            var (w, h) = TiffIO.ReadTiffSize(path);
+            var (rect, whole) = RoiPixels(w, h);
+            return whole
+                ? Gated(TiffFullBytes(path), () => DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false)))
+                : GatedTiffRegion(path, Normalised(rect, w, h), () => DecoupleCalibration.MeanAll(
+                    TiffIO.LoadTiffRegionExact(path, inputIsSrgb: false, rect)));
+        }
+        return Gated(() =>
+        {
+            var s = Settings.Current;
+            return RawDecode.RoiMeanFull(path, s.DecodeBackend, s.FbddMode);
+        });
+    }
+
+    /// <summary>
+    /// The pixel rectangle <see cref="DecoupleCalibration.RoiMean"/> averages — the central
+    /// 40–60% by the same truncating arithmetic — or the whole frame when that would be empty.
+    /// </summary>
+    private static ((int X, int Y, int W, int H) Rect, bool Whole) RoiPixels(int w, int h)
+    {
+        int r0 = (int)(h * 0.4), r1 = (int)(h * 0.6);
+        int c0 = (int)(w * 0.4), c1 = (int)(w * 0.6);
+        if (r0 >= r1 || c0 >= c1) return ((0, 0, w, h), true);
+        return ((c0, r0, c1 - c0, r1 - r0), false);
+    }
+
+    private static (double X, double Y, double W, double H) Normalised((int X, int Y, int W, int H) px, int w, int h)
+        => ((double)px.X / w, (double)px.Y / h, (double)px.W / w, (double)px.H / h);
 
     /// <summary>Versioned counterpart used by calibration so profiled TIFF samples are measured
     /// in the same linear working domain as their content frames.</summary>
@@ -283,23 +310,32 @@ public static class ImageIo
         string path,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
-        TiffInputAssumption tiffInputAssumption) => GatedFull(path, () =>
+        TiffInputAssumption tiffInputAssumption)
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
         if (!RawDecode.IsRawExtension(path))
         {
-            WorkingFrame working = TiffIO.LoadWorkingFrame(
-                path,
-                tiffInputAssumption,
-                pipelineVersion,
-                colorManagement);
-            return DecoupleCalibration.RoiMean(working.Pixels);
+            // As above: the ROI alone, off the typed decoder.
+            var (w, h) = TiffIO.ReadTiffSize(path);
+            var (rect, whole) = RoiPixels(w, h);
+            if (whole)
+            {
+                return Gated(TiffFullBytes(path), () => DecoupleCalibration.RoiMean(TiffIO.LoadWorkingFrame(
+                    path, tiffInputAssumption, pipelineVersion, colorManagement).Pixels));
+            }
+            var slice = LoadWorkingRegion(
+                path, rect.X, rect.Y, rect.W, rect.H, w, h, pipelineVersion, colorManagement, tiffInputAssumption)
+                ?? throw new InvalidOperationException($"could not region-decode TIFF: {path}");
+            return DecoupleCalibration.MeanAll(slice.Slice.Pixels);
         }
 
-        var settings = Settings.Current;
-        return RawDecode.RoiMeanFull(path, settings.DecodeBackend, settings.FbddMode);
-    });
+        return Gated(() =>
+        {
+            var settings = Settings.Current;
+            return RawDecode.RoiMeanFull(path, settings.DecodeBackend, settings.FbddMode);
+        });
+    }
 
     /// <summary>
     /// Per-channel high percentile (default 99.9%) via a 1024-bin histogram over [0,1].
