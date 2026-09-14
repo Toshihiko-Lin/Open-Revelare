@@ -15,6 +15,17 @@ public sealed class LittleCmsEngine : IColorManagementEngine
     public const CmmTransformFlags FixedTransformFlags =
         CmmTransformFlags.NoCache | CmmTransformFlags.NoOptimize;
 
+    /// <summary>
+    /// Flags for a <see cref="TransformPrecision.Preview"/> transform: optimisation and the
+    /// one-pixel cache are on, and the precalculated CLUT (when LittleCMS chooses one) uses its
+    /// high-resolution grid. See <see cref="TransformPrecision"/> for what that costs.
+    /// </summary>
+    public const CmmTransformFlags PreviewTransformFlags = CmmTransformFlags.HighResPrecalc;
+
+    /// <summary>Native LittleCMS TYPE_RGB_16: interleaved R, G, B, one unsigned 16-bit integer
+    /// each — the domain a <see cref="TransformPrecision.Preview"/> transform runs in.</summary>
+    private const uint NativeRgb16 = (4u << 16) | (3u << 3) | 2u;
+
     private readonly object _gate = new();
     private readonly ThreadLocal<ThreadCache> _threadCaches;
     private readonly ManualResetEventSlim _noActiveOperations = new(initialState: true);
@@ -124,7 +135,9 @@ public sealed class LittleCmsEngine : IColorManagementEngine
         bool operationTransferredToLease = false;
         try
         {
-            CmmTransformFlags effectiveFlags = FixedTransformFlags;
+            CmmTransformFlags effectiveFlags = request.Precision == TransformPrecision.Preview
+                ? PreviewTransformFlags
+                : FixedTransformFlags;
             if (request.BlackPointCompensation)
                 effectiveFlags |= CmmTransformFlags.BlackPointCompensation;
 
@@ -321,11 +334,18 @@ public sealed class LittleCmsEngine : IColorManagementEngine
                 throw new ArgumentException("Source and destination may be identical but may not partially overlap.", nameof(destination));
 
             _cache.Errors.Clear();
-            fixed (float* input = source)
-            fixed (float* output = destination)
+            if (_entry.SixteenBit)
             {
-                LittleCmsNative.cmsDoTransform(
-                    _entry.Handle.DangerousGetHandle(), input, output, checked((uint)pixelCount));
+                ApplySixteenBit(source, destination, pixelCount);
+            }
+            else
+            {
+                fixed (float* input = source)
+                fixed (float* output = destination)
+                {
+                    LittleCmsNative.cmsDoTransform(
+                        _entry.Handle.DangerousGetHandle(), input, output, checked((uint)pixelCount));
+                }
             }
 
             if (_cache.Errors.Last is { } error)
@@ -335,6 +355,38 @@ public sealed class LittleCmsEngine : IColorManagementEngine
                     $"intent={_request.Intent}, flags={Key.EffectiveFlags}): {error}");
             }
             _engine.RecordTransform(pixelCount);
+        }
+
+        /// <summary>
+        /// The preview-precision path: the float samples are the file's codes scaled to [0,1],
+        /// so rounding them to 16-bit codes is exact for 8- and 16-bit sources; the native
+        /// transform runs 16-bit to 16-bit (where LittleCMS's optimisations apply), and the
+        /// result comes back scaled to [0,1] — quantised to 1/65535 and clamped, which is the
+        /// documented cost of <see cref="TransformPrecision.Preview"/>.
+        /// </summary>
+        private unsafe void ApplySixteenBit(ReadOnlySpan<float> source, Span<float> destination, int pixelCount)
+        {
+            int count = pixelCount * 3;
+            ushort[] codes = System.Buffers.ArrayPool<ushort>.Shared.Rent(count);
+            try
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    float v = source[i] * 65535f + 0.5f;
+                    codes[i] = v <= 0f ? (ushort)0 : v >= 65535f ? (ushort)65535 : (ushort)v;
+                }
+                fixed (ushort* io = codes)
+                {
+                    LittleCmsNative.cmsDoTransform16(
+                        _entry.Handle.DangerousGetHandle(), io, io, checked((uint)pixelCount));
+                }
+                const float inv = 1.0f / 65535f;
+                for (int i = 0; i < count; i++) destination[i] = codes[i] * inv;
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<ushort>.Shared.Return(codes);
+            }
         }
 
         public void Dispose()
@@ -494,18 +546,22 @@ public sealed class LittleCmsEngine : IColorManagementEngine
                         LittleCmsNative.cmsSetAdaptationStateTHR(
                             Context.DangerousGetHandle(), request.AdaptationState);
 
+                        // A preview transform is built in LittleCMS's 16-bit domain: that is
+                        // where its optimisations apply (none of them touch a float pipeline),
+                        // and the lease converts the caller's floats around it.
+                        bool sixteenBit = request.Precision == TransformPrecision.Preview;
                         IntPtr transform = LittleCmsNative.cmsCreateTransformTHR(
                             Context.DangerousGetHandle(),
                             sourceProfile,
-                            (uint)request.SourceFormat,
+                            sixteenBit ? NativeRgb16 : (uint)request.SourceFormat,
                             destinationProfile,
-                            (uint)request.DestinationFormat,
+                            sixteenBit ? NativeRgb16 : (uint)request.DestinationFormat,
                             (uint)request.Intent,
                             (uint)effectiveFlags);
                         if (transform == IntPtr.Zero)
                             throw TransformFailure(request, effectiveFlags, "native transform creation returned null");
 
-                        return new TransformEntry(new LittleCmsTransformHandle(transform));
+                        return new TransformEntry(new LittleCmsTransformHandle(transform), sixteenBit);
                     }
                     finally
                     {
@@ -638,7 +694,15 @@ public sealed class LittleCmsEngine : IColorManagementEngine
         private int _leased;
         internal LittleCmsTransformHandle Handle { get; }
 
-        internal TransformEntry(LittleCmsTransformHandle handle) => Handle = handle;
+        /// <summary>True when the native transform was created 16-bit to 16-bit (preview
+        /// precision) and <see cref="TransformLease.Apply"/> must convert around it.</summary>
+        internal bool SixteenBit { get; }
+
+        internal TransformEntry(LittleCmsTransformHandle handle, bool sixteenBit)
+        {
+            Handle = handle;
+            SixteenBit = sixteenBit;
+        }
 
         internal bool TryAcquire() => Interlocked.CompareExchange(ref _leased, 1, 0) == 0;
 

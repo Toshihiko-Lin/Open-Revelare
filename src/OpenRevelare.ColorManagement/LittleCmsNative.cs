@@ -135,6 +135,15 @@ internal static class LittleCmsNative
         float* inputBuffer,
         float* outputBuffer,
         uint pixelCount);
+
+    /// <summary>The same entry point for a transform created 16-bit to 16-bit; the buffers
+    /// are interpreted by the transform's own formats, not by this signature.</summary>
+    [DllImport(LibraryName, EntryPoint = "cmsDoTransform", CallingConvention = CallingConvention.Winapi, ExactSpelling = true)]
+    internal static extern unsafe void cmsDoTransform16(
+        IntPtr transform,
+        ushort* inputBuffer,
+        ushort* outputBuffer,
+        uint pixelCount);
 }
 
 internal sealed class LittleCmsContextHandle : SafeHandleZeroOrMinusOneIsInvalid

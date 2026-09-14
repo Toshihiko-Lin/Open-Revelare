@@ -692,7 +692,7 @@ public static class TiffIO
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
 
         ArgumentNullException.ThrowIfNull(colorManagement);
-        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region: null)[0];
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region: null, TransformPrecision.Exact)[0];
     }
 
     /// <summary>
@@ -712,14 +712,20 @@ public static class TiffIO
         int maxEdge,
         TiffInputAssumption inputAssumption,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement)
-        => LoadWorkingRegions(path, rect, new[] { maxEdge }, inputAssumption, pipelineVersion, colorManagement)[0];
+        IColorManagementEngine colorManagement,
+        TransformPrecision precision = TransformPrecision.Exact)
+        => LoadWorkingRegions(path, rect, new[] { maxEdge }, inputAssumption, pipelineVersion, colorManagement, precision)[0];
 
     /// <summary>
     /// <see cref="LoadWorkingRegion"/> at several sizes off ONE pass over the file: element
     /// <c>k</c> is the window boxed to <c>maxEdges[k]</c>. What a caller that wants both an
     /// editor preview and a strip thumbnail of the same frame uses, so the file and its colour
     /// transform are paid for once.
+    ///
+    /// <paramref name="precision"/> applies to the routes that run a CMM transform (an embedded
+    /// or detected profile, the explicit sRGB fallback); the others carry no transform to speed
+    /// up. <see cref="TransformPrecision.Preview"/> is for pixels that are looked at and measured,
+    /// never for pixels that are written out — see <see cref="TransformPrecision"/>.
     /// </summary>
     public static WorkingFrame[] LoadWorkingRegions(
         string path,
@@ -727,10 +733,13 @@ public static class TiffIO
         int[] maxEdges,
         TiffInputAssumption inputAssumption,
         ColorPipelineVersion pipelineVersion,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement,
+        TransformPrecision precision = TransformPrecision.Exact)
     {
         if (!Enum.IsDefined(inputAssumption))
             throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null);
+        if (!Enum.IsDefined(precision))
+            throw new ArgumentOutOfRangeException(nameof(precision), precision, null);
         ArgumentNullException.ThrowIfNull(maxEdges);
         if (maxEdges.Length == 0)
             throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
@@ -741,14 +750,15 @@ public static class TiffIO
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Unknown colour pipeline version.");
 
         ArgumentNullException.ThrowIfNull(colorManagement);
-        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region);
+        return LoadManagedWorkingFrame(path, inputAssumption, colorManagement, region, precision);
     }
 
     private static WorkingFrame[] LoadManagedWorkingFrame(
         string path,
         TiffInputAssumption inputAssumption,
         IColorManagementEngine colorManagement,
-        RegionRequest? region)
+        RegionRequest? region,
+        TransformPrecision precision)
     {
         SuppressLibTiffWarnings();
         string stableId = FrameSourceIds.ForPath(path);
@@ -785,7 +795,8 @@ public static class TiffIO
                     ColorReference.SceneReferred,
                     "managed v2 exact embedded ICC -> LittleCMS -> linear ACEScg",
                     colorManagement,
-                    region);
+                    region,
+                    precision);
             }
             catch (Exception ex)
                 // A transform-creation failure is deliberately NOT caught here: the embedded
@@ -818,14 +829,14 @@ public static class TiffIO
             TiffInputAssumption.Linear => DecodeManagedLinearAssumption(
                 path, stableId, ExplicitPrefix("linear", fallbackDiagnostic), region),
             TiffInputAssumption.Srgb => DecodeManagedSrgbAssumption(
-                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement, region),
+                path, stableId, ExplicitPrefix("sRGB", fallbackDiagnostic), colorManagement, region, precision),
             TiffInputAssumption.LegacyByBitDepthCompatibility when fallbackDiagnostic is null =>
                 LoadManagedCompatibility(
                     path,
                     "managed v2 versioned legacy-by-bit-depth compatibility",
                     region),
             TiffInputAssumption.Unspecified => DecodeManagedDetected(
-                path, stableId, fallbackDiagnostic, colorManagement, region),
+                path, stableId, fallbackDiagnostic, colorManagement, region, precision),
             TiffInputAssumption.LegacyByBitDepthCompatibility =>
                 throw MissingTiffInputAssumption(path, fallbackDiagnostic),
             _ => throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null),
@@ -844,7 +855,8 @@ public static class TiffIO
         string stableId,
         string? fallbackDiagnostic,
         IColorManagementEngine colorManagement,
-        RegionRequest? region)
+        RegionRequest? region,
+        TransformPrecision precision)
     {
         TiffInputDetection detection = TiffInputDetector.Detect(path);
         string prefix = fallbackDiagnostic is null
@@ -869,7 +881,8 @@ public static class TiffIO
                     : ColorReference.DisplayReferred,
                 $"{prefix} [{reason}] -> exact profile from file tags -> LittleCMS -> linear ACEScg",
                 colorManagement,
-                region);
+                region,
+                precision);
         }
 
         // Normally unreachable — LoadManagedWorkingFrame honours the vendor declaration before
@@ -883,7 +896,7 @@ public static class TiffIO
 
         return detection.Assumption == TiffInputAssumption.Linear
             ? DecodeManagedLinearAssumption(path, stableId, $"{prefix} [{reason}]", region)
-            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement, region);
+            : DecodeManagedSrgbAssumption(path, stableId, $"{prefix} [{reason}]", colorManagement, region, precision);
     }
 
     /// <summary>Recipe wording for a user-selected roll override.</summary>
@@ -898,7 +911,8 @@ public static class TiffIO
         string stableId,
         string prefix,
         IColorManagementEngine colorManagement,
-        RegionRequest? region)
+        RegionRequest? region,
+        TransformPrecision precision)
     {
         return DecodeManagedWithProfile(
             path,
@@ -907,7 +921,8 @@ public static class TiffIO
             ColorReference.DisplayReferred,
             $"{prefix} -> exact built-in sRGB -> LittleCMS -> linear ACEScg",
             colorManagement,
-            region);
+            region,
+            precision);
     }
 
     private static WorkingFrame[] DecodeManagedLinearAssumption(
@@ -998,9 +1013,14 @@ public static class TiffIO
         ColorReference sourceReference,
         string decodeRecipe,
         IColorManagementEngine colorManagement,
-        RegionRequest? region)
+        RegionRequest? region,
+        TransformPrecision precision)
     {
         ColorProfileRef workingProfile = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Working);
+        // The recipe says which precision made these pixels: a preview-precision frame must never
+        // be mistaken for the exact decode in diagnostics or by a caller that writes files.
+        if (precision == TransformPrecision.Preview)
+            decodeRecipe += " [preview precision: 16-bit optimised transform]";
 
         EnsureValidInputProfile(colorManagement, sourceProfile, path, "source");
         EnsureValidInputProfile(colorManagement, workingProfile, path, "working destination");
@@ -1011,7 +1031,8 @@ public static class TiffIO
             TransformPurpose.InputToWorking,
             RenderingIntent.RelativeColorimetric,
             blackPointCompensation: false,
-            adaptationState: 1.0);
+            adaptationState: 1.0,
+            precision: precision);
 
         // Lease creation constructs the complete native transform. It happens before any
         // scanline is decoded, so failure cannot leave a half-transformed frame to fall back

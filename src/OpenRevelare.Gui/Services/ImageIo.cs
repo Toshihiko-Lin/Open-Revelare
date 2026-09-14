@@ -418,6 +418,9 @@ public static class ImageIo
         if (!RawDecode.IsRawExtension(path))
         {
             // Streamed: every size off one pass, none of them via the full-resolution frame.
+            // PREVIEW precision: these pixels are looked at and measured, never written out, so
+            // a profiled file takes the CMM's fast 16-bit path (~4x on a matrix-shaper profile)
+            // and agrees with the exact decode to ~1e-4 — see TransformPrecision.
             var (fullW, fullH) = TiffIO.ReadTiffSize(path);
             WorkingFrame[] previews = TiffIO.LoadWorkingRegions(
                 path,
@@ -425,7 +428,8 @@ public static class ImageIo
                 maxEdges,
                 tiffInputAssumption,
                 pipelineVersion,
-                colorManagement);
+                colorManagement,
+                TransformPrecision.Preview);
             return (previews, fullW, fullH);
         }
 
@@ -625,7 +629,8 @@ public static class ImageIo
             maxEdge,
             tiffInputAssumption,
             pipelineVersion,
-            colorManagement);
+            colorManagement,
+            TransformPrecision.Preview);   // looked at and measured, never written — see above
         // The file's own dimensions rather than back-computed from the returned buffer: the box
         // factor truncates, so that route loses up to a factor's worth of pixels.
         int sourceWidth = Math.Max(1, (int)Math.Round(rect.W * fullW));

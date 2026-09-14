@@ -294,6 +294,71 @@ public sealed class TiffRegionDecodeTests
         }
     }
 
+    /// <summary>
+    /// Preview precision on a route that runs a CMM transform: the recipe says so, the pixels
+    /// agree with the exact decode to the documented tolerance, and the value is a real one —
+    /// not the exact decode relabelled. On the FlexColor exports that motivated it the
+    /// difference measured 3e-4 at most in linear light; 1e-3 is the contract.
+    /// </summary>
+    [Theory]
+    [InlineData(16, true, TiffInputAssumption.Unspecified)]   // embedded ICC
+    [InlineData(8, true, TiffInputAssumption.Unspecified)]
+    [InlineData(16, false, TiffInputAssumption.Srgb)]         // explicit built-in sRGB
+    [InlineData(16, false, TiffInputAssumption.Unspecified)]  // detected → sRGB convention
+    public void Preview_precision_is_close_to_exact_and_says_so(int bitsPerSample, bool embedIcc, TiffInputAssumption assumption)
+    {
+        string path = WriteTiff(bitsPerSample, embedIcc, 61, 300, Compression.NONE, 8);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            foreach (int maxEdge in new[] { 0, 40 })
+            {
+                WorkingFrame exact = TiffIO.LoadWorkingRegion(
+                    path, (0, 0, 1, 1), maxEdge, assumption, ColorPipelineVersion.ManagedV2, engine, TransformPrecision.Exact);
+                WorkingFrame preview = TiffIO.LoadWorkingRegion(
+                    path, (0, 0, 1, 1), maxEdge, assumption, ColorPipelineVersion.ManagedV2, engine, TransformPrecision.Preview);
+
+                Assert.Equal(exact.Source.DecodeRecipe + " [preview precision: 16-bit optimised transform]", preview.Source.DecodeRecipe);
+                Assert.DoesNotContain("preview precision", exact.Source.DecodeRecipe, StringComparison.Ordinal);
+                Assert.Equal(exact.Admission, preview.Admission);
+                Assert.Equal((exact.Pixels.Width, exact.Pixels.Height), (preview.Pixels.Width, preview.Pixels.Height));
+
+                float[] a = exact.Pixels.Data, b = preview.Pixels.Data;
+                float maxAbs = 0f;
+                for (int i = 0; i < a.Length; i++) maxAbs = Math.Max(maxAbs, Math.Abs(a[i] - b[i]));
+                Assert.True(maxAbs <= 1e-3f, $"preview precision drifted {maxAbs:E2} from exact at maxEdge {maxEdge}");
+                Assert.True(maxAbs > 0f, "preview precision produced the exact decode — the fast transform was not used");
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>A route with no CMM transform has nothing to trade: precision must not change a bit.</summary>
+    [Theory]
+    [InlineData(true, TiffInputAssumption.Unspecified)]   // Flextight vendor gamma (v1 LUT)
+    [InlineData(false, TiffInputAssumption.Linear)]       // explicit linear passthrough
+    public void Preview_precision_leaves_transformless_routes_untouched(bool flextight, TiffInputAssumption assumption)
+    {
+        string path = flextight ? WriteFlextightTiff() : WriteTiff(16, embedIcc: false);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            WorkingFrame exact = TiffIO.LoadWorkingRegion(
+                path, (0, 0, 1, 1), 9, assumption, ColorPipelineVersion.ManagedV2, engine, TransformPrecision.Exact);
+            WorkingFrame preview = TiffIO.LoadWorkingRegion(
+                path, (0, 0, 1, 1), 9, assumption, ColorPipelineVersion.ManagedV2, engine, TransformPrecision.Preview);
+            Assert.Equal(exact.Source.DecodeRecipe, preview.Source.DecodeRecipe);
+            AssertFloatBitsEqual(exact.Pixels.Data, preview.Pixels.Data);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     /// <summary>An empty window is refused the way <see cref="Geometry.ApplyCrop"/> refuses it.</summary>
     [Fact]
     public void Empty_window_is_rejected()

@@ -37,7 +37,32 @@ public enum CmmTransformFlags : uint
     None = 0,
     NoCache = 0x0040,
     NoOptimize = 0x0100,
+    HighResPrecalc = 0x0400,
     BlackPointCompensation = 0x2000,
+}
+
+/// <summary>
+/// How faithfully a transform reproduces the profiles' maths.
+///
+/// <see cref="Exact"/> is the contract every export, full-resolution decode and render runs
+/// under: float in and out, no optimisation, no cache — the pipeline is evaluated stage by
+/// stage per pixel, which is what keeps extended-range values (negative, above one) intact and
+/// makes the result the CMM's own answer to the last bit. It is also slow, because LittleCMS
+/// applies none of its optimisations to a float pipeline: a matrix-shaper profile costs a
+/// parametric-curve evaluation per channel per pixel (~400 ns a pixel on a 2020s desktop).
+///
+/// <see cref="Preview"/> trades that for speed where the pixels are only LOOKED AT and
+/// measured — the editor preview, the strip, the sheet tiles, the roll-wide analysis: the
+/// transform runs in LittleCMS's 16-bit integer domain with its optimisations on (a
+/// pre-linearised 33-point CLUT, or the 1.14 fixed-point matrix shaper), so values are
+/// quantised to 1/65535 and clamped to [0,1], and agree with <see cref="Exact"/> to roughly
+/// 1e-4. The decode recipe records which precision produced a frame, and nothing that is
+/// written to a file ever comes from a <see cref="Preview"/> transform.
+/// </summary>
+public enum TransformPrecision
+{
+    Exact,
+    Preview,
 }
 
 public sealed record CmmBuildIdentity(
@@ -77,6 +102,7 @@ public sealed class ColorTransformRequest
     public double AdaptationState { get; }
     public PixelFormatDescriptor SourceFormat { get; }
     public PixelFormatDescriptor DestinationFormat { get; }
+    public TransformPrecision Precision { get; }
 
     public ColorTransformRequest(
         ColorProfileRef source,
@@ -86,7 +112,8 @@ public sealed class ColorTransformRequest
         bool blackPointCompensation = false,
         double adaptationState = 1.0,
         PixelFormatDescriptor sourceFormat = PixelFormatDescriptor.RgbFloat32,
-        PixelFormatDescriptor destinationFormat = PixelFormatDescriptor.RgbFloat32)
+        PixelFormatDescriptor destinationFormat = PixelFormatDescriptor.RgbFloat32,
+        TransformPrecision precision = TransformPrecision.Exact)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(destination);
@@ -97,6 +124,10 @@ public sealed class ColorTransformRequest
             throw new NotSupportedException($"Unsupported source pixel format: {sourceFormat}.");
         if (!IsSupported(destinationFormat))
             throw new NotSupportedException($"Unsupported destination pixel format: {destinationFormat}.");
+        if (!Enum.IsDefined(precision)) throw new ArgumentOutOfRangeException(nameof(precision));
+        if (precision == TransformPrecision.Preview
+            && (sourceFormat != PixelFormatDescriptor.RgbFloat32 || destinationFormat != PixelFormatDescriptor.RgbFloat32))
+            throw new NotSupportedException("Preview precision is defined for RGB float32 transforms only.");
 
         Source = source;
         Destination = destination;
@@ -106,6 +137,7 @@ public sealed class ColorTransformRequest
         AdaptationState = adaptationState;
         SourceFormat = sourceFormat;
         DestinationFormat = destinationFormat;
+        Precision = precision;
 
         static bool IsSupported(PixelFormatDescriptor format) =>
             format is PixelFormatDescriptor.RgbFloat32 or PixelFormatDescriptor.XyzFloat32;
@@ -122,7 +154,8 @@ public readonly record struct ColorTransformKey(
     PixelFormatDescriptor SourceFormat,
     PixelFormatDescriptor DestinationFormat,
     int EncodedCmmVersion,
-    CmmTransformFlags EffectiveFlags)
+    CmmTransformFlags EffectiveFlags,
+    TransformPrecision Precision)
 {
     public static ColorTransformKey From(
         ColorTransformRequest request,
@@ -137,7 +170,8 @@ public readonly record struct ColorTransformKey(
             request.SourceFormat,
             request.DestinationFormat,
             build.EncodedNativeVersion,
-            effectiveFlags);
+            effectiveFlags,
+            request.Precision);
 }
 
 public sealed record CmmDiagnosticsSnapshot(
