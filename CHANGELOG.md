@@ -6,7 +6,7 @@
 
 - **修复了灯板亮度不均时整卷检不到齿孔的问题**。灯板绿通道削顶、红蓝在板面上有渐变时，灯板在直方图里是两个挨着的峰，旧判定停在两峰之间的小凹里，把整卷判成没有灯板、齿孔遮罩静默关闭（18-KODAK GOLD200）。薄片基胶卷的判定结果不变。
 
-- **修复了小内存机器分条导入大幅扫描时爆白或整卷偏色的问题**。一条 Flextight 整条扫描解成浮点是 1.5–2.3 GB，此前每一格的预览都要整张解码再裁，8 GB 内存的机器上要么自动流程根本起不来（整卷停在出厂默认，负片一片白），要么整卷分析里几格解码失败被无声丢掉，用剩下几格算出的 wb_high 每次导入都不一样。现在预览与分格逐行流式解码，只保留自己那一格，结果与整张解码逐位相同；解码失败的帧会计数并写进状态栏；带 ICC 的 TIFF 解码峰值内存从 4 倍帧降到 1 倍；内存闸门按文件真实尺寸记账。
+- **修复了小内存机器分条导入大幅扫描时爆白或整卷偏色的问题**。一条 Flextight 整条扫描解成浮点是 1.5–2.3 GB，此前每一格的预览都要整张解码再裁，8 GB 内存的机器上要么自动流程根本起不来（整卷停在出厂默认，负片一片白），要么整卷分析里几格解码失败被无声丢掉，用剩下几格算出的 wb_high 每次导入都不一样。现在预览与分格逐行流式解码，只保留自己那一格，结果与整张解码逐位相同；解码失败的帧会计数并写进状态栏；带 ICC 的 TIFF 解码峰值内存从 4 倍帧降到 1 倍；内存闸门按文件真实尺寸记账。分格帧的导出和局部全分辨率放大也只解码自己那一格（导出取景与预览一致）。
 
 ---
 
@@ -14,7 +14,7 @@
 
 - **Fixed sprocket detection failing on a whole roll when the light board is unevenly bright.** With the green channel clipped and red and blue drifting across the panel, the board shows up as two adjacent peaks in the histogram; the old walk stopped in the dip between them and reported the roll boardless, silently switching the sprocket mask off (18-KODAK GOLD200). Thin-base rolls are unaffected.
 
-- **Fixed blown-white or off-colour results when splitting large scans on a small-memory machine.** A whole Flextight strip is 1.5–2.3 GB as float, and every split cell's preview used to decode the whole file before cropping; on an 8 GB machine the auto chain either never started (the roll sat on factory defaults, a white negative) or the roll-wide analysis silently dropped the cells that failed to decode and computed wb_high from whichever survived — a different answer on every import. Previews and split cells are now decoded scanline by scanline, holding only their own cell, with results identical bit for bit to the whole-frame decode; frames that fail to decode are counted and reported in the status line; ICC-tagged TIFF decoding peaks at one frame instead of four; and the memory gate charges files by their real size.
+- **Fixed blown-white or off-colour results when splitting large scans on a small-memory machine.** A whole Flextight strip is 1.5–2.3 GB as float, and every split cell's preview used to decode the whole file before cropping; on an 8 GB machine the auto chain either never started (the roll sat on factory defaults, a white negative) or the roll-wide analysis silently dropped the cells that failed to decode and computed wb_high from whichever survived — a different answer on every import. Previews and split cells are now decoded scanline by scanline, holding only their own cell, with results identical bit for bit to the whole-frame decode; frames that fail to decode are counted and reported in the status line; ICC-tagged TIFF decoding peaks at one frame instead of four; the memory gate charges files by their real size; and exporting or zooming into a split cell decodes only that cell (the export is framed exactly as the preview shows it).
 
 ## v1.7.0（2026-09-13）
 
