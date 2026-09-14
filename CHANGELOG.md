@@ -2,6 +2,10 @@
 
 ## v1.7.1（未发布）
 
+**改进**
+
+- **TIFF 导入快得多**。扫描 TIFF 改为多线程按行带解码，预览、分格、导出一起受益；12 核机器上一条 127 MP 的 Flextight 扫描预览从 2.5 s 到 0.6 s，带扫描仪 LUT 配置文件的 FlexColor 导出从 14 s 到 2 s。结果与之前逐位相同。
+
 **修复**
 
 - **修复了灯板亮度不均时整卷检不到齿孔的问题**。
@@ -9,6 +13,10 @@
 - **修复了小内存机器分条导入大幅扫描时爆白或整卷偏色的问题**。此前每一格的预览都要整张解码再裁，现在预览、分格、导出和局部放大都只解码自己那一格，结果与整张解码逐位相同；解码失败的帧会写进状态栏。
 
 ---
+
+**Improved**
+
+- **Much faster TIFF import.** Scanner TIFFs are now decoded in parallel bands of rows, which speeds up previews, split cells and exports alike: on a 12-core machine a 127 MP Flextight strip previews in 0.6 s instead of 2.5 s, and a FlexColor export carrying the scanner's LUT profile in 2 s instead of 14 s. Results are bit-identical to before.
 
 **Fixed**
 
