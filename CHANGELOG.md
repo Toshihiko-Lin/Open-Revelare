@@ -1,18 +1,10 @@
 # OpenRevelare — 更新日志
 
-## v1.7.3（未发布）
+## v1.7.2（未发布）
 
 **改进**
 
 - **齿孔遮罩和几何 / 裁切固定在右侧面板底部，切换 Cineon / Display 标签时一直在**。这两组和色彩无关，不再藏在 Cineon 标签里；面板有内容被挡在下方时会提示「还有内容，向下滚动」。
-
----
-
-**Improved**
-
-- **Sprocket mask and Geometry / crop now stay pinned at the bottom of the right-hand panel, whichever of Cineon / Display is open.** Neither is a colour parameter, so they no longer live inside the Cineon tab; the panel also says "more below, scroll down" when controls are hidden past the fold.
-
-## v1.7.2（2026-09-15）
 
 **修复**
 
@@ -21,6 +13,10 @@
 - **RGB 分光（Path A）导入的卷自动结果不再偏黄偏红**。色度补偿矩阵改在端点归一后作用，标定的黑白两端严格中性；白光/扫描卷不受影响，旧工程重新打开即生效。
 
 ---
+
+**Improved**
+
+- **Sprocket mask and Geometry / crop now stay pinned at the bottom of the right-hand panel, whichever of Cineon / Display is open.** Neither is a colour parameter, so they no longer live inside the Cineon tab; the panel also says "more below, scroll down" when controls are hidden past the fold.
 
 **Fixed**
 
