@@ -177,8 +177,8 @@ around the negative is recognised and the panel excluded just the same. Only whe
 actually be measured (a flatbed scan, or a negative that covers the panel completely) is the roll
 treated as having none, and no mask is forced onto it.
 
-To check or adjust it, go to Roll calibration → **Sprocket mask** and tick "show mask" for the red
-overlay.
+To check or adjust it, open **Sprocket mask** at the bottom of the right-hand panel (it sits below
+the Cineon / Display tabs and stays put whichever is open) and tick "show mask" for the red overlay.
 
 - Red **should** cover: sprocket holes, blown-out panel areas
 - Red should **not** cover: the orange film base, or anything with picture in it
@@ -303,14 +303,17 @@ Distortion, vignetting, **LCC flat field**. Besides fixing the optical faults th
 field improves the accuracy of the auto analysis — vignetting distorts the base and D_max statistics
 at the edges. The flat-field shot is an even light source photographed with no film in the way.
 
-### 4.4 Sprocket mask (optional)
+## 5. Sprocket mask and Geometry / cropping
+
+Neither of these is a colour parameter, so they live outside the Cineon / Display tabs: pinned to
+the bottom of the right-hand panel, in reach whichever tab is open.
+
+### Sprocket mask (optional)
 
 Marks over-bright areas (absolute luminance > threshold) as masked and fills them white after
 inversion. "Show mask" lets you check the coverage (a red overlay).
 
----
-
-## 5. Geometry and cropping
+### Geometry and cropping
 
 
 - **Crop**: pick a format preset (135 full frame, half frame, XPan, 645, 6×6, 6×7, 6×9, 6×12 …) or

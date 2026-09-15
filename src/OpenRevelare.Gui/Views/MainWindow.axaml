@@ -813,7 +813,7 @@
             <GridSplitter Grid.Column="3" Width="1" Background="{DynamicResource BorderSoftBrush}" />
 
             <!-- Col 4 — histogram + FilmBase/SceneBase/备注 tabs -->
-            <Grid Grid.Column="4" RowDefinitions="Auto,*" Background="{DynamicResource PanelBrush}">
+            <Grid Grid.Column="4" RowDefinitions="Auto,*,Auto" Background="{DynamicResource PanelBrush}">
                 <Border Grid.Row="0" Padding="10,8,10,4" Background="{DynamicResource Panel2Brush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
@@ -840,10 +840,11 @@
 
                 <!-- Which of these two is open decides what Ctrl+C / Ctrl+V act on: 整卷校准 →
                      Stage-1 标定, 帧编辑 → Stage-2 场景. -->
-                <TabControl Name="PanelTabs" Grid.Row="1" Padding="0">
+                <Panel Grid.Row="1">
+                <TabControl Name="PanelTabs" Padding="0">
                     <!-- ══ 整卷校准（FilmBase · Stage 1） ═══════════════════════ -->
                     <TabItem Header="Cineon">
-                        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer Name="CineonScroll" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="False">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
                                 <!-- 旧模型存的 d_max / scan_ev 与现在固定的输出范围不是同一
                                      量纲，静默折算实测在薄部偏 -18%、浓部 +53%（比不折算更糟），
@@ -882,7 +883,7 @@
                                         </Button>
                                     </Grid>
                                     <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                               Text="{i18n:T '自动完成：片基 T_base → 亮端 → D-max → 黑白场。不改动裁切；裁切见下方【几何 / 裁切】。'}" />
+                                               Text="{i18n:T '自动完成：片基 T_base → 亮端 → D-max → 黑白场。不改动裁切；裁切见面板底部【几何 / 裁切】。'}" />
                                 </StackPanel>
 
                                 <!-- 镜头校正 -->
@@ -996,95 +997,6 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 齿孔遮罩 -->
-                                <Expander Header="{i18n:T '齿孔遮罩'}">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Classes="groupHint"
-                                                   Text="{i18n:T '把齿孔/灯板等过亮区域（绝对亮度 &gt; 阈值）标记为遮罩，反相后填白。'}" />
-                                        <StackPanel Orientation="Horizontal" Spacing="12">
-                                            <CheckBox Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}" IsEnabled="{Binding HasImage}" />
-                                            <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
-                                        </StackPanel>
-                                        <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" />
-                                    </StackPanel>
-                                </Expander>
-
-                                <!-- 几何 / 裁切 -->
-                                <Expander Header="{i18n:T '几何 / 裁切'}">
-                                    <StackPanel Spacing="6">
-                                        <StackPanel Orientation="Horizontal" Spacing="2">
-                                            <Button Classes="icon" Click="OnRotateCcwClick" IsEnabled="{Binding HasImage}"
-                                                    AutomationProperties.Name="{i18n:T '逆时针 90°'}"
-                                                    ToolTip.Tip="{i18n:T '逆时针 90°'}">
-                                                <ctl:Icon Data="{StaticResource IcoRotateCcw}" />
-                                            </Button>
-                                            <Button Classes="icon" Click="OnRotateCwClick" IsEnabled="{Binding HasImage}"
-                                                    AutomationProperties.Name="{i18n:T '顺时针 90°'}"
-                                                    ToolTip.Tip="{i18n:T '顺时针 90°'}">
-                                                <ctl:Icon Data="{StaticResource IcoRotateCw}" />
-                                            </Button>
-                                            <Button Classes="icon" Click="OnFlipHClick" IsEnabled="{Binding HasImage}"
-                                                    AutomationProperties.Name="{i18n:T '水平翻转'}"
-                                                    ToolTip.Tip="{i18n:T '水平翻转'}">
-                                                <ctl:Icon Data="{StaticResource IcoFlipH}" />
-                                            </Button>
-                                            <Button Classes="icon" Click="OnFlipVClick" IsEnabled="{Binding HasImage}"
-                                                    AutomationProperties.Name="{i18n:T '竖直翻转'}"
-                                                    ToolTip.Tip="{i18n:T '竖直翻转'}">
-                                                <ctl:Icon Data="{StaticResource IcoFlipV}" />
-                                            </Button>
-                                        </StackPanel>
-                                        <Grid ColumnDefinitions="Auto,*">
-                                            <TextBlock Grid.Column="0" Classes="fieldLabel" MinWidth="44" Text="{i18n:T '预设'}" />
-                                            <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
-                                                      SelectedIndex="0" SelectionChanged="OnCropPresetChanged"
-                                                      ToolTip.Tip="{i18n:T '选择后裁切框以此比例居中显示，拖框时保持该比例'}">
-                                                <ComboBoxItem Content="{i18n:T '自由'}" />
-                                                <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
-                                                <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
-                                                <ComboBoxItem Content="{i18n:T '半格 — 内容 (3:4)'}" />
-                                                <ComboBoxItem Content="{i18n:T 'XPan 全幅 (65:24)'}" />
-                                                <ComboBoxItem Content="{i18n:T '645 — 内容 (4:3)'}" />
-                                                <ComboBoxItem Content="{i18n:T '6×6 — 内容 (1:1)'}" />
-                                                <ComboBoxItem Content="{i18n:T '6×7 — 内容 (7:6)'}" />
-                                                <ComboBoxItem Content="{i18n:T '6×9 — 内容 (3:2)'}" />
-                                                <ComboBoxItem Content="{i18n:T '6×12 全景 (2:1)'}" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <ToggleButton Name="CropBtn" Grid.Column="0" Classes="sampling"
-                                                          Click="OnCropClick" IsEnabled="{Binding HasImage}">
-                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <ctl:Icon Data="{StaticResource IcoCrop}" />
-                                                    <TextBlock Text="{i18n:T '裁切（拖框）'}" VerticalAlignment="Center" />
-                                                </StackPanel>
-                                            </ToggleButton>
-                                            <Button Grid.Column="1" Content="{i18n:T '清除'}" Click="OnClearCropClick"
-                                                    Margin="6,0,0,0" IsEnabled="{Binding HasImage}" />
-                                        </Grid>
-                                        <ctl:SliderRow Label="{i18n:T '拉直'}" Minimum="-15" Maximum="15" Decimals="1" Increment="0.5" DefaultValue="0" Value="{Binding Rotation}" />
-                                        <Grid ColumnDefinitions="*,*">
-                                            <ToggleButton Name="StraightenHBtn" Grid.Column="0" Classes="sampling"
-                                                          Click="OnStraightenHClick" IsEnabled="{Binding HasImage}"
-                                                          ToolTip.Tip="{i18n:T '在预览上拖一条『应当水平』的参考线（如地平线），松开即转正'}">
-                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <ctl:Icon Data="{StaticResource IcoLevelH}" />
-                                                    <TextBlock Text="{i18n:T '取水平'}" VerticalAlignment="Center" />
-                                                </StackPanel>
-                                            </ToggleButton>
-                                            <ToggleButton Name="StraightenVBtn" Grid.Column="1" Classes="sampling"
-                                                          Margin="6,0,0,0"
-                                                          Click="OnStraightenVClick" IsEnabled="{Binding HasImage}"
-                                                          ToolTip.Tip="{i18n:T '在预览上拖一条『应当垂直』的参考线（如门框、旗杆），松开即转正'}">
-                                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <ctl:Icon Data="{StaticResource IcoLevelV}" />
-                                                    <TextBlock Text="{i18n:T '取垂直'}" VerticalAlignment="Center" />
-                                                </StackPanel>
-                                            </ToggleButton>
-                                        </Grid>
-                                    </StackPanel>
-                                </Expander>
-
                                 <!-- Broadcast. 复制 / 应用到勾选帧 / 同步项 moved to 编辑 菜单
                                      and the film-strip right-click; only the roll-wide action
                                      (the one this whole tab exists for) stays on-screen. -->
@@ -1102,7 +1014,7 @@
 
                     <!-- ══ 帧编辑（SceneBase · Stage 2） ═══════════════════════ -->
                     <TabItem Header="Display">
-                        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer Name="DisplayScroll" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="False">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
                                 <!-- 色温/色调不在这里。色彩平衡是反相白端的属性，只应该有一处；
                                      在这里再调一次等于在已定好的端点上叠第二层，两处数值互相掩盖，
@@ -1167,6 +1079,123 @@
                          identification strip burned onto the sheet — you want to be typing them
                          while looking at the roll they label, not in a side panel. -->
                 </TabControl>
+                <!-- Shown while the open tab still has content below the fold. The fixed block
+                     under the tabs eats height, so it is easy to lose the bottom of a tab. -->
+                <Border Name="TabsMoreHint" IsVisible="False" IsHitTestVisible="False"
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,4"
+                        Padding="6,2" CornerRadius="3" Background="{DynamicResource ElevatedBrush}"
+                        BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                    <TextBlock Classes="fieldLabel" Text="{i18n:T '↓ 还有内容，向下滚动'}" />
+                </Border>
+                </Panel>
+
+                <!-- 齿孔遮罩 / 几何裁切 live below the tabs, not inside Cineon: neither is a
+                     colour parameter, and you want them at hand whichever stage you are on. -->
+                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                    <!-- Header bar doubles as the divider: a full-width groove plus a rubric,
+                         so it reads as its own region rather than the tail of the open tab. -->
+                    <Border Grid.Row="0" Padding="12,4" Background="{DynamicResource Panel2Brush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,3,0,1">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '通用 · 不随标签切换'}" />
+                            <TextBlock Grid.Column="1" Name="FixedMoreHint" IsVisible="False" Classes="fieldLabel"
+                                       Foreground="{DynamicResource WarnBrush}" Text="{i18n:T '↓ 还有内容，向下滚动'}" />
+                        </Grid>
+                    </Border>
+                    <ScrollViewer Grid.Row="1" Name="FixedScroll" HorizontalScrollBarVisibility="Disabled"
+                                  AllowAutoHide="False" MaxHeight="420">
+                        <StackPanel Spacing="2" Margin="12,6,12,10">
+                            <!-- 齿孔遮罩 -->
+                            <Expander Header="{i18n:T '齿孔遮罩'}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="groupHint"
+                                               Text="{i18n:T '把齿孔/灯板等过亮区域（绝对亮度 &gt; 阈值）标记为遮罩，反相后填白。'}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <CheckBox Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}" IsEnabled="{Binding HasImage}" />
+                                        <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
+                                    </StackPanel>
+                                    <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" />
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 几何 / 裁切 -->
+                            <Expander Header="{i18n:T '几何 / 裁切'}">
+                                <StackPanel Spacing="6">
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <Button Classes="icon" Click="OnRotateCcwClick" IsEnabled="{Binding HasImage}"
+                                                AutomationProperties.Name="{i18n:T '逆时针 90°'}"
+                                                ToolTip.Tip="{i18n:T '逆时针 90°'}">
+                                            <ctl:Icon Data="{StaticResource IcoRotateCcw}" />
+                                        </Button>
+                                        <Button Classes="icon" Click="OnRotateCwClick" IsEnabled="{Binding HasImage}"
+                                                AutomationProperties.Name="{i18n:T '顺时针 90°'}"
+                                                ToolTip.Tip="{i18n:T '顺时针 90°'}">
+                                            <ctl:Icon Data="{StaticResource IcoRotateCw}" />
+                                        </Button>
+                                        <Button Classes="icon" Click="OnFlipHClick" IsEnabled="{Binding HasImage}"
+                                                AutomationProperties.Name="{i18n:T '水平翻转'}"
+                                                ToolTip.Tip="{i18n:T '水平翻转'}">
+                                            <ctl:Icon Data="{StaticResource IcoFlipH}" />
+                                        </Button>
+                                        <Button Classes="icon" Click="OnFlipVClick" IsEnabled="{Binding HasImage}"
+                                                AutomationProperties.Name="{i18n:T '竖直翻转'}"
+                                                ToolTip.Tip="{i18n:T '竖直翻转'}">
+                                            <ctl:Icon Data="{StaticResource IcoFlipV}" />
+                                        </Button>
+                                    </StackPanel>
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <TextBlock Grid.Column="0" Classes="fieldLabel" MinWidth="44" Text="{i18n:T '预设'}" />
+                                        <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
+                                                  SelectedIndex="0" SelectionChanged="OnCropPresetChanged"
+                                                  ToolTip.Tip="{i18n:T '选择后裁切框以此比例居中显示，拖框时保持该比例'}">
+                                            <ComboBoxItem Content="{i18n:T '自由'}" />
+                                            <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
+                                            <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
+                                            <ComboBoxItem Content="{i18n:T '半格 — 内容 (3:4)'}" />
+                                            <ComboBoxItem Content="{i18n:T 'XPan 全幅 (65:24)'}" />
+                                            <ComboBoxItem Content="{i18n:T '645 — 内容 (4:3)'}" />
+                                            <ComboBoxItem Content="{i18n:T '6×6 — 内容 (1:1)'}" />
+                                            <ComboBoxItem Content="{i18n:T '6×7 — 内容 (7:6)'}" />
+                                            <ComboBoxItem Content="{i18n:T '6×9 — 内容 (3:2)'}" />
+                                            <ComboBoxItem Content="{i18n:T '6×12 全景 (2:1)'}" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <ToggleButton Name="CropBtn" Grid.Column="0" Classes="sampling"
+                                                      Click="OnCropClick" IsEnabled="{Binding HasImage}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoCrop}" />
+                                                <TextBlock Text="{i18n:T '裁切（拖框）'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </ToggleButton>
+                                        <Button Grid.Column="1" Content="{i18n:T '清除'}" Click="OnClearCropClick"
+                                                Margin="6,0,0,0" IsEnabled="{Binding HasImage}" />
+                                    </Grid>
+                                    <ctl:SliderRow Label="{i18n:T '拉直'}" Minimum="-15" Maximum="15" Decimals="1" Increment="0.5" DefaultValue="0" Value="{Binding Rotation}" />
+                                    <Grid ColumnDefinitions="*,*">
+                                        <ToggleButton Name="StraightenHBtn" Grid.Column="0" Classes="sampling"
+                                                      Click="OnStraightenHClick" IsEnabled="{Binding HasImage}"
+                                                      ToolTip.Tip="{i18n:T '在预览上拖一条『应当水平』的参考线（如地平线），松开即转正'}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoLevelH}" />
+                                                <TextBlock Text="{i18n:T '取水平'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </ToggleButton>
+                                        <ToggleButton Name="StraightenVBtn" Grid.Column="1" Classes="sampling"
+                                                      Margin="6,0,0,0"
+                                                      Click="OnStraightenVClick" IsEnabled="{Binding HasImage}"
+                                                      ToolTip.Tip="{i18n:T '在预览上拖一条『应当垂直』的参考线（如门框、旗杆），松开即转正'}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ctl:Icon Data="{StaticResource IcoLevelV}" />
+                                                <TextBlock Text="{i18n:T '取垂直'}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </ToggleButton>
+                                    </Grid>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
             </Grid>
         </Grid>
 

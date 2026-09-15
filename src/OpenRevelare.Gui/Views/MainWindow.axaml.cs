@@ -26,6 +26,14 @@ public partial class MainWindow : Window
         Library.NewRollRequested += ImportNewRollAsync;
         Curves.CurvesChanged += (_, _) => PushCurves();
         Curves.PreserveHueChanged += (_, _) => PushCurves();
+        // "More below" hints for the right-hand panel: the fixed block under the tabs takes
+        // height away from them, so both the open tab and the block itself can have controls
+        // hidden past the fold without any obvious sign.
+        WireMoreBelowHint(CineonScroll, TabsMoreHint);
+        WireMoreBelowHint(DisplayScroll, TabsMoreHint);
+        WireMoreBelowHint(FixedScroll, FixedMoreHint);
+        PanelTabs.SelectionChanged += (_, _) => Dispatcher.UIThread.Post(() =>
+            TabsMoreHint.IsVisible = HasMoreBelow(CalibrationTabOpen ? CineonScroll : DisplayScroll));
         // Drag mode for every parameter control in the window. SliderRow's events bubble, so one
         // subscription here covers all of them — including rows added later.
         AddHandler(SliderRow.InteractionStartedEvent, (_, _) => Vm?.BeginInteractive());
@@ -1068,6 +1076,18 @@ public partial class MainWindow : Window
     // remember. The context menus name both explicitly, for when the intent is not the open tab.
 
     private bool CalibrationTabOpen => PanelTabs.SelectedIndex == 0;
+
+    private static bool HasMoreBelow(ScrollViewer sv) =>
+        sv.IsEffectivelyVisible && sv.Offset.Y + sv.Viewport.Height < sv.Extent.Height - 0.5;
+
+    private static void WireMoreBelowHint(ScrollViewer sv, Control hint)
+    {
+        // ScrollChanged also fires on extent/viewport changes, so it covers expanders opening,
+        // the window resizing and the user scrolling; Loaded covers the first layout.
+        void Update() { if (sv.IsEffectivelyVisible) hint.IsVisible = HasMoreBelow(sv); }
+        sv.ScrollChanged += (_, _) => Update();
+        sv.Loaded += (_, _) => Update();
+    }
 
     private void OnCopyActiveClick(object? sender, RoutedEventArgs e)
     {
