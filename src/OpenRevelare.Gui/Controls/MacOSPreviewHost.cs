@@ -398,6 +398,9 @@ public sealed class MacOSPreviewHost : NativeControlHost, IPreviewHost
                     runtime.Backend.Resize(size, scale);
                     runtime.Size = size;
                     runtime.Scale = scale;
+                    // The backend drops frames of any other size (see its Present); ask the
+                    // window for one that fits, as the Windows host does.
+                    PresentationRecoveryRequested?.Invoke(this, EventArgs.Empty);
                 }
             }
             if (refresh) runtime.Backend.Refresh();

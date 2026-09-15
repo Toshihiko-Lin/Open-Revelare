@@ -186,6 +186,12 @@ internal sealed class MacOSPreviewHostBackend : IMacOSPreviewHostBackend
         lock (_gate)
         {
             ThrowIfDisposed();
+            // Superseded, not wrong: a frame composed for a viewport size this presenter no longer
+            // has. The Resize that made it stale already asked the window for a fresh composition
+            // (MacOSPreviewHost raises PresenterRecoveryRequested after every Resize). The shim
+            // would answer ORWM_E_INVALID_SIZE, which invalidates the presenter and blanks the
+            // preview — same reasoning and same guard as the Windows backend.
+            if (frame.Size != _size) return;
             DisplayContract current = _environment.Current;
             current.Validate(frame);
             if (_presenter is null)
