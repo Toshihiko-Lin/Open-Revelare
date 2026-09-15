@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -8,6 +9,7 @@ using OpenRevelare.Gui.Controls;
 using OpenRevelare.Gui.ViewModels;
 using OpenRevelare.Presentation;
 using OpenRevelare.Gui.Models;
+using OpenRevelare.Gui.Services;
 using OpenRevelare.Presentation.Win32;
 using OpenRevelare.Presentation.Win32.Native;
 using PresentationPixelRect = OpenRevelare.Presentation.PixelRect;
@@ -24,9 +26,19 @@ public partial class MainWindow
 {
     private readonly object _windowsPresentationGate = new();
     private WindowsPresentationSnapshot? _pendingWindowsPresentation;
+    // The most recently CAPTURED snapshot, kept after the worker takes it: the worker compares a
+    // finished frame's size against it before presenting (see PublishWindowsPresentation).
+    private WindowsPresentationSnapshot? _newestWindowsSnapshot;
     private bool _windowsPresentationWorkerActive;
     private bool _windowsPresentationClosed;
     private long _windowsPresentationEpoch;
+    // Owned by the single presentation worker (ProcessWindowsPresentationQueue): the picture
+    // fitted to the viewport is kept between snapshots, so a crop-handle or straighten-line move
+    // re-rasterises only the primitives on top of it. See ComposedBaseCache.
+    private readonly ComposedBaseCache _composedBase = new();
+    // The packed frame's bytes, reused across frames (PresentationBufferBuilder.Build's
+    // reusableOutput). Safe because the present is synchronous and nothing retains the frame.
+    private byte[]? _packedFrame;
     private string _lastWindowsColorDiagnostics = "Native color presentation has not initialized.";
 
     /// <summary>
@@ -187,6 +199,7 @@ public partial class MainWindow
         {
             if (_windowsPresentationClosed) return;
             _pendingWindowsPresentation = snapshot;
+            _newestWindowsSnapshot = snapshot;
             if (!_windowsPresentationWorkerActive)
             {
                 _windowsPresentationWorkerActive = true;
@@ -215,18 +228,26 @@ public partial class MainWindow
 
             try
             {
-                PresentationScene finalScene = CpuPresentationCompositor.Compose(
+                var trace = RenderTrace.Start();
+                PresentationScene finalScene = _composedBase.Compose(
                     snapshot.Background,
                     snapshot.ViewportSize,
                     snapshot.Overlays,
                     snapshot.Primitives);
+                long tCompose = trace?.ElapsedMilliseconds ?? 0;
                 PresentationBuffer buffer = snapshot.ViewModel.BuildPresentationBuffer(
                     finalScene,
-                    snapshot.Contract);
+                    snapshot.Contract,
+                    _packedFrame);
+                _packedFrame = ImmutableCollectionsMarshal.AsArray(buffer.Bytes);
+                if (trace is not null)
+                    RenderTrace.Write($"present {snapshot.ViewportSize.Width}x{snapshot.ViewportSize.Height}: compose {tCompose} ({(_composedBase.LastComposeReusedBase ? "cached base" : "full")}, {snapshot.Overlays.Count} overlays, {snapshot.Primitives.Count} prims) | pack {trace.ElapsedMilliseconds - tCompose} | total {trace.ElapsedMilliseconds} ms");
 
-                Dispatcher.UIThread.Post(
-                    () => PublishWindowsPresentation(snapshot.Epoch, buffer),
-                    DispatcherPriority.Render);
+                // Straight from this worker, not via the UI thread. PresentNewest is the host's
+                // thread-safe one-slot entry (it drains inline — InlinePreviewDispatcher),
+                // so the frame reaches the screen without waiting for a UI-thread turn that a drag
+                // does not give. Only the status-badge refresh still needs the UI thread.
+                PublishWindowsPresentation(snapshot.Epoch, buffer);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -237,21 +258,44 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>Runs on the composition worker. Everything it touches on the UI is posted.</summary>
     private void PublishWindowsPresentation(long epoch, PresentationBuffer buffer)
     {
-        if (_windowsPresentationClosed || epoch != _windowsPresentationEpoch) return;
+        // NO epoch check here — and this was the actual cause of "the picture only updates when
+        // the mouse stops". Every pointer move captures a snapshot and bumps the epoch; composing
+        // one takes ~20 ms, during which a moving pointer has already captured the next. So the
+        // frame just finished was ALWAYS "stale" by the time it was compared, and was dropped; the
+        // only frame that ever matched was the one composed after the last move. Compose speed,
+        // dispatcher priority and which thread presented were all beside the point.
+        //
+        // A finished frame is the newest picture that EXISTS. Presenting it is right even when a
+        // newer snapshot is pending: the pending one is composed next and replaces it within a
+        // frame. Staleness that matters — a closed window, a changed display contract — is caught
+        // by the flag below and by the host's own contract validation, not by comparing epochs.
+        // The epoch still gates failure REPORTING (ReportWindowsCompositionFailure), where an old
+        // error must not overwrite the badge for a newer, healthy frame.
+        //
+        // The one staleness that DOES invalidate a frame is the viewport having changed size: the
+        // native presenter rejects a buffer of the wrong size (InvalidSize) and tears itself down,
+        // which blanked the preview and lost the crop frame the first time a frame composed before
+        // a resize reached it. A resize always captures a new snapshot, so compare against the
+        // newest one captured and let that one carry the picture instead.
+        if (_windowsPresentationClosed) return;
+        if (Volatile.Read(ref _newestWindowsSnapshot) is { } newest && newest.ViewportSize != buffer.Size) return;
         try
         {
             ActivePreview!.PresentNewest(buffer);
-            UpdateWindowsColorStatus();
+            Dispatcher.UIThread.Post(UpdateWindowsColorStatus, DispatcherPriority.Background);
         }
         catch (PresentationContractException)
         {
-            QueueWindowsPresentation();
+            QueueWindowsPresentation();   // marshals itself to the UI thread
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            ReportWindowsCompositionFailure(epoch, ex);
+            Dispatcher.UIThread.Post(
+                () => ReportWindowsCompositionFailure(epoch, ex),
+                DispatcherPriority.Background);
         }
     }
 

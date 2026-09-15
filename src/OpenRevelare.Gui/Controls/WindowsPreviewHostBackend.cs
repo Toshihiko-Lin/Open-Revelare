@@ -280,6 +280,16 @@ internal sealed class WindowsPreviewHostBackend : IWindowsPreviewHostBackend
         lock (_gate)
         {
             ThrowIfDisposed();
+            // A frame composed for a viewport size the presenter no longer has (or does not have
+            // yet) is not an error, it is superseded: the resize that made it stale has already
+            // asked the window for a fresh composition (WindowsPreviewHost raises
+            // PresenterRecoveryRequested after every Resize), and that frame will fit. Handing
+            // this one to the native presenter instead returned InvalidSize, which invalidated the
+            // presenter and blanked the preview for a frame that was about to be replaced anyway.
+            // The two sizes come from two different bounds observers (the window's viewport
+            // snapshot and this host's own Bounds), updated at different dispatcher priorities,
+            // so a brief disagreement during a resize is expected, not exceptional.
+            if (frame.Size != _size) return;
             DisplayContract current = _environment.Current;
             current.Validate(frame);
 

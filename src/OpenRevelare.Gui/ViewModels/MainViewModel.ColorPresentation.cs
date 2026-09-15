@@ -275,8 +275,9 @@ public partial class MainViewModel
 
     internal PresentationBuffer BuildPresentationBuffer(
         PresentationScene finalOpaqueScene,
-        DisplayContract contract) =>
-        PresentationBufferBuilder.Build(finalOpaqueScene, contract, ColorManagement);
+        DisplayContract contract,
+        byte[]? reusableOutput = null) =>
+        PresentationBufferBuilder.Build(finalOpaqueScene, contract, ColorManagement, reusableOutput);
 
     /// <summary>
     /// True when the roll's pixels entered the working space WITHOUT a colour characterization —

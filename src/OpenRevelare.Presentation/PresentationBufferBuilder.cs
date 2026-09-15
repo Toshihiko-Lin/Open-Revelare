@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
@@ -16,6 +17,27 @@ public static class PresentationBufferBuilder
         PresentationScene finalOpaqueScene,
         DisplayContract contract,
         IColorManagementEngine colorManagement)
+        => Build(finalOpaqueScene, contract, colorManagement, reusableOutput: null);
+
+    /// <summary>
+    /// <see cref="Build(PresentationScene, DisplayContract, IColorManagementEngine)"/>, writing the
+    /// packed bytes into <paramref name="reusableOutput"/> when it is exactly the required length
+    /// (a fresh array is allocated otherwise, and returned via <see cref="PresentationBuffer.Bytes"/>
+    /// for the caller to keep for next time).
+    ///
+    /// <para>
+    /// The returned buffer ALIASES the array it was written into. The caller may hand the array
+    /// back here only once nothing holds that buffer any more — for the presentation worker that
+    /// is after the synchronous native present returns, since neither the mailbox nor the
+    /// presenter retains a frame. A full-screen RGBA16F frame is 18 MB; allocating one per pointer
+    /// move was most of the large-object churn behind the gen-2 stalls in a drag.
+    /// </para>
+    /// </summary>
+    public static PresentationBuffer Build(
+        PresentationScene finalOpaqueScene,
+        DisplayContract contract,
+        IColorManagementEngine colorManagement,
+        byte[]? reusableOutput)
     {
         ArgumentNullException.ThrowIfNull(finalOpaqueScene);
         ArgumentNullException.ThrowIfNull(contract);
@@ -28,9 +50,8 @@ public static class PresentationBufferBuilder
                 $"does not exactly match display contract scale {contract.ReferenceWhiteScale:R}.");
         }
 
-        ReadOnlySpan<Half> rgba = finalOpaqueScene.Pixels;
         if (!finalOpaqueScene.IsKnownOpaque)
-            RequireOpaque(rgba);
+            RequireOpaque(finalOpaqueScene);
 
         byte[] bytes;
         ProfileIdentity? appliedProfile = null;
@@ -40,16 +61,16 @@ public static class PresentationBufferBuilder
         {
             case FinalTransformOwner.SystemCompositor:
                 bytes = PackCanonicalHalf(
-                    rgba,
-                    finalOpaqueScene.Size,
-                    contract.ReferenceWhiteScale);
+                    finalOpaqueScene,
+                    contract.ReferenceWhiteScale,
+                    reusableOutput);
                 break;
 
             case FinalTransformOwner.Application:
                 ColorProfileRef deviceProfile = contract.DeviceProfile
                     ?? throw new PresentationContractException(
                         "Application-managed display contract has no exact device profile.");
-                float[] scaledRgb = ExtractScaledRgb(rgba, contract.ReferenceWhiteScale);
+                float[] scaledRgb = ExtractScaledRgb(finalOpaqueScene, contract.ReferenceWhiteScale);
                 bytes = TransformAndQuantizeMonitor(
                     scaledRgb,
                     finalOpaqueScene.Size,
@@ -61,8 +82,7 @@ public static class PresentationBufferBuilder
 
             case FinalTransformOwner.None:
                 bytes = EncodeEmergencySrgb(
-                    rgba,
-                    finalOpaqueScene.Size,
+                    finalOpaqueScene,
                     contract.ReferenceWhiteScale);
                 break;
 
@@ -89,92 +109,113 @@ public static class PresentationBufferBuilder
         return result;
     }
 
-    private static void RequireOpaque(ReadOnlySpan<Half> rgba)
+    // Every per-pixel loop below runs row-parallel through PresentationRows. The viewport is the
+    // largest surface in the program — a 1900×1000 physical viewport is 1.9 M pixels, and it is
+    // rebuilt on EVERY pointer move while a crop handle or the straighten line is being dragged,
+    // and on every slider step. Serial, the scaled RGBA16F pack alone measured 55 ms on that
+    // viewport, which on its own capped the drag at under 20 fps before a single pixel had been
+    // composed. Each loop is pointwise, so row-splitting changes no value and no order of output.
+
+    private static void RequireOpaque(PresentationScene scene)
     {
-        for (int i = 3; i < rgba.Length; i += 4)
+        ImmutableArray<Half> rgba = scene.LinearExtendedSrgbRgba;
+        int width = scene.Size.Width;
+        PresentationRows.Run(scene.Size.Height, width, y =>
         {
-            if ((float)rgba[i] != 1f)
+            int start = y * width * 4;
+            int end = start + (width * 4);
+            for (int i = start + 3; i < end; i += 4)
             {
-                throw new ArgumentException(
-                    $"Final presentation scene must be exactly opaque; pixel {i / 4} has alpha {(float)rgba[i]:R}.",
-                    "finalOpaqueScene");
+                if ((float)rgba[i] != 1f)
+                {
+                    throw new ArgumentException(
+                        $"Final presentation scene must be exactly opaque; pixel {i / 4} has alpha {(float)rgba[i]:R}.",
+                        "finalOpaqueScene");
+                }
             }
-        }
+        });
     }
 
-    private static float[] ExtractScaledRgb(ReadOnlySpan<Half> rgba, float referenceWhiteScale)
+    private static float[] ExtractScaledRgb(PresentationScene scene, float referenceWhiteScale)
     {
-        var scaled = new float[checked((rgba.Length / 4) * 3)];
-        int destination = 0;
-        for (int source = 0; source < rgba.Length; source += 4)
+        ImmutableArray<Half> rgba = scene.LinearExtendedSrgbRgba;
+        int width = scene.Size.Width;
+        var scaled = new float[checked(scene.Size.PixelCount * 3)];
+        PresentationRows.Run(scene.Size.Height, width, y =>
         {
-            for (int channel = 0; channel < 3; channel++)
+            int source = y * width * 4;
+            int end = source + (width * 4);
+            int destination = y * width * 3;
+            for (; source < end; source += 4)
             {
-                float value = (float)rgba[source + channel] * referenceWhiteScale;
-                if (!float.IsFinite(value))
+                for (int channel = 0; channel < 3; channel++)
                 {
-                    throw new InvalidOperationException(
-                        $"Reference-white scaling produced a non-finite RGB component at pixel " +
-                        $"{source / 4}, channel {channel}.");
+                    float value = (float)rgba[source + channel] * referenceWhiteScale;
+                    if (!float.IsFinite(value))
+                    {
+                        throw new InvalidOperationException(
+                            $"Reference-white scaling produced a non-finite RGB component at pixel " +
+                            $"{source / 4}, channel {channel}.");
+                    }
+                    scaled[destination++] = value;
                 }
-                scaled[destination++] = value;
             }
-        }
+        });
         return scaled;
     }
 
-    private static byte[] PackCanonicalHalf(
-        ReadOnlySpan<Half> rgba,
-        PixelSize size,
-        float referenceWhiteScale)
+    private static byte[] PackCanonicalHalf(PresentationScene scene, float referenceWhiteScale, byte[]? reusable)
     {
-        var bytes = new byte[size.RequiredByteCount(bytesPerPixel: 8)];
+        PixelSize size = scene.Size;
+        int required = size.RequiredByteCount(bytesPerPixel: 8);
+        byte[] bytes = reusable is not null && reusable.Length == required ? reusable : new byte[required];
         if (referenceWhiteScale == 1f && BitConverter.IsLittleEndian)
         {
             // RGBA-half already has the exact byte layout required by the system-managed
             // presentation surface. The scene is immutable and opacity was checked above, so a
             // single copy into the owned output byte array is sufficient.
-            MemoryMarshal.AsBytes(rgba).CopyTo(bytes);
+            MemoryMarshal.AsBytes(scene.Pixels).CopyTo(bytes);
             return bytes;
         }
 
-        Span<byte> output = bytes;
-        for (int pixel = 0; pixel < size.PixelCount; pixel++)
+        // The scaled path is what an HDR display takes on every frame (D-020: the scale is
+        // SdrWhiteNits/80, never 1 there). Row-parallel, writing the little-endian half bits
+        // straight into the byte array; the output layout is exactly the one the serial loop
+        // wrote, and every pixel's own finite check is kept.
+        ImmutableArray<Half> rgba = scene.LinearExtendedSrgbRgba;
+        int width = size.Width;
+        ushort opaque = BitConverter.HalfToUInt16Bits((Half)1f);
+        PresentationRows.Run(size.Height, width, y =>
         {
-            int rgbaComponentOffset = pixel * 4;
-            int rgbaOffset = pixel * 8;
-            WriteHalf(
-                output.Slice(rgbaOffset, 2),
-                (float)rgba[rgbaComponentOffset] * referenceWhiteScale,
-                pixel,
-                channel: 0);
-            WriteHalf(
-                output.Slice(rgbaOffset + 2, 2),
-                (float)rgba[rgbaComponentOffset + 1] * referenceWhiteScale,
-                pixel,
-                channel: 1);
-            WriteHalf(
-                output.Slice(rgbaOffset + 4, 2),
-                (float)rgba[rgbaComponentOffset + 2] * referenceWhiteScale,
-                pixel,
-                channel: 2);
-            BinaryPrimitives.WriteUInt16LittleEndian(
-                output.Slice(rgbaOffset + 6, 2),
-                BitConverter.HalfToUInt16Bits((Half)1f));
+            ReadOnlySpan<Half> source = rgba.AsSpan().Slice(y * width * 4, width * 4);
+            Span<ushort> row = MemoryMarshal.Cast<byte, ushort>(bytes.AsSpan(y * width * 8, width * 8));
+            int firstPixel = y * width;
+            for (int x = 0; x < width; x++)
+            {
+                int component = x * 4;
+                row[component] = ScaleHalf(source[component], referenceWhiteScale, firstPixel + x, 0);
+                row[component + 1] = ScaleHalf(source[component + 1], referenceWhiteScale, firstPixel + x, 1);
+                row[component + 2] = ScaleHalf(source[component + 2], referenceWhiteScale, firstPixel + x, 2);
+                row[component + 3] = opaque;
+            }
+        });
+        if (!BitConverter.IsLittleEndian)
+        {
+            Span<ushort> all = MemoryMarshal.Cast<byte, ushort>(bytes);
+            for (int i = 0; i < all.Length; i++)
+                all[i] = BinaryPrimitives.ReverseEndianness(all[i]);
         }
         return bytes;
 
-        static void WriteHalf(Span<byte> destination, float value, int pixel, int channel)
+        static ushort ScaleHalf(Half value, float scale, int pixel, int channel)
         {
-            Half half = (Half)value;
+            Half half = (Half)((float)value * scale);
             if (!float.IsFinite((float)half))
             {
                 throw new InvalidOperationException(
                     $"Scaled canonical RGB at pixel {pixel}, channel {channel} exceeds finite half range.");
             }
-            BinaryPrimitives.WriteUInt16LittleEndian(
-                destination,
-                BitConverter.HalfToUInt16Bits(half));
+            return BitConverter.HalfToUInt16Bits(half);
         }
     }
 
@@ -205,36 +246,47 @@ public static class PresentationBufferBuilder
     private static byte[] PackMonitorBgra8(float[] deviceRgb, PixelSize size)
     {
         var bytes = new byte[size.RequiredByteCount(bytesPerPixel: 4)];
-        for (int pixel = 0; pixel < size.PixelCount; pixel++)
+        int width = size.Width;
+        PresentationRows.Run(size.Height, width, y =>
         {
-            int rgbOffset = pixel * 3;
-            int bgraOffset = pixel * 4;
-            bytes[bgraOffset] = QuantizeAndClipDevice(deviceRgb[rgbOffset + 2]);
-            bytes[bgraOffset + 1] = QuantizeAndClipDevice(deviceRgb[rgbOffset + 1]);
-            bytes[bgraOffset + 2] = QuantizeAndClipDevice(deviceRgb[rgbOffset]);
-            bytes[bgraOffset + 3] = byte.MaxValue;
-        }
+            int pixel = y * width;
+            int end = pixel + width;
+            for (; pixel < end; pixel++)
+            {
+                int rgbOffset = pixel * 3;
+                int bgraOffset = pixel * 4;
+                bytes[bgraOffset] = QuantizeAndClipDevice(deviceRgb[rgbOffset + 2]);
+                bytes[bgraOffset + 1] = QuantizeAndClipDevice(deviceRgb[rgbOffset + 1]);
+                bytes[bgraOffset + 2] = QuantizeAndClipDevice(deviceRgb[rgbOffset]);
+                bytes[bgraOffset + 3] = byte.MaxValue;
+            }
+        });
         return bytes;
     }
 
-    private static byte[] EncodeEmergencySrgb(
-        ReadOnlySpan<Half> rgba,
-        PixelSize size,
-        float referenceWhiteScale)
+    private static byte[] EncodeEmergencySrgb(PresentationScene scene, float referenceWhiteScale)
     {
+        PixelSize size = scene.Size;
+        ImmutableArray<Half> rgba = scene.LinearExtendedSrgbRgba;
         var bytes = new byte[size.RequiredByteCount(bytesPerPixel: 4)];
-        for (int pixel = 0; pixel < size.PixelCount; pixel++)
+        int width = size.Width;
+        PresentationRows.Run(size.Height, width, y =>
         {
-            int rgbaOffset = pixel * 4;
-            int bgraOffset = pixel * 4;
-            bytes[bgraOffset] = EncodeLinearSrgbAndQuantize(
-                (float)rgba[rgbaOffset + 2] * referenceWhiteScale);
-            bytes[bgraOffset + 1] = EncodeLinearSrgbAndQuantize(
-                (float)rgba[rgbaOffset + 1] * referenceWhiteScale);
-            bytes[bgraOffset + 2] = EncodeLinearSrgbAndQuantize(
-                (float)rgba[rgbaOffset] * referenceWhiteScale);
-            bytes[bgraOffset + 3] = byte.MaxValue;
-        }
+            int pixel = y * width;
+            int end = pixel + width;
+            for (; pixel < end; pixel++)
+            {
+                int rgbaOffset = pixel * 4;
+                int bgraOffset = pixel * 4;
+                bytes[bgraOffset] = EncodeLinearSrgbAndQuantize(
+                    (float)rgba[rgbaOffset + 2] * referenceWhiteScale);
+                bytes[bgraOffset + 1] = EncodeLinearSrgbAndQuantize(
+                    (float)rgba[rgbaOffset + 1] * referenceWhiteScale);
+                bytes[bgraOffset + 2] = EncodeLinearSrgbAndQuantize(
+                    (float)rgba[rgbaOffset] * referenceWhiteScale);
+                bytes[bgraOffset + 3] = byte.MaxValue;
+            }
+        });
         return bytes;
     }
 

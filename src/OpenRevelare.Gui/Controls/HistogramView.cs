@@ -54,17 +54,53 @@ public sealed class HistogramData
     /// <summary>Bin the [0,1] interleaved RGB buffer into 256 counts per channel + luma.</summary>
     public static HistogramData FromBuffer(float[] data)
     {
+        var (r, g, b, l) = Bin4(data, static (v, _) => Bin(v), 0f);
+        return new HistogramData { R = r, G = g, B = b, L = l };
+    }
+
+    /// <summary>
+    /// Four 256-bin histograms (R, G, B, luma) of an interleaved RGB buffer, binned in parallel
+    /// chunks with thread-local counts merged at the end. Counting is exact — every pixel lands in
+    /// the same bin it would serially, and float counts of whole numbers add exactly — only the
+    /// order of the additions differs.
+    ///
+    /// This runs inline on the UI thread on every drag frame (RenderInteractive). Serial, the
+    /// extended binning measured 10–18 ms on a 648×486 drag render, because each component goes
+    /// through the sRGB curve (a Pow) before it is binned — a third of the whole drag frame, and
+    /// the histogram is the one thing on screen that must not fall behind the slider.
+    /// </summary>
+    private static (float[] R, float[] G, float[] B, float[] L) Bin4(
+        float[] data, Func<float, float, int> bin, float axisStops)
+    {
+        int pixels = data.Length / 3;
+        // One chunk per ~64 K pixels; below one chunk the fork costs more than it saves.
+        int chunks = Math.Clamp(pixels / 65_536, 1, Environment.ProcessorCount);
+        var partial = new float[chunks][];
+        Parallel.For(0, chunks, c =>
+        {
+            var local = new float[4 * 256];
+            int start = (int)((long)pixels * c / chunks) * 3;
+            int end = (int)((long)pixels * (c + 1) / chunks) * 3;
+            for (int p = start; p < end; p += 3)
+            {
+                float rv = data[p], gv = data[p + 1], bv = data[p + 2];
+                local[bin(rv, axisStops)]++;
+                local[256 + bin(gv, axisStops)]++;
+                local[512 + bin(bv, axisStops)]++;
+                local[768 + bin(0.2126f * rv + 0.7152f * gv + 0.0722f * bv, axisStops)]++;
+            }
+            partial[c] = local;
+        });
         var r = new float[256];
         var g = new float[256];
         var b = new float[256];
         var l = new float[256];
-        for (int p = 0; p < data.Length; p += 3)
-        {
-            float rv = data[p], gv = data[p + 1], bv = data[p + 2];
-            r[Bin(rv)]++; g[Bin(gv)]++; b[Bin(bv)]++;
-            l[Bin(0.2126f * rv + 0.7152f * gv + 0.0722f * bv)]++;
-        }
-        return new HistogramData { R = r, G = g, B = b, L = l };
+        foreach (float[] local in partial)
+            for (int i = 0; i < 256; i++)
+            {
+                r[i] += local[i]; g[i] += local[256 + i]; b[i] += local[512 + i]; l[i] += local[768 + i];
+            }
+        return (r, g, b, l);
     }
 
     /// <summary>
@@ -101,17 +137,7 @@ public sealed class HistogramData
         }
 
         float stops = StopsFor(targetHeadroom);
-        float[] data = frame.Pixels.Data;
-        var r = new float[256];
-        var g = new float[256];
-        var b = new float[256];
-        var l = new float[256];
-        for (int p = 0; p < data.Length; p += 3)
-        {
-            float rv = data[p], gv = data[p + 1], bv = data[p + 2];
-            r[ExtendedBin(rv, stops)]++; g[ExtendedBin(gv, stops)]++; b[ExtendedBin(bv, stops)]++;
-            l[ExtendedBin(0.2126f * rv + 0.7152f * gv + 0.0722f * bv, stops)]++;
-        }
+        var (r, g, b, l) = Bin4(frame.Pixels.Data, static (v, s) => ExtendedBin(v, s), stops);
         return new HistogramData
         {
             R = r, G = g, B = b, L = l, IsExtended = true, SdrBinCount = ExtendedSdrBins,

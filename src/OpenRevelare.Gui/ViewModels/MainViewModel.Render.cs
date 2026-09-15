@@ -128,7 +128,9 @@ public partial class MainViewModel
         if (_previewWorking is null) return;
         try
         {
+            var trace = RenderTrace.Start();
             _dragSmall ??= Resample.Box(_previewWorking.Pixels, DragMaxEdge);
+            long tSmall = trace?.ElapsedMilliseconds ?? 0;
             // _dragSmall comes off _previewLinear, so it inherits its pre-cropped-ness.
             FrameParams parameters = ForPreview(BuildParams());
             RenderedFrame rendered = Pipeline.Render(
@@ -136,9 +138,12 @@ public partial class MainViewModel
                 parameters,
                 _colorPipelineVersion,
                 ColorManagement);
+            long tRender = trace?.ElapsedMilliseconds ?? 0;
             ImageBuffer outImg = rendered.Pixels;
             PresentationScene scene = ConvertPreviewScene(rendered);
+            long tScene = trace?.ElapsedMilliseconds ?? 0;
             Bitmap fallback = BuildFallbackBitmap(rendered, scene);
+            long tFallback = trace?.ElapsedMilliseconds ?? 0;
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
             HistogramData histogram = HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
@@ -146,6 +151,7 @@ public partial class MainViewModel
             PresentationScene? clippingScene = ShowClipping
                 ? BuildClippingPresentationScene(outImg)
                 : null;
+            long tHist = trace?.ElapsedMilliseconds ?? 0;
             PublishCompletePreview(
                 rendered,
                 scene,
@@ -154,6 +160,8 @@ public partial class MainViewModel
                 clipping,
                 clippingScene,
                 refreshSprocketMask: true);
+            if (trace is not null)
+                RenderTrace.Write($"drag  {_dragSmall.Width}x{_dragSmall.Height}: downsample {tSmall} | pipeline {tRender - tSmall} | scene {tScene - tRender} | fallback {tFallback - tScene} | hist+clip {tHist - tFallback} | publish {trace.ElapsedMilliseconds - tHist} | total {trace.ElapsedMilliseconds} ms");
         }
         catch (Exception ex) { ReportRenderFailure(ex); }
     }

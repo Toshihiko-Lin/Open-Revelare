@@ -217,8 +217,11 @@ internal sealed class PreviewFrameMailbox : IDisposable
         if (frame is null) return;
         try
         {
+            var trace = Services.RenderTrace.Start();
             _sink.Current.Validate(frame);
             _sink.Present(frame);
+            if (trace is not null)
+                Services.RenderTrace.Write($"native present {frame.Size.Width}x{frame.Size.Height}: {trace.ElapsedMilliseconds} ms ({(Dispatcher.UIThread.CheckAccess() ? "ui thread" : "worker")})");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -235,6 +238,44 @@ internal sealed class AvaloniaPreviewDispatcher : IPreviewDispatcher
 
     private AvaloniaPreviewDispatcher() { }
 
+    // Render, not Background: the drain is the native present, the only step that puts a frame
+    // on screen, and at Background it ran after every Input, Loaded and Render job — i.e. never
+    // while a drag was in progress. The mailbox coalesces to the newest frame, so the higher
+    // priority cannot flood the thread. (macOS still drains here; Windows no longer does — see
+    // ThreadPoolPreviewDispatcher.)
     public void Post(Action action) =>
-        Dispatcher.UIThread.Post(action, DispatcherPriority.Background);
+        Dispatcher.UIThread.Post(action, DispatcherPriority.Render);
+}
+
+/// <summary>
+/// Drains the mailbox INLINE, on whatever thread enqueued the frame — on Windows that is the
+/// composition worker — instead of on the UI thread.
+///
+/// <para>
+/// Two attempts to keep the present on the UI thread failed, measured: raising the drain to
+/// Render priority still left ~20 composed frames a second with one presented every second or
+/// two, because during a drag the UI thread is consumed by the drag itself and Avalonia does not
+/// reliably interleave posted jobs with that stream. Queueing the drain to the thread pool then
+/// failed the same way for a different reason: the compositor's own Parallel.For keeps every pool
+/// worker busy on its local queues, and the global-queue drain item waited until the compose
+/// stream paused. Running it inline is the only scheduling that cannot be starved by either — and
+/// it gives natural back-pressure: the worker does not start composing the next snapshot until
+/// the current frame is on screen.
+/// </para>
+///
+/// <para>
+/// This is safe because the Windows backend and presenter are thread-safe by design — every
+/// native call sits under their own locks, in a consistent order (backend → presenter →
+/// display-contract lease) with the UI thread's Resize / Refresh — and a DXGI flip-model
+/// swapchain may be presented from any thread. Failures are reported through the host's own
+/// callback, which already marshals itself to the UI thread.
+/// </para>
+/// </summary>
+internal sealed class InlinePreviewDispatcher : IPreviewDispatcher
+{
+    internal static InlinePreviewDispatcher Instance { get; } = new();
+
+    private InlinePreviewDispatcher() { }
+
+    public void Post(Action action) => action();
 }

@@ -96,7 +96,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
     public WindowsPreviewHost()
         : this(
             WindowsPreviewHostBackendFactory.Instance,
-            AvaloniaPreviewDispatcher.Instance,
+            InlinePreviewDispatcher.Instance,
             WindowsPreviewNativeAirspace.Instance)
     {
     }
@@ -539,6 +539,10 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
                     runtime.Backend.Resize(size, scale);
                     runtime.Size = size;
                     runtime.Scale = scale;
+                    // The backend drops frames of any other size (see its Present), so a frame
+                    // the window composed before this resize will not be shown; ask for one that
+                    // fits. Same event the window already answers with a recomposition.
+                    PresentationRecoveryRequested?.Invoke(this, EventArgs.Empty);
                 }
             }
 
