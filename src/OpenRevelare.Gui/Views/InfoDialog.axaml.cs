@@ -127,12 +127,12 @@ public partial class InfoDialog : Window
         "· BitMiracle.LibTiff.NET（BSD）— 16-bit TIFF\n" +
         "· SixLabors.ImageSharp（Six Labors Split License）— JPEG\n" +
         "· Sdcb.LibRaw / LibRaw（LGPL/CDDL）— RAW 解码\n" +
-        "· Microsoft.ML.OnnxRuntime（MIT）— 智能白平衡\n" +
+        "· Microsoft.ML.OnnxRuntime（MIT）— 智能色偏修正\n" +
         "· CommunityToolkit.Mvvm（MIT）\n\n" +
         // LGPL-2.1 的 LibRaw 要求随二进制给出许可声明，光在这里列个名字不够，
         // 完整文本随包分发（Windows 在安装目录、Linux 在 AppImage 内、mac 在
         // OpenRevelare.app/Contents/Resources）。这一行是指路牌，别删。
         "完整第三方声明见随附的 THIRD_PARTY_NOTICES.txt。\n\n" +
-        "「智能白平衡」用到的 net_awb.onnx 权重（Deep White-Balance Editing,\n" +
+        "「智能色偏修正」用到的 net_awb.onnx 权重（Deep White-Balance Editing,\n" +
         "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。")).WithLogo();
 }

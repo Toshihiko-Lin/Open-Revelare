@@ -818,7 +818,7 @@ public static class FilmBase
     /// bake a clipped channel into the whole roll. Do not reach for it to "protect" a triple some
     /// later stage has already placed — the lift is >= 1 by construction, so it can only push the
     /// endpoints up, and on an already-placed triple that reads as an unasked-for exposure change.
-    /// 智能白平衡 used to call it for exactly that reason and had to stop; see AutoWbAiAsync step 3.
+    /// 智能色偏修正 used to call it for exactly that reason and had to stop; see AutoWbAiAsync step 3.
     ///
     /// The factor is the largest overshoot across the three channels, so the worst offender lands
     /// exactly on its endpoint and the other two stay below theirs. It is never less than 1: a
@@ -1693,7 +1693,7 @@ public static class FilmBase
     ///
     /// Split out because the Deep-WB solve needs exactly this vector as its anchor — both for its
     /// geometric starting wb_high and as the divisor that turns the net's log-gains into a
-    /// density-slope delta. Sharing it is what keeps 智能白平衡 and 自动亮部 WB from starting in
+    /// density-slope delta. Sharing it is what keeps 智能色偏修正 and 自动亮部 WB from starting in
     /// two different places; a private per-channel percentile is precisely the failure this
     /// method's same-source pick exists to avoid (see the comment inside).
     /// </summary>

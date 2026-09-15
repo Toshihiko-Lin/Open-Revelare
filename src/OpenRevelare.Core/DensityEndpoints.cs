@@ -122,6 +122,75 @@ public readonly struct DensityEndpoints
         FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel);
 
     /// <summary>
+    /// The Cineon code an absolute density lands on in one channel — <see cref="Apply"/> read in
+    /// the encoding's units (<see cref="LogEncoding"/>: <c>code = 1032 + D_adj / 0.002</c>). This is
+    /// what a neutral-grey pick reports back, so the user can see where their card sits against
+    /// the standard's <see cref="FrameParams.CineonGreyCode"/>.
+    /// </summary>
+    public double CodeOf(int channel, double density) =>
+        FrameParams.CineonWhiteCode + Apply(channel, density) / FrameParams.CineonDensityPerCode;
+
+    /// <summary>
+    /// The highlight endpoint that lands a measured NEUTRAL patch on one Cineon code in every
+    /// channel — the grey card pinned to the standard's 18% grey
+    /// (<see cref="FrameParams.CineonGreyCode"/>), or to any other code the caller names.
+    ///
+    /// With the black end pinned by the film base, each channel has one degree of freedom left:
+    /// its span <c>s_c = dMax_c − dMin_c</c>. "This patch is neutral" fixes the RATIOS between the
+    /// spans; landing it on a NAMED code spends the shared factor too, so the card decides both
+    /// balance AND placement — the picture's brightness moves to where the standard says a card
+    /// belongs. That is the LAD-style absolute anchor: the one input a roll can have that is
+    /// entitled to set exposure, because unlike a net's prior a card is a measurement of the scene.
+    /// It makes D_max a placement derived from the card rather than the film's measured density
+    /// ceiling, which is what a card is for.
+    ///
+    /// This is <see cref="FilmBase.SampleWbHighFromRect"/>'s measurement moved from the white
+    /// end to the mid-tones: sampling a highlight asserts neutrality at 1032, sampling a card
+    /// asserts it at 470. The two are ALTERNATIVES, not a pair — one neutral point per channel
+    /// determines the affine, so whichever is written last wins, and on a stock whose three dye
+    /// curves are not parallel a card-balanced roll can still carry a residual cast at the very
+    /// top (or a highlight-balanced one in the mid-tones). Skin and mid-tones sit next to the
+    /// card; that is the trade a card buys.
+    ///
+    /// Algebra: the card must sit at <c>D_adj = −(1032 − code)·0.002</c>, i.e.
+    /// <c>outRange·x_c/s_c − outRange = −(1032 − code)·0.002</c>, so
+    /// <c>s_c = x_c · outRange / (outRange − (1032 − code)·0.002)</c>. For 470 the factor is
+    /// 1.874/0.750 ≈ 2.50 — a typical C-41 card at 0.6–0.9 above base gives spans of 1.5–2.2,
+    /// the same range roll calibration measures.
+    /// </summary>
+    public static double[] HighlightFromNeutralAtCode(double[] dGrey, double[] dMin, double code)
+    {
+        double dropBelowWhite = (FrameParams.CineonWhiteCode - code) * FrameParams.CineonDensityPerCode;
+        double denom = FrameParams.OutputRange - dropBelowWhite;
+        if (!(code > FrameParams.CineonBlackCode) || !(denom > 1e-6))
+            throw new ArgumentOutOfRangeException(nameof(code), code,
+                "target code must lie inside the Cineon domain (95, 1032]");
+        double[] x = SpanAbove(dGrey, dMin);
+        double factor = FrameParams.OutputRange / denom;
+        var dMax = new double[3];
+        for (int c = 0; c < 3; c++) dMax[c] = dMin[c] + factor * x[c];
+        return dMax;
+    }
+
+    /// <summary>A patch's density above the black end, per channel; rejects a patch that is not
+    /// denser than the base in every channel (a rect that landed on the base, or a black end
+    /// sampled from picture content).</summary>
+    private static double[] SpanAbove(double[] d, double[] dMin)
+    {
+        if (d.Length != 3 || dMin.Length != 3)
+            throw new ArgumentException("DensityEndpoints requires 3 channels");
+        var x = new double[3];
+        for (int c = 0; c < 3; c++)
+        {
+            x[c] = d[c] - dMin[c];
+            if (!(x[c] > 1e-3))
+                throw new ArgumentException(CoreText.F(
+                    $"采样区不比黑端浓（D = {d[0]:F3}, {d[1]:F3}, {d[2]:F3} · D_min = {dMin[0]:F3}, {dMin[1]:F3}, {dMin[2]:F3}）· 请框画面里的灰卡，并确认黑端已标定为片基"));
+        }
+        return x;
+    }
+
+    /// <summary>
     /// Inverse of <see cref="Apply"/>: recovers the pre-step-5 density from an adjusted one.
     /// The Deep-WB solve needs this to reason backwards from a rendered positive
     /// (see <see cref="WhiteBalance.SrgbToPreStep4Density"/>), and it stays a closed form

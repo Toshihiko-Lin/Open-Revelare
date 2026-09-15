@@ -45,7 +45,7 @@ public sealed class OnnxDeepWbCorrector : IDeepWbCorrector, IDisposable
         if (!File.Exists(modelPath))
             throw new FileNotFoundException(
                 $"未找到 Deep-WB 模型 net_awb.onnx（应在 {modelPath}）。" +
-                "「智能白平衡」需要它，其余功能不受影响；说明见 models/README.md。",
+                "「智能色偏修正」需要它，其余功能不受影响；说明见 models/README.md。",
                 modelPath);
 
         _session = new InferenceSession(modelPath);
@@ -112,12 +112,14 @@ public sealed class OnnxDeepWbCorrector : IDeepWbCorrector, IDisposable
     /// <summary>
     /// One NN-judged density-domain step for wb_high — port of nn_wb_high_step.
     ///
-    /// ⚠ NO CALLERS. The GUI's 智能白平衡 inlines its own version of this step, differing in
-    /// one deliberate way: it measures the net's gains over the HIGHLIGHT BAND instead of the
-    /// whole-image mean (see MainViewModel.MeanLinearHighlight for why — wb_high is a
-    /// highlight-end control, so closing the loop on a whole-image statistic overshoots the
-    /// highlight by roughly d_highlight/d_mean and walks real whites off into a cast). Kept as
-    /// the faithful record of what Python does; do not wire it up without re-reading that note.
+    /// ⚠ NO CALLERS. The GUI's 智能色偏修正 uses its own step, differing in two deliberate ways:
+    /// it measures the net's gains over the HIGHLIGHT BAND instead of the whole-image mean (see
+    /// MainViewModel.MeanLinearHighlight for why — the endpoint is a highlight-end control, so
+    /// closing the loop on a whole-image statistic overshoots the highlight by roughly
+    /// d_highlight/d_mean and walks real whites off into a cast), and its step is derived for
+    /// the endpoint model under the 0.6 print response the net actually sees
+    /// (WhiteBalance.HighlightSpanStep) rather than for this gamma-1 chain. Kept as the faithful
+    /// record of what Python does; do not wire it up without re-reading that note.
     ///
     /// Derivation across pipeline steps 4→5→6: D_wb = D·wb_high + offset; D_adj =
     /// pivot + (D_wb - pivot)·grade - d_max; T_pos = 10^D_adj. The net asking for gains g

@@ -4,6 +4,12 @@
 
 **改进**
 
+- **拍了灰卡的卷可以框灰卡直接定色偏**。Cineon 标定在 D_min 与 D_max 之间新增「色偏修正」组，「灰卡采样 · Cineon 470」与智能色偏修正并列——解的是同一个量，一个是测量、一个是推测，有灰卡时用灰卡。框灰卡，它即标准灰，三通道落在码值 470，色偏和曝光位置一起定下，状态栏报亮度较标定动了几档。
+
+- **Display 标签找回白平衡（色温 / 色调）**。标定阶段解的是胶片和扫描的色偏，白平衡是场景光源的冷暖，两层各答各的问题；旧工程存下的值照常回显。
+
+- **「智能白平衡」改名「智能色偏修正」，收敛更快、更稳**。标定阶段没有白平衡的概念，它解的是色偏；步长按实际显示渲染重新推导，几轮即收敛，取残差最小的一轮并报出残差，亮度始终保持标定值。
+
 - **齿孔遮罩和几何 / 裁切固定在右侧面板底部，切换 Cineon / Display 标签时一直在**。这两组和色彩无关，不再藏在 Cineon 标签里；面板有内容被挡在下方时会提示「还有内容，向下滚动」。
 
 **修复**
@@ -15,6 +21,12 @@
 ---
 
 **Improved**
+
+- **A roll shot with a grey card can have its cast set straight off the card.** Cineon calibration gains a Cast correction group between D_min and D_max, with “Grey card · Cineon 470” beside Smart cast correction — the same quantity, one measured and one guessed; with a card in the roll, use the card. Box the card, it is the standard grey, all three channels land on code 470, setting cast and placement together, and the status bar reports how far brightness moved from calibration.
+
+- **The Display tab gets White balance (temperature / tint) back.** Calibration solves the film's and the scan's cast; white balance is the warmth of the scene's light — two layers answering two questions. Values saved by older projects show up as before.
+
+- **“Deep white balance” is renamed “Smart cast correction”, and converges faster and more steadily.** Calibration has no notion of white balance; the button solves a cast. The step is now derived for the actual display rendering, so a frame settles in a few rounds; the best round is kept and its residual reported, and brightness stays at the calibrated value throughout.
 
 - **Sprocket mask and Geometry / crop now stay pinned at the bottom of the right-hand panel, whichever of Cineon / Display is open.** Neither is a colour parameter, so they no longer live inside the Cineon tab; the panel also says "more below, scroll down" when controls are hidden past the fold.
 

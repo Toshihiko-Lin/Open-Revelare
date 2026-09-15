@@ -194,7 +194,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 - **完整色彩管理**——工作空间 ACEScg（宽色域，场景参考）承载反相；输出空间在主窗口选（sRGB / Display P3 / Adobe RGB），帧编辑即在该空间内进行，导出所见即所得；也可导出场景线性 ACEScg 交给外部调色
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
-- **智能白平衡**——DeepWB 神经网络一键估算白点（模型单独授权，[见下](#智能白平衡模型--单独授权请读一下)）
+- **智能色偏修正**——DeepWB 神经网络一键估算色偏（模型单独授权，[见下](#智能色偏修正模型--单独授权请读一下)）
 - **预反转校正**——LCC 平场、镜头畸变、暗角、齿孔遮罩，全部在线性光域完成
 - **Stage 2 调整**——曝光 / 色阶 / 对比度 / 高光阴影 / PCHIP 曲线 / 饱和度
 
@@ -329,15 +329,15 @@ ISCC.exe open-revelare.iss                     # → installer/OpenRevelare-{版
 
 > **macOS 的 LibRaw 必须锁 0.21.x**：Sdcb.LibRaw 0.21.1.7 按 0.21 的 `libraw_data_t` 布局 marshal，brew 上的 0.22 加过字段，偏移全错。`bundle-libraw.sh` 因此锁 0.21.4 源码编译。
 
-## 智能白平衡模型 —— 单独授权，请读一下
+## 智能色偏修正模型 —— 单独授权，请读一下
 
-「智能白平衡」用到 Deep White-Balance Editing (CVPR 2020) 的网络权重 `models/net_awb.onnx`。它随仓库和发行包一起分发，但——
+「智能色偏修正」用到 Deep White-Balance Editing (CVPR 2020) 的网络权重 `models/net_awb.onnx`。它随仓库和发行包一起分发，但——
 
 > [!IMPORTANT]
 > **这个文件不在本项目 GPL-3.0 授权的范围内。**
 > 它按原作者的 **CC BY-NC-SA 4.0**（署名 — 非商业 — 相同方式共享）分发。
 
-OpenRevelare 免费、不销售、无订阅无内购，分发本身不以商业利益为目的，因此符合 NC 条款。但**你从 GPL-3.0 拿到的「可以商业再分发」这项权利不适用于这个文件**——要商用请先删掉 `models/` 目录。程序照常构建运行，只有「智能白平衡」一个功能会提示模型未找到；手动白平衡、自动亮部白平衡、Path A 解耦都不依赖它。
+OpenRevelare 免费、不销售、无订阅无内购，分发本身不以商业利益为目的，因此符合 NC 条款。但**你从 GPL-3.0 拿到的「可以商业再分发」这项权利不适用于这个文件**——要商用请先删掉 `models/` 目录。程序照常构建运行，只有「智能色偏修正」一个功能会提示模型未找到；手动白平衡、自动亮部白平衡、Path A 解耦都不依赖它。
 
 细节见 [models/README.md](models/README.md) 与 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) 第 13 条。作者要求引用其论文。
 

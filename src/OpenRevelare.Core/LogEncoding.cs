@@ -80,12 +80,17 @@ public static class LogEncoding
     public static readonly float White = (float)(WhiteCode / CodeFullScale);
 
     /// <summary>
-    /// Where an 18% scene grey lands under this mapping, relative to the white end. Reported for
-    /// diagnostics rather than used by the transform; the anchors above define the mapping on
-    /// their own.
+    /// Normalised Cineon value for an 18% scene grey — code <see cref="FrameParams.CineonGreyCode"/>
+    /// (470). Reported for diagnostics rather than used by the transform; the anchors above
+    /// define the mapping on their own.
+    ///
+    /// This used to be computed as <c>1032 + log10(0.18)/0.002</c> ≈ code 660, which treats the
+    /// encoding ceiling as the scene's 100% white and density as scene log-exposure at gamma 1.
+    /// Neither holds: 1032 is the FILM's density ceiling (picture white sits at 685) and the
+    /// rendering divides by a 0.6 print response. Under that rendering 18% grey is at 470, the
+    /// standard's own number, so it is read from the one constant rather than re-derived here.
     /// </summary>
-    public static readonly float MidGrey =
-        (float)((WhiteCode + Math.Log10(0.18) / DensityPerCode) / CodeFullScale);
+    public static readonly float MidGrey = (float)(FrameParams.CineonGreyCode / CodeFullScale);
 
     /// <summary>
     /// Converts the linear positive Stage 1 produces into normalised Cineon code values, in

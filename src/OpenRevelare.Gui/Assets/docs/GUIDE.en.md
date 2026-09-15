@@ -276,6 +276,30 @@ cast is adjusted under **Per channel**.
 > affine map, so **the render is bit-identical**, but the readout becomes a verifiable quantity
 > instead of a sentinel.
 
+#### Cast correction
+
+Between the two ends, because it is the third calibration quantity besides them: what cast this
+roll carries — what the film, the scan and the base leave on the two ends. Calibration has no notion
+of white balance; that is the warmth of the scene's light, and lives in the Display tab.
+
+| Button | Type | Use |
+|---|---|---|
+| **Grey card · Cineon 470** | Manual | Select the grey card in the picture; it is the Cineon standard grey, so all three channels land on code 470 |
+| **Smart cast correction (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
+
+Both solve the same quantity: the card is a measurement, smart cast correction a guess — with a card
+in the roll, use the card. Box the card in the picture; it is the Cineon standard grey, so all three
+channels land on code **470**, which sets cast and placement together. The status bar reports how
+far brightness moved from the roll calibration — close to zero when calibration already had the
+card near 470, in which case the picture barely changing is expected. The card's reading stays under
+the button until the next roll. For smart cast correction, **crop the sprockets and film edge away
+first**.
+
+Both write the three D_max densities. Sampling the highlight asserts the box is neutral at the white
+end (1032), sampling the card asserts it is neutral at 470 — with the black end pinned by the film
+base each channel has one degree of freedom left, so they and Sample the highlight are alternatives;
+the last one pressed wins.
+
 #### D_max (white end)
 
 The density each channel reads as white, typically 1.8–2.4. Its distance from D_min is the
@@ -287,10 +311,9 @@ correction factors.
 |---|---|---|
 | **Sample the highlight** | Manual | Select the densest part of the negative (the positive's highlights) |
 | **Auto white point** | Automatic | Finds the brightest point and treats it as pure white |
-| **Deep white balance (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
 
-All three write the same triple; whichever you press last wins. For deep white balance, **crop the
-sprockets and film edge away first**.
+Both write the same triple; whichever you press last wins — as do the two buttons of the Cast
+correction group above.
 
 > **The output range is a constant with no slider.** It sets where black lands (fixed at 10⁻²).
 > While it was adjustable it competed with the endpoints for the same degree of freedom — both

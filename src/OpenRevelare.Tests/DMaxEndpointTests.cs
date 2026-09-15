@@ -94,7 +94,7 @@ public class DMaxEndpointTests
     // The lift lives in two public pieces — MaxChannelDensityFromRoll and
     // RescaleToClearChannelMax — because DetectDMaxPerChannelFromRoll is not the only thing that
     // may need to ask "does this triple clear the frame?". It IS, currently, the only caller:
-    // 智能白平衡 deliberately does not lift its converged triple (an endpoint lift is an exposure
+    // 智能色偏修正 deliberately does not lift its converged triple (an endpoint lift is an exposure
     // change, and that button must not move brightness — see AutoWbAiAsync step 3), so clipping is
     // allowed there. These tests pin the detector's own behaviour across the split.
 
@@ -146,7 +146,7 @@ public class DMaxEndpointTests
     /// <summary>
     /// THE CHROMA-ONLY STEP MUST NOT MOVE THE BRIGHTNESS.
     ///
-    /// This is the arithmetic of 智能白平衡's inner loop in miniature. The delta is zero-sum across
+    /// This is the arithmetic of 智能色偏修正's inner loop in miniature. The delta is zero-sum across
     /// channels, which would be chroma-only if it were ADDED; applied multiplicatively against
     /// three unequal endpoints it is not, because mean(ep·(1-d)) = mean(ep) - mean(ep·d) and
     /// mean(ep·d) vanishes only when the endpoints are equal. The loop therefore leaked brightness

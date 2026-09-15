@@ -25,11 +25,13 @@ public interface IDeepWbCorrector
 /// of freedom and can only fix one end. These functions therefore REGRESS the net's whole
 /// correction across the density range to recover both slope and intercept.
 ///
-/// ⚠ NOT THE SHIPPING AUTO-WB PATH. The GUI's 智能白平衡 button does NOT call
+/// ⚠ NOT THE SHIPPING AUTO-WB PATH. The GUI's 智能色偏修正 button does NOT call
 /// <see cref="AutoWbAffineIterative"/>; it runs its own loop (MainViewModel.AutoWbAiAsync) —
-/// a geometric highlight baseline plus a chroma-only wb_high delta closed over the HIGHLIGHT
+/// the calibrated endpoint as baseline plus a chroma-only SPAN step closed over the HIGHLIGHT
 /// BAND rather than the whole-image mean, which is what fixed the yellow-clouds case that the
-/// whole-image statistic caused. That is the behaviour the user has settled on (2026-08).
+/// whole-image statistic caused. That is the behaviour the user has settled on (2026-08). The
+/// per-round arithmetic of that loop is <see cref="HighlightSpanStep"/> below, which is the one
+/// piece of it that is derived for the endpoint model and unit-tested.
 ///
 /// What lives here is kept deliberately, not by accident: it is the faithful port of
 /// white_balance.py and the only auto-WB code with a parity harness behind it
@@ -379,6 +381,61 @@ public static class WhiteBalance
 
         Quantise(bigH); Quantise(bigO);
         return (bigH, bigO, converged, reason);
+    }
+
+    /// <summary>
+    /// One round of the SHIPPING Deep-WB loop (MainViewModel.AutoWbAiAsync), in the endpoint
+    /// model: the net's per-channel log10 gains over the highlight band → a new per-channel
+    /// highlight SPAN <c>s_c = dMax_c − dMin_c</c>, chroma-only and brightness-exact.
+    ///
+    /// SENSITIVITY, DERIVED FOR THE RENDER THE NET ACTUALLY SEES. At the highlight's density
+    /// <c>x_c</c> above the black end, the encoding puts <c>D_adj = R·x/s − R</c>
+    /// (<see cref="DensityEndpoints.FromMeasured"/>, R = <see cref="FrameParams.OutputRange"/>),
+    /// and the display rendering makes that linear light as <c>10^(D_adj / γ)</c> with
+    /// γ = <see cref="ColorPipeline.ResponseGamma"/>. So a log10 gain the net asks for is
+    /// <c>γ·log10(g)</c> of density at the encoding, and since <c>∂D_adj/∂s = −R·x/s²</c> the
+    /// span move that delivers it is <c>Δs = −γ·log10(g)·s²/(R·x)</c>. The step this replaced
+    /// was <c>log10(g)/(grade·D)</c>, the derivation for the retired grade/pivot chain rendered
+    /// at gamma 1; under the 0.6 print response that is ~1.7× the Newton step, so the loop
+    /// oscillated its way down instead of walking. The band sits mostly above the shoulder's
+    /// knee, where the real sensitivity is a little LOWER than the model — so this step lands
+    /// slightly short there and converges monotonically, which is the safe side.
+    ///
+    /// CHROMA-ONLY BY CONSTRUCTION. Brightness is the slope, <c>R/s_c</c>, so the invariant is
+    /// <c>mean(1/s_c)</c> (not <c>mean(s_c)</c> — 1/x is convex, and pinning the wrong mean leaks
+    /// exposure as the channels spread; see the pin discussion in AutoWbAiAsync's history). One
+    /// shared factor on the spans restores it EXACTLY — <c>mean(1/(k·s)) = mean(1/s)/k</c> — with
+    /// no residual from a per-channel black end, because the factor is applied to the span
+    /// rather than to the endpoint the black end is subtracted from.
+    /// </summary>
+    /// <param name="span">Current per-channel span, <c>dMax − dMin</c>.</param>
+    /// <param name="highlightAboveBlack">The roll's highlight density above the black end per
+    /// channel, <c>d_highlight − dMin</c> — where the net's gains were measured.</param>
+    /// <param name="logGains">The net's log10 output/input ratio per channel over that band.</param>
+    /// <param name="responseGamma"><see cref="ColorPipeline.ResponseGamma"/>.</param>
+    /// <param name="targetSlopeMean">The <c>mean(1/s_c)</c> to hold — the calibration's.</param>
+    /// <returns>The new span. Never NaN; each channel's move is clamped to ×[0.5, 2] per round so
+    /// one wild net output cannot throw the solve out of the domain.</returns>
+    public static double[] HighlightSpanStep(double[] span, double[] highlightAboveBlack,
+                                             double[] logGains, double responseGamma,
+                                             double targetSlopeMean)
+    {
+        double meanLog = (logGains[0] + logGains[1] + logGains[2]) / 3.0;
+        var next = new double[3];
+        for (int c = 0; c < 3; c++)
+        {
+            double s = Math.Max(span[c], 1e-3);
+            double x = Math.Max(highlightAboveBlack[c], 0.05);
+            double chroma = logGains[c] - meanLog;
+            // The net wants channel c brighter (chroma > 0) ⇒ D_adj up at the highlight ⇒ a
+            // SMALLER span, hence the subtraction.
+            double factor = 1.0 - responseGamma * chroma * s / (FrameParams.OutputRange * x);
+            next[c] = s * Math.Clamp(factor, 0.5, 2.0);
+        }
+        double have = (1.0 / next[0] + 1.0 / next[1] + 1.0 / next[2]) / 3.0;
+        double k = targetSlopeMean > 1e-9 ? have / targetSlopeMean : 1.0;
+        for (int c = 0; c < 3; c++) next[c] = Math.Max(next[c] * k, 1e-3);
+        return next;
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────────

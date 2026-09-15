@@ -148,7 +148,7 @@ The licenses below apply to all of them.
     the GPL-3.0 rights they hold over the program's source code. In
     particular, the GPL-3.0 right to redistribute OpenRevelare commercially
     does NOT extend to these weights — delete the models/ directory first.
-    Everything except 智能白平衡 works without it. The authors also ask that
+    Everything except 智能色偏修正 works without it. The authors also ask that
     the paper above be cited.
 
     Full licence text:

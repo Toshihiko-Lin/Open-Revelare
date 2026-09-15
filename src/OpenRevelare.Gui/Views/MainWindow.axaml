@@ -956,6 +956,37 @@
                                     </StackPanel>
                                 </Expander>
 
+                                <!-- 色偏修正：在两端之间，因为它是两端之外的第三个标定量——这一卷偏什么色。
+                                     两个入口解的是同一个量：灰卡是测量（一个已知中性、已知落点 Cineon 470 的点），
+                                     智能色偏修正是神经网络的推测。答案都写进亮端三个数（反相只从那里读白端），
+                                     与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
+                                <Expander Header="{i18n:T '色偏修正'}" IsExpanded="True"
+                                          ToolTip.Tip="{i18n:T '解这一卷的色偏（胶片、扫描、片基留在两端上的偏差）。灰卡是测量，智能色偏修正是神经网络的推测，有灰卡时用灰卡。结果写进 D_max 的三个密度，与高光采样互为替代，后按的生效。'}">
+                                    <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,*">
+                                            <ToggleButton Name="GreyBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                                          Click="OnSampleNeutralGreyClick" IsEnabled="{Binding HasImage}"
+                                                          ToolTip.Tip="{i18n:T '框画面里拍到的灰卡，它即 Cineon 标准灰：三通道都落在码值 470，色偏和曝光位置一起定下。这是测量，有灰卡时优先于智能色偏修正；与高光采样互为替代，后采的生效。'}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <ctl:Icon Data="{StaticResource IcoMarquee}" />
+                                                    <TextBlock Text="{i18n:T '灰卡采样 · Cineon 470'}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </ToggleButton>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                                    Click="OnAutoWbAiClick" IsEnabled="{Binding HasImage}"
+                                                    ToolTip.Tip="{i18n:T 'Deep-WB 神经网络推断色偏（不需画面中有中性物）。建议先裁掉齿孔/片边。'}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <ctl:Icon Data="{StaticResource IcoWand}" />
+                                                    <TextBlock Text="{i18n:T '智能色偏修正（Beta）'}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <TextBlock Classes="groupHint" Text="{Binding GreyCardText}"
+                                                   IsVisible="{Binding GreyCardText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Expander>
+
                                 <!-- D_max：亮端 -->
                                 <Expander Header="{i18n:T 'D_max（白端）'}" IsExpanded="True"
                                           ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离就是反差；三通道之差就是高光色偏——这三个数本身即白平衡。'}">
@@ -979,14 +1010,6 @@
                                                 </StackPanel>
                                             </Button>
                                         </Grid>
-                                        <Button Click="OnAutoWbAiClick" HorizontalAlignment="Stretch"
-                                                IsEnabled="{Binding HasImage}"
-                                                ToolTip.Tip="{i18n:T 'Deep-WB 神经网络推断白平衡（不需画面中有中性物）。建议先裁掉齿孔/片边。'}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <ctl:Icon Data="{StaticResource IcoWand}" />
-                                                <TextBlock Text="{i18n:T '智能白平衡（Beta）'}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </Button>
                                         <Expander Header="{i18n:T '逐通道'}" Margin="0,2,0,0">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxR}" />
@@ -1016,11 +1039,17 @@
                     <TabItem Header="Display">
                         <ScrollViewer Name="DisplayScroll" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="False">
                             <StackPanel Spacing="2" Margin="12,8,12,14">
-                                <!-- 色温/色调不在这里。色彩平衡是反相白端的属性，只应该有一处；
-                                     在这里再调一次等于在已定好的端点上叠第二层，两处数值互相掩盖，
-                                     出了偏色说不清是哪一处造成的。见【整卷校准 → D_max】。-->
-                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Margin="0,0,0,4"
-                                           Text="{i18n:T '色偏在【整卷校准 → D_max / D_min】展开的三个通道里调，那里是反相的两端。'}" />
+                                <!-- 白平衡属于这里，不属于标定。标定阶段解的是【色偏】——胶片、扫描、片基
+                                     留在两端上的偏差，写在 D_min / D_max 里，没有"白平衡"的概念；白平衡是
+                                     场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
+                                     问题，不再互相掩盖。曾经因为"同一件事两处调"而撤掉，那时标定组还叫白平衡。-->
+                                <Expander Header="{i18n:T '白平衡（色温 / 色调）'}" IsExpanded="True"
+                                          ToolTip.Tip="{i18n:T '场景白平衡，正片域的线性增益。片子本身的色偏在 Cineon 标签里标定，这里只管光源的冷暖。'}">
+                                    <StackPanel Spacing="1">
+                                        <ctl:SliderRow Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" />
+                                        <ctl:SliderRow Label="{i18n:T '色调'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Tint}" />
+                                    </StackPanel>
+                                </Expander>
 
                                 <ctl:SliderRow Label="{i18n:T '曝光'}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" />
 

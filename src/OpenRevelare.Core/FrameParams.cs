@@ -78,6 +78,18 @@ public sealed class FrameParams
     public const double CineonWhiteCode = 1032.0;
 
     /// <summary>
+    /// Cineon 的 18% 标准灰码值。灰卡采样「锚定标准灰」时把灰卡钉在这里。
+    ///
+    /// **这是本仓库里 18% 灰唯一的出处。** 它与显示渲染自洽：
+    /// <see cref="ColorPipeline.CineonToDisplay"/> 以 685 为 1.0、印片响应 0.6，
+    /// 470 → 10^((470−685)·0.002/0.6) ≈ 0.19，片基归一后 0.183——正是 18%/90%。它落在
+    /// toe 膝之上、shoulder 膝（码值 596）之下的纯线性段，两端修形都碰不到它。
+    ///
+    /// 不是 445：那是 LAD 灰块（视觉密度 1.0，印刷密度 0.89）的码值，不是 18% 灰卡。
+    /// </summary>
+    public const double CineonGreyCode = 470.0;
+
+    /// <summary>
     /// 密度编码域的上限——Cineon 的 1032，**不是标定点**。
     ///
     /// 它只做一件事：让 T→0 的像素得到一个有限密度。源文件里通道值为 0 的像素（LibRaw 0.21

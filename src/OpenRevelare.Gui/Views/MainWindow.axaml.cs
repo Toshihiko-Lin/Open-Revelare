@@ -186,7 +186,7 @@ public partial class MainWindow : Window
     // Esc. The tools are mutually exclusive — arming one disarms the others.
     private enum SampleMode
     {
-        None, FilmBase, DMax, Black, White, Crop,
+        None, FilmBase, DMax, NeutralGrey, Black, White, Crop,
         StraightenH, StraightenV,
     }
 
@@ -811,7 +811,7 @@ public partial class MainWindow : Window
 
     private ToggleButton[] AllToggles() => new[]
     {
-        FilmBaseBtn, DMaxBtn, BlackBtn, WhiteBtn, CropBtn,
+        FilmBaseBtn, DMaxBtn, GreyBtn, BlackBtn, WhiteBtn, CropBtn,
         StraightenHBtn, StraightenVBtn,
     };
 
@@ -965,6 +965,7 @@ public partial class MainWindow : Window
     {
         SampleMode.FilmBase => FilmBaseBtn,
         SampleMode.DMax => DMaxBtn,
+        SampleMode.NeutralGrey => GreyBtn,
         SampleMode.Black => BlackBtn,
         SampleMode.White => WhiteBtn,
         SampleMode.Crop => CropBtn,
@@ -1117,6 +1118,11 @@ public partial class MainWindow : Window
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DMax,
             Loc.T("高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
+            useNegative: true);
+
+    private void OnSampleNeutralGreyClick(object? sender, RoutedEventArgs e) =>
+        ToggleSampling(sender, SampleMode.NeutralGrey,
+            Loc.T("中性灰采样：预览已切到负片。对准画面里的【灰卡 / 中性物】拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleBlackClick(object? sender, RoutedEventArgs e) =>
@@ -1660,6 +1666,7 @@ public partial class MainWindow : Window
             {
                 case SampleMode.FilmBase: Vm.SampleFilmBase(rect.Value); break;
                 case SampleMode.DMax: Vm.SampleDMax(rect.Value); break;
+                case SampleMode.NeutralGrey: Vm.SampleNeutralGrey(rect.Value); break;
                 case SampleMode.Black: Vm.SampleBlack(rect.Value); break;
                 case SampleMode.White: Vm.SampleWhite(rect.Value); break;
             }

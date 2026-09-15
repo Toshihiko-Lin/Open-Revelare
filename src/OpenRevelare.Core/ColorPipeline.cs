@@ -206,20 +206,29 @@ public static class ColorPipeline
     /// the extended path spreads the same latitude over <c>[0.5, headroom)</c>.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The response gamma folded into <see cref="CineonToDisplay"/>, and the source of its
+    /// contrast. Not the output space's encoding gamma — that is applied afterwards, by
+    /// OutputRender.Encode.
+    ///
+    /// 0.6 is the average gamma of a print stock's D-logE curve: a negative's density difference
+    /// ΔD prints onto positive stock as roughly 0.6·ΔD, so dividing by it asks "how bright would
+    /// this negative density be once printed". It is an EMPIRICAL typical value, not a defined
+    /// constant of the encoding the way 685 and 0.002 are — real stocks and processes vary around
+    /// it. It is therefore the legitimate knob for overall contrast, and lowering it (0.5 lands
+    /// the shadows nearly on 2383's measured points) is a look decision rather than a departure
+    /// from the standard.
+    ///
+    /// Public because it is also the sensitivity the Deep-WB loop needs: a log10 gain the net asks
+    /// for on the rendered picture is <c>ResponseGamma</c>× that much density at the encoding
+    /// (<see cref="WhiteBalance.HighlightSpanStep"/>).
+    /// </summary>
+    public const double ResponseGamma = 0.6;
+
     internal static void CineonToDisplay(float[] data, float shoulderAsymptote)
     {
         const double refWhite = 685.0;
-        // The response gamma folded into the transform, and the source of its contrast. Not the
-        // output space's encoding gamma — that is applied afterwards, by OutputRender.Encode.
-        //
-        // 0.6 is the average gamma of a print stock's D-logE curve: a negative's density
-        // difference ΔD prints onto positive stock as roughly 0.6·ΔD, so dividing by it asks
-        // "how bright would this negative density be once printed". It is an EMPIRICAL typical
-        // value, not a defined constant of the encoding the way 685 and 0.002 are — real stocks
-        // and processes vary around it. It is therefore the legitimate knob for overall contrast,
-        // and lowering it (0.5 lands the shadows nearly on 2383's measured points) is a look
-        // decision rather than a departure from the standard.
-        const double responseGamma = 0.6;
+        const double responseGamma = ResponseGamma;
         const double codeFullScale = 1023.0;
 
         float scale = (float)(codeFullScale * FrameParams.CineonDensityPerCode / responseGamma);
@@ -246,10 +255,12 @@ public static class ColorPipeline
     /// <summary>
     /// Where the toe ends, in the normalised linear domain. Above it the transform is untouched.
     ///
-    /// 0.05 sits just below 18% mid-grey, which lands at 0.0585. That is the binding constraint
-    /// rather than a rounded preference: mid-grey, the mid-tone crossing and the diffuse white are
-    /// all set by the decode and the response gamma, and a toe reaching past 0.0585 would start
-    /// moving them. Everything from mid-grey up passes through unchanged.
+    /// 18% mid-grey (code <see cref="FrameParams.CineonGreyCode"/>, 470) lands at 0.183 in this
+    /// domain; 0.05 corresponds to code ≈ 319, about 1.6 stops below it. The constraint is that
+    /// mid-grey, the mid-tone crossing and the diffuse white are all set by the decode and the
+    /// response gamma alone, so the toe has to end well under 0.183 — and it does, with room.
+    /// Everything from there up passes through unchanged. (An earlier note put mid-grey at 0.0585;
+    /// that figure did not come from this transform — 470 through the decode above gives 0.183.)
     /// </summary>
     private const float ToeKnee = 0.05f;
 

@@ -386,6 +386,7 @@ public partial class MainViewModel
         _pendingSprocketPrompt = false;
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
+        ClearGreyCard();   // and its grey card — a measurement of that roll under that light
         // Rebuild under the reorder guard, so the strip's binding cannot start a switch MID-build.
         // Frames.Clear() pushes null through SelectedItem and the first Frames.Add makes the
         // ListBox auto-select it and push it straight back — a switch that would decode frame 1
@@ -689,6 +690,7 @@ public partial class MainViewModel
             lock (_decoding) _decoding.Clear();
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
+        ClearGreyCard();   // and its grey card — a measurement of that roll under that light
         Frames.Clear();
         // File-name order, not the order the paths arrived in. A folder import is already sorted,
         // but a hand-picked selection comes back in whatever order the platform picker chose, and
@@ -865,8 +867,8 @@ public partial class MainViewModel
         TBaseR = p.TBase[0]; TBaseG = p.TBase[1]; TBaseB = p.TBase[2];
         DMinPerChannel = (double[])p.DMinPerChannel.Clone();
         DMaxPerChannel = (double[])p.DMaxPerChannel.Clone();
-        // Stage-2 的色温/色调滑块已随【色偏修正】一组移除，但存下来的 wb_gains 仍然照常载入、
-        // 照常参与渲染——旧工程的观感因此逐位不变。
+        // 存下来的 wb_gains 照常载入、照常参与渲染，并回显到 Display 的色温/色调滑块——旧工程的
+        // 观感逐位不变。
         //
         // 不折进亮端端点。看上去两者都是逐通道的对数域操作，实际不是：Stage-2 增益是线性域的
         // 【乘法】，等价于给密度【加】一个常数；而端点决定的是【斜率】。加常数与改斜率只能在
