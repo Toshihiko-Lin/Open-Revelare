@@ -387,4 +387,5 @@ After listening to feedback, it was rewritten, three platforms were added, and o
 
 <p align="center">
   <img src="docs/assets/donate-wechat.png" width="220" alt="WeChat Pay">
+  <img src="docs/assets/donate-alipay.png" width="220" alt="Alipay">
 </p>

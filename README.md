@@ -386,4 +386,5 @@ Revelare 最早是自己做着玩的小工具。当时开发花了不少成本�
 
 <p align="center">
   <img src="docs/assets/donate-wechat.png" width="220" alt="微信支付">
+  <img src="docs/assets/donate-alipay.png" width="220" alt="支付宝">
 </p>
