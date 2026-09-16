@@ -79,7 +79,7 @@ public sealed class ExportIccUiPolicyTests
         string summary = options.Summary();
 
         Assert.Contains("DisplayP3", summary, StringComparison.Ordinal);
-        Assert.Contains("强制嵌入 exact DisplayP3 ICC", summary, StringComparison.Ordinal);
+        Assert.Contains("嵌入 DisplayP3 ICC", summary, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -118,12 +118,12 @@ public sealed class ExportIccUiPolicyTests
         Assert.Contains("增益图 JPEG", summary, StringComparison.Ordinal);
         Assert.Contains("+2.3", summary, StringComparison.Ordinal);
         Assert.Contains("基底 DisplayP3", summary, StringComparison.Ordinal);
-        Assert.Contains("强制嵌入 exact DisplayP3 ICC", summary, StringComparison.Ordinal);
+        Assert.Contains("嵌入 DisplayP3 ICC", summary, StringComparison.Ordinal);
         Assert.DoesNotContain("AdobeRGB", summary, StringComparison.Ordinal);
 
         // An sRGB base keeps the ordinary omit choice: readers assume sRGB.
         options.HdrBaseSpace = ColorSpaces.Srgb.Name;
-        Assert.Contains("省略 ICC", options.Summary(), StringComparison.Ordinal);
+        Assert.Contains("不嵌入 ICC", options.Summary(), StringComparison.Ordinal);
 
         // An unknown base name falls back to sRGB rather than to the roll's space.
         options.HdrBaseSpace = "Rec2020";
@@ -144,7 +144,7 @@ public sealed class ExportIccUiPolicyTests
         string summary = options.Summary();
         Assert.Contains("32-bit float TIFF", summary, StringComparison.Ordinal);
         Assert.Contains("HDR 母版 +1.5", summary, StringComparison.Ordinal);
-        Assert.Contains("强制嵌入 exact ICC", summary, StringComparison.Ordinal);
+        Assert.Contains("嵌入 ICC", summary, StringComparison.Ordinal);
     }
 
     public static TheoryData<ColorSpaceDef> NonSrgbDisplaySpaces => new()

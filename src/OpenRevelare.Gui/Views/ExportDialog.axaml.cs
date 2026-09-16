@@ -10,9 +10,9 @@ namespace OpenRevelare.Gui.Views;
 /// Export options, shown before the destination is picked — the format decides the extension the
 /// save dialog should offer, so asking for a filename first would be asking in the wrong order.
 ///
-/// Options that do not apply to the current format are DISABLED, not hidden: a control that
-/// disappears reads as a feature the app lacks, while a greyed one reads as "not for this
-/// format", which is what is actually true.
+/// Options that do not apply to the current format are HIDDEN: the dialog shows only the
+/// parameters of the file it is about to write. (It used to grey them out instead; in practice
+/// the greyed block was noise the eye had to skip every time.)
 ///
 /// The colour space is NOT chosen here any more. It is a render parameter now — Stage 2 runs
 /// inside it — so it lives in the main window next to the other things that change the picture,
@@ -37,18 +37,6 @@ public partial class ExportDialog : Window
     private bool _displayEmbedIccPreference = true;
 
     private bool _syncingIccControl;
-
-    /// <summary>What each space is for, in the hint under the label.</summary>
-    private static string HintFor(ColorSpaceDef s) => s.Name switch
-    {
-        "Rec709" => Loc.T("标准 Cineon 流程的第 4 步目标，Gamma 2.4。色域与 sRGB 相同，反差略高。"),
-        "sRGB" => Loc.T("网页与大多数屏幕的通用选择。不确定就选它。"),
-        "AdobeRGB" => Loc.T("色域比 sRGB 宽，青绿方向尤其明显，适合送印刷或继续修图。在不做色彩管理的软件里看会偏淡。"),
-        // The export dialog describes the FILE, which really does carry the full gamut — unlike the
-        // preview, whose sRGB ceiling is stated on the picker instead.
-        "DisplayP3" => Loc.T("现代屏幕（Apple 设备、多数新款显示器）的宽色域，编码曲线与 sRGB 相同。"),
-        _ => "",
-    };
 
     /// <summary>What the user confirmed. Only meaningful once ShowDialog returned true.</summary>
     public ExportOptions Options { get; private set; } = new();
@@ -93,6 +81,8 @@ public partial class ExportDialog : Window
         IccChk.IsChecked = saved.EmbedIcc;
         DownsampleChk.IsChecked = saved.Downsample;
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
+        SizeLimitChk.IsChecked = saved.LimitFileSize;
+        SizeLimitBox.Value = (decimal)Math.Clamp(saved.MaxFileSizeMb, 0.1d, 1000d);
         ConflictOverwrite.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Overwrite;
         ConflictSkip.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Skip;
         ConflictUnique.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Unique;
@@ -142,6 +132,8 @@ public partial class ExportDialog : Window
             EmbedIcc = icc.EmbedIcc,
             Downsample = DownsampleChk.IsChecked == true,
             MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
+            LimitFileSize = SizeLimitChk.IsChecked == true,
+            MaxFileSizeMb = (double)(SizeLimitBox.Value ?? 10m),
             Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
                      : ConflictSkip.IsChecked == true ? ExportFile.ConflictPolicy.Skip
                      : ExportFile.ConflictPolicy.Unique,
@@ -163,14 +155,14 @@ public partial class ExportDialog : Window
         // controls up, before every named field exists.
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
             || ColorSpaceHint is null || LinearChk is null || IccHint is null
-            || HdrBaseGroup is null || FormatHint is null) return;
+            || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
-        TiffGroup.IsEnabled = !jpeg;
-        JpegGroup.IsEnabled = jpeg;
-        LinearChk.IsEnabled = !jpeg;
+        TiffGroup.IsVisible = !jpeg;
+        JpegGroup.IsVisible = jpeg;
         if (jpeg && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
+        SizeLimitRow.IsEnabled = SizeLimitChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
         // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
@@ -188,32 +180,29 @@ public partial class ExportDialog : Window
             finally { _syncingIccControl = false; }
         }
 
-        // The base-space picker exists only for an HDR roll — an SDR roll has no second rendition
-        // to relate to — and, like the other per-format groups, greys out rather than vanishing
-        // when the format is TIFF.
-        HdrBaseGroup.IsVisible = IsHdr;
-        HdrBaseGroup.IsEnabled = gainMap;
+        // The base-space picker exists only for a gain-map JPEG — an SDR roll has no second
+        // rendition to relate to, and a TIFF of an HDR roll is the master, not a container.
+        HdrBaseGroup.IsVisible = gainMap;
 
         FormatHint.Text = IsHdr
-            ? Loc.F($"HDR 已开（+{_hdrLimitStops:0.0} 档）：TIFF 写成 32-bit float 线性母版；JPEG 写成增益图 JPEG——SDR 基底加一张增益图，任何看图软件都能打开，HDR 屏上恢复高光，余量不足的屏幕按比例回落。")
-            : Loc.T("普通输出使用 16-bit TIFF；场景线性输出自动使用 32-bit float TIFF 保留超范围分量。JPEG 适合直接分享。");
+            ? Loc.F($"HDR 已开（+{_hdrLimitStops:0.0} 档）：TIFF 是 32-bit float 线性母版；JPEG 是增益图 JPEG，任何看图软件都能打开，HDR 屏上还原高光。")
+            : Loc.T("TIFF 保留全部层次，适合存档或继续修图；JPEG 适合直接分享。");
 
         ColorSpaceHint.Text = linear
-            ? Loc.T("场景线性导出不经过第 4 步；以 32-bit float ACEScg 保留负值和大于 1 的通道。")
+            ? Loc.T("场景线性 ACEScg，输出空间不参与。")
             : hdrMaster
-                ? Loc.T("HDR 母版：linear extended sRGB 载体，线性、无上界、不裁色域（D-024）。输出空间不参与。")
+                ? Loc.T("HDR 母版为线性扩展 sRGB，不裁色域；输出空间不参与。")
                 : gainMap
-                    ? Loc.T("HDR 渲染本身没有输出空间；增益图 JPEG 的 SDR 基底要装进一个显示空间，在下面选。")
-                    : Loc.F($"{DisplayName(_space)}——在主窗口选定，导出即所见。{HintFor(_space)}");
+                    ? Loc.T("增益图 JPEG 的基底空间在下面选。")
+                    : Loc.F($"{DisplayName(_space)}，在主窗口选定，导出即所见。");
 
-        ColorSpaceDef fileSpace = gainMap ? SelectedHdrBaseSpace : _space;
         IccHint.Text = linear
-            ? Loc.T("必须嵌入与像素一致的 deterministic linear ACEScg exact ICC。")
+            ? Loc.T("场景线性文件必须嵌入 ACEScg 配置文件。")
             : hdrMaster
-                ? Loc.T("必须嵌入载体的 exact ICC：float32 线性数据离开这个配置文件无法被正确解读。")
+                ? Loc.T("HDR 母版必须嵌入配置文件，否则无法被正确解读。")
                 : icc.IsForced
-                    ? Loc.F($"为避免文件被按 sRGB 误解，必须嵌入与像素一致的 exact {fileSpace.Name} ICC。")
-                    : Loc.T("仅 exact display-referred sRGB 可省略 ICC；勾选时嵌入与像素一致的 exact sRGB ICC。");
+                    ? Loc.T("非 sRGB 文件必须嵌入配置文件，以免被当作 sRGB 显示。")
+                    : Loc.T("sRGB 可不嵌入：看图软件默认按 sRGB 处理。");
 
         SummaryLbl.Text = Collect().Summary();
     }

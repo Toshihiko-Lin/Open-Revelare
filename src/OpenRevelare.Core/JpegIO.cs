@@ -60,6 +60,130 @@ public static class JpegIO
     }
 
     /// <summary>
+    /// <see cref="ExportJpeg(RenderedFrame, string, int, string?, ExportProfilePolicy)"/> under a
+    /// byte ceiling: the file is encoded to memory and, when it is over
+    /// <paramref name="maxBytes"/>, re-encoded at a lower quality, then at a smaller size, until
+    /// it fits — see <see cref="FitToSize"/> for the order. Returns what was actually written.
+    /// </summary>
+    public static JpegFit ExportJpeg(
+        RenderedFrame frame,
+        string path,
+        int quality,
+        long maxBytes,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (frame.Encoding.Reference != ColorReference.DisplayReferred
+            || frame.Encoding.Transfer != TransferState.ProfileEncoded
+            || frame.Encoding.Range != NumericRange.Normalized)
+        {
+            throw new NotSupportedException(
+                "JPEG export requires normalized, display-referred, profile-encoded pixels; " +
+                "scene-linear JPEG is not supported.");
+        }
+
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
+        ImageBuffer full = frame.Pixels;
+        // One downsampled copy per size step, reused across the quality search at that step.
+        ImageBuffer scaled = full;
+        var (file, fit) = FitToSize(full.Width, full.Height, quality, maxBytes, (maxEdge, q) =>
+        {
+            if (Math.Max(scaled.Width, scaled.Height) > maxEdge) scaled = Resample.Box(full, maxEdge);
+            return Encode(scaled, q, description, profileBytes, xmp: null);
+        });
+        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+        return fit;
+    }
+
+    /// <summary>
+    /// What a size-limited JPEG export actually wrote, against what was asked for: the quality
+    /// used, the long edge the picture ended up at (equal to the source's when it was not
+    /// shrunk for size), and the file's length.
+    /// </summary>
+    public sealed record JpegFit(int Quality, int LongEdge, long Bytes)
+    {
+        /// <summary>The quality the export was asked for, before any reduction.</summary>
+        public int RequestedQuality { get; init; }
+
+        /// <summary>The long edge the export would have had without the size limit.</summary>
+        public int RequestedLongEdge { get; init; }
+
+        public bool QualityReduced => Quality < RequestedQuality;
+        public bool Shrunk => LongEdge < RequestedLongEdge;
+    }
+
+    /// <summary>The lowest quality the size fit will go to before it starts shrinking the
+    /// picture instead. The same floor as the export dialog's slider: below it, JPEG artefacts
+    /// cost more than the pixels a smaller picture gives up.</summary>
+    public const int MinFitQuality = 40;
+
+    /// <summary>
+    /// Finds an encode of at most <paramref name="maxBytes"/>. <paramref name="encode"/> is
+    /// called with a long-edge ceiling (the source's own edge means "unscaled") and a quality,
+    /// and must return the complete file.
+    ///
+    /// <para>
+    /// Order: quality first, size second. At the requested size the quality is walked down by
+    /// bisection to <see cref="MinFitQuality"/>; only when the floor is still too big does the
+    /// picture shrink one integer box factor, and the quality search starts over from the
+    /// requested value at the new size. So the result is the LARGEST picture at which the floor
+    /// quality fits, at the HIGHEST quality that fits at that size — the fewest pixels given up
+    /// for the ceiling. Every encode is a full pass over the image, so the search is kept to a
+    /// handful: at most 2 + log2(quality range) encodes per size step.
+    /// </para>
+    /// </summary>
+    public static (byte[] File, JpegFit Fit) FitToSize(
+        int width,
+        int height,
+        int quality,
+        long maxBytes,
+        Func<int, int, byte[]> encode)
+    {
+        if (maxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        int sourceEdge = Math.Max(width, height);
+        int requested = Math.Clamp(quality, MinFitQuality, 100);
+
+        for (int factor = 1; ; factor++)
+        {
+            // Resample.Box picks its factor as ceil(edge / maxEdge); this ceiling makes it pick
+            // exactly `factor`, so the size steps are the same ladder the long-edge option uses.
+            int maxEdge = (sourceEdge + factor - 1) / factor;
+            if (factor > 1 && (width / factor < 1 || height / factor < 1 || maxEdge < 64))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot fit the JPEG under {maxBytes} bytes even at quality {MinFitQuality} " +
+                    $"and a long edge of {(sourceEdge + factor - 2) / (factor - 1)} px.");
+            }
+            int edge = Math.Min(sourceEdge, maxEdge);
+
+            byte[] best = encode(maxEdge, requested);
+            if (best.Length <= maxBytes) return (best, Result(requested, best));
+
+            byte[] floor = encode(maxEdge, MinFitQuality);
+            if (floor.Length > maxBytes) continue;   // even the floor is too big: shrink
+
+            // Highest fitting quality in [MinFitQuality, requested): floor fits, requested does not.
+            int lo = MinFitQuality, hi = requested;
+            best = floor;
+            while (hi - lo > 1)
+            {
+                int mid = (lo + hi) / 2;
+                byte[] candidate = encode(maxEdge, mid);
+                if (candidate.Length <= maxBytes) { lo = mid; best = candidate; }
+                else hi = mid;
+            }
+            return (best, Result(lo, best));
+
+            JpegFit Result(int q, byte[] file) => new(q, edge, file.LongLength)
+            {
+                RequestedQuality = requested,
+                RequestedLongEdge = sourceEdge,
+            };
+        }
+    }
+
+    /// <summary>
     /// A gain-map JPEG (ISO 21496-1 / Adobe gain map): <paramref name="sdrBase"/> as an ordinary
     /// JPEG any reader shows, plus the map that takes it back to <paramref name="hdr"/> on a
     /// display with headroom. See <see cref="HdrGainMap"/> for what relates the two and
@@ -85,8 +209,59 @@ public static class JpegIO
         string? description = null,
         ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
     {
-        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target);
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(sdrBase, profilePolicy);
+        byte[] file = EncodeGainMapJpeg(
+            sdrBase, hdr, baseSpace, target, quality, description, profileBytes);
+        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+    }
+
+    /// <summary>
+    /// <see cref="ExportGainMapJpeg(RenderedFrame, RenderedFrame, ColorSpaceDef, OutputTarget, string, int, string?, ExportProfilePolicy)"/>
+    /// under a byte ceiling, by the same search as the plain export
+    /// (<see cref="FitToSize"/>). The ceiling is on the WHOLE file — base plus map — since that is
+    /// what a size limit means to whoever set it; both streams share one quality, and a size step
+    /// shrinks both renditions together and recomputes the map from the shrunk pair, so the map
+    /// keeps describing the base it is attached to.
+    /// </summary>
+    public static JpegFit ExportGainMapJpeg(
+        RenderedFrame sdrBase,
+        RenderedFrame hdr,
+        ColorSpaceDef baseSpace,
+        OutputTarget target,
+        string path,
+        int quality,
+        long maxBytes,
+        string? description = null,
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+    {
+        byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(sdrBase, profilePolicy);
+        RenderedFrame scaledBase = sdrBase, scaledHdr = hdr;
+        var (file, fit) = FitToSize(
+            sdrBase.Pixels.Width, sdrBase.Pixels.Height, quality, maxBytes, (maxEdge, q) =>
+        {
+            if (Math.Max(scaledBase.Pixels.Width, scaledBase.Pixels.Height) > maxEdge)
+            {
+                scaledBase = sdrBase.WithPixels(Resample.Box(sdrBase.Pixels, maxEdge));
+                scaledHdr = hdr.WithPixels(Resample.Box(hdr.Pixels, maxEdge));
+            }
+            return EncodeGainMapJpeg(
+                scaledBase, scaledHdr, baseSpace, target, q, description, profileBytes);
+        });
+        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+        return fit;
+    }
+
+    /// <summary>The complete gain-map file for one base/HDR pair at one quality.</summary>
+    private static byte[] EncodeGainMapJpeg(
+        RenderedFrame sdrBase,
+        RenderedFrame hdr,
+        ColorSpaceDef baseSpace,
+        OutputTarget target,
+        int quality,
+        string? description,
+        byte[]? profileBytes)
+    {
+        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target);
 
         // The map first, finished: the base's XMP has to state the map's final byte length.
         byte[] gainMapJpeg = GainMapJpegContainer.WithIsoMetadata(
@@ -104,8 +279,7 @@ public static class JpegIO
             description,
             profileBytes,
             xmp: GainMapJpegContainer.PrimaryXmp(gainMapJpeg.Length));
-        byte[] file = GainMapJpegContainer.Compose(primaryJpeg, gainMapJpeg);
-        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+        return GainMapJpegContainer.Compose(primaryJpeg, gainMapJpeg);
     }
 
     private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,

@@ -171,6 +171,24 @@ public sealed class ExportOptions
     /// <summary>Ceiling for the long edge when <see cref="Downsample"/> is on.</summary>
     public int MaxLongEdge { get; set; } = 2048;
 
+    /// <summary>
+    /// Keep a JPEG under <see cref="MaxFileSizeMb"/>. JPEG only: it is the one container with a
+    /// quality knob, so a ceiling can be met by re-encoding rather than by changing what the file
+    /// is. A 16-bit TIFF's size is its pixel count and the option is greyed out for it.
+    /// </summary>
+    public bool LimitFileSize { get; set; }
+
+    /// <summary>The ceiling, in MiB (1 MB = 1024 × 1024 bytes — what Windows Explorer shows).</summary>
+    public double MaxFileSizeMb { get; set; } = 10d;
+
+    /// <summary>The byte ceiling the JPEG encoder is held to, null when none applies: the option
+    /// is off, or the file is not a JPEG.</summary>
+    [JsonIgnore]
+    public long? MaxFileBytes =>
+        LimitFileSize && Format == ExportFormat.Jpeg && !ExportLinear && MaxFileSizeMb > 0d
+            ? (long)Math.Round(MaxFileSizeMb * 1024d * 1024d)
+            : null;
+
     /// <summary>What a roll export does when the name is taken. Single-frame export ignores this —
     /// its save dialog already asked.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -196,13 +214,14 @@ public sealed class ExportOptions
             ? Loc.F($"JPEG 品质 {JpegQuality}")
             : Loc.F($"16-bit TIFF · {compression}");
         string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
+        if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");
         if (ExportLinear)
-            return $"{format} · {size} · " + Loc.T("场景线性 ACEScg · 强制嵌入 exact ICC");
+            return $"{format} · {size} · " + Loc.T("场景线性 ACEScg · 嵌入 ICC");
         if (IsHdr && Format != ExportFormat.Jpeg)
         {
             // The master: the carrier itself, which only its own profile describes.
             return Loc.F($"32-bit float TIFF · {compression}") + $" · {size} · "
-                + Loc.F($"HDR 母版 +{HdrLimitStops:0.0} 档 · linear extended sRGB · 强制嵌入 exact ICC");
+                + Loc.F($"HDR 母版 +{HdrLimitStops:0.0} 档 · 嵌入 ICC");
         }
         if (WritesGainMap)
             format = Loc.F($"增益图 JPEG 品质 {JpegQuality}") + " · " + Loc.F($"HDR +{HdrLimitStops:0.0} 档");
@@ -214,10 +233,10 @@ public sealed class ExportOptions
             exportLinear: false,
             EmbedIcc);
         string profile = icc.IsForced
-            ? Loc.F($"强制嵌入 exact {FileDisplaySpace.Name} ICC")
+            ? Loc.F($"嵌入 {FileDisplaySpace.Name} ICC")
             : icc.EmbedIcc
-                ? Loc.T("嵌入 exact sRGB ICC")
-                : Loc.T("省略 ICC（仅限 exact sRGB）");
+                ? Loc.T("嵌入 sRGB ICC")
+                : Loc.T("不嵌入 ICC");
         return $"{format} · {size} · {space} · {profile}";
     }
 }

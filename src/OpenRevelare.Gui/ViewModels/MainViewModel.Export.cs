@@ -33,13 +33,13 @@ public partial class MainViewModel
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var exportBox = SplitCropOf(frame);
-            await Task.Run(() =>
+            JpegIO.JpegFit? fit = await Task.Run(() =>
             {
                 var (working, boxed) = LoadForExport(
                     srcPath, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: true);
-                RenderAndWriteExport(working, boxed, path, opt, pipelineVersion);
+                return RenderAndWriteExport(working, boxed, path, opt, pipelineVersion);
             });
-            StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}");
+            StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}") + DescribeFit(fit);
         }
         catch (Exception ex)
         {

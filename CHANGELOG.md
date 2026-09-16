@@ -14,6 +14,8 @@
 
 - **右侧面板每个参数组是一张卡片，滑条会告诉你往哪边拖是什么**。Cineon 按 D_min → D_max → 色偏修正 标了 ①②③，镜头校正挪到最后；Display 里曝光 / 反差 / 饱和度归入「基本」，「色调」组改叫「影调」以免和色调滑条撞名。色温、色调、曝光、影调四点、饱和度和逐通道 R/G/B 的轨道带方向色，居中的滑条从零点起填充，动过的参数标签会亮起。
 
+- **JPEG 导出可以限定文件不超过多少 MB**。导出窗口「JPEG 品质」下勾选「限制文件大小」并填一个数；超限时先从所选品质往下降（最低 40），仍超限再按整数倍缩小尺寸，实际用到的品质、尺寸和大小在状态栏报告。整卷导出逐帧各自守限。TIFF 无品质可降，此项置灰。
+
 **修复**
 
 - **Windows 上拖裁切框、拉平线、滑块时预览不再等鼠标停下才更新**。拖动中合成好的帧此前被当作过期丢弃；现在算完即上屏，全屏裁切拖动每步从 ~150 ms 到 ~20 ms。macOS 同路径一并修复，实机待验。
@@ -33,6 +35,8 @@
 - **Sprocket mask and Geometry / crop now stay pinned at the bottom of the right-hand panel, whichever of Cineon / Display is open.** Neither is a colour parameter, so they no longer live inside the Cineon tab; the panel also says "more below, scroll down" when controls are hidden past the fold.
 
 - **Every parameter group in the right-hand panel is a card, and the sliders show which way is which.** The Cineon steps are numbered ①②③ in the order D_min → D_max → cast correction, and lens correction moves to the end; in Display, Exposure / Contrast / Saturation join a Basic card and the tone group is renamed so it no longer shares a name with the Tint slider. Temperature, tint, exposure, the four tone points, saturation and the per-channel R/G/B tracks carry a direction colour, centred sliders fill from zero, and a parameter that has been moved lights its label.
+
+- **A JPEG export can be held under a size in MB.** Tick “Limit file size” under JPEG quality in the export dialog and enter a number; when the file is over, quality is lowered first (down to 40), and only if that is still too big is the picture shrunk by whole integer factors. The quality, size and bytes actually used are reported in the status bar, and a roll export holds every frame to the limit individually. TIFF has no quality to give up, so the option is greyed out for it.
 
 **Fixed**
 

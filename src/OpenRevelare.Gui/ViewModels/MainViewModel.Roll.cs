@@ -1285,8 +1285,9 @@ public partial class MainViewModel
     /// <summary>
     /// Renders and writes one export. A JPEG of an extended render is a gain-map JPEG and needs a
     /// second, SDR render of the same frame; everything else is one render and one write.
+    /// Returns what a size-limited JPEG actually settled on, null for every other export.
     /// </summary>
-    private void RenderAndWriteExport(
+    private JpegIO.JpegFit? RenderAndWriteExport(
         WorkingFrame working,
         FrameParams ep,
         string path,
@@ -1298,11 +1299,7 @@ public partial class MainViewModel
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
         bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
             && rendered.Encoding.Range == NumericRange.Extended;
-        if (!gainMap)
-        {
-            WriteExport(rendered, path, opt);
-            return;
-        }
+        if (!gainMap) return WriteExport(rendered, path, opt);
 
         ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
         RenderedFrame sdrBase = Pipeline.Render(
@@ -1312,6 +1309,18 @@ public partial class MainViewModel
             sdrBase = sdrBase.WithPixels(Resample.Box(sdrBase.Pixels, opt.MaxLongEdge));
             rendered = rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge));
         }
+        if (opt.MaxFileBytes is { } gainMapCeiling)
+        {
+            return JpegIO.ExportGainMapJpeg(
+                sdrBase,
+                rendered,
+                baseSpace,
+                ep.ResolvedOutputTarget,
+                path,
+                opt.JpegQuality,
+                gainMapCeiling,
+                profilePolicy: ProfilePolicyFor(opt));
+        }
         JpegIO.ExportGainMapJpeg(
             sdrBase,
             rendered,
@@ -1320,6 +1329,7 @@ public partial class MainViewModel
             path,
             opt.JpegQuality,
             profilePolicy: ProfilePolicyFor(opt));
+        return null;
     }
 
     /// <summary>
@@ -1332,7 +1342,7 @@ public partial class MainViewModel
             ? ExportProfilePolicy.EmbedExact
             : ExportProfilePolicy.OmitExactSrgb;
 
-    private static void WriteExport(RenderedFrame rendered, string path, ExportOptions opt)
+    private static JpegIO.JpegFit? WriteExport(RenderedFrame rendered, string path, ExportOptions opt)
     {
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
         // whereas shrinking the negative first would throw away detail the render still needed
@@ -1343,17 +1353,43 @@ public partial class MainViewModel
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
         if (opt.Format == ExportFormat.Jpeg)
+        {
+            // The size ceiling applies on top of the long-edge one: the encoder starts from the
+            // already-shrunk picture and only shrinks further when the floor quality is still over.
+            if (opt.MaxFileBytes is { } ceiling)
+                return JpegIO.ExportJpeg(
+                    output,
+                    path,
+                    opt.JpegQuality,
+                    ceiling,
+                    profilePolicy: profilePolicy);
             JpegIO.ExportJpeg(
                 output,
                 path,
                 opt.JpegQuality,
                 profilePolicy: profilePolicy);
-        else
-            TiffIO.ExportTiff(
-                output,
-                path,
-                opt.TiffCompression,
-                profilePolicy: profilePolicy);
+            return null;
+        }
+        TiffIO.ExportTiff(
+            output,
+            path,
+            opt.TiffCompression,
+            profilePolicy: profilePolicy);
+        return null;
+    }
+
+    /// <summary>
+    /// What the size limit did to one file, for the status bar: nothing to say when the file fit
+    /// as asked, otherwise the quality and — when the picture had to shrink — the long edge it
+    /// settled on, and the size it landed at.
+    /// </summary>
+    internal static string DescribeFit(JpegIO.JpegFit? fit)
+    {
+        if (fit is null || (!fit.QualityReduced && !fit.Shrunk)) return "";
+        string mb = $"{fit.Bytes / (1024d * 1024d):0.#} MB";
+        return fit.Shrunk
+            ? " · " + Loc.F($"实际 {mb}（品质 {fit.Quality}，长边 {fit.LongEdge}px）")
+            : " · " + Loc.F($"实际 {mb}（品质 {fit.Quality}）");
     }
 
     /// <summary>Export every frame at full resolution into a folder, each with its own params.</summary>
@@ -1371,7 +1407,7 @@ public partial class MainViewModel
             var reserved = ExportFile.NewReservations();
             string extension = opt.Extension;
             ExportFile.CleanupStale(folder);
-            int renamed = 0, skipped = 0;
+            int renamed = 0, skipped = 0, qualityReduced = 0, shrunk = 0;
             for (int i = 0; i < frames.Count; i++)
             {
                 RollFrame f = frames[i];
@@ -1391,16 +1427,20 @@ public partial class MainViewModel
                     renamed++;
                 FrameParams ep = ForExport(p, opt);
                 var exportBox = SplitCropOf(f);
-                await Task.Run(() =>
+                JpegIO.JpegFit? fit = await Task.Run(() =>
                 {
                     var (working, boxed) = LoadForExport(
                         f.Path, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: false);
-                    RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion);
+                    return RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion);
                 });
+                if (fit is { Shrunk: true }) shrunk++;
+                else if (fit is { QualityReduced: true }) qualityReduced++;
             }
             string detail = "";
             if (renamed > 0) detail += Loc.F($"，其中 {renamed} 帧重名已另存");
             if (skipped > 0) detail += Loc.F($"，跳过 {skipped} 帧同名");
+            if (qualityReduced > 0) detail += Loc.F($"，{qualityReduced} 帧为守住大小降了品质");
+            if (shrunk > 0) detail += Loc.F($"，{shrunk} 帧为守住大小缩了尺寸");
             StatusText = Loc.F($"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}");
         }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
