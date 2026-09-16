@@ -51,6 +51,43 @@
                     <SolidColorBrush x:Key="HoverSoftBrush">#14FFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="PressSoftBrush">#0AFFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="WarnBrush">#C09A52</SolidColorBrush>
+                    <!-- Slider track gradients (SliderRow.TrackBrush). Saturation is held down
+                         to the panel's graphite register: the colour is a direction cue read
+                         up close, not a stripe that competes with the photo. -->
+                    <LinearGradientBrush x:Key="TrackTempBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#4E6E9C" />
+                        <GradientStop Offset="0.5" Color="#5E6268" />
+                        <GradientStop Offset="1" Color="#A8915A" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackTintBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#5C8C62" />
+                        <GradientStop Offset="0.5" Color="#5E6268" />
+                        <GradientStop Offset="1" Color="#9C6496" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackLumBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#26282B" />
+                        <GradientStop Offset="1" Color="#B4B8BE" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackSatBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#5A5D62" />
+                        <GradientStop Offset="0.5" Color="#6C7076" />
+                        <GradientStop Offset="0.62" Color="#A46464" />
+                        <GradientStop Offset="0.75" Color="#A49C5C" />
+                        <GradientStop Offset="0.88" Color="#5E9C68" />
+                        <GradientStop Offset="1" Color="#6678B4" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackRBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#3A2E2E" />
+                        <GradientStop Offset="1" Color="#A85E5E" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackGBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#2E3A30" />
+                        <GradientStop Offset="1" Color="#5E9C68" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackBBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#2E323A" />
+                        <GradientStop Offset="1" Color="#6678B4" />
+                    </LinearGradientBrush>
                     <Color x:Key="SystemAccentColor">#6E8CA6</Color>
                     <Color x:Key="SystemAccentColorDark1">#6E8CA6</Color>
                     <Color x:Key="SystemAccentColorDark2">#5D7890</Color>
@@ -78,6 +115,40 @@
                     <SolidColorBrush x:Key="HoverSoftBrush">#0E000000</SolidColorBrush>
                     <SolidColorBrush x:Key="PressSoftBrush">#16000000</SolidColorBrush>
                     <SolidColorBrush x:Key="WarnBrush">#8A6A18</SolidColorBrush>
+                    <LinearGradientBrush x:Key="TrackTempBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#6A8CBE" />
+                        <GradientStop Offset="0.5" Color="#B8BCC2" />
+                        <GradientStop Offset="1" Color="#C8AC64" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackTintBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#78AE7E" />
+                        <GradientStop Offset="0.5" Color="#B8BCC2" />
+                        <GradientStop Offset="1" Color="#BC86B6" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackLumBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#3A3D42" />
+                        <GradientStop Offset="1" Color="#DADDE1" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackSatBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#A4A8AE" />
+                        <GradientStop Offset="0.5" Color="#B8BCC2" />
+                        <GradientStop Offset="0.62" Color="#D08A8A" />
+                        <GradientStop Offset="0.75" Color="#CCC27E" />
+                        <GradientStop Offset="0.88" Color="#84C08E" />
+                        <GradientStop Offset="1" Color="#8C9CD4" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackRBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#E2CFCF" />
+                        <GradientStop Offset="1" Color="#C46A6A" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackGBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#CFE0D2" />
+                        <GradientStop Offset="1" Color="#6AAE76" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="TrackBBrush" StartPoint="0%,50%" EndPoint="100%,50%">
+                        <GradientStop Offset="0" Color="#D0D5E2" />
+                        <GradientStop Offset="1" Color="#7286C8" />
+                    </LinearGradientBrush>
                     <Color x:Key="SystemAccentColor">#47698A</Color>
                     <Color x:Key="SystemAccentColorDark1">#3E5D7B</Color>
                     <Color x:Key="SystemAccentColorDark2">#35506A</Color>
@@ -144,20 +215,46 @@
                                     <RepeatButton x:Name="PART_IncreaseButton" Focusable="False"
                                                   Theme="{StaticResource SliderEmpty}" />
                                 </Track.IncreaseButton>
-                                <Thumb x:Name="thumb" Width="13" Height="13" Padding="0"
+                                <!-- 14, and SliderRow.ThumbSize must agree: the row places its
+                                     zero tick and centre fill from that number. -->
+                                <Thumb x:Name="thumb" Width="14" Height="14" Padding="0"
                                        Theme="{StaticResource SliderThumb}" />
                             </Track>
                         </Grid>
                     </ControlTemplate>
                 </Setter>
+                <!-- .gradient (SliderRow.TrackBrush set): the Background IS the message, so the
+                     track thickens to make it legible and the left-anchored fill gets out of
+                     its way. Opacity rather than a template swap keeps the button's hit area,
+                     so clicking the track still steps the value. -->
+                <Style Selector="^.gradient /template/ Border#TrackBackground">
+                    <Setter Property="Height" Value="6" />
+                    <Setter Property="CornerRadius" Value="3" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource GrooveBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                </Style>
+                <Style Selector="^.gradient /template/ RepeatButton#PART_DecreaseButton">
+                    <Setter Property="Opacity" Value="0" />
+                </Style>
+                <!-- .bipolar (SliderRow.Bipolar): the fill grows from the neutral point, which
+                     the row draws itself; the left-anchored one would contradict it. -->
+                <Style Selector="^.bipolar /template/ RepeatButton#PART_DecreaseButton">
+                    <Setter Property="Opacity" Value="0" />
+                </Style>
             </ControlTheme>
 
-            <!-- ══ Flat Expander section (hairline caption, no box) ═══════════════ -->
+            <!-- ══ Section card ═══════════════════════════════════════════════════
+                 One parameter module = one card: a Panel2 surface with a hairline edge,
+                 the caption on top, the controls inset below. The caption row is the
+                 whole card's width so the module reads as one object from any edge; the
+                 chevron sits at the far right, Lightroom-style, so captions and their
+                 optional step badges line up down the left. -->
             <ControlTheme x:Key="SectionHeader" TargetType="ToggleButton">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
                 <Setter Property="Background" Value="Transparent" />
-                <Setter Property="Padding" Value="0,8" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinHeight" Value="34" />
                 <Setter Property="Cursor" Value="Hand" />
                 <!-- Background/Margin are literal, NOT TemplateBindings: the global
                      `Style Selector="ToggleButton"` below wins over a ControlTheme setter,
@@ -165,17 +262,87 @@
                      12,6 padding) onto every section caption. -->
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border Background="Transparent"
-                                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
-                            <Grid ColumnDefinitions="18,*" Margin="0,8">
-                                <ctl:Icon x:Name="chev" Grid.Column="0" Width="12" Height="12"
+                        <Border x:Name="face" Background="Transparent" Padding="8,0" CornerRadius="5,5,0,0">
+                            <Grid ColumnDefinitions="Auto,*,Auto" MinHeight="34">
+                                <!-- Step badge: the Expander's Tag, shown only when set. The
+                                     Cineon tab numbers its three calibration cards with it. -->
+                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="9"
+                                        Margin="0,0,8,0" VerticalAlignment="Center"
+                                        Background="{DynamicResource AccentSoftBrush}"
+                                        IsVisible="{TemplateBinding Tag, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                    <TextBlock Text="{TemplateBinding Tag}" FontSize="10.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource AccentBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
+                                                  VerticalAlignment="Center"
+                                                  FontWeight="SemiBold" FontSize="12"
+                                                  Foreground="{DynamicResource TextBrush}" />
+                                <!-- 16, the Icon authoring grid: the glyph is drawn unscaled, so a
+                                     smaller box does not shrink it, it crops it and moves the
+                                     rotation centre off the glyph. -->
+                                <ctl:Icon x:Name="chev" Grid.Column="2" Width="16" Height="16"
+                                          Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
+                                          Foreground="{DynamicResource TextMuteBrush}"
+                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%" />
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter>
+                <Style Selector="^:checked /template/ ctl|Icon#chev">
+                    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+                </Style>
+                <Style Selector="^:pointerover /template/ Border#face">
+                    <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+                </Style>
+                <Style Selector="^:pointerover /template/ ctl|Icon#chev">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                </Style>
+            </ControlTheme>
+
+            <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="{DynamicResource Panel2Brush}"
+                                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                                CornerRadius="6" ClipToBounds="True">
+                            <StackPanel>
+                                <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
+                                              IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
+                                              Content="{TemplateBinding Header}"
+                                              Tag="{TemplateBinding Tag}" />
+                                <ContentPresenter x:Name="PART_ContentPresenter"
+                                                  IsVisible="{TemplateBinding IsExpanded}"
+                                                  Content="{TemplateBinding Content}"
+                                                  Margin="8,0,8,8" />
+                            </StackPanel>
+                        </Border>
+                    </ControlTemplate>
+                </Setter>
+            </ControlTheme>
+
+            <!-- Nested detail inside a card (逐通道): a hairline caption, no second box —
+                 a card within a card would out-rank the module it belongs to. -->
+            <ControlTheme x:Key="SubSectionHeader" TargetType="ToggleButton">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinHeight" Value="30" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <Border Background="Transparent" Padding="0,2,0,0"
+                                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+                            <Grid ColumnDefinitions="20,*" MinHeight="28">
+                                <ctl:Icon x:Name="chev" Grid.Column="0" Width="16" Height="16" Margin="-2,0,0,0"
                                           Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
                                           Foreground="{DynamicResource TextMuteBrush}"
                                           VerticalAlignment="Center" RenderTransformOrigin="50%,50%" />
                                 <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
                                                   VerticalAlignment="Center"
-                                                  FontWeight="SemiBold" FontSize="12"
-                                                  Foreground="{DynamicResource TextBrush}" />
+                                                  FontSize="12"
+                                                  Foreground="{DynamicResource TextDimBrush}" />
                             </Grid>
                         </Border>
                     </ControlTemplate>
@@ -187,18 +354,17 @@
                     <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
                 </Style>
             </ControlTheme>
-
-            <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
+            <ControlTheme x:Key="SubExpander" TargetType="Expander">
                 <Setter Property="Template">
                     <ControlTemplate>
                         <StackPanel>
-                            <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
+                            <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SubSectionHeader}"
                                           IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
                                           Content="{TemplateBinding Header}" />
                             <ContentPresenter x:Name="PART_ContentPresenter"
                                               IsVisible="{TemplateBinding IsExpanded}"
                                               Content="{TemplateBinding Content}"
-                                              Margin="6,8,0,12" />
+                                              Margin="0,0,0,2" />
                         </StackPanel>
                     </ControlTemplate>
                 </Setter>
@@ -222,7 +388,7 @@
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         </Style>
         <Style Selector="Expander">
-            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Margin" Value="0,3" />
         </Style>
 
         <!-- ══ Menu bar ═══════════════════════════════════════════════════════ -->
@@ -352,22 +518,41 @@
             <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
         </Style>
 
-        <!-- ══ Tabs: flat, accent underline on the selected one ═══════════════ -->
+        <!-- ══ Tabs: an equal-width stage switch, accent underline on the open one ═══
+             The two tabs are the two stages of the pipeline, so they share the strip
+             half-and-half like a segmented control (the UniformGrid ItemsPanel is set on
+             the TabControl itself, in MainWindow). -->
         <Style Selector="TabControl">
             <Setter Property="Background" Value="Transparent" />
         </Style>
+        <!-- The open stage is lit (the panel's own surface, so it runs into the page below);
+             the other sits on the darker Panel2 strip. Background goes on the TabItem itself,
+             not its template Border: the Border template-binds Background, and a template
+             binding outranks a plain style setter — only pseudo-class setters beat it. -->
         <Style Selector="TabItem">
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="13.5" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
-            <Setter Property="Padding" Value="16,9" />
+            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+            <!-- Fluent draws the selected pipe INSIDE the padding, so a roomy Padding lifts
+                 it off the strip's edge. Bottom padding therefore moves onto the presenter,
+                 leaving the pipe flush with the edge. -->
+            <Setter Property="Padding" Value="16,12,16,0" />
             <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TabItem /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
         <Style Selector="TabItem:selected">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
         </Style>
         <Style Selector="TabItem:selected /template/ Border#PART_SelectedPipe">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Height" Value="2" />
         </Style>
         <Style Selector="TabItem:pointerover /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />

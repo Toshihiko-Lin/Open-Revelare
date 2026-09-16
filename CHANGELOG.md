@@ -12,6 +12,8 @@
 
 - **齿孔遮罩和几何 / 裁切固定在右侧面板底部，切换 Cineon / Display 标签时一直在**。这两组和色彩无关，不再藏在 Cineon 标签里；面板有内容被挡在下方时会提示「还有内容，向下滚动」。
 
+- **右侧面板每个参数组是一张卡片，滑条会告诉你往哪边拖是什么**。Cineon 按 D_min → D_max → 色偏修正 标了 ①②③，镜头校正挪到最后；Display 里曝光 / 反差 / 饱和度归入「基本」，「色调」组改叫「影调」以免和色调滑条撞名。色温、色调、曝光、影调四点、饱和度和逐通道 R/G/B 的轨道带方向色，居中的滑条从零点起填充，动过的参数标签会亮起。
+
 **修复**
 
 - **Windows 上拖裁切框、拉平线、滑块时预览不再等鼠标停下才更新**。拖动中合成好的帧此前被当作过期丢弃；现在算完即上屏，全屏裁切拖动每步从 ~150 ms 到 ~20 ms。macOS 同路径一并修复，实机待验。
@@ -29,6 +31,8 @@
 - **“Deep white balance” is renamed “Smart cast correction”, and converges faster and more steadily.** Calibration has no notion of white balance; the button solves a cast. The step is now derived for the actual display rendering, so a frame settles in a few rounds; the best round is kept and its residual reported, and brightness stays at the calibrated value throughout.
 
 - **Sprocket mask and Geometry / crop now stay pinned at the bottom of the right-hand panel, whichever of Cineon / Display is open.** Neither is a colour parameter, so they no longer live inside the Cineon tab; the panel also says "more below, scroll down" when controls are hidden past the fold.
+
+- **Every parameter group in the right-hand panel is a card, and the sliders show which way is which.** The Cineon steps are numbered ①②③ in the order D_min → D_max → cast correction, and lens correction moves to the end; in Display, Exposure / Contrast / Saturation join a Basic card and the tone group is renamed so it no longer shares a name with the Tint slider. Temperature, tint, exposure, the four tone points, saturation and the per-channel R/G/B tracks carry a direction colour, centred sliders fill from zero, and a parameter that has been moved lights its label.
 
 **Fixed**
 

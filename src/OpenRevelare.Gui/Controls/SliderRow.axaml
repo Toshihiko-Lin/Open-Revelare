@@ -5,6 +5,19 @@
              x:Class="OpenRevelare.Gui.Controls.SliderRow"
              x:DataType="ctl:SliderRow"
              x:Name="Root">
+    <UserControl.Styles>
+        <!-- A row that has been moved off its default reads brighter than one that has not, so a
+             glance down the panel says which parameters this frame actually carries. -->
+        <Style Selector="ctl|SliderRow:modified TextBlock#LabelText">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+        <Style Selector="ctl|SliderRow:modified NumericUpDown#Spin">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        </Style>
+        <Style Selector="ctl|SliderRow NumericUpDown#Spin">
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        </Style>
+    </UserControl.Styles>
     <!-- 标签（双击重置）| 滑条 | 数字框 —— 复刻 Python _make_row 布局 -->
     <!-- Auto, not a fixed 44: 「曝光」 is two glyphs and "Exposure" is eight, so a width that
          fits the Chinese label clips the English one. MinWidth keeps the sliders lined up in
@@ -18,12 +31,25 @@
                    Foreground="{DynamicResource TextDimBrush}"
                    ToolTip.Tip="{i18n:T '双击重置'}"
                    DoubleTapped="OnLabelDoubleTapped" />
-        <Slider Name="Sld"
-                Grid.Column="1"
-                Minimum="{Binding Minimum, ElementName=Root}"
-                Maximum="{Binding Maximum, ElementName=Root}"
-                Value="{Binding Value, ElementName=Root, Mode=TwoWay}"
-                VerticalAlignment="Center" Margin="6,0" />
+        <!-- The slider sits on top of two passive marks the row positions itself (see
+             UpdateMarks): a fill that grows from the zero point rather than the left edge,
+             for bipolar rows on a plain track, and a hairline tick at the zero point. Both
+             ignore the pointer so the slider underneath keeps the whole strip as hit area. -->
+        <Grid Grid.Column="1" Margin="6,0" VerticalAlignment="Center">
+            <Border Name="CenterFill" IsHitTestVisible="False" IsVisible="False"
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    Height="3" CornerRadius="1.5"
+                    Background="{DynamicResource TrackFillBrush}" />
+            <Border Name="ZeroTick" IsHitTestVisible="False" IsVisible="False"
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    Width="1" Height="9"
+                    Background="{DynamicResource TextMuteBrush}" />
+            <Slider Name="Sld"
+                    Minimum="{Binding Minimum, ElementName=Root}"
+                    Maximum="{Binding Maximum, ElementName=Root}"
+                    Value="{Binding Value, ElementName=Root, Mode=TwoWay}"
+                    VerticalAlignment="Center" />
+        </Grid>
         <NumericUpDown Name="Spin"
                        Grid.Column="2"
                        Minimum="{Binding Minimum, ElementName=Root}"
