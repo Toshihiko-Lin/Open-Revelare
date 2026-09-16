@@ -94,7 +94,7 @@ public sealed class TypedTiffExportTests
 
         Assert.Contains("32-bit float TIFF", summary, StringComparison.Ordinal);
         Assert.DoesNotContain("16-bit TIFF", summary, StringComparison.Ordinal);
-        Assert.Contains("exact ICC", summary, StringComparison.Ordinal);
+        Assert.Contains("嵌入 ICC", summary, StringComparison.Ordinal);
     }
 
     [Fact]
