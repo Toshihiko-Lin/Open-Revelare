@@ -669,7 +669,6 @@ public static class Sprocket
     {
         float[] luma = Luma(image);
         if (luma.Length < 100) return NoMaskDark;
-        double[] smooth = Smooth7(Histogram256(luma));
 
         // 0. The top of the FILM's range. Everything below keys off this rather than off the
         //    absolute scale, because "dark" only means anything relative to how the frame was
@@ -683,7 +682,61 @@ public static class Sprocket
         //    0.44 and declared 66% of the frame a mask. Only the empty-mask fallback in
         //    HighDensityKeepMask kept that from reaching the statistics.
         double boardCut = EstimateSprocketThreshold(image);
-        int filmCeil = boardCut >= NoBoard ? smooth.Length : SearchSortedLeftCentres(boardCut);
+
+        // Two passes over the same luma at two histogram RESOLUTIONS, because the two fail on
+        // different frames and neither is right for both.
+        //
+        // The first bins the fixed [0, 1] scale, as this estimator always has, and is where every
+        // frame it was tuned on is decided: a scanner's unlit border, a copy stand's blocking
+        // card, a fogged trailing end. It is kept exactly, so that none of them moves.
+        //
+        // Its failure is the DIM frame. Over the fixed scale the film on "135 ecn2 1142" (GFX copy
+        // stand, film top 0.27) got 70 of the 256 bins; the carrier's pure black at 0.0005 and the
+        // picture's densest tones at 0.02 were four bins apart and the 7-bin smoothing folded them
+        // into one hump. The valley test failed on seven frames in ten, and the carrier — 11% of
+        // every frame — went into the statistics and set the roll's highlight end.
+        //
+        // So a frame the fixed scale finds nothing on is binned again over the FILM's range —
+        // the same 256 bins whether the film reaches 0.27 or 0.95, the exposure invariance the
+        // search bounds already claim applied to the resolution as well. Over [0, 0.27] the two
+        // populations above are fifteen bins apart and separate cleanly.
+        //
+        // Not the other way round, and not the fine binning alone: fine bins resolve a mask's own
+        // TEXTURE into bumps. A Flextight's unlit border (诺日士1089 图像 001, luma 0.002-0.009 and
+        // not flat) becomes two humps a bin apart, the first is taken for the mask peak and the
+        // second for the picture's, and the "valley" between them is nothing. The fixed scale
+        // sees that border as the single hump it is. The fine pass is therefore a fallback, and
+        // it runs only where the fixed scale has already said "no mask" — a frame that came
+        // through the first pass with an answer never reaches it.
+        double first = ValleyOver(image, luma, top: 1.0, boardCut);
+        if (first > NoMaskDark) return first;
+
+        double filmTop = boardCut < NoBoard ? boardCut : TailLuma(luma, 0.999);
+        if (filmTop <= 0.0 || filmTop >= 1.0) return NoMaskDark;   // fills the scale: pass 1 was already this
+        return ValleyOver(image, luma, filmTop, boardCut);
+    }
+
+    /// <summary>
+    /// One pass of <see cref="EstimateDarkValley"/>: the luma histogram binned over
+    /// [0, <paramref name="top"/>], the mask / picture / valley search on it, and the spatial and
+    /// colour gates on the frame. Bins above the board cut are out of the search but, at
+    /// <paramref name="top"/> = 1, still in the histogram — which is what the fixed-scale pass
+    /// has always done, and what keeps its 1% floor a share of the frame's tallest bin, board
+    /// included.
+    /// </summary>
+    private static double ValleyOver(ImageBuffer image, float[] luma, double top, double boardCut)
+    {
+        double[] smooth = Smooth7(Histogram256(luma, top));
+        double LumaAt(int bin) => Centre(bin) * top;
+
+        // The film's ceiling in bins: the board cut when there is a board and it lies inside the
+        // range, else the whole histogram.
+        int filmCeil = smooth.Length;
+        if (boardCut < NoBoard && boardCut < top)
+        {
+            filmCeil = 0;
+            while (filmCeil < smooth.Length && LumaAt(filmCeil) < boardCut) filmCeil++;
+        }
         if (filmCeil <= 1) return NoMaskDark;
 
         // 1. Mask peak: the DARKEST significant peak, NOT the tallest bin in the dark
@@ -721,7 +774,7 @@ public static class Sprocket
 
         // 3. Valley: deepest point between the two peaks.
         int valleyIdx = ArgMin(smooth, maskPk, picPk);
-        double valleyLuma = Centre(valleyIdx);
+        double valleyLuma = LumaAt(valleyIdx);
 
         double maskVal = smooth[maskPk], picVal = smooth[picPk], valleyVal = smooth[valleyIdx];
         if (maskVal <= 0 || picVal <= 0) return NoMaskDark;
@@ -879,6 +932,54 @@ public static class Sprocket
         return counts;
     }
 
+    /// <summary>
+    /// <see cref="Histogram256(float[])"/> over [0, <paramref name="top"/>] instead of [0, 1]:
+    /// the same 256 bins stretched or squeezed to the given range, values above it dropped.
+    /// <paramref name="top"/> = 1 reproduces the fixed-range histogram bit for bit.
+    /// </summary>
+    private static double[] Histogram256(float[] luma, double top)
+    {
+        if (top == 1.0) return Histogram256(luma);
+        var counts = new double[256];
+        double scale = 256.0 / top;
+        foreach (float a in luma)
+        {
+            if (a < 0.0f || a > top) continue;
+            int idx = (int)(a * scale);
+            if (idx > 255) idx = 255;
+            counts[idx]++;
+        }
+        return counts;
+    }
+
+    /// <summary>
+    /// The luma below which <paramref name="share"/> of the pixels lie, read off a 4096-bin
+    /// histogram — a percentile without the sort, at a resolution (1/4096) far finer than the
+    /// 256 bins it goes on to set the range of.
+    /// </summary>
+    private static double TailLuma(float[] luma, double share)
+    {
+        const int bins = 4096;
+        var counts = new long[bins];
+        long total = 0;
+        foreach (float a in luma)
+        {
+            if (a < 0.0f || a > 1.0f) continue;
+            int idx = (int)(a * bins);
+            counts[idx > bins - 1 ? bins - 1 : idx]++;
+            total++;
+        }
+        if (total == 0) return 0.0;
+        long target = (long)Math.Ceiling(total * share);
+        long acc = 0;
+        for (int i = 0; i < bins; i++)
+        {
+            acc += counts[i];
+            if (acc >= target) return (i + 1) / (double)bins;   // the bin's upper edge
+        }
+        return 1.0;
+    }
+
     // Bin edges of linspace(0, 1, 257): exactly i/256. Centres: exactly (2i+1)/512.
     private static double Edge(int i) => i / 256.0;
     private static double Centre(int i) => (2 * i + 1) / 512.0;
@@ -899,14 +1000,6 @@ public static class Sprocket
             smooth[i] = acc;
         }
         return smooth;
-    }
-
-    // np.searchsorted(centres, v, side='left') over the 256 bin centres.
-    private static int SearchSortedLeftCentres(double v)
-    {
-        int i = 0;
-        while (i < 256 && Centre(i) < v) i++;
-        return i;
     }
 
     // np.argmax / np.argmin over [lo, hi) — FIRST occurrence on ties, as numpy does.

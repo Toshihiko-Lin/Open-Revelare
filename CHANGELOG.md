@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.7.3（未发布）
+
+**修复**
+
+- **曝光偏暗的翻拍卷，片夹的纯黑边不再混进自动标定**。此前画面整体只到四分之一亮度时，黑边和画面最密处在直方图里挤成一团、没被认出来，整卷亮端被黑边定走；现在原有方法找不到时会按胶片自身范围重新分格再找一遍，黑边照常排除；原来能识别的卷结果不变。
+
+---
+
+**Fixed**
+
+- **On a dim copy-stand roll, the carrier's pure-black frame no longer leaks into the automatic calibration.** When the film reached only a quarter of the scale, the black frame and the picture's densest tones fell into the same few histogram bins and went unrecognised, and the roll's highlight end was set by the frame; when the existing search finds nothing, the histogram is now re-binned over the film's own range and searched again, so the frame is excluded as before; rolls that were already recognised are unchanged.
+
 ## v1.7.2（2026-09-16）
 
 **改进**
