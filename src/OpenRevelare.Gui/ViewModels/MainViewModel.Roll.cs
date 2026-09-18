@@ -351,10 +351,11 @@ public partial class MainViewModel
     /// What the limit means on this display right now, under the slider.
     ///
     /// <para>
-    /// The D-032 consequence is stated here for the same reason D-023's restriction used to be:
-    /// the control that sets the range is the right place to say what the range does. Under HDR
-    /// the tone controls span the limit — a curve's right end is the peak — so moving this
-    /// slider re-grades the picture, which is not what it does in SDR.
+    /// The D-032 / D-036 consequence is stated here for the same reason D-023's restriction used
+    /// to be: the control that sets the range is the right place to say what the range does.
+    /// Under HDR the span-defined tone controls (highlights/shadows, curves) reach the limit — a
+    /// curve's right end is the peak — so moving this slider re-grades them, which is not what it
+    /// does in SDR; contrast, levels and saturation are anchored to SDR white and do not move.
     /// </para>
     /// </summary>
     public string HdrLimitHint
@@ -369,7 +370,7 @@ public partial class MainViewModel
 
             string graded = CurrentFrame is { } frame &&
                             Stage2.HasDisplayReferredAdjustments(frame.Params)
-                ? Loc.T("色阶／对比度／高光阴影／曲线／饱和度在 HDR 下按这个上限定义（曲线右端 = 峰值），改上限会一起改影调（D-032）。")
+                ? Loc.T("高光阴影与曲线在 HDR 下跨到这个上限（曲线右端 = 峰值），改上限会一起改它们的影调；反差／色阶／饱和度锚在 SDR 白，与 SDR 下相同（D-036）。")
                 : string.Empty;
 
             string ignored = _outputSpaceIndex != 0 || _printLutIndex != 0

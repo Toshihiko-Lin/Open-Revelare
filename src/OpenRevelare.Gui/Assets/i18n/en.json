@@ -628,7 +628,7 @@
   "关（印相）": "Off (print)",
   "+{0:0.0} 档 · {1:0} nits": "+{0:0.0} stops · {1:0} nits",
   "HDR 关闭：印相渲染，高光收进纸白。": "HDR off: rendered as a print, highlights folded into paper white.",
-"色阶／对比度／高光阴影／曲线／饱和度在 HDR 下按这个上限定义（曲线右端 = 峰值），改上限会一起改影调（D-032）。": "Under HDR, levels / contrast / highlights & shadows / curves / saturation are defined against this limit (a curve's right end is the peak), so changing the limit re-grades the picture (D-032).",
+"高光阴影与曲线在 HDR 下跨到这个上限（曲线右端 = 峰值），改上限会一起改它们的影调；反差／色阶／饱和度锚在 SDR 白，与 SDR 下相同（D-036）。": "Under HDR, highlights & shadows and the curves span this limit (a curve's right end is the peak), so changing the limit re-grades those; contrast / levels / saturation are anchored to SDR white, as in SDR (D-036).",
   "此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。": "This roll is still on the legacy colour pipeline (v1); its rendering is frozen by D-013 and HDR has no effect. Available once the roll is migrated to v2.",
   "（高光软校样）": " (highlights soft-proofed)",
   "（高光裁切）": " (highlights clipped)",

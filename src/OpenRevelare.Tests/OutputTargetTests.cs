@@ -181,9 +181,10 @@ public sealed class OutputTargetTests
 
     /// <summary>
     /// D-032 (superseding D-023's refusal): levels, contrast, highlights/shadows, curves and
-    /// saturation are defined against a display range, and on an extended target that range is
-    /// the roll's own <c>[0, headroom]</c>. Each of them renders, takes effect, and stays inside
-    /// the headroom — the shoulder's ceiling is enforced after them, not defeated by them.
+    /// saturation are defined against a display range, and on an extended target they are given
+    /// one (D-036 says which: the span-defined pair reach the roll's headroom, the anchored ones
+    /// keep SDR's anchor). Each of them renders, takes effect, and stays inside the headroom —
+    /// the shoulder's ceiling is enforced after them, not defeated by them.
     /// </summary>
     [Theory]
     [InlineData("Contrast")]
@@ -250,6 +251,119 @@ public sealed class OutputTargetTests
         }
         Assert.True(aboveWhite > 0, "fixture has no highlight above SDR white to test with");
         Assert.Contains(plain.Zip(withPull), pair => pair.First < 1f && pair.Second > 0f);
+    }
+
+    /// <summary>
+    /// D-036: contrast and levels are anchored to SDR white on an extended target, so below the
+    /// shoulder's knee — where the extended render and its SDR rendition are the same pixels —
+    /// they grade an HDR roll exactly as they grade its SDR rendition. Under D-032 the pivot sat
+    /// at diffuse white and the whole picture below it was pushed down per channel.
+    /// </summary>
+    [Theory]
+    [InlineData("Contrast")]
+    [InlineData("Levels")]
+    [InlineData("Saturation")]
+    public void Hdr_anchored_ops_grade_the_sdr_range_as_the_sdr_rendition_does(string adjustment)
+    {
+        var neutral = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        FrameParams graded = neutral.Clone();
+        switch (adjustment)
+        {
+            case "Contrast": graded.Contrast = 0.5; break;
+            case "Levels": graded.BlackPoint = 0.05; graded.WhitePoint = 0.9; break;
+            case "Saturation": graded.Saturation = 0.4; break;
+        }
+        using var cmm = new LittleCmsEngine();
+
+        float[] plainHdr = Pipeline.Render(
+            MakeNeutralWorkingFrame(), neutral, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+        float[] hdr = Pipeline.Render(
+            MakeNeutralWorkingFrame(), graded, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+        float[] sdr = Pipeline.Render(
+            MakeNeutralWorkingFrame(), graded.SdrRendition(), ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+
+        int compared = 0;
+        for (int p = 0; p < plainHdr.Length; p += 3)
+        {
+            // Only where the two renderings were the same pixel to begin with: at or below the
+            // knee, and inside the gamut — the SDR terminal clips a D-005 negative, the extended
+            // carrier keeps it.
+            bool comparable = true;
+            for (int c = 0; c < 3; c++)
+                comparable &= plainHdr[p + c] >= 0f && plainHdr[p + c] <= HighlightRolloff.Knee;
+            if (!comparable) continue;
+            compared++;
+            for (int c = 0; c < 3; c++)
+            {
+                float sdrLinear = Srgb.SrgbToLinear(sdr[p + c]);
+                Assert.True(MathF.Abs(hdr[p + c] - sdrLinear) <= 2e-3f,
+                    $"{adjustment}: component {p + c} is {hdr[p + c]:R} on the extended target but {sdrLinear:R} in the SDR rendition.");
+            }
+        }
+        Assert.True(compared > 0, "fixture has no pixel below the knee to compare");
+    }
+
+    /// <summary>
+    /// D-036: on an extended target nothing floors the chain's output (D-005 keeps the carrier's
+    /// real out-of-gamut negatives), so the affine ops themselves must not manufacture one — a
+    /// component that arrives non-negative leaves non-negative, as the SDR clamp would have left
+    /// it. Under D-032 a hard contrast turned every dark chromatic pixel into a colour outside
+    /// the gamut, which a wide-gamut panel showed as saturated red and blue.
+    /// </summary>
+    [Fact]
+    public void Hdr_contrast_does_not_push_a_non_negative_component_negative()
+    {
+        var neutral = new FrameParams { OutputSpace = "sRGB", PrintLut = "", HdrPeakNits = 1000d };
+        FrameParams hard = neutral.Clone();
+        hard.Contrast = 1.0;
+        using var cmm = new LittleCmsEngine();
+
+        float[] plain = Pipeline.Render(
+            MakeWorkingFrame(), neutral, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+        float[] contrasty = Pipeline.Render(
+            MakeWorkingFrame(), hard, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data;
+
+        Assert.NotEqual(plain, contrasty);
+        for (int i = 0; i < plain.Length; i++)
+        {
+            if (plain[i] >= 0f)
+                Assert.True(contrasty[i] >= 0f, $"component {i}: {plain[i]:R} became {contrasty[i]:R}.");
+        }
+    }
+
+    /// <summary>
+    /// D-036: the ceiling guard bounds a colour, not three channels. A pixel over the ceiling is
+    /// scaled as a whole so its largest component sits exactly on it and its ratios are kept —
+    /// clamping per channel changed the hue of every highlight an exposure push carried past the
+    /// ceiling. NaN and colours under the ceiling are untouched, and a D-005 negative only moves
+    /// toward zero.
+    /// </summary>
+    [Fact]
+    public void Bound_above_scales_the_whole_colour_and_keeps_its_ratios()
+    {
+        const float ceiling = 4.93f;
+        float[] data =
+        [
+            6f, 3f, 1.5f,          // over: scaled to the ceiling, ratios 4:2:1 kept
+            2f, 1f, 0.5f,          // under: untouched
+            6f, -1f, 2f,           // over with a D-005 negative: negative scaled toward zero
+            float.NaN, 9f, 9f,     // NaN stays NaN; its neighbours are still bounded
+            ceiling, ceiling, 0f,  // exactly on the ceiling: untouched
+        ];
+
+        HighlightRolloff.BoundAbove(data, ceiling);
+
+        Assert.Equal(ceiling, data[0]);
+        Assert.Equal(ceiling / 2f, data[1], 1e-6f);
+        Assert.Equal(ceiling / 4f, data[2], 1e-6f);
+        Assert.Equal([2f, 1f, 0.5f], data[3..6]);
+        Assert.Equal(ceiling, data[6]);
+        Assert.Equal(-1f * ceiling / 6f, data[7], 1e-6f);
+        Assert.Equal(2f * ceiling / 6f, data[8], 1e-6f);
+        Assert.True(float.IsNaN(data[9]));
+        Assert.Equal([ceiling, ceiling], data[10..12]);
+        Assert.Equal([ceiling, ceiling, 0f], data[12..15]);
+        Assert.All(data.Where(float.IsFinite), v => Assert.True(v <= ceiling));
     }
 
     /// <summary>
@@ -657,9 +771,25 @@ public sealed class OutputTargetTests
         }
     }
 
-    private static WorkingFrame MakeWorkingFrame()
+    /// <summary>
+    /// A near-neutral negative: every pixel renders inside the gamut, and the brighter half of it
+    /// (dense on the positive) lands below the shoulder's knee, where the extended render and the
+    /// SDR rendition are the same pixels. The saturated default fixture has neither.
+    /// </summary>
+    private static WorkingFrame MakeNeutralWorkingFrame() => MakeWorkingFrame([
+        0.50f, 0.50f, 0.50f,
+        0.30f, 0.30f, 0.30f,
+        0.15f, 0.15f, 0.15f,
+        0.08f, 0.08f, 0.08f,
+        0.04f, 0.04f, 0.04f,
+        0.02f, 0.02f, 0.02f,
+        0.30f, 0.26f, 0.22f,
+        0.10f, 0.12f, 0.14f,
+    ]);
+
+    private static WorkingFrame MakeWorkingFrame(float[]? data = null)
     {
-        var pixels = new ImageBuffer(4, 2, [
+        var pixels = new ImageBuffer(4, 2, data ?? [
             0.81f,  0.52f,   0.29f,
             0.63f,  0.31f,   0.12f,
             0.42f,  0.17f,   0.052f,

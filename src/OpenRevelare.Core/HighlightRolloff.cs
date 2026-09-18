@@ -107,21 +107,49 @@ public static class HighlightRolloff
     /// </para>
     ///
     /// <para>
+    /// THE BOUND IS PER PIXEL, NOT PER CHANNEL (D-036). A colour whose largest component is over
+    /// the ceiling is scaled down as a whole, by the one factor that puts that component ON the
+    /// ceiling; its ratios — hue and saturation — are kept. Clamping each channel on its own
+    /// instead let a warm highlight lose its red first and its green second as exposure rose,
+    /// so the highlights an exposure push carried past the ceiling changed colour on the way,
+    /// which is the cast seen on an HDR panel. The SDR path's clamp into <c>[0,1]</c> does clip
+    /// per channel, but there the ceiling is paper white and every channel ends on it together;
+    /// an HDR ceiling is a luminance, and a colour can sit on it without being white.
+    /// </para>
+    ///
+    /// <para>
     /// The lower bound is deliberately absent. In the display-referred form a negative could only
     /// be an artefact of the destination encoding; here it is a colour outside the target's
-    /// primaries, which the extended carrier represents exactly and D-005 keeps on purpose.
+    /// primaries, which the extended carrier represents exactly and D-005 keeps on purpose. The
+    /// scale is below 1, so a negative component only moves toward zero.
     /// </para>
     /// </summary>
     public static void BoundAbove(float[] data, float asymptote)
     {
         ArgumentNullException.ThrowIfNull(data);
         RequireValidAsymptote(asymptote);
+        if (data.Length % 3 != 0)
+            throw new ArgumentException("Expected interleaved RGB samples.", nameof(data));
 
-        ParallelSweep.Over(data.Length, (from, to) =>
+        ParallelSweep.OverPixels(data.Length / 3, (from, to) =>
         {
-            for (int i = from; i < to; i++)
+            for (int i = from; i < to; i += 3)
             {
-                if (data[i] > asymptote) data[i] = asymptote;
+                float r = data[i], g = data[i + 1], b = data[i + 2];
+                // Not MathF.Max: that propagates NaN, and a NaN component would then leave its
+                // two neighbours unbounded. Written this way NaN fails every comparison, so it is
+                // ignored for the maximum and stays NaN on the way out, as it did per channel.
+                float max = float.NegativeInfinity;
+                if (r > max) max = r;
+                if (g > max) max = g;
+                if (b > max) max = b;
+                if (!(max > asymptote)) continue;
+                float scale = asymptote / max;
+                // The largest component lands on the ceiling exactly, the others under it: a
+                // rounded product must not leave a sample an ulp over the promise.
+                data[i] = r == max ? asymptote : MathF.Min(r * scale, asymptote);
+                data[i + 1] = g == max ? asymptote : MathF.Min(g * scale, asymptote);
+                data[i + 2] = b == max ? asymptote : MathF.Min(b * scale, asymptote);
             }
         });
     }

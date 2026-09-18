@@ -31,6 +31,17 @@ namespace OpenRevelare.Presentation;
 /// have to move the knee below 1 to show anything, which re-grades the SDR range; the honest
 /// answer there is the clip, said out loud by the status badge, and the SDR tier for the roll.
 /// </para>
+///
+/// <para>
+/// THE SHOULDER IS APPLIED PER PIXEL, NOT PER CHANNEL (D-036). It is driven by the pixel's
+/// largest component, and the whole colour is scaled by the one factor that takes that
+/// component to where the shoulder puts it, so hue and saturation are carried across unchanged
+/// and only the luminance is fitted. Compressing each channel on its own bent the ratios of every
+/// highlight that reached above the knee — a warm highlight shed its red faster than its blue —
+/// which showed as a cast in the highlights whenever exposure pushed more of the picture up
+/// there. "The SDR range is untouched" therefore holds per pixel: a colour whose largest
+/// component is at or below the knee is exactly as rendered.
+/// </para>
 /// </summary>
 public static class HighlightSoftProof
 {
@@ -83,9 +94,16 @@ public static class HighlightSoftProof
         var fitted = new Half[source.Length];
         for (int i = 0; i < source.Length; i += 4)
         {
-            fitted[i] = (Half)Of((float)source[i], contentHeadroom, displayHeadroom);
-            fitted[i + 1] = (Half)Of((float)source[i + 1], contentHeadroom, displayHeadroom);
-            fitted[i + 2] = (Half)Of((float)source[i + 2], contentHeadroom, displayHeadroom);
+            float r = (float)source[i], g = (float)source[i + 1], b = (float)source[i + 2];
+            float max = MathF.Max(r, MathF.Max(g, b));
+            if (max > Knee)
+            {
+                float scale = Of(max, contentHeadroom, displayHeadroom) / max;
+                r *= scale; g *= scale; b *= scale;
+            }
+            fitted[i] = (Half)r;
+            fitted[i + 1] = (Half)g;
+            fitted[i + 2] = (Half)b;
             fitted[i + 3] = source[i + 3];
         }
         return PresentationScene.FromOwnedPixels(fitted, scene.Size, scene.ReferenceWhiteScale);

@@ -17,8 +17,13 @@ public static class WbMath
     public const double WbK = 0.002;       // log-gain per slider unit
     public const double WbRange = 250.0;   // slider extent; exp(250·k) ≈ 1.65 gain
 
-    private static readonly double[] ETemp = { 1.0, 0.0, -1.0 };   // warm↔cool (R up / B down)
-    private static readonly double[] ETint = { -0.5, 1.0, -0.5 };  // magenta↔green (G vs R+B)
+    private static readonly double[] ETemp = { 1.0, 0.0, -1.0 };   // cool↔warm: + is R up / B down
+    // green↔magenta: + is G DOWN, R+B up — the Lightroom sign and the direction the slider's
+    // track paints. The Python original had this basis negated (+ pushed green), so the control
+    // ran against its own colour cue. Projects store gains, not slider values, and
+    // GainsToTempTint is the exact inverse of this basis, so an old roll's gains read back
+    // unchanged — only the number on the slider changes sign.
+    private static readonly double[] ETint = { 0.5, -1.0, 0.5 };
 
     /// <summary>Sliders (each in [-250,250]) → pure-colour gains with geomean == 1.</summary>
     public static double[] TempTintToGains(double temp, double tint)

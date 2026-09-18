@@ -4,13 +4,33 @@
 
 **修复**
 
-- **曝光偏暗的翻拍卷，片夹的纯黑边不再混进自动标定**。此前画面整体只到四分之一亮度时，黑边和画面最密处在直方图里挤成一团、没被认出来，整卷亮端被黑边定走；现在原有方法找不到时会按胶片自身范围重新分格再找一遍，黑边照常排除；原来能识别的卷结果不变。
+- **HDR 下调整 Display 反差不再偏红蓝**。反差与色阶锚定于 SDR 中灰与黑白点，暗部与中间调同 SDR；高光阴影与曲线仍跨至 HDR 上限。
+
+- **HDR 下调整曝光，高光不再偏色**。超出上限的高光按整体亮度收顶，色相不变；预览软校样同样保持色相。
+
+- **色调滑条方向修正：向右为洋红**。旧工程白平衡不变，滑条读数符号相反。
+
+- **拖动 D_max / D_min 时预览不再红蓝闪动**。三个通道写完后只渲染一次。
+
+- **D_min / D_max 逐通道滑条轨道色改为颜色 → 补色**。密度加大即该通道变暗，与画面变化方向一致。
+
+- **曝光偏暗的翻拍卷，片夹黑边不再混入自动标定**。首轮识别不到时按胶片自身范围重新分格再找一遍；原本能识别的卷结果不变。
 
 ---
 
 **Fixed**
 
-- **On a dim copy-stand roll, the carrier's pure-black frame no longer leaks into the automatic calibration.** When the film reached only a quarter of the scale, the black frame and the picture's densest tones fell into the same few histogram bins and went unrecognised, and the roll's highlight end was set by the frame; when the existing search finds nothing, the histogram is now re-binned over the film's own range and searched again, so the frame is excluded as before; rolls that were already recognised are unchanged.
+- **Under HDR, Display contrast no longer casts red and blue.** Contrast and levels are anchored to SDR mid-grey and the black/white points, so shadows and mid-tones match SDR; highlights/shadows and curves still span the HDR limit.
+
+- **Under HDR, exposure no longer shifts highlight colour.** Highlights past the limit are bounded by overall brightness with hue preserved; the preview soft proof preserves hue likewise.
+
+- **Tint slider direction corrected: right is magenta.** Saved white balances are unchanged; the slider reading changes sign.
+
+- **Dragging D_max / D_min no longer flickers the preview red and blue.** One render per step, after all three channels are written.
+
+- **Per-channel D_min / D_max tracks now run colour → complement.** More density darkens that channel, matching the direction the picture moves.
+
+- **On a dim copy-stand roll, the carrier's black frame no longer leaks into automatic calibration.** When the first search finds nothing, the histogram is re-binned over the film's own range and searched again; rolls already recognised are unchanged.
 
 ## v1.7.2（2026-09-16）
 

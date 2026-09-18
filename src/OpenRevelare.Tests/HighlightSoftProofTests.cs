@@ -77,18 +77,29 @@ public sealed class HighlightSoftProofTests
         Assert.Equal(scene.ReferenceWhiteScale, fitted.ReferenceWhiteScale);
     }
 
+    /// <summary>
+    /// D-036: the shoulder is driven by the pixel's largest component and the whole colour is
+    /// scaled by one factor, so a fitted highlight keeps its hue and saturation — per-channel
+    /// fitting bent the ratios of every highlight above the knee, a cast that grew with exposure.
+    /// A colour whose largest component is at or below the knee is exactly as rendered.
+    /// </summary>
     [Fact]
-    public void Fit_touches_only_colour_above_diffuse_white_and_carries_alpha_across()
+    public void Fit_scales_a_colour_above_diffuse_white_as_a_whole_and_carries_alpha_across()
     {
         PresentationScene scene = Scene(0.25f, 1f, 3f);
         PresentationScene fitted = HighlightSoftProof.Fit(scene, Content, Display);
 
-        Assert.Equal((Half)0.25f, fitted.LinearExtendedSrgbRgba[0]);
-        Assert.Equal((Half)1f, fitted.LinearExtendedSrgbRgba[1]);
-        float expected = HighlightSoftProof.Of(3f, Content, Display);
-        Assert.Equal(expected, (float)fitted.LinearExtendedSrgbRgba[2], 2e-3f);
-        Assert.True((float)fitted.LinearExtendedSrgbRgba[2] < 3f);
+        float expectedMax = HighlightSoftProof.Of(3f, Content, Display);
+        float scale = expectedMax / 3f;
+        Assert.True(scale < 1f);
+        Assert.Equal(0.25f * scale, (float)fitted.LinearExtendedSrgbRgba[0], 2e-3f);
+        Assert.Equal(1f * scale, (float)fitted.LinearExtendedSrgbRgba[1], 2e-3f);
+        Assert.Equal(expectedMax, (float)fitted.LinearExtendedSrgbRgba[2], 2e-3f);
         Assert.Equal((Half)1f, fitted.LinearExtendedSrgbRgba[3]);
+
+        PresentationScene sdrColour = Scene(1f, 0.5f, 0.2f);
+        PresentationScene untouched = HighlightSoftProof.Fit(sdrColour, Content, Display);
+        Assert.Equal(sdrColour.LinearExtendedSrgbRgba.ToArray(), untouched.LinearExtendedSrgbRgba.ToArray());
     }
 
     private static PresentationScene Scene(float r, float g, float b) =>

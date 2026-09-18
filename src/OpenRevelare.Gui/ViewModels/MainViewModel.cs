@@ -980,6 +980,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_syncingEndpointView) return;
         _syncingEndpointView = true;
+        // 三个分量的 setter 各自会 ScheduleRender，而拖动中的渲染是同步的：不压住的话，
+        // 拖一下 D_max 会先画"只有 R 动了"、再画"R G 动了"两帧中间态才画到位——预览
+        // 红蓝乱闪，且每步渲染四遍。压住，三个分量写完再渲染一次。
+        bool wasSuppressed = _suppressRender;
+        _suppressRender = true;
         try
         {
             if (shadow)
@@ -993,7 +998,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 DMaxR += d; DMaxG += d; DMaxB += d;
             }
         }
-        finally { _syncingEndpointView = false; }
+        finally
+        {
+            _syncingEndpointView = false;
+            _suppressRender = wasSuppressed;
+        }
         ScheduleRender();
     }
 

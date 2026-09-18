@@ -94,13 +94,30 @@ public static class Stage2
         ApplyOperationChain(d, cal, output, encodeExit, curvesAlreadyEncoded: false);
     }
 
+    /// <param name="rangeTop">The encoded value the RANGE-DEFINED ops span up to: 1 on an SDR
+    /// target, and on an extended target the encoded headroom (D-036). Highlights/shadows and the
+    /// curves are defined over <c>[0, rangeTop]</c> — that is what lets the highlights slider reach
+    /// the highlights above SDR white. Levels and contrast are NOT: they are anchored to SDR white
+    /// whatever the range, so the picture below diffuse white is graded as it is in SDR. Above 1
+    /// the chain also refuses to turn a non-negative component negative (see the loop).</param>
     private static void ApplyOperationChain(
         float[] d,
         FrameParams cal,
         ColorSpaceDef output,
         bool encodeExit,
-        bool curvesAlreadyEncoded)
+        bool curvesAlreadyEncoded,
+        float rangeTop = 1f)
     {
+        if (!float.IsFinite(rangeTop) || rangeTop < 1f)
+            throw new ArgumentOutOfRangeException(nameof(rangeTop), rangeTop, "The range top must be finite and at least 1.");
+        // On an extended target the affine ops must not manufacture out-of-gamut colour. In SDR
+        // the final clamp floors whatever they push below zero; here nothing below is clamped
+        // (D-005 keeps the carrier's real out-of-gamut negatives), so the floor is applied at
+        // the op, and only to a component that ARRIVED non-negative — a D-005 negative passes
+        // through the affine as it always did. Never taken on an SDR target: rangeTop is 1 and
+        // every SDR result stays bit-identical.
+        bool extended = rangeTop > 1f;
+        static float KeepSign(float before, float after) => before >= 0f && after < 0f ? 0f : after;
 
         Luma luma = Luma.For(output);
 
@@ -174,28 +191,56 @@ public static class Stage2
                     if (bl < 0.0f) bl = 0.0f;
                 }
 
-                // 3 — levels
+                // 3 — levels. Black and white are SDR's 0 and 1 on every target: the affine
+                // continues above 1 on an extended range, so the white slider still moves the
+                // HDR highlights, but it does not re-anchor to the headroom (D-036).
                 if (doLevels)
                 {
-                    r = (r - black) * lvlScale;
-                    g = (g - black) * lvlScale;
-                    bl = (bl - black) * lvlScale;
+                    if (extended)
+                    {
+                        r = KeepSign(r, (r - black) * lvlScale);
+                        g = KeepSign(g, (g - black) * lvlScale);
+                        bl = KeepSign(bl, (bl - black) * lvlScale);
+                    }
+                    else
+                    {
+                        r = (r - black) * lvlScale;
+                        g = (g - black) * lvlScale;
+                        bl = (bl - black) * lvlScale;
+                    }
                 }
 
-                // 4 — contrast about 0.5
+                // 4 — contrast about 0.5 — SDR's encoded mid-grey on every target. Pivoting on the
+                // midpoint of an HDR range instead put the pivot at diffuse white, and then every
+                // tone below it (all of the picture) was pushed down per channel: at +0.3 a dark
+                // 0.15/0.12/0.10 became 0.07/0.03/0.008, red nine times blue, which is the
+                // red/blue blow-out D-032 was seen to produce on an HDR panel. Anchored at SDR
+                // mid-grey the shadows and mid-tones grade exactly as in SDR (D-036).
                 if (doContrast)
                 {
-                    r = (r - 0.5f) * contrastGain + 0.5f;
-                    g = (g - 0.5f) * contrastGain + 0.5f;
-                    bl = (bl - 0.5f) * contrastGain + 0.5f;
+                    if (extended)
+                    {
+                        r = KeepSign(r, (r - 0.5f) * contrastGain + 0.5f);
+                        g = KeepSign(g, (g - 0.5f) * contrastGain + 0.5f);
+                        bl = KeepSign(bl, (bl - 0.5f) * contrastGain + 0.5f);
+                    }
+                    else
+                    {
+                        r = (r - 0.5f) * contrastGain + 0.5f;
+                        g = (g - 0.5f) * contrastGain + 0.5f;
+                        bl = (bl - 0.5f) * contrastGain + 0.5f;
+                    }
                 }
 
-                // 5 — highlights / shadows (luma-driven, hue preserving)
+                // 5 — highlights / shadows (luma-driven, hue preserving). Defined over
+                // [0, rangeTop]: on an SDR target that is [0,1] and this is the original op, on an
+                // extended target the top is the encoded headroom, so the highlights slider
+                // reaches the highlights above SDR white (the reason D-032 gave the ops a range).
                 if (doHs)
                 {
                     float lum = luma.Of(r, g, bl);
-                    float lumaC = lum < 0.0f ? 0.0f : (lum > 1.0f ? 1.0f : lum);
-                    float outv = lumaC;
+                    float lumaC = lum < 0.0f ? 0.0f : (lum > rangeTop ? rangeTop : lum);
+                    float outv = lumaC / rangeTop;
                     if (sh != 0.0f)
                     {
                         float c = Math.Clamp(outv, 0.0f, 1.0f);
@@ -206,7 +251,7 @@ public static class Stage2
                         float c = Math.Clamp(outv, 0.0f, 1.0f);
                         outv = (1.0f - hiAmt) * outv + hiAmt * (1.0f - (float)Math.Pow(1.0f - c, hiGamma));
                     }
-                    float scale = lumaC > 1e-6f ? outv / Math.Max(lumaC, 1e-6f) : 1.0f;
+                    float scale = lumaC > 1e-6f ? outv * rangeTop / Math.Max(lumaC, 1e-6f) : 1.0f;
                     r *= scale; g *= scale; bl *= scale;
                 }
 
@@ -219,20 +264,25 @@ public static class Stage2
                 // wider working space exists to provide — an ACEScg red lands at 1.23 in sRGB terms,
                 // and truncating it before the curve throws that away permanently.
                 //
+                // On an extended target the curve's [0,1] is the roll's [0, rangeTop]: its right
+                // end is the HDR peak, as D-032 defined it, so a pulled top point reaches the
+                // highlights above SDR white. On SDR rangeTop is 1 and this is the original op.
+                //
                 // Negatives are still floored: Pow of a negative base is NaN, and a negative here
                 // means the colour left the gamut entirely, which the output stage handles.
                 if (doCurves)
                 {
-                    float kr = r > 1.0f ? r : 0.0f, kg = g > 1.0f ? g : 0.0f, kb = bl > 1.0f ? bl : 0.0f;
+                    float rn = r / rangeTop, gn = g / rangeTop, bn = bl / rangeTop;
+                    float kr = rn > 1.0f ? r : 0.0f, kg = gn > 1.0f ? g : 0.0f, kb = bn > 1.0f ? bl : 0.0f;
                     float cr = curvesAlreadyEncoded
-                        ? Math.Clamp(r, 0.0f, 1.0f)
-                        : (float)Math.Pow(Math.Clamp(r, 0.0f, 1.0f), InvGamma);
+                        ? Math.Clamp(rn, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(rn, 0.0f, 1.0f), InvGamma);
                     float cg = curvesAlreadyEncoded
-                        ? Math.Clamp(g, 0.0f, 1.0f)
-                        : (float)Math.Pow(Math.Clamp(g, 0.0f, 1.0f), InvGamma);
+                        ? Math.Clamp(gn, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(gn, 0.0f, 1.0f), InvGamma);
                     float cb = curvesAlreadyEncoded
-                        ? Math.Clamp(bl, 0.0f, 1.0f)
-                        : (float)Math.Pow(Math.Clamp(bl, 0.0f, 1.0f), InvGamma);
+                        ? Math.Clamp(bn, 0.0f, 1.0f)
+                        : (float)Math.Pow(Math.Clamp(bn, 0.0f, 1.0f), InvGamma);
 
                     if (lutM != null)
                     {
@@ -254,16 +304,18 @@ public static class Stage2
                     if (lutG != null) cg = SampleLut(lutG, cg);
                     if (lutB != null) cb = SampleLut(lutB, cb);
 
-                    // Restore anything that was above 1.0 on the way in: the curve had nothing to
-                    // say about it, so it passes through untouched rather than being flattened.
+                    // Restore anything that was above the top on the way in: the curve had nothing
+                    // to say about it, so it passes through untouched rather than being flattened.
+                    // The legacy (private-gamma) branch only ever runs on an SDR range, so only the
+                    // encoded branch scales back up.
                     r = kr > 0.0f ? kr : curvesAlreadyEncoded
-                        ? Math.Max(cr, 0.0f)
+                        ? Math.Max(cr, 0.0f) * rangeTop
                         : Math.Max((float)Math.Pow(cr, Gamma), 0.0f);
                     g = kg > 0.0f ? kg : curvesAlreadyEncoded
-                        ? Math.Max(cg, 0.0f)
+                        ? Math.Max(cg, 0.0f) * rangeTop
                         : Math.Max((float)Math.Pow(cg, Gamma), 0.0f);
                     bl = kb > 0.0f ? kb : curvesAlreadyEncoded
-                        ? Math.Max(cb, 0.0f)
+                        ? Math.Max(cb, 0.0f) * rangeTop
                         : Math.Max((float)Math.Pow(cb, Gamma), 0.0f);
                 }
 
@@ -320,9 +372,10 @@ public static class Stage2
     /// </para>
     ///
     /// <para>
-    /// An extended-range render therefore gives them a range to be defined against: the roll's
-    /// own <c>[0, headroom]</c>, normalised to <c>[0,1]</c> (D-032, superseding D-023's refusal).
-    /// See <see cref="ApplyManagedToExtendedTarget"/>.
+    /// An extended-range render therefore gives them a range to be defined against: SDR's own,
+    /// continued above white, with the span-defined ops told where the roll's headroom is
+    /// (D-032 superseding D-023's refusal, amended by D-036). See
+    /// <see cref="ApplyManagedToExtendedTarget"/>.
     /// </para>
     /// </summary>
     public static bool HasDisplayReferredAdjustments(FrameParams cal)
@@ -345,7 +398,8 @@ public static class Stage2
 
     /// <summary>
     /// Stage 2 for a scene-referred extended render: white balance and exposure in linear light,
-    /// then the perceptual ops against the roll's own range (D-032).
+    /// then the perceptual ops in SDR's encoding continued above white, with the span-defined
+    /// ops reaching the roll's headroom (D-032 / D-036).
     ///
     /// <para>
     /// WHITE BALANCE AND EXPOSURE SURVIVE THE MOVE BECAUSE THEY ARE MULTIPLICATIVE IN LINEAR
@@ -355,25 +409,27 @@ public static class Stage2
     /// </para>
     ///
     /// <para>
-    /// THE PERCEPTUAL FIVE ARE DEFINED AGAINST A RANGE, SO THEY ARE GIVEN ONE. Levels, contrast,
-    /// highlights/shadows, curves and saturation mean nothing on unbounded linear light (the
-    /// reason D-023 refused them), but the extended target is not unbounded: it has a headroom,
-    /// and <c>[0, headroom]</c> is as much a display range as the SDR terminal's <c>[0,1]</c> —
-    /// it is what the roll's HDR limit says the file will hold. So the carrier is normalised by
-    /// the headroom, encoded with the same sRGB curve the SDR ops run under, and the ops run
-    /// unchanged: contrast still pivots about the encoded midpoint, a curve's right end is now
-    /// the HDR peak, the highlights slider reaches the highlights above SDR white. This is the
-    /// Lightroom definition, where every tone control spans the HDR limit.
+    /// THE PERCEPTUAL FIVE ARE DEFINED AGAINST A RANGE, SO THEY ARE GIVEN ONE — BUT NOT ALL THE
+    /// SAME ONE (D-036, amending D-032). They mean nothing on unbounded linear light (the reason
+    /// D-023 refused them), but the extended target is not unbounded: it has a headroom. D-032
+    /// normalised the whole carrier by that headroom and ran the five unchanged, so that a
+    /// curve's right end was the HDR peak and the highlights slider reached above SDR white.
+    /// On a real HDR panel that put contrast's pivot at diffuse white instead of mid-grey, and
+    /// every tone below it — the whole picture — was pushed down per channel into saturated red
+    /// and blue. So the range is now handed to the ops that are defined by their span
+    /// (highlights/shadows, curves: <c>[0, encoded headroom]</c>, as under D-032) while the ops
+    /// that are defined by an anchor (contrast about mid-grey, levels between black and white)
+    /// keep SDR's anchor and simply continue above white. The carrier is encoded with diffuse
+    /// white at 1 — the SDR encoding, continued — by the same sRGB curve the SDR ops run under.
     /// </para>
     ///
     /// <para>
-    /// THE COST IS STATED, NOT HIDDEN: the same parameters produce a different SDR-range picture
-    /// on the extended target than on the SDR one, because the range they are defined against
-    /// differs. The roll's SDR rendition (D-031) keeps the SDR definition, so a gain-map JPEG's
-    /// two renditions are each graded against their own range; the gain map carries the
-    /// difference. The user chose this over the alternative — ops confined to <c>[0,1]</c> with
-    /// the HDR range passed through — because a highlights slider that cannot reach the HDR
-    /// highlights is not a highlights slider.
+    /// WHAT THAT BUYS AND WHAT IT STILL COSTS. Contrast, levels and saturation now grade the
+    /// SDR range of an extended render exactly as they grade the SDR rendition (D-031).
+    /// Highlights/shadows and the curves are still defined over the roll's range, so for those
+    /// two the same parameters still give a different SDR-range picture on the two targets, and
+    /// the gain map carries the difference — the cost D-032 stated, kept for the two ops whose
+    /// reach above white was the point.
     /// </para>
     ///
     /// <para>
@@ -381,10 +437,13 @@ public static class Stage2
     /// could only be an out-of-range artefact of the destination encoding; here it is a colour
     /// outside the target's primaries, which the extended carrier represents exactly and which
     /// D-005 keeps on purpose. The encoding is therefore sign-mirrored so those components pass
-    /// through the affine ops intact. Two ops floor them by their own definition — the curve
-    /// step cannot sample a negative and highlights/shadows work on a clamped luma — exactly as
-    /// they do in SDR. Values above the headroom are not clamped here either: the caller's
-    /// <see cref="HighlightRolloff.BoundAbove"/> is the single place that enforces the ceiling.
+    /// through the affine ops intact. What the affine ops may NOT do is create one: a component
+    /// that arrived non-negative and would leave negative is floored at zero, which is what the
+    /// SDR path's final clamp did for it. Two ops floor everything by their own definition — the
+    /// curve step cannot sample a negative and highlights/shadows work on a clamped luma —
+    /// exactly as they do in SDR. Values above the headroom are not clamped here either: the
+    /// caller's <see cref="HighlightRolloff.BoundAbove"/> is the single place that enforces the
+    /// ceiling.
     /// </para>
     /// </summary>
     /// <param name="headroom">The target's highlight headroom in units of diffuse white — the
@@ -430,16 +489,17 @@ public static class Stage2
 
         if (!HasDisplayReferredAdjustments(cal)) return;
 
-        // Normalise the roll's range onto [0,1] and enter the encoded domain the ops are defined
-        // in. The curve is sRGB's — the same one the SDR ops see when the roll targets sRGB or
-        // Display P3 — applied by the closed form rather than the [0,1] table because the domain
-        // here is open at both ends: overshoot above the headroom (exposure is multiplicative and
-        // lands first) and negative out-of-gamut components both have to come back out intact.
-        float inverseHeadroom = 1.0f / headroom;
+        // Enter the encoded domain the ops are defined in, with diffuse white at 1 — the SDR
+        // encoding, continued above white. The curve is sRGB's — the same one the SDR ops see
+        // when the roll targets sRGB or Display P3 — applied by the closed form rather than the
+        // [0,1] table because the domain here is open at both ends: overshoot above the headroom
+        // (exposure is multiplicative and lands first) and negative out-of-gamut components both
+        // have to come back out intact. The range-defined ops are told where the roll's top is;
+        // the anchored ones never ask (D-036).
         ParallelSweep.Over(d.Length, (from, to) =>
         {
             for (int index = from; index < to; index++)
-                d[index] = Srgb.LinearToSrgbExtended(d[index] * inverseHeadroom);
+                d[index] = Srgb.LinearToSrgbExtended(d[index]);
         });
 
         FrameParams perceptual = cal.Clone();
@@ -451,12 +511,13 @@ public static class Stage2
             perceptual,
             ColorSpaces.LinearExtendedSrgb,
             encodeExit: false,
-            curvesAlreadyEncoded: true);
+            curvesAlreadyEncoded: true,
+            rangeTop: Srgb.LinearToSrgbExtended(headroom));
 
         ParallelSweep.Over(d.Length, (from, to) =>
         {
             for (int index = from; index < to; index++)
-                d[index] = Srgb.SrgbToLinearExtended(d[index]) * headroom;
+                d[index] = Srgb.SrgbToLinearExtended(d[index]);
         });
     }
 

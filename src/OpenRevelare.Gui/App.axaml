@@ -76,17 +76,21 @@
                         <GradientStop Offset="0.88" Color="#5E9C68" />
                         <GradientStop Offset="1" Color="#6678B4" />
                     </LinearGradientBrush>
+                    <!-- Per-channel DENSITY tracks (D_min / D_max R·G·B). A higher density in a
+                         channel is LESS of that colour on the positive — sliding R up pushes the
+                         picture toward cyan — so the track runs colour → complement, the way a
+                         printer's filter pack reads, not dark → colour. -->
                     <LinearGradientBrush x:Key="TrackRBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#3A2E2E" />
-                        <GradientStop Offset="1" Color="#A85E5E" />
+                        <GradientStop Offset="0" Color="#A85E5E" />
+                        <GradientStop Offset="1" Color="#5E9CA0" />
                     </LinearGradientBrush>
                     <LinearGradientBrush x:Key="TrackGBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#2E3A30" />
-                        <GradientStop Offset="1" Color="#5E9C68" />
+                        <GradientStop Offset="0" Color="#5E9C68" />
+                        <GradientStop Offset="1" Color="#9C6496" />
                     </LinearGradientBrush>
                     <LinearGradientBrush x:Key="TrackBBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#2E323A" />
-                        <GradientStop Offset="1" Color="#6678B4" />
+                        <GradientStop Offset="0" Color="#6678B4" />
+                        <GradientStop Offset="1" Color="#A8915A" />
                     </LinearGradientBrush>
                     <Color x:Key="SystemAccentColor">#6E8CA6</Color>
                     <Color x:Key="SystemAccentColorDark1">#6E8CA6</Color>
@@ -137,17 +141,18 @@
                         <GradientStop Offset="0.88" Color="#84C08E" />
                         <GradientStop Offset="1" Color="#8C9CD4" />
                     </LinearGradientBrush>
+                    <!-- Density tracks: colour → complement (see the dark theme's note). -->
                     <LinearGradientBrush x:Key="TrackRBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#E2CFCF" />
-                        <GradientStop Offset="1" Color="#C46A6A" />
+                        <GradientStop Offset="0" Color="#C46A6A" />
+                        <GradientStop Offset="1" Color="#6AAEB2" />
                     </LinearGradientBrush>
                     <LinearGradientBrush x:Key="TrackGBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#CFE0D2" />
-                        <GradientStop Offset="1" Color="#6AAE76" />
+                        <GradientStop Offset="0" Color="#6AAE76" />
+                        <GradientStop Offset="1" Color="#BC86B6" />
                     </LinearGradientBrush>
                     <LinearGradientBrush x:Key="TrackBBrush" StartPoint="0%,50%" EndPoint="100%,50%">
-                        <GradientStop Offset="0" Color="#D0D5E2" />
-                        <GradientStop Offset="1" Color="#7286C8" />
+                        <GradientStop Offset="0" Color="#7286C8" />
+                        <GradientStop Offset="1" Color="#C8AC64" />
                     </LinearGradientBrush>
                     <Color x:Key="SystemAccentColor">#47698A</Color>
                     <Color x:Key="SystemAccentColorDark1">#3E5D7B</Color>
