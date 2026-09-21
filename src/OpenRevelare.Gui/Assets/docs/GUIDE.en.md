@@ -397,8 +397,14 @@ comes before `DSC_10`. Drag a thumbnail to reorder by hand — a highlighted lin
 land, and a virtual copy travels with its parent. Right-click → "Sort by file name" puts it back.
 The order is saved with the project and sets the contact sheet's layout.
 
-**Virtual copies**: to keep several Stage 2 treatments of one frame, right-click the thumbnail. A
-virtual copy inherits Stage 1 and keeps its own Stage 2.
+**Virtual copies**: to keep several treatments of one frame (the other half of a half-frame scan, a
+second grade), right-click the thumbnail. A copy takes every parameter of its parent, crop included,
+and is independent from then on. With several frames ticked, right-click → create copy / remove
+from roll acts on each ticked frame.
+
+**Sync geometry**: the sync button beside the flip buttons in the Geometry / crop panel applies this
+frame's rotation / flips and straighten to the ticked frames (the whole roll when none are ticked).
+The crop is not included — to broadcast a crop, tick Sync options → Crop and use paste.
 
 **Library (roll wall)**: press **G** to switch between library and editing. "Scan a folder into the
 library…" re-registers `.ncproj` files that have been scattered around.
@@ -468,11 +474,13 @@ roll-wide samples — nothing to set by hand.
 | Ctrl+N / Ctrl+O | New roll / add images |
 | Ctrl+E | Export this frame |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+C / Ctrl+V | Copy / paste parameters — follows the open tab: Cineon calibration or Display |
 | N | Temporary negative view (for aiming at the base) |
 | K | Before/after (without Stage 2) |
+| J | Over / under-exposure warning |
 | F / Ctrl+1 | Fit to window / actual pixels 100% |
 | G / D | Library / editing |
-| Esc | Cancel the current sampling |
+| Enter / Esc | Crop: apply / cancel; other sampling: Esc cancels |
 | Ctrl+Shift+T | Light/dark theme |
 | Ctrl+, | Preferences |
 

@@ -1033,20 +1033,49 @@ public partial class MainViewModel
         await Task.CompletedTask;
     }
 
-    /// <summary>Create a virtual copy of the current frame (inserted right after it) and select it.</summary>
-    public void CreateVirtualCopyOfCurrent()
+    /// <summary>
+    /// The frames a strip command acts on: the ticked ones when any are ticked, else the
+    /// current frame. Ticking is how the strip says "these, not this one" — the copy/paste
+    /// commands already read it, so the structural ones follow the same rule instead of
+    /// making the user repeat a right-click per frame.
+    /// </summary>
+    private List<RollFrame> StripTargets()
     {
-        if (CurrentFrame is not { } parent) return;
-        if (parent.IsVirtual) { StatusText = Loc.T("只能对真实帧创建副本（当前已是副本）"); return; }
+        var ticked = Frames.Where(f => f.IsSelected).ToList();
+        if (ticked.Count > 0) return ticked;
+        return CurrentFrame is { } cur ? new List<RollFrame> { cur } : new List<RollFrame>();
+    }
+
+    /// <summary>
+    /// A virtual copy of each target frame (the ticked frames, else the current one), inserted
+    /// right after its original. A single copy is selected so it can be adjusted at once; a batch
+    /// leaves the selection where it was — jumping to the last of N copies would be arbitrary.
+    ///
+    /// A copy of a copy is allowed: it shares the same source file, sits in the same run, and is
+    /// exactly what a third half-frame crop or a third grade is.
+    /// </summary>
+    public void CreateVirtualCopies()
+    {
+        List<RollFrame> parents = StripTargets();
+        if (parents.Count == 0) return;
 
         CommitUndo();
-        CommitLiveParams(parent);   // capture live edits into the parent first
-        RollFrame copy = RollFrame.MakeVirtualCopy(parent);
-        int pos = Frames.IndexOf(parent) + 1;
-        Frames.Insert(pos, copy);
+        CommitLiveParams(CurrentFrame);   // capture live edits before anything is cloned
+        RollFrame? last = null;
+        // Walk the strip bottom-up so an insertion never shifts an index still to be visited.
+        for (int i = Frames.Count - 1; i >= 0; i--)
+        {
+            RollFrame parent = Frames[i];
+            if (!parents.Contains(parent)) continue;
+            RollFrame copy = RollFrame.MakeVirtualCopy(parent);
+            Frames.Insert(i + 1, copy);
+            last ??= copy;
+        }
         ResetUndoAfterStructural();
-        CurrentFrame = copy;             // switch to the copy so it can be adjusted immediately
-        StatusText = Loc.T("已创建虚拟副本（继承标定、场景已重置）");
+        if (parents.Count == 1) CurrentFrame = last;   // switch to the copy so it can be adjusted immediately
+        StatusText = parents.Count == 1
+            ? Loc.T("已创建虚拟副本（参数已复制）")
+            : Loc.F($"已为 {parents.Count} 个勾选帧各创建虚拟副本");
         RestartThumbnails();
     }
 
@@ -1176,29 +1205,34 @@ public partial class MainViewModel
         return (start, end - start + 1);
     }
 
-    /// <summary>Remove the current frame. Removing a real frame also drops every virtual copy of it.</summary>
-    public void RemoveCurrentFrame()
+    /// <summary>Remove the target frames (the ticked ones, else the current one). Removing a real
+    /// frame also drops every virtual copy of it.</summary>
+    public void RemoveFrames()
     {
-        if (CurrentFrame is not { } target) return;
-        if (Frames.Count <= 1) { StatusText = Loc.T("至少保留一帧，无法移除"); return; }
+        List<RollFrame> targets = StripTargets();
+        if (targets.Count == 0) return;
 
-        // Collect victims: the target, plus (if it's a real frame) all its virtual copies.
-        var victims = new HashSet<RollFrame> { target };
-        if (!target.IsVirtual)
-            foreach (RollFrame f in Frames)
-                if (f.IsVirtual && string.Equals(f.Path, target.Path, StringComparison.OrdinalIgnoreCase))
-                    victims.Add(f);
+        // Collect victims: the targets, plus (for a real frame) all its virtual copies.
+        var victims = new HashSet<RollFrame>(targets);
+        foreach (RollFrame target in targets)
+            if (!target.IsVirtual)
+                foreach (RollFrame f in Frames)
+                    if (f.IsVirtual && string.Equals(f.Path, target.Path, StringComparison.OrdinalIgnoreCase))
+                        victims.Add(f);
+        if (victims.Count >= Frames.Count) { StatusText = Loc.T("至少保留一帧，无法移除"); return; }
 
-        int targetIdx = Frames.IndexOf(target);
-        _prevFrame = null;               // don't persist the frame we're deleting on the coming switch
+        int anchor = CurrentFrame is { } cur ? Frames.IndexOf(cur) : 0;
+        bool currentGoes = CurrentFrame is { } c && victims.Contains(c);
+        if (currentGoes) _prevFrame = null;   // don't persist the frame we're deleting on the coming switch
         for (int i = Frames.Count - 1; i >= 0; i--)
             if (victims.Contains(Frames[i])) { Retire(Frames[i].Thumbnail); Frames.RemoveAt(i); }
 
         ResetUndoAfterStructural();
-        CurrentFrame = Frames[Math.Clamp(targetIdx, 0, Frames.Count - 1)];
-        StatusText = victims.Count > 1
-            ? Loc.F($"已移除该帧及其 {victims.Count - 1} 个副本")
-            : Loc.T("已从卷中移除该帧");
+        if (currentGoes) CurrentFrame = Frames[Math.Clamp(anchor, 0, Frames.Count - 1)];
+        int copies = victims.Count - targets.Count;
+        StatusText = targets.Count > 1
+            ? (copies > 0 ? Loc.F($"已移除 {targets.Count} 帧及其 {copies} 个副本") : Loc.F($"已移除 {targets.Count} 帧"))
+            : (copies > 0 ? Loc.F($"已移除该帧及其 {copies} 个副本") : Loc.T("已从卷中移除该帧"));
     }
 
     /// <summary>

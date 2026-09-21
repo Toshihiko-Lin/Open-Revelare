@@ -45,6 +45,9 @@
     <StreamGeometry x:Key="IcoMinus">M3.5 8H12.5</StreamGeometry>
     <StreamGeometry x:Key="IcoCopy">M6 6H13V13H6ZM10 6V3H3V10H6</StreamGeometry>
     <StreamGeometry x:Key="IcoCheck">M3.5 8.5L6.5 11.5L12.5 4.5</StreamGeometry>
+    <!-- broadcast = push the current frame's values onto other frames: a source dot and two
+         arcs radiating from it. -->
+    <StreamGeometry x:Key="IcoBroadcast">M4.2 8A1 1 0 1 0 6.2 8A1 1 0 1 0 4.2 8M8.3 5A4.2 4.2 0 0 1 8.3 11M11 2.4A7.9 7.9 0 0 1 11 13.6</StreamGeometry>
     <StreamGeometry x:Key="IcoLayers">M8 2L14 5.5L8 9L2 5.5ZM2 9.5L8 13L14 9.5</StreamGeometry>
     <StreamGeometry x:Key="IcoTrash">M3 4.5H13M6.5 4.5V3A0.5 0.5 0 0 1 7 2.5H9A0.5 0.5 0 0 1 9.5 3V4.5M4.5 4.5V13A1 1 0 0 0 5.5 14H10.5A1 1 0 0 0 11.5 13V4.5M6.8 7V11.5M9.2 7V11.5</StreamGeometry>
     <!-- Shortest-to-longest bars beside a down arrow: sort ascending. -->

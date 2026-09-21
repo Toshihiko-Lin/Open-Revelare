@@ -1234,15 +1234,14 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Tick the swatch that matches the saved backdrop, in every copy of the menu
-    /// (视图 菜单, the preview right-click, and — on macOS — the native menu bar share the item
-    /// list but not the instances).</summary>
+    /// (视图 菜单 and — on macOS — the native menu bar share the item list but not the
+    /// instances).</summary>
     private void SyncViewerBgChecks()
     {
         string cur = Services.Settings.Current.ViewerBackground;
-        foreach (MenuItem parent in new[] { BgMenu, BgMenu2 })
-            foreach (object? child in parent.Items)
-                if (child is MenuItem { Tag: string hex } mi)
-                    mi.IsChecked = string.Equals(hex, cur, StringComparison.OrdinalIgnoreCase);
+        foreach (object? child in BgMenu.Items)
+            if (child is MenuItem { Tag: string hex } mi)
+                mi.IsChecked = string.Equals(hex, cur, StringComparison.OrdinalIgnoreCase);
 
         // 第三份：mac 顶端菜单栏那组。空 dictionary 时（非 mac）这一圈什么也不做。
         foreach ((string hex, NativeMenuItem item) in _bgNativeItems)
@@ -1404,6 +1403,8 @@ public partial class MainWindow : Window
     // Orientation buttons. The ViewModel turns the STORED crop with the frame; these also turn
     // the in-progress draft and the locked ratio, so an edit in flight survives a 90° turn
     // instead of snapping back to the pre-turn shape.
+    private void OnApplyGeometryClick(object? sender, RoutedEventArgs e) => Vm?.ApplyGeometryToFrames();
+
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)
     {
         Vm?.RotateCw();
@@ -2043,8 +2044,8 @@ public partial class MainWindow : Window
         if (paths.Count > 0) await Vm.AddImagesAsync(paths);
     }
 
-    private void OnVirtualCopyClick(object? sender, RoutedEventArgs e) => Vm?.CreateVirtualCopyOfCurrent();
-    private void OnRemoveFrameClick(object? sender, RoutedEventArgs e) => Vm?.RemoveCurrentFrame();
+    private void OnVirtualCopyClick(object? sender, RoutedEventArgs e) => Vm?.CreateVirtualCopies();
+    private void OnRemoveFrameClick(object? sender, RoutedEventArgs e) => Vm?.RemoveFrames();
     private void OnSortFramesClick(object? sender, RoutedEventArgs e) => Vm?.SortFramesByName();
 
     private async void OnExportClick(object? sender, RoutedEventArgs e)

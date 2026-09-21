@@ -62,11 +62,47 @@ public partial class MainViewModel
         RestartThumbnails();
     }
 
+    /// <summary>
+    /// The 几何 panel's own broadcast: the current frame's orientation and straighten angle onto
+    /// the ticked frames, or the whole roll when none are ticked. Deliberately ignores the 同步项
+    /// geometry ticks — those default to off; this button IS the request.
+    ///
+    /// The crop is NOT carried: a crop is a composition drawn on one picture, and a roll that was
+    /// shot sideways needs the turn on every frame but the framing on none of them. Crops travel
+    /// through 同步项 → 裁切 with the paste commands, where asking for it is explicit.
+    /// </summary>
+    public void ApplyGeometryToFrames()
+    {
+        if (CurrentFrame is null) return;
+        CommitUndo();
+        // Through ForStorage: with the crop tool open BuildParams suppresses the crop for the
+        // render, and stored (here, and on every target) that null would erase it.
+        FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
+        CurrentFrame.Params = src;
+        var ticked = Frames.Where(f => f.IsSelected && !ReferenceEquals(f, CurrentFrame)).ToList();
+        bool onlySelected = ticked.Count > 0;
+        int n = 0;
+        foreach (RollFrame f in Frames)
+        {
+            if (ReferenceEquals(f, CurrentFrame)) continue;
+            if (onlySelected && !f.IsSelected) continue;
+            FrameParams d = f.Params;
+            d.QuarterTurns = src.QuarterTurns; d.FlipH = src.FlipH; d.FlipV = src.FlipV;
+            d.Rotation = src.Rotation;
+            SetThumbnail(f, null); n++;
+        }
+        StatusText = onlySelected
+            ? Loc.F($"已把旋转 / 翻转和拉直应用到勾选的 {n} 帧")
+            : Loc.F($"已把旋转 / 翻转和拉直应用到整卷（{n} 帧）");
+        MarkEdit();
+        RestartThumbnails();
+    }
+
     private void Broadcast(bool cal, bool scene, bool onlySelected, string what)
     {
         if (CurrentFrame is null) return;
         CommitUndo();   // close the previous edit as its own undo step
-        FrameParams src = BuildParams();
+        FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);   // never store a suppressed crop
         CurrentFrame.Params = src;
         int n = 0;
         foreach (RollFrame f in Frames)

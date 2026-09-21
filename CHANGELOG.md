@@ -1,5 +1,41 @@
 # OpenRevelare — 更新日志
 
+## v1.7.4（未发布）
+
+**改进**
+
+- **胶片条勾选多帧后，右键「创建虚拟副本」「从卷中移除」对每个勾选帧执行**。没有勾选时仍只作用于当前帧。
+
+- **虚拟副本复制母帧的全部参数（含 Display 参数和裁切）**，不再重置场景；做半格的另一半、第二种调法时不用从头调。
+
+- **几何 / 裁切面板翻转按钮旁新增同步按钮**：把本帧的旋转 / 翻转和拉直应用到勾选帧，没有勾选则整卷；不带裁切。
+
+- **预览区右键菜单精简，并标出快捷键**。面板和菜单栏里已有的项（清除裁切、拉线、齿孔遮罩、背景色）不再重复；Ctrl+C / Ctrl+V、J、Ctrl+Z / Ctrl+Y 在菜单和「快捷键…」里都写明了。
+
+**修复**
+
+- **从图库重新进入正在打开的卷，不再丢失还没自动保存的裁切等修改**。当前卷不再从文件重新读回，直接回到修片；切卷前的保存会等正在进行的写入完成，写入失败则不切卷并留下原因；工程文件被杀毒软件或索引短暂占用时会自动重试。
+
+- **切卷时中止上一卷的整卷分析**，它的结果不再落到后打开的卷上。
+
+---
+
+**Improved**
+
+- **With several frames ticked in the film strip, right-click "Create virtual copy" and "Remove from roll" act on each ticked frame.** With nothing ticked they still act on the current frame alone.
+
+- **A virtual copy now takes every parameter of its parent, Display parameters and crop included,** instead of resetting the scene — the other half of a half-frame scan or a second grade no longer starts from scratch.
+
+- **A sync button next to the flip buttons in the Geometry / crop panel** applies this frame's rotation / flips and straighten to the ticked frames, or to the whole roll when none are ticked; the crop is not included.
+
+- **The preview's right-click menu is shorter and shows its shortcuts.** Items that already live in the panel or the menu bar (clear crop, straighten lines, sprocket mask, background colour) are no longer repeated; Ctrl+C / Ctrl+V, J and Ctrl+Z / Ctrl+Y are stated in the menu and under "Shortcuts…".
+
+**Fixed**
+
+- **Re-entering the open roll from the library no longer loses edits (crops and more) that autosave had not yet written.** The open roll is no longer re-read from disk; the save before a roll switch waits for a write in flight, a failed write cancels the switch and keeps its reason on the status line, and a project file briefly held by an antivirus scan or indexer is retried.
+
+- **A roll-wide analysis is cancelled when the roll changes**, so its result no longer lands on the roll opened next.
+
 ## v1.7.3（2026-09-18）
 
 **修复**

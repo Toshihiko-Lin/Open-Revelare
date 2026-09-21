@@ -281,13 +281,16 @@
                                     <ctl:Icon Data="{StaticResource IcoPlus}" />
                                 </MenuItem.Icon>
                             </MenuItem>
+                            <!-- Copy / remove act on the TICKED frames when any are ticked, else on
+                                 the current one — the same rule the paste commands below use. -->
                             <MenuItem Header="{i18n:T '创建虚拟副本'}" Click="OnVirtualCopyClick"
-                                      ToolTip.Tip="{i18n:T '继承标定、重置场景，可独立调整'}">
+                                      ToolTip.Tip="{i18n:T '复制全部参数（含裁切），可独立调整；勾选了多帧则各建一个'}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoLayers}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '从卷中移除'}" Click="OnRemoveFrameClick">
+                            <MenuItem Header="{i18n:T '从卷中移除'}" Click="OnRemoveFrameClick"
+                                      ToolTip.Tip="{i18n:T '勾选了多帧则全部移除；真实帧连同它的副本一起'}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoTrash}" />
                                 </MenuItem.Icon>
@@ -525,7 +528,12 @@
                         <ContextMenu>
                             <!-- Copy/paste of the frame's parameters leads the menu: it is the
                                  one thing here you reach for mid-edit. Ctrl+C / Ctrl+V do
-                                 whichever of the two the open panel is showing. -->
+                                 whichever of the two the open panel is showing, which is why
+                                 the gesture is stated once, on the hint line, rather than
+                                 pinned to one pair.
+                                 Kept deliberately short: everything that has a home in the
+                                 right-hand panel (clear crop, straighten, sprocket mask) or in
+                                 the 视图 menu (background colour) is NOT repeated here. -->
                             <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
@@ -540,16 +548,15 @@
                             <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick" />
                             <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
-                            <!-- Which field groups a copy actually carries is decided here, so it
-                                 belongs beside the copy commands rather than only in 编辑. -->
-                            <MenuItem Header="{i18n:T '选择同步项…'}" Click="OnSyncOptionsClick" />
+                            <MenuItem Header="{i18n:T 'Ctrl+C / Ctrl+V 复制 / 粘贴当前打开标签的那一组'}"
+                                      IsEnabled="False" />
                             <Separator />
                             <MenuItem Header="{i18n:T '适合窗口'}" InputGesture="F" Click="OnFitClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoFit}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '实际像素 100%（Ctrl+1）'}" Click="OnActualSizeClick">
+                            <MenuItem Header="{i18n:T '实际像素 100%'}" InputGesture="Ctrl+1" Click="OnActualSizeClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoActual}" />
                                 </MenuItem.Icon>
@@ -565,13 +572,14 @@
                                     <ctl:Icon Data="{StaticResource IcoCompare}" />
                                 </MenuItem.Icon>
                             </MenuItem>
+                            <MenuItem Header="{i18n:T '过曝 / 欠曝指示'}" InputGesture="J" ToggleType="CheckBox"
+                                      IsChecked="{Binding ShowClipping, Mode=TwoWay}" />
                             <Separator />
                             <MenuItem Header="{i18n:T '裁切（拖框）'}" Click="OnCropClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCrop}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '清除裁切'}" Click="OnClearCropClick" />
                             <MenuItem Header="{i18n:T '旋转 / 翻转'}">
                                 <MenuItem Header="{i18n:T '逆时针 90°'}" Click="OnRotateCcwClick">
                                     <MenuItem.Icon>
@@ -593,29 +601,19 @@
                                         <ctl:Icon Data="{StaticResource IcoFlipV}" />
                                     </MenuItem.Icon>
                                 </MenuItem>
-                                <Separator />
-                                <MenuItem Header="{i18n:T '拉线取水平'}" Click="OnStraightenHClick">
-                                    <MenuItem.Icon>
-                                        <ctl:Icon Data="{StaticResource IcoLevelH}" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
-                                <MenuItem Header="{i18n:T '拉线取垂直'}" Click="OnStraightenVClick">
-                                    <MenuItem.Icon>
-                                        <ctl:Icon Data="{StaticResource IcoLevelV}" />
-                                    </MenuItem.Icon>
-                                </MenuItem>
                             </MenuItem>
                             <Separator />
-                            <MenuItem Header="{i18n:T '显示齿孔遮罩'}" ToggleType="CheckBox"
-                                      IsChecked="{Binding ShowSprocketMask, Mode=TwoWay}" />
-                            <MenuItem Header="{i18n:T '预览背景色'}" Name="BgMenu2">
-                                <MenuItem Header="{i18n:T '白'}" Tag="#FFFFFF" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
-                                <MenuItem Header="{i18n:T '浅灰'}" Tag="#B4B4B4" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
-                                <MenuItem Header="{i18n:T '中灰（默认）'}" Tag="#5E5E5E" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
-                                <MenuItem Header="{i18n:T '18% 中性灰'}" Tag="#777777" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
-                                <MenuItem Header="{i18n:T '深灰'}" Tag="#323232" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
-                                <MenuItem Header="{i18n:T '黑'}" Tag="#0E0F11" ToggleType="Radio" GroupName="viewerbg2" Click="OnViewerBgClick" />
+                            <MenuItem Header="{i18n:T '撤销'}" InputGesture="Ctrl+Z" Click="OnUndoClick">
+                                <MenuItem.Icon>
+                                    <ctl:Icon Data="{StaticResource IcoUndo}" />
+                                </MenuItem.Icon>
                             </MenuItem>
+                            <MenuItem Header="{i18n:T '重做'}" InputGesture="Ctrl+Y" Click="OnRedoClick">
+                                <MenuItem.Icon>
+                                    <ctl:Icon Data="{StaticResource IcoRedo}" />
+                                </MenuItem.Icon>
+                            </MenuItem>
+                            <MenuItem Header="{i18n:T '全部快捷键…'}" Click="OnHelpClick" />
                         </ContextMenu>
                     </Border.ContextMenu>
                     <Grid Name="ViewPort" PointerWheelChanged="OnViewportWheel">
@@ -1182,6 +1180,15 @@
                                                 AutomationProperties.Name="{i18n:T '竖直翻转'}"
                                                 ToolTip.Tip="{i18n:T '竖直翻转'}">
                                             <ctl:Icon Data="{StaticResource IcoFlipV}" />
+                                        </Button>
+                                        <!-- Sits with the orientation buttons because that is what it
+                                             is mostly used for: turn one frame, push the turn down
+                                             the roll. It carries the straighten angle too; never the crop. -->
+                                        <Button Classes="icon" Click="OnApplyGeometryClick" IsEnabled="{Binding HasImage}"
+                                                Margin="8,0,0,0"
+                                                AutomationProperties.Name="{i18n:T '同步几何到其他帧'}"
+                                                ToolTip.Tip="{i18n:T '把本帧的旋转 / 翻转和拉直应用到勾选帧；没有勾选则应用到整卷（不含裁切）'}">
+                                            <ctl:Icon Data="{StaticResource IcoBroadcast}" />
                                         </Button>
                                     </StackPanel>
                                     <Grid ColumnDefinitions="Auto,*">

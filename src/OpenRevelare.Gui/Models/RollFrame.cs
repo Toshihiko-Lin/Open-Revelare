@@ -57,17 +57,17 @@ public sealed partial class RollFrame : ObservableObject
     }
 
     /// <summary>
-    /// Make a virtual copy of <paramref name="parent"/>: inherit its Stage-1 calibration,
-    /// geometry, lens and roll-level ops, but reset Stage-2 scene adjustments to defaults
-    /// (mirrors Python's <c>FrameEntry.make_virtual_copy</c> — FilmBase inherited, SceneBase reset).
+    /// Make a virtual copy of <paramref name="parent"/>: every parameter of both stages, the
+    /// geometry and the crop included.
+    ///
+    /// The Stage-2 scene used to be reset on the copy (the Python build's FilmBase-inherited /
+    /// SceneBase-reset split). In practice a copy is made to VARY a finished frame — the other
+    /// half of a half-frame scan, an alternative crop, a second grade — and starting it from a
+    /// flat scene meant re-doing the whole Display stage first.
     /// </summary>
     public static RollFrame MakeVirtualCopy(RollFrame parent)
-    {
-        FrameParams p = parent.Params.Clone();
-        ResetScene(p);
-        // Thumbnail left null so the strip re-renders it from this copy's own (scene-reset) params.
-        return new RollFrame(parent.Path, isVirtual: true) { Params = p };
-    }
+        // Thumbnail left null so the strip renders it from this copy's own params.
+        => new(parent.Path, isVirtual: true) { Params = parent.Params.Clone() };
 
     /// <summary>Reset every Stage-2 (SceneBase) field of <paramref name="p"/> to its neutral default.</summary>
     public static void ResetScene(FrameParams p)
