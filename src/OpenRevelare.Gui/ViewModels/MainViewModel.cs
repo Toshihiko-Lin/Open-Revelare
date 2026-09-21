@@ -280,7 +280,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // has no crop", which is permanent.
         //
         // Every way out of a frame arrives here, so with the tool left armed all three lost the
-        // crop: creating a virtual copy (CreateVirtualCopyOfCurrent commits the parent, then
+        // crop: creating a virtual copy (CreateVirtualCopies commits the parent, then
         // CLONES it, so one click erased both frames' crops), stepping to the next frame
         // (OnCurrentFrameChanged), and the idle autosave or the close (BuildProjectData). Nothing
         // looks wrong at the time — the tool is open, so the preview is uncropped anyway — and the
@@ -2713,8 +2713,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>Cancels an in-flight <see cref="AutoInvertRollAsync"/> when a new roll loads.</summary>
+    /// <summary>The in-flight <see cref="AutoInvertRollAsync"/>, if any — cancelled by
+    /// <see cref="CancelRollAnalysis"/> when the roll is replaced.</summary>
     private CancellationTokenSource? _autoInvertCts;
+
+    /// <summary>
+    /// Stop a roll-wide analysis that belongs to the roll being LEFT. Its stage 2 finishes on the
+    /// live controls and then broadcasts to <see cref="Frames"/> — whatever roll those happen to
+    /// be by then. Nothing cancelled it on a roll switch (only the next analysis did), so the
+    /// import-time pass of the previous roll could land its pooled base and endpoints on a roll
+    /// opened seconds later, and dirty it.
+    /// </summary>
+    private void CancelRollAnalysis()
+    {
+        _autoInvertCts?.Cancel();
+        _autoInvertCts = null;
+        RollAnalysisPending = false;
+    }
 
     /// <summary>
     /// Push the four auto-chain parameters onto EVERY frame.
@@ -3883,8 +3898,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return buf;
     }
 
-    /// <summary>Write a pending edit out right now (roll switch, export, shutdown).</summary>
-    public Task FlushRollAsync() => _autoSave.FlushAsync();
+    /// <summary>Write a pending edit out right now (roll switch, export, shutdown). False when
+    /// the write failed and the roll is still dirty — a caller about to REPLACE the roll's state
+    /// must then keep it, or the unsaved edits are gone with nothing on disk to show for them.</summary>
+    public Task<bool> FlushRollAsync() => _autoSave.FlushAsync();
+
+    /// <summary>
+    /// The flush before a roll is replaced. A failed write is reported and the switch is refused:
+    /// the edits are only in memory, and the load about to happen throws memory away.
+    /// </summary>
+    private async Task<bool> FlushBeforeSwitchAsync()
+    {
+        if (await FlushRollAsync()) return true;
+        // AutoSaveAsync has just put the reason on the status line; add what it means here.
+        StatusText += Loc.T("——未切换卷，以免丢失这些修改");
+        return false;
+    }
 
     /// <summary>
     /// Synchronous flush for window close, where there is no time left to await anything: the app
@@ -3950,6 +3979,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (roll.Missing)
         {
             StatusText = Loc.F($"工程文件不存在：{roll.ProjectPath}");
+            return;
+        }
+        // The roll that is already open is not reloaded — it is on screen, warm, and its edits
+        // are in memory. Reading the file back would replace all of that with whatever the last
+        // write managed to capture: stepping out to 图库 and straight back in used to throw away
+        // every edit since the previous idle-pause save (and re-decode the whole roll to do it).
+        // The flush still runs, so the file catches up with the screen.
+        if (_roll is { } open && open.Id == roll.Id && Frames.Count > 0)
+        {
+            await FlushRollAsync();
             return;
         }
         await OpenProjectAsync(roll.ProjectPath);

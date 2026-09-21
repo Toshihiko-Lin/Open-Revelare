@@ -114,10 +114,7 @@ public static class Project
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         });
-        string tmp = path + ".tmp";
-        File.WriteAllText(tmp, json);
-        if (File.Exists(path)) File.Replace(tmp, path, null);
-        else File.Move(tmp, path);
+        AtomicFile.WriteAllText(path, json);
     }
 
     // ── Load ────────────────────────────────────────────────────────────────────

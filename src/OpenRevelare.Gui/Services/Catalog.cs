@@ -1,3 +1,4 @@
+using OpenRevelare.Core;
 using System.Text.Json;
 
 namespace OpenRevelare.Gui.Services;
@@ -280,13 +281,7 @@ public static class Catalog
 
     /// <summary>Write <paramref name="text"/> to <paramref name="path"/> without ever leaving a
     /// truncated file behind, even if the process dies mid-write.</summary>
-    public static void AtomicWrite(string path, string text)
-    {
-        string tmp = path + ".tmp";
-        File.WriteAllText(tmp, text);
-        if (File.Exists(path)) File.Replace(tmp, path, null);
-        else File.Move(tmp, path);
-    }
+    public static void AtomicWrite(string path, string text) => AtomicFile.WriteAllText(path, text);
 
     // ── Project-file placement ──────────────────────────────────────────────────
 

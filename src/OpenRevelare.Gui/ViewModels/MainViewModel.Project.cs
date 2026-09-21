@@ -275,7 +275,8 @@ public partial class MainViewModel
     /// rebuild every frame (real + virtual copies) with its saved params, and show the first.</summary>
     public async Task OpenProjectAsync(string path)
     {
-        await FlushRollAsync();   // the outgoing roll's pending edit, before anything is replaced
+        // The outgoing roll's pending edit, before anything is replaced.
+        if (!await FlushBeforeSwitchAsync()) return;
         IsBusy = true;
         StatusText = Loc.T("正在打开工程 …");
         Project.Data data;
@@ -338,10 +339,11 @@ public partial class MainViewModel
 
         // Relink/calibration can leave the dialog up for a long time. Capture any edits made to
         // the outgoing roll during that interval while all of its own state is still installed.
-        await FlushRollAsync();
+        if (!await FlushBeforeSwitchAsync()) { IsBusy = false; return; }
 
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
+        CancelRollAnalysis();
         _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
         lock (_decoding) _decoding.Clear();
 
@@ -447,7 +449,7 @@ public partial class MainViewModel
         // Save the outgoing roll while all of its own colour state is still installed. The
         // incoming assumption is adopted only after preparation succeeds, so a bad calibration
         // file cannot alter either the saved project or the live caches of the roll on screen.
-        await FlushRollAsync();
+        if (!await FlushBeforeSwitchAsync()) return;
         IsBusy = true;
         StatusText = Loc.T("正在准备导入 …");
 
@@ -489,7 +491,7 @@ public partial class MainViewModel
         // Preparation may be long and the busy indicator does not lock the old roll's controls.
         // Flush once more while its pipeline/assumption are still installed, so edits made during
         // calibration cannot be lost when adoption detaches it below.
-        await FlushRollAsync();
+        if (!await FlushBeforeSwitchAsync()) { ReportBackground(""); IsBusy = false; return; }
 
         // Preparation was side-effect free. From this point onward the incoming roll is being
         // adopted, so retire every cache whose pixels were decoded under the outgoing contract.
@@ -654,7 +656,7 @@ public partial class MainViewModel
         if (paths.Count == 0) return;
         // Config imports flush before their potentially-failing preparation, while the outgoing
         // roll's assumption is still active. Direct callers still flush here.
-        if (!_configLoad) await FlushRollAsync();
+        if (!_configLoad && !await FlushBeforeSwitchAsync()) return;
         _autoSave.Discard();
         // Detach from the outgoing roll BEFORE its frames are replaced: anything that dirties the
         // roll between here and RegisterRoll would otherwise be pointed at the old entry.
@@ -669,6 +671,7 @@ public partial class MainViewModel
         Notes.Reset();            // notes are per-roll; a new roll starts blank
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
+        CancelRollAnalysis();
         _prevFrame = null;
         // The controls still show the OUTGOING roll, and they stay that way until the incoming
         // first frame finishes decoding and LoadParams runs. Say so before Frames is touched:
