@@ -67,7 +67,7 @@ public sealed class StripBatchTests
             // Never down to nothing.
             foreach (RollFrame f in vm.Frames) f.IsSelected = true;
             vm.RemoveFrames();
-            Assert.Equal(1, vm.Frames.Count);
+            Assert.Single(vm.Frames);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }
     }

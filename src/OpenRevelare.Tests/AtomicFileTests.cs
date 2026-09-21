@@ -6,7 +6,7 @@ namespace OpenRevelare.Tests;
 public sealed class AtomicFileTests
 {
     [Fact]
-    public void Replaces_the_target_once_a_transient_lock_is_released()
+    public async Task Replaces_the_target_once_a_transient_lock_is_released()
     {
         string path = Path.Combine(TestDataIsolation.Root, $"atomic-{Guid.NewGuid():N}.txt");
         File.WriteAllText(path, "old");
@@ -22,7 +22,7 @@ public sealed class AtomicFileTests
 
         AtomicFile.WriteAllText(path, "new");   // must outlast the 150 ms lock and land
 
-        holder.Wait();
+        await holder;
         Assert.Equal("new", File.ReadAllText(path));
         Assert.False(File.Exists(path + ".tmp"));
     }
