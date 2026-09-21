@@ -5,7 +5,18 @@ namespace OpenRevelare.Tests;
 
 public sealed class AtomicFileTests
 {
-    [Fact]
+    /// <summary>The two lock tests describe Windows sharing semantics: on POSIX an open file does
+    /// not block a rename over it, so there is neither a transient to outlast nor a hold to give
+    /// up on. They are the mechanism's reason to exist, and it only exists there.</summary>
+    private sealed class WindowsFactAttribute : FactAttribute
+    {
+        public WindowsFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows()) Skip = "Windows file-sharing semantics only";
+        }
+    }
+
+    [WindowsFact]
     public async Task Replaces_the_target_once_a_transient_lock_is_released()
     {
         string path = Path.Combine(TestDataIsolation.Root, $"atomic-{Guid.NewGuid():N}.txt");
@@ -27,7 +38,7 @@ public sealed class AtomicFileTests
         Assert.False(File.Exists(path + ".tmp"));
     }
 
-    [Fact]
+    [WindowsFact]
     public void Gives_up_on_a_lock_that_does_not_clear()
     {
         string path = Path.Combine(TestDataIsolation.Root, $"atomic-{Guid.NewGuid():N}.txt");
