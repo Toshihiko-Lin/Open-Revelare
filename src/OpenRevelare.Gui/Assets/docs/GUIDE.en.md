@@ -409,6 +409,13 @@ The crop is not included — to broadcast a crop, tick Sync options → Crop and
 **Library (roll wall)**: press **G** to switch between library and editing. "Scan a folder into the
 library…" re-registers `.ncproj` files that have been scattered around.
 
+**Sorting**: the picker under the sidebar's search box orders the wall by added time (the default,
+newest first), last modified, last opened, roll name, roll number or dev date; the button beside it
+reverses the direction. A roll that has no value for the chosen field always goes last, in either
+direction. Dev date is free text: entries a date can be read out of (`2025.09`, `2025-09-12`,
+`2025年9月`, `20250912`) sort chronologically, and anything else sorts after all of them. The choice
+is remembered between sessions.
+
 ---
 
 ## 8. Exporting

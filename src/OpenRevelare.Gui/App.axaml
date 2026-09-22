@@ -17,10 +17,121 @@
             </ResourceDictionary.MergedDictionaries>
 
             <!--
+              ══ Scales ════════════════════════════════════════════════════════════
+              Type, radius and spacing, as five / three / five steps. Before these the
+              window carried nine font sizes (10 … 17), nine corner radii (2 … 12) and
+              spacing typed in at each call site, so nothing lined up except by luck
+              and every new control invented its own measurements.
+
+              12–15 px, which is a whole step above where a control panel lands when
+              density is the only thing optimised. 10–13 reads as a utility: legible,
+              joyless, faintly apologetic about taking up room.
+
+              Raised in ONE move, with the spacing pulled in at the same time. The
+              first attempt went up a single pixel per step and added air around it,
+              and the two cancelled: a pixel is under the threshold of noticing, while
+              white space around text makes the text look SMALLER by comparison, so
+              the panel came out looking the same but emptier. Type carries this
+              design; space is what is left over once it has what it needs.
+
+              A step is chosen by ROLE, never by how big it looks in one place:
+
+                FontXxs  the film strip's caption — the one place a 10 px label is
+                         legible-enough because it is a file name under its own picture
+                FontXs   secondary lines: hints, tallies, field rubrics, readouts
+                FontSm   controls — buttons, inputs, menus, check boxes
+                FontMd   body, card titles, the open tab
+                FontLg   a module's heading (图库)
+
+                RadiusSm inner surfaces that sit inside something else (a cover inside
+                         a card, a chip, a swatch)
+                RadiusMd controls: buttons, inputs, strip items, roll cards
+                RadiusLg only what FLOATS above the window — menus, flyouts, dialogs.
+                         Nothing that is part of a panel gets this: a rounded box
+                         drawn inside another rounded box is the web's card idiom,
+                         and a panel of them reads as a page rather than an
+                         instrument. Panels are flush and divided by hairlines.
+
+              The radii are deliberately SMALL — 2, 3, 6. 10–12 px corners are what a
+              browser puts on a card because a card there is a floating object; here
+              the same number makes a light meter look like a landing page. At 2–3 px
+              a corner stops being a shape and becomes what it is for: taking the
+              sharpness off an edge so it does not read as a cut.
+
+              MOTION is two durations and nothing else: 120 ms for a state that
+              answers the pointer (hover, press, check), 160 ms for something that
+              moves or turns (a chevron, a card lifting). Anything slower reads as
+              lag in a tool you use at slider rate.
+            -->
+            <x:Double x:Key="FontXxs">12</x:Double>
+            <x:Double x:Key="FontXs">13</x:Double>
+            <x:Double x:Key="FontSm">14</x:Double>
+            <x:Double x:Key="FontMd">15</x:Double>
+            <x:Double x:Key="FontLg">22</x:Double>
+
+            <CornerRadius x:Key="RadiusSm">2</CornerRadius>
+            <CornerRadius x:Key="RadiusMd">3</CornerRadius>
+            <CornerRadius x:Key="RadiusLg">6</CornerRadius>
+
+            <x:Double x:Key="Space1">4</x:Double>
+            <x:Double x:Key="Space2">6</x:Double>
+            <x:Double x:Key="Space3">8</x:Double>
+            <x:Double x:Key="Space4">12</x:Double>
+            <x:Double x:Key="Space5">18</x:Double>
+
+            <!-- The label column every parameter row starts at. One number, so the
+                 sliders, the pickers and the crop preset all break at the same x and
+                 the panel has a spine — the single change that most makes a dense
+                 column of controls look composed rather than assembled. Wide enough
+                 for the longest English label the rows carry (「Exposure」), since a
+                 width that fits 「曝光」 clips it. -->
+            <x:Double x:Key="LabelColumn">62</x:Double>
+
+            <!-- The gutter the Cineon steps' numerals HANG IN — outside the panel's
+                 left margin, not inside it. Everything that is content starts on one
+                 line: a section's caption, a section's controls, and a control that
+                 belongs to no section at all (「应用 Cineon 标定到整卷」, the HDR row
+                 above the tabs). Only the numerals are left of it.
+
+                 Getting this wrong is invisible in a mock-up and obvious in the
+                 window: with the gutter INSIDE the margin, everything inside a section
+                 sat 26 px right of everything that was not, and the panel had two left
+                 edges. Hence the Expander's negative margin below — it reaches back out
+                 through the panel's margin so its caption lands on the same line as its
+                 own controls.
+
+                 18, not 24, and the panel's own margin is 22 rather than 40. In a
+                 370 px column every pixel of left margin is a pixel off the end of
+                 every slider in it, and a slider that is 10% shorter is 10% coarser to
+                 drag — the one place where "generous margins" is not a matter of taste
+                 but of how precisely the user can set a number. -->
+            <x:Double x:Key="StepGutter">18</x:Double>
+
+            <!--
               ══ Palette ═══════════════════════════════════════════════════════════
-              Graphite + a restrained cyan-blue accent. Both variants are defined, so
-              偏好设置 → 界面主题 actually repaints the app (it used to only re-tint
+              NEUTRAL graphite + one restrained blue accent. Both variants are defined,
+              so 偏好设置 → 界面主题 actually repaints the app (it used to only re-tint
               Fluent's own controls while every custom surface stayed dark).
+
+              The greys are neutral by measurement, not by eye: R=G=B, or within a
+              point of it. They used to carry a blue cast (#1C1E20 is 4 points of blue
+              over red, #DCE0E4 eight), which is the default "cool UI" look and the
+              one thing a colour tool cannot afford — a chrome that leans blue makes
+              every picture in front of it read warm, and the user corrects a cast the
+              screen invented. It is also why the warm, paper-grey palette that would
+              otherwise suit this app's restraint is not on the table: the discipline
+              has to come from proportion, type and what is left out, not from tint.
+
+              One accent, and it is the only chroma in the window that is not a
+              photograph: #6E8CA6, a desaturated slate blue, used for the open tab, an
+              armed tool, a selected card and keyboard focus, and for nothing else.
+
+              The surfaces are spaced on a LADDER, not clustered: ground → panel →
+              chrome → raised → elevated, roughly eight levels apart, dark to light in
+              the order things sit in front of each other. Neutral greys a few levels
+              apart read as one flat sheet — the eye needs the step to see the edge,
+              and with no hue difference to fall back on the step is all there is.
+              Restraint is the size of the palette, not the size of its contrast.
 
               Every consumer must bind these with {DynamicResource} — a StaticResource
               is resolved once at load and would freeze the app in one variant.
@@ -31,26 +142,30 @@
             -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="BgBrush">#1C1E20</SolidColorBrush>
-                    <SolidColorBrush x:Key="ChromeBrush">#212327</SolidColorBrush>
-                    <SolidColorBrush x:Key="PanelBrush">#232529</SolidColorBrush>
-                    <SolidColorBrush x:Key="Panel2Brush">#1D1F22</SolidColorBrush>
-                    <SolidColorBrush x:Key="ElevatedBrush">#2B2E33</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextBrush">#DCE0E4</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextDimBrush">#A8AEB5</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextMuteBrush">#7E848B</SolidColorBrush>
-                    <SolidColorBrush x:Key="BorderBrush2">#34373C</SolidColorBrush>
-                    <SolidColorBrush x:Key="BorderSoftBrush">#2A2D31</SolidColorBrush>
-                    <SolidColorBrush x:Key="GrooveBrush">#15171A</SolidColorBrush>
+                    <SolidColorBrush x:Key="BgBrush">#151515</SolidColorBrush>
+                    <SolidColorBrush x:Key="ChromeBrush">#232323</SolidColorBrush>
+                    <SolidColorBrush x:Key="PanelBrush">#272727</SolidColorBrush>
+                    <SolidColorBrush x:Key="Panel2Brush">#1C1C1C</SolidColorBrush>
+                    <SolidColorBrush x:Key="ElevatedBrush">#333333</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextBrush">#ECECEC</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextDimBrush">#B2B2B2</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#8A8A8A</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderBrush2">#3E3E3E</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderSoftBrush">#313131</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#0E0E0E</SolidColorBrush>
                     <!-- Instrument grey: sliders and meters read as measurement, not decoration. -->
-                    <SolidColorBrush x:Key="TrackFillBrush">#7C838B</SolidColorBrush>
+                    <SolidColorBrush x:Key="TrackFillBrush">#808080</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentBrush">#6E8CA6</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentHoverBrush">#849FB6</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentSoftBrush">#246E8CA6</SolidColorBrush>
-                    <SolidColorBrush x:Key="AccentFgBrush">#101214</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentFgBrush">#121212</SolidColorBrush>
                     <SolidColorBrush x:Key="HoverSoftBrush">#14FFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="PressSoftBrush">#0AFFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="WarnBrush">#C09A52</SolidColorBrush>
+                    <!-- Keyboard focus. Brighter than the accent on purpose: it has to be
+                         findable at a glance on a dark panel, and it is only ever on screen
+                         while the pointer is not being used. -->
+                    <SolidColorBrush x:Key="FocusBrush">#9CC2E0</SolidColorBrush>
                     <!-- Slider track gradients (SliderRow.TrackBrush). Saturation is held down
                          to the panel's graphite register: the colour is a direction cue read
                          up close, not a stripe that competes with the photo. -->
@@ -100,24 +215,25 @@
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="BgBrush">#EDEEF0</SolidColorBrush>
-                    <SolidColorBrush x:Key="ChromeBrush">#FAFBFC</SolidColorBrush>
-                    <SolidColorBrush x:Key="PanelBrush">#F5F6F8</SolidColorBrush>
-                    <SolidColorBrush x:Key="Panel2Brush">#E9EBEE</SolidColorBrush>
+                    <SolidColorBrush x:Key="BgBrush">#E4E4E4</SolidColorBrush>
+                    <SolidColorBrush x:Key="ChromeBrush">#FBFBFB</SolidColorBrush>
+                    <SolidColorBrush x:Key="PanelBrush">#F7F7F7</SolidColorBrush>
+                    <SolidColorBrush x:Key="Panel2Brush">#EDEDED</SolidColorBrush>
                     <SolidColorBrush x:Key="ElevatedBrush">#FFFFFF</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextBrush">#1C1E20</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextDimBrush">#4C5157</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextMuteBrush">#787E85</SolidColorBrush>
-                    <SolidColorBrush x:Key="BorderBrush2">#D3D6DA</SolidColorBrush>
-                    <SolidColorBrush x:Key="BorderSoftBrush">#E2E5E8</SolidColorBrush>
-                    <SolidColorBrush x:Key="GrooveBrush">#DCDFE3</SolidColorBrush>
-                    <SolidColorBrush x:Key="TrackFillBrush">#6B727A</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextBrush">#1C1C1C</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextDimBrush">#525252</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#7C7C7C</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderBrush2">#CACACA</SolidColorBrush>
+                    <SolidColorBrush x:Key="BorderSoftBrush">#DADADA</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#D2D2D2</SolidColorBrush>
+                    <SolidColorBrush x:Key="TrackFillBrush">#6E6E6E</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentBrush">#47698A</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentHoverBrush">#587C9F</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentSoftBrush">#2447698A</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentFgBrush">#FFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="HoverSoftBrush">#0E000000</SolidColorBrush>
                     <SolidColorBrush x:Key="PressSoftBrush">#16000000</SolidColorBrush>
+                    <SolidColorBrush x:Key="FocusBrush">#2A5C88</SolidColorBrush>
                     <SolidColorBrush x:Key="WarnBrush">#8A6A18</SolidColorBrush>
                     <LinearGradientBrush x:Key="TrackTempBrush" StartPoint="0%,50%" EndPoint="100%,50%">
                         <GradientStop Offset="0" Color="#6A8CBE" />
@@ -248,18 +364,26 @@
                 </Style>
             </ControlTheme>
 
-            <!-- ══ Section card ═══════════════════════════════════════════════════
-                 One parameter module = one card: a Panel2 surface with a hairline edge,
-                 the caption on top, the controls inset below. The caption row is the
-                 whole card's width so the module reads as one object from any edge; the
-                 chevron sits at the far right, Lightroom-style, so captions and their
-                 optional step badges line up down the left. -->
+            <!-- ══ Section ════════════════════════════════════════════════════════
+                 One parameter module = one SECTION of the panel, not a card on it.
+                 Flush to both edges, no border of its own, separated from its
+                 neighbours by a single hairline above the caption — which is how a
+                 panel of fifteen modules stays a panel instead of becoming a page of
+                 stacked boxes. (It was the boxes: outlined, rounded, inset, gapped, a
+                 column of them is the web's card list, and the whole window read as a
+                 site rather than an instrument.)
+
+                 The caption row spans the full width so the module reads as one object
+                 from any edge; the chevron sits at the far right, Lightroom-style, so
+                 captions and their optional step badges line up down the left. -->
             <ControlTheme x:Key="SectionHeader" TargetType="ToggleButton">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Padding" Value="0" />
-                <Setter Property="MinHeight" Value="34" />
+                <!-- Tall enough to carry the caption and its space, short enough that
+                     the rubric still reads as a label on the group rather than a bar. -->
+                <Setter Property="MinHeight" Value="26" />
                 <Setter Property="Cursor" Value="Hand" />
                 <!-- Background/Margin are literal, NOT TemplateBindings: the global
                      `Style Selector="ToggleButton"` below wins over a ControlTheme setter,
@@ -267,29 +391,55 @@
                      12,6 padding) onto every section caption. -->
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border x:Name="face" Background="Transparent" Padding="8,0" CornerRadius="5,5,0,0">
-                            <Grid ColumnDefinitions="Auto,*,Auto" MinHeight="34">
+                        <Border x:Name="face" Background="Transparent" Padding="2,0" CornerRadius="0">
+                            <Border.Transitions>
+                                <Transitions>
+                                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                                </Transitions>
+                            </Border.Transitions>
+                            <Grid ColumnDefinitions="18,*,Auto" MinHeight="26">
                                 <!-- Step badge: the Expander's Tag, shown only when set. The
-                                     Cineon tab numbers its three calibration cards with it. -->
-                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="9"
-                                        Margin="0,0,8,0" VerticalAlignment="Center"
+                                     Cineon tab numbers its three calibration steps with it.
+                                     The COLUMN is fixed whether or not the badge is in it. -->
+                                <Border Grid.Column="0" Width="15" Height="15" CornerRadius="7.5"
+                                        HorizontalAlignment="Left" VerticalAlignment="Center"
                                         Background="{DynamicResource AccentSoftBrush}"
                                         IsVisible="{TemplateBinding Tag, Converter={x:Static ObjectConverters.IsNotNull}}">
-                                    <TextBlock Text="{TemplateBinding Tag}" FontSize="10.5" FontWeight="SemiBold"
+                                    <TextBlock Text="{TemplateBinding Tag}" FontSize="{DynamicResource FontXs}" FontWeight="SemiBold"
                                                Foreground="{DynamicResource AccentBrush}"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
-                                                  VerticalAlignment="Center"
-                                                  FontWeight="SemiBold" FontSize="12"
-                                                  Foreground="{DynamicResource TextBrush}" />
+                                <!-- A rubric, not a title: one step DOWN in size from the
+                                     controls it labels, tracked out, and at full contrast.
+                                     Small and dark, not big and dark (that is a page of
+                                     headlines) and not small and dim either — that was the
+                                     first cut, and it left every heading fainter than its own
+                                     content. Tracking is what keeps it legible at 11 px, and
+                                     it is the device Chinese type has in place of small caps. -->
+                                <TextBlock Grid.Column="1" Text="{TemplateBinding Content}"
+                                           VerticalAlignment="Center"
+                                           FontWeight="SemiBold" FontSize="{DynamicResource FontXs}"
+                                           LetterSpacing="1.4"
+                                           Foreground="{DynamicResource TextBrush}" />
                                 <!-- 16, the Icon authoring grid: the glyph is drawn unscaled, so a
                                      smaller box does not shrink it, it crops it and moves the
                                      rotation centre off the glyph. -->
+                                <!-- rotate(0deg) rather than no transform at all: the
+                                     transition below interpolates BETWEEN transforms, and
+                                     there is nothing to interpolate from if the start state
+                                     is unset — the chevron would snap as it always did. -->
                                 <ctl:Icon x:Name="chev" Grid.Column="2" Width="16" Height="16"
                                           Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
                                           Foreground="{DynamicResource TextMuteBrush}"
-                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%" />
+                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%"
+                                          RenderTransform="rotate(0deg)">
+                                    <ctl:Icon.Transitions>
+                                        <Transitions>
+                                            <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.16" />
+                                            <BrushTransition Property="Foreground" Duration="0:0:0.12" />
+                                        </Transitions>
+                                    </ctl:Icon.Transitions>
+                                </ctl:Icon>
                             </Grid>
                         </Border>
                     </ControlTemplate>
@@ -303,14 +453,17 @@
                 <Style Selector="^:pointerover /template/ ctl|Icon#chev">
                     <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
                 </Style>
+                <Style Selector="^:pointerover /template/ TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                </Style>
             </ControlTheme>
 
             <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border Background="{DynamicResource Panel2Brush}"
-                                BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
-                                CornerRadius="6" ClipToBounds="True">
+                        <!-- Nothing at all: no fill, no outline, no rule, no corners. The
+                             panel is one surface and the sections are intervals on it. -->
+                        <Border Background="Transparent">
                             <StackPanel>
                                 <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
                                               IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
@@ -319,7 +472,7 @@
                                 <ContentPresenter x:Name="PART_ContentPresenter"
                                                   IsVisible="{TemplateBinding IsExpanded}"
                                                   Content="{TemplateBinding Content}"
-                                                  Margin="8,0,8,8" />
+                                                  Margin="18,2,0,0" />
                             </StackPanel>
                         </Border>
                     </ControlTemplate>
@@ -343,11 +496,20 @@
                                 <ctl:Icon x:Name="chev" Grid.Column="0" Width="16" Height="16" Margin="-2,0,0,0"
                                           Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
                                           Foreground="{DynamicResource TextMuteBrush}"
-                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%" />
-                                <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
-                                                  VerticalAlignment="Center"
-                                                  FontSize="12"
-                                                  Foreground="{DynamicResource TextDimBrush}" />
+                                          VerticalAlignment="Center" RenderTransformOrigin="50%,50%"
+                                          RenderTransform="rotate(0deg)">
+                                    <ctl:Icon.Transitions>
+                                        <Transitions>
+                                            <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.16" />
+                                            <BrushTransition Property="Foreground" Duration="0:0:0.12" />
+                                        </Transitions>
+                                    </ctl:Icon.Transitions>
+                                </ctl:Icon>
+                                <TextBlock Grid.Column="1" Text="{TemplateBinding Content}"
+                                           VerticalAlignment="Center"
+                                           FontSize="{DynamicResource FontXs}"
+                                           LetterSpacing="1.0"
+                                           Foreground="{DynamicResource TextDimBrush}" />
                             </Grid>
                         </Border>
                     </ControlTemplate>
@@ -384,7 +546,7 @@
         <Style Selector="Window">
             <Setter Property="Background" Value="{DynamicResource BgBrush}" />
             <Setter Property="FontFamily" Value="Inter, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="{DynamicResource FontMd}" />
             <!-- Title-bar / taskbar icon for *every* window, main and modal alike — set here
                  rather than per-Window so a new dialog can never ship icon-less. -->
             <Setter Property="Icon" Value="/Assets/icons/app-128.png" />
@@ -392,8 +554,19 @@
         <Style Selector="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         </Style>
+        <!-- A section is separated by SPACE and nothing else — no rule, no fill, no
+             outline. This is the last line to come out, and the one the whole look
+             turns on: with a rubric set small, tracked and at full contrast against
+             body text a step larger, the register alone says "new group", and a rule
+             on top of that is a belt over braces. What a rule is actually for is
+             rescuing a layout whose rhythm does not group on its own.
+
+             The gap is asymmetric by design: above, never below, so the caption belongs
+             to what follows it rather than floating between two modules. 16 is enough to
+             group at this type size — at 26 the panel was mostly air and the sections
+             drifted apart rather than reading as parts of one thing. -->
         <Style Selector="Expander">
-            <Setter Property="Margin" Value="0,3" />
+            <Setter Property="Margin" Value="-18,16,0,0" />
         </Style>
 
         <!-- ══ Menu bar ═══════════════════════════════════════════════════════ -->
@@ -403,40 +576,68 @@
         </Style>
         <Style Selector="Menu > MenuItem">
             <Setter Property="Padding" Value="11,6" />
-            <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
             <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        </Style>
+        <Style Selector="Menu > MenuItem /template/ Border#PART_LayoutRoot">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Menu > MenuItem:selected /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
         </Style>
         <Style Selector="MenuItem">
-            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
         </Style>
         <Style Selector="MenuFlyoutPresenter, ContextMenu">
             <Setter Property="Background" Value="{DynamicResource ChromeBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
             <Setter Property="Padding" Value="4" />
         </Style>
 
         <!-- ══ Buttons ════════════════════════════════════════════════════════
              Three weights only — that is the whole button system:
-               (default)  a quiet raised chip           …ordinary actions
-               .primary   accent-filled                 …the terminal action (导出)
-               .icon      square, chrome-less           …toolbar glyphs
+               (default)  flat, a hairline edge          …ordinary actions
+               .primary   accent-filled                  …the terminal action (导出)
+               .icon      square, chrome-less            …toolbar glyphs
+
+             FLAT, but not invisible. A filled-and-outlined rounded rectangle with
+             12,6 padding is the web's button, and a panel holding a dozen of them
+             looks like a form — but a button with no fill at all and a hairline for
+             an edge stops announcing that it can be pressed, which costs more than
+             the tidiness is worth in a panel where half the controls are buttons.
+             The resting state is therefore one step off the panel, not level with
+             it: enough to read as a surface, far short of a chip.
+
+             The padding and the row height come from the rhythm of the sliders these
+             sit between, not from a touch target — this is a pointer-driven tool.
              ════════════════════════════════════════════════════════════════ -->
         <Style Selector="Button">
             <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="12,6" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
+            <Setter Property="MinHeight" Value="28" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <!-- One transition declaration covers hover, press, check and disable: they all
+             land on the same two brushes of the same presenter. -->
+        <Style Selector="Button /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
@@ -449,6 +650,32 @@
         </Style>
         <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Opacity" Value="0.4" />
+        </Style>
+        <!-- ══ Keyboard focus ═════════════════════════════════════════════════
+             :focus-visible, not :focus — the ring is for someone navigating by
+             keyboard, and drawing it on every click would put a permanent outline
+             around the last thing the pointer touched.
+
+             Expressed as a BorderBrush swap rather than an added outline so that
+             showing it cannot move anything: these controls already carry a 1 px
+             border, and a ring that reflows the panel is worse than no ring.
+             ════════════════════════════════════════════════════════════════════ -->
+        <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        </Style>
+        <Style Selector="ToggleButton:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        </Style>
+        <Style Selector="TextBox:focus-visible /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+        </Style>
+        <Style Selector="ComboBox:focus-visible /template/ Border#Background">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+        </Style>
+        <Style Selector="CheckBox:focus-visible /template/ Border#NormalRectangle">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
         </Style>
 
         <Style Selector="Button.primary">
@@ -472,7 +699,7 @@
             <Setter Property="Width" Value="30" />
             <Setter Property="Height" Value="30" />
             <Setter Property="MinHeight" Value="30" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -481,18 +708,32 @@
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         </Style>
+        <!-- A chrome-less button has no resting border to recolour, so its ring is a
+             border that appears. The 1 px is inside the 30×30 box, so nothing moves. -->
+        <Style Selector="Button.icon:focus-visible /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.icon:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
 
         <!-- ══ Toggles ════════════════════════════════════════════════════════ -->
         <Style Selector="ToggleButton">
             <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="12,6" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
+            <Setter Property="MinHeight" Value="28" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="ToggleButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
@@ -535,19 +776,19 @@
              not its template Border: the Border template-binds Background, and a template
              binding outranks a plain style setter — only pseudo-class setters beat it. -->
         <Style Selector="TabItem">
-            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontSize" Value="{DynamicResource FontMd}" />
             <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
             <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
             <!-- Fluent draws the selected pipe INSIDE the padding, so a roomy Padding lifts
                  it off the strip's edge. Bottom padding therefore moves onto the presenter,
                  leaving the pipe flush with the edge. -->
-            <Setter Property="Padding" Value="16,12,16,0" />
+            <Setter Property="Padding" Value="16,10,16,0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="TabItem /template/ ContentPresenter#PART_ContentPresenter">
-            <Setter Property="Margin" Value="0,0,0,12" />
+            <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
         <Style Selector="TabItem:selected">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -562,6 +803,13 @@
         <Style Selector="TabItem:pointerover /template/ Border#PART_LayoutRoot">
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
         </Style>
+        <Style Selector="TabItem /template/ Border#PART_LayoutRoot">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
 
         <!-- ══ Inputs ═════════════════════════════════════════════════════════ -->
         <Style Selector="NumericUpDown">
@@ -569,10 +817,10 @@
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
             <Setter Property="FontFamily" Value="JetBrains Mono, Consolas, monospace" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="FontSize" Value="{DynamicResource FontXs}" />
+            <Setter Property="MinHeight" Value="28" />
         </Style>
         <Style Selector="NumericUpDown /template/ TextBox">
             <Setter Property="Background" Value="Transparent" />
@@ -582,31 +830,173 @@
             <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
             <Setter Property="MinHeight" Value="28" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
         </Style>
         <Style Selector="ComboBox">
             <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="MinHeight" Value="30" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
         </Style>
         <Style Selector="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
         </Style>
 
-        <!-- ══ Film strip ═════════════════════════════════════════════════════ -->
+        <!-- ══ What Fluent still draws ════════════════════════════════════════
+             The app opens with <FluentTheme/> and overrides pieces of it, so every
+             control NOT retemplated above is stock Windows 11: a 20 px rounded check
+             box, a 12 px fading scroll bar, Fluent's combo chevron and its 32 px rows.
+             Next to the hand-made sliders, sections and buttons, that reads as two
+             design languages sharing a window — the custom half an instrument, the
+             inherited half an OS settings page.
+
+             What follows is not a reskin of Fluent; it is the handful of parts whose
+             GEOMETRY gives it away, brought into the same register as everything
+             else: smaller, square-er, quieter, and sized off this panel's rhythm
+             rather than a touch target.
+             ════════════════════════════════════════════════════════════════════ -->
+
+        <!-- Check box: 15 px and nearly square, against Fluent's 20 px rounded tile.
+             The filter sidebar stacks a dozen of these, where the Fluent size sets the
+             row height and the whole column reads as a settings page. -->
+        <Style Selector="CheckBox /template/ Border#NormalRectangle">
+            <Setter Property="Width" Value="15" />
+            <Setter Property="Height" Value="15" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="CheckBox /template/ Path#CheckGlyph">
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="7,0,0,0" />
+        </Style>
+        <Style Selector="CheckBox /template/ ContentPresenter">
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Scroll bar: a 8 px rail that is always the same width, rather than Fluent's
+             expanding overlay. An overlay that grows under the pointer is right for a
+             document; in a parameter panel it lands on top of the control you were
+             reaching for, and its arrival animation is motion nobody asked for. -->
+        <Style Selector="ScrollBar">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ScrollBar:vertical">
+            <Setter Property="Width" Value="8" />
+        </Style>
+        <Style Selector="ScrollBar:horizontal">
+            <Setter Property="Height" Value="8" />
+        </Style>
+        <Style Selector="ScrollBar /template/ Thumb">
+            <Setter Property="Background" Value="{DynamicResource BorderBrush2}" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="ScrollBar:pointerover /template/ Thumb">
+            <Setter Property="Background" Value="{DynamicResource TextMuteBrush}" />
+        </Style>
+        <!-- Fluent's line-step arrows at the ends of the rail: a scroll bar in a panel
+             this size is dragged or wheeled, never stepped, and the two glyphs are most
+             of what makes the rail look like a widget. -->
+        <Style Selector="ScrollBar /template/ RepeatButton#PART_LineUpButton, ScrollBar /template/ RepeatButton#PART_LineDownButton">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+
+        <!-- Combo box: the drop-down glyph at the icon set's weight, and a popup that
+             matches the app's own menus rather than Fluent's. -->
+        <Style Selector="ComboBox /template/ PathIcon#DropDownGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
+            <Setter Property="Width" Value="10" />
+            <Setter Property="Height" Value="10" />
+        </Style>
+        <Style Selector="ComboBox /template/ Border#Background">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="ComboBoxItem">
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+        </Style>
+
+        <!-- Menu rows, at the panel's rhythm rather than Fluent's 32 px. -->
+        <Style Selector="MenuFlyoutPresenter > MenuItem, ContextMenu > MenuItem">
+            <Setter Property="MinHeight" Value="28" />
+        </Style>
+
+        <!-- The tab strip's selected marker. Fluent draws a short rounded pipe inset
+             from the item's edges; an underline that spans the whole stage reads as
+             "this half of the strip is open" instead of "this label is ticked". -->
+        <Style Selector="TabItem:selected /template/ Border#PART_SelectedPipe">
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+
+        <!-- ══ Film strip ═════════════════════════════════════════════════════
+             The strip is on screen for the whole session and is the only part of the
+             window that repeats one unit forty times, so anything carried on every
+             frame is carried forty times. The tick box is the case in point: it is
+             used when broadcasting to a few frames and ignored the rest of the time,
+             and drawn always it put a small bright square on top of forty
+             photographs. It is revealed by the pointer, and stays out once ticked.
+             ════════════════════════════════════════════════════════════════════ -->
         <Style Selector="ListBox.filmstrip">
             <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        </Style>
+        <Style Selector="ListBox.filmstrip CheckBox">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="ListBox.filmstrip ListBoxItem:pointerover CheckBox">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="ListBox.filmstrip CheckBox:checked">
+            <Setter Property="Opacity" Value="1" />
         </Style>
         <Style Selector="ListBox.filmstrip ListBoxItem">
             <Setter Property="Padding" Value="3" />
             <Setter Property="Margin" Value="0,2" />
-            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+        </Style>
+        <Style Selector="ListBox.filmstrip ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <!-- The strip is the one list that is navigated with the arrow keys as a matter of
+             course, so its focus ring earns its keep more than anywhere else. -->
+        <Style Selector="ListBox.filmstrip ListBoxItem:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
         </Style>
         <Style Selector="ListBox.filmstrip ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
@@ -620,15 +1010,42 @@
         <!-- ══ Text roles ═════════════════════════════════════════════════════ -->
         <Style Selector="TextBlock.groupHint">
             <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="{DynamicResource FontXs}" />
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Margin" Value="0,0,0,6" />
         </Style>
+        <!-- A measured value, wherever one is printed outside a NumericUpDown: the
+             readouts under the HDR slider, the film-base figures, the status line's
+             numbers. Tabular monospace so a digit changing does not shift the ones
+             beside it — a readout that jitters while a slider moves cannot be read at
+             all, and it is the difference between a number and an instrument. -->
+        <Style Selector="TextBlock.readout">
+            <Setter Property="FontFamily" Value="JetBrains Mono, Consolas, monospace" />
+            <Setter Property="FontSize" Value="{DynamicResource FontXs}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        </Style>
+        <!-- A status chip: the background stage, the colour diagnostic. Same shape as
+             the readouts they sit beside. -->
+        <Style Selector="Border.chip">
+            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+            <Setter Property="Padding" Value="8,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
         <!-- Small all-caps rubric above a stack of related controls. -->
         <Style Selector="TextBlock.fieldLabel">
             <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
-            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontSize" Value="{DynamicResource FontXs}" />
             <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <!-- A label that starts a parameter ROW, and therefore holds the panel's spine:
+             the same column SliderRow breaks its slider at. Only rows in the panel get
+             it — a label in the bottom bar has no row to line up with. -->
+        <Style Selector="TextBlock.spine">
+            <Setter Property="MinWidth" Value="{DynamicResource LabelColumn}" />
         </Style>
         <Style Selector="Separator">
             <Setter Property="Background" Value="{DynamicResource BorderSoftBrush}" />
@@ -636,7 +1053,7 @@
         </Style>
         <!-- Document viewer's table of contents: a flat list that only reacts on hover. -->
         <Style Selector="Button.tocLink">
-            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
         </Style>
         <Style Selector="Button.tocLink:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />

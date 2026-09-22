@@ -235,20 +235,15 @@
                 <ProgressBar IsIndeterminate="True" Width="120" Height="3"
                              IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
-                           FontSize="11" Foreground="{DynamicResource TextDimBrush}" />
+                           FontSize="{DynamicResource FontXs}" Foreground="{DynamicResource TextDimBrush}" />
                 <!-- Background stage (解耦矩阵 / 色度补偿 / 后台解码 …). Its own field so roll
                      progress and the current frame name never overwrite each other. -->
-                <Border IsVisible="{Binding BackgroundStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                        Background="{DynamicResource AccentSoftBrush}" CornerRadius="4" Padding="7,1"
-                        VerticalAlignment="Center">
-                    <TextBlock Text="{Binding BackgroundStatus}" VerticalAlignment="Center"
-                               FontSize="11" Foreground="{DynamicResource TextDimBrush}" />
+                <Border Classes="chip"
+                        IsVisible="{Binding BackgroundStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding BackgroundStatus}" Classes="readout" VerticalAlignment="Center" />
                 </Border>
-                <Border Name="ColorDiagnosticStatus" IsVisible="False"
-                        Background="{DynamicResource AccentSoftBrush}" CornerRadius="4" Padding="7,1"
-                        VerticalAlignment="Center">
-                    <TextBlock Name="ColorDiagnosticText" VerticalAlignment="Center"
-                               FontSize="11" Foreground="{DynamicResource TextDimBrush}"
+                <Border Name="ColorDiagnosticStatus" Classes="chip" IsVisible="False">
+                    <TextBlock Name="ColorDiagnosticText" Classes="readout" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" MaxWidth="560" />
                 </Border>
             </StackPanel>
@@ -284,13 +279,13 @@
                             <!-- Copy / remove act on the TICKED frames when any are ticked, else on
                                  the current one — the same rule the paste commands below use. -->
                             <MenuItem Header="{i18n:T '创建虚拟副本'}" Click="OnVirtualCopyClick"
-                                      ToolTip.Tip="{i18n:T '复制全部参数（含裁切），可独立调整；勾选了多帧则各建一个'}">
+                                      ToolTip.Tip="{i18n:T '复制全部参数（含裁切）；勾选多帧时各建一个'}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoLayers}" />
                                 </MenuItem.Icon>
                             </MenuItem>
                             <MenuItem Header="{i18n:T '从卷中移除'}" Click="OnRemoveFrameClick"
-                                      ToolTip.Tip="{i18n:T '勾选了多帧则全部移除；真实帧连同它的副本一起'}">
+                                      ToolTip.Tip="{i18n:T '移除勾选的全部帧；真实帧连同其副本'}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoTrash}" />
                                 </MenuItem.Icon>
@@ -343,12 +338,21 @@
                                                    Foreground="{DynamicResource TextMuteBrush}" />
                                     </Border>
                                     <Image Source="{Binding Thumbnail}" Height="76" Stretch="Uniform" />
+                                    <!-- A hairline round the picture, so a frame whose edges are
+                                         near-white stops bleeding into the strip and every cell
+                                         is the same rectangle whatever is inside it. -->
+                                    <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1"
+                                            IsHitTestVisible="False" />
                                     <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Left"
-                                              VerticalAlignment="Top"
+                                              VerticalAlignment="Top" Margin="2"
                                               ToolTip.Tip="{i18n:T '勾选为「应用到勾选帧」的目标'}" />
                                 </Grid>
-                                <TextBlock Text="{Binding Label}" FontSize="10" TextTrimming="CharacterEllipsis"
-                                           HorizontalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />
+                                <!-- Left-aligned, not centred: forty file names down a column are
+                                     read by their differences, and centring puts the difference
+                                     in a different place on every line. -->
+                                <TextBlock Text="{Binding Label}" FontSize="{DynamicResource FontXxs}"
+                                           TextTrimming="CharacterEllipsis" Margin="1,1,0,0"
+                                           Foreground="{DynamicResource TextMuteBrush}" />
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -374,7 +378,7 @@
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
                             <ToggleButton Name="ViewNegBtn" Click="OnViewNegToggle" IsEnabled="{Binding HasImage}"
                                           Padding="9,5"
-                                          ToolTip.Tip="{i18n:T '临时切到（带 gamma 的）负片视图，便于对准片基/齿孔（N）'}">
+                                          ToolTip.Tip="{i18n:T '切到负片视图，用于对准片基与齿孔（N）'}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <ctl:Icon Data="{StaticResource IcoFilm}" />
                                     <TextBlock Text="{i18n:T '负片'}" VerticalAlignment="Center" />
@@ -382,7 +386,7 @@
                             </ToggleButton>
                             <ToggleButton Name="CompareBtn" Click="OnCompareToggle" IsEnabled="{Binding HasImage}"
                                           Padding="9,5"
-                                          ToolTip.Tip="{i18n:T '显示未做帧编辑（Stage 2）的画面，用于前后对比（K）'}">
+                                          ToolTip.Tip="{i18n:T '显示未经帧编辑的画面，用于前后对比（K）'}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <ctl:Icon Data="{StaticResource IcoCompare}" />
                                     <TextBlock Text="{i18n:T '对比'}" VerticalAlignment="Center" />
@@ -419,9 +423,12 @@
                         </Border>
 
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
-                            <TextBlock Name="ZoomLabel" Text="100%" VerticalAlignment="Center"
-                                       Margin="0,0,6,0" MinWidth="38" TextAlignment="Right"
-                                       Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
+                            <!-- Monospace: this number changes on every wheel notch, and a
+                                 proportional 1 is narrower than a 9 — set as body text the
+                                 whole readout twitches sideways while you zoom. -->
+                            <TextBlock Name="ZoomLabel" Text="100%" Classes="readout"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0" MinWidth="44" TextAlignment="Right" />
                             <Button Classes="icon" Click="OnFitClick" IsEnabled="{Binding HasImage}"
                                     ToolTip.Tip="{i18n:T '适合窗口（F）'}">
                                 <ctl:Icon Data="{StaticResource IcoFit}" />
@@ -721,14 +728,14 @@
                              胶片风格下拉不再随之隐藏：声明为 PQ 输出的 LUT 就是 HDR 渲染（D-033）。 -->
                         <ComboBox Grid.Column="1" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
                                   IsVisible="{Binding CanChooseOutputSpace}"
-                                  ToolTip.Tip="{i18n:T 'Cineon 流程第 4 步的目标空间：反相结果转换到它，帧编辑在它里面进行，导出也写成它——所见即所得。工作空间是 ACEScg，所以这里每个选择都是真实的色域变换，不是模拟。换空间会保留滑块数值、让画面随之改变：这些数值的含义本就是「在当前输出空间里调这么多」。属于胶卷参数，会保存进工程。不确定就用 sRGB。'}">
+                                  ToolTip.Tip="{i18n:T 'Cineon 第 4 步的目标空间：反相结果转换到它，帧编辑在它内进行，导出也写成它。工作空间为 ACEScg，每个选项都是真实的色域变换。切换空间保留滑块数值，画面随之改变。属于胶卷参数，随工程保存。'}">
                             <ComboBoxItem Content="{i18n:T 'sRGB（通用）'}" />
                             <ComboBoxItem Content="{i18n:T 'Display P3（宽色域）'}" />
                             <ComboBoxItem Content="{i18n:T 'Adobe RGB（宽色域）'}" />
                         </ComboBox>
                         <TextBlock Grid.Column="1" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center"
                                    Text="{i18n:T '不裁色域'}" Foreground="{DynamicResource TextDimBrush}"
-                                   ToolTip.Tip="{i18n:T 'HDR 开启时输出不选容器：渲染不裁到任何色域三角，P3、Adobe RGB 之外的颜色原样保留（D-024），导出的 float32 TIFF 也原样带着；容器原色（P3 / BT.2020）要到 PQ 导出才需要选。屏幕上能看到多宽，由显示器决定——见左下角色彩状态的悬停说明。'}" />
+                                   ToolTip.Tip="{i18n:T 'HDR 渲染不裁到任何色域三角，P3 与 Adobe RGB 之外的颜色原样保留，float32 TIFF 导出同样保留。容器原色（P3 / BT.2020）在 PQ 导出时选择。屏幕可见范围由显示器决定，见左下角色彩状态。'}" />
 
                         <!-- 胶片风格与输出空间并列，不并入其中：前者决定画面被渲染成什么样，
                              后者决定它被装进哪个容器，两者正交。内置两张印片（见
@@ -738,7 +745,7 @@
                         <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                             <ComboBox VerticalAlignment="Center" MinWidth="150"
                                       ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                      ToolTip.Tip="{i18n:T '印片模拟：把反相结果按一张印片（如 Kodak 2383、Fujifilm 3513DI）的响应渲染，反差与色彩由该胶片决定。它接在反相之后、帧编辑之前——所以曝光、反差这些调整作用在它的结果上。&#10;&#10;随程序带了 Resolve 的六张 Rec709 Film Looks（Kodak 2383 / Fujifilm 3513DI × D55 / D60 / D65）。也可以选任何以 Cineon Film Log 为时间线做的 .cube——Resolve 里调完色「生成 LUT」导出的直接能用；输出若不是 Rec.709 2.4，在旁边的「输出」按钮里改。&#10;&#10;HDR 开启时印片照常可选：取印片的颜色，影调由解析肩部打开（D-034）。Resolve 以 Rec.2100 ST2084 输出生成的 HDR LUT 也能用（在「输出」里声明为 Rec.2100 PQ），只在 HDR 开启时列出。&#10;&#10;想一次加好几张：把 .cube 复制进你自己的 LUT 文件夹（【帮助 → 打开 LUT 文件夹】），重启后自动出现在这个列表里。&#10;&#10;选「标准」则只做 Cineon 的标准显示转换，不加任何印片风格。属于胶卷参数，会保存进工程。&#10;&#10;HDR LUT 是 HDR 渲染本身，肩部由它决定，【HDR 上限】只做封顶（D-033）。'}" />
+                                      ToolTip.Tip="{i18n:T '把反相结果按一张印片的响应渲染，反差与色彩由该胶片决定；作用在反相之后、帧编辑之前。&#10;&#10;随程序带有 Resolve 的六张 Rec709 Film Looks，也可选任何以 Cineon Film Log 为时间线制作的 .cube，其输出编码在旁边的「输出」中声明。把 .cube 放入 LUT 文件夹（帮助 → 打开 LUT 文件夹）可批量加入。&#10;&#10;「标准」表示不加印片风格。属于胶卷参数，随工程保存。'}" />
 
                             <!-- LUT 的输出声明（D-033）：.cube 不携带色彩空间；输入恒为 Cineon（本程序的处理基于
                                  Cineon），要声明的只有输出。只对文件头没写输出的 cube（Resolve 生成的）出现——
@@ -746,7 +753,7 @@
                                  可见（SDR 下它只会让位）。v1 工程没有按钮：冻结的 v1 出口只认 Rec709。 -->
                             <Button IsVisible="{Binding CanEditPrintLutContract}"
                                     Content="{Binding PrintLutContractText}" Padding="8,3" VerticalAlignment="Center"
-                                    ToolTip.Tip="{i18n:T '这张 LUT 出来的是什么编码——它的文件头没写，所以要你来声明（自带的印片文件头写明了 Rec.709 2.4，不会出现这个按钮）。.cube 文件本身不带色彩空间，Resolve 也是靠 LUT 后面的色彩空间转换来声明的——这里同理。填 Resolve 生成这张 LUT 时的输出色彩空间：Rec.709 Gamma 2.4（Resolve 自带的 Film Looks、多数成品 LUT）、DCI-P3 Gamma 2.6（影院版 Film Looks）、sRGB，或 Rec.2100 ST2084（HDR LUT，只在 HDR 开启时可选）。&#10;&#10;输入不用选：本程序的处理基于 Cineon，LUT 必须是以 Cineon Film Log 为时间线做的。声明错了不会报错，只会得到颜色是错的图。随卷保存进工程。'}">
+                                    ToolTip.Tip="{i18n:T '声明这张 LUT 的输出编码。.cube 文件本身不携带色彩空间；随程序自带的印片已写明，因此不出现此项。填写生成该 LUT 时的输出色彩空间：Rec.709 Gamma 2.4、DCI-P3 Gamma 2.6、sRGB，或 Rec.2100 ST2084（仅 HDR 开启时可选）。&#10;&#10;输入固定为 Cineon Film Log，无需选择。声明错误不会报错，只会得到错误的颜色。随工程保存。'}">
                                 <Button.Flyout>
                                     <Flyout Placement="Top">
                                         <StackPanel Spacing="6" MinWidth="220">
@@ -767,7 +774,7 @@
                             <TextBlock IsVisible="{Binding PrintLutTargetNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                        Text="{Binding PrintLutTargetNote}" VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextDimBrush}"
-                                       ToolTip.Tip="{i18n:T 'HDR 开启时印片这样参与：颜色是印片的（色相、饱和度、高光去饱和都按印片），影调由解析肩部铺到【HDR 上限】——拐点以下与印片逐位相同，高光按同一族曲线打开（D-034）。缩略图、印样、增益图基底显示的就是这张印片的 SDR 版。&#10;&#10;声明为 PQ 输出的 LUT 是 HDR 渲染本身，在 SDR 下让位给标准显示渲染（D-033）；开启 HDR 即恢复。'}" />
+                                       ToolTip.Tip="{i18n:T 'HDR 下印片决定颜色（色相、饱和度、高光去饱和），影调由解析肩部铺到 HDR 上限，拐点以下与印片一致。缩略图、印样与增益图基底用该印片的 SDR 版。&#10;&#10;声明为 PQ 输出的 LUT 在 SDR 下让位给标准显示渲染，开启 HDR 即恢复。'}" />
                         </StackPanel>
 
                         <!-- HDR 与输出空间、胶片风格三者并列：胶片风格决定画面被渲染成什么样，
@@ -811,8 +818,17 @@
             <GridSplitter Grid.Column="3" Width="1" Background="{DynamicResource BorderSoftBrush}" />
 
             <!-- Col 4 — histogram + FilmBase/SceneBase/备注 tabs -->
-            <Grid Grid.Column="4" RowDefinitions="Auto,*,Auto" Background="{DynamicResource PanelBrush}">
-                <Border Grid.Row="0" Padding="10,8,10,4" Background="{DynamicResource Panel2Brush}"
+            <!-- The histogram stays pinned; everything below it is ONE scroll column.
+                 The fixed block used to be anchored to the panel's bottom edge with the
+                 tab area taking all the space between, so a short tab (Cineon holds four
+                 sections) left a third of the panel empty and the two groups sat at
+                 opposite ends of a void. Stacked in one scroller they follow the content:
+                 flush under it when it is short, pushed down and scrolled to when it is
+                 long. They are still "通用" in the sense that mattered — present whichever
+                 tab is open — and the panel now has ONE scrollbar where it used to nest
+                 two, which is the other half of the problem this fixes. -->
+            <Grid Grid.Column="4" RowDefinitions="Auto,*" Background="{DynamicResource PanelBrush}">
+                <Border Grid.Row="0" Padding="22,8,14,6" Background="{DynamicResource Panel2Brush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
                         <ctl:HistogramView Data="{Binding Histogram}" DisplayHeadroom="{Binding DisplayHdrHeadroom}" ToolTip.Tip="{Binding HistogramTooltip}" Height="78" HorizontalAlignment="Stretch" />
@@ -836,9 +852,13 @@
                     </StackPanel>
                 </Border>
 
+                <Panel Grid.Row="1">
+                <ScrollViewer Name="PanelScroll" HorizontalScrollBarVisibility="Disabled"
+                              AllowAutoHide="False">
+                <StackPanel>
                 <!-- Which of these two is open decides what Ctrl+C / Ctrl+V act on: 整卷校准 →
                      Stage-1 标定, 帧编辑 → Stage-2 场景. -->
-                <Panel Grid.Row="1">
+                <Panel>
                 <TabControl Name="PanelTabs" Padding="0">
                     <!-- Two stages, half the strip each — see the Tabs block in App.axaml. -->
                     <TabControl.ItemsPanel>
@@ -848,8 +868,9 @@
                     </TabControl.ItemsPanel>
                     <!-- ══ 整卷校准（FilmBase · Stage 1） ═══════════════════════ -->
                     <TabItem Header="Cineon">
-                        <ScrollViewer Name="CineonScroll" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="False">
-                            <StackPanel Spacing="0" Margin="8,8,8,14">
+                        <!-- No scroller of its own: the panel scrolls as one column (see PanelScroll). -->
+                        <Border>
+                            <StackPanel Spacing="0" Margin="22,4,14,18">
                                 <!-- 旧模型存的 d_max / scan_ev 与现在固定的输出范围不是同一
                                      量纲，静默折算实测在薄部偏 -18%、浓部 +53%（比不折算更糟），
                                      所以如实提示重跑，而不是假装画面没变。-->
@@ -870,7 +891,7 @@
                                         <Button Grid.Column="0" Classes="primary" Margin="0,0,3,0"
                                                 HorizontalAlignment="Stretch"
                                                 Click="OnAutoInvertRollClick" IsEnabled="{Binding HasImage}"
-                                                ToolTip.Tip="{i18n:T '遍历整卷解出片基 / 白平衡 / D-max / 黑白场，一套参数应用到所有帧。会覆盖已有的白平衡与色阶，不改动裁切。'}">
+                                                ToolTip.Tip="{i18n:T '遍历整卷解出片基、白平衡、D-max 与黑白场，一套参数应用到所有帧。覆盖已有的白平衡与色阶，不改动裁切。'}">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <ctl:Icon Data="{StaticResource IcoWand}" />
                                                 <TextBlock Text="{i18n:T '自动（整卷）'}" VerticalAlignment="Center" />
@@ -897,7 +918,7 @@
 
                                 <!-- D_min：暗端 -->
                                 <Expander Header="{i18n:T 'D_min（黑端）'}" IsExpanded="True" Tag="1"
-                                          ToolTip.Tip="{i18n:T '每个通道读作黑的密度（对完全透光 T=1 而言）。C-41 的橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54——这三个数是可验证的物理量，不是相对某个基准的偏移。展开三个分量即可调暗部色偏。'}">
+                                          ToolTip.Tip="{i18n:T '每个通道读作黑的密度（相对完全透光 T=1）。C-41 橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。'}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_min" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" />
@@ -911,7 +932,7 @@
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}"
-                                                    ToolTip.Tip="{i18n:T '自动找出画面里裸露的片基并写入黑端。依次尝试：灯板下的片基峰 → 边缘裸片基窄带 → 亮端分位。'}">
+                                                    ToolTip.Tip="{i18n:T '自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。'}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <ctl:Icon Data="{StaticResource IcoWand}" />
                                                     <TextBlock Text="{i18n:T '自动黑点'}" VerticalAlignment="Center" />
@@ -939,7 +960,7 @@
 
                                 <!-- D_max：亮端 -->
                                 <Expander Header="{i18n:T 'D_max（白端）'}" IsExpanded="True" Tag="2"
-                                          ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离就是反差；三通道之差就是高光色偏——这三个数本身即白平衡。'}">
+                                          ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。'}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
                                                        Value="{Binding DMaxLevel}" />
@@ -975,12 +996,12 @@
                                      智能色偏修正是神经网络的推测。答案都写进亮端三个数（反相只从那里读白端），
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
                                 <Expander Header="{i18n:T '色偏修正'}" IsExpanded="True" Tag="3"
-                                          ToolTip.Tip="{i18n:T '解这一卷的色偏（胶片、扫描、片基留在两端上的偏差）。灰卡是测量，智能色偏修正是神经网络的推测，有灰卡时用灰卡。结果写进 D_max 的三个密度，与高光采样互为替代，后按的生效。'}">
+                                          ToolTip.Tip="{i18n:T '解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入 D_max 的三个密度，与高光采样互为替代，后执行者生效。'}">
                                     <StackPanel Spacing="2">
                                         <Grid ColumnDefinitions="*,*">
                                             <ToggleButton Name="GreyBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleNeutralGreyClick" IsEnabled="{Binding HasImage}"
-                                                          ToolTip.Tip="{i18n:T '框画面里拍到的灰卡，它即 Cineon 标准灰：三通道都落在码值 470，色偏和曝光位置一起定下。这是测量，有灰卡时优先于智能色偏修正；与高光采样互为替代，后采的生效。'}">
+                                                          ToolTip.Tip="{i18n:T '框选画面中拍到的灰卡，将其定为 Cineon 标准灰：三通道落在码值 470，色偏与曝光位置一同确定。与高光采样互为替代，后执行者生效。'}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <ctl:Icon Data="{StaticResource IcoMarquee}" />
                                                     <TextBlock Text="{i18n:T '灰卡采样 · Cineon 470'}" VerticalAlignment="Center" />
@@ -1029,26 +1050,26 @@
                                      (the one this whole tab exists for) stays on-screen. -->
                                 <Button Click="OnApplyCalToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
                                         IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{i18n:T '把当前帧的标定（按同步项）写入本卷所有其他帧。复制/粘贴到勾选帧见 编辑 菜单或胶片条右键。'}">
+                                        ToolTip.Tip="{i18n:T '把当前帧的标定按同步项写入本卷其他所有帧。'}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <ctl:Icon Data="{StaticResource IcoCheck}" />
                                         <TextBlock Text="{i18n:T '应用 Cineon 标定到整卷'}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                        </ScrollViewer>
+                        </Border>
                     </TabItem>
 
                     <!-- ══ 帧编辑（SceneBase · Stage 2） ═══════════════════════ -->
                     <TabItem Header="Display">
-                        <ScrollViewer Name="DisplayScroll" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="False">
-                            <StackPanel Spacing="0" Margin="8,8,8,14">
+                        <Border>
+                            <StackPanel Spacing="0" Margin="22,4,14,18">
                                 <!-- 白平衡属于这里，不属于标定。标定阶段解的是【色偏】——胶片、扫描、片基
                                      留在两端上的偏差，写在 D_min / D_max 里，没有"白平衡"的概念；白平衡是
                                      场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
                                      问题，不再互相掩盖。曾经因为"同一件事两处调"而撤掉，那时标定组还叫白平衡。-->
                                 <Expander Header="{i18n:T '白平衡'}" IsExpanded="True"
-                                          ToolTip.Tip="{i18n:T '场景白平衡，正片域的线性增益。片子本身的色偏在 Cineon 标签里标定，这里只管光源的冷暖。'}">
+                                          ToolTip.Tip="{i18n:T '场景白平衡，正片域的线性增益，只管光源的冷暖。片子本身的色偏在 Cineon 标签中标定。'}">
                                     <StackPanel Spacing="1">
                                         <ctl:SliderRow Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" Bipolar="True" TrackBrush="{DynamicResource TrackTempBrush}" />
                                         <ctl:SliderRow Label="{i18n:T '色调'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Tint}" Bipolar="True" TrackBrush="{DynamicResource TrackTintBrush}" />
@@ -1103,14 +1124,14 @@
 
                                 <Button Click="OnApplySceneToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
                                         IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{i18n:T '把当前帧的场景调整（白平衡/曝光/影调/曲线）写入本卷所有其他帧。复制/粘贴到勾选帧见 编辑 菜单或胶片条右键。'}">
+                                        ToolTip.Tip="{i18n:T '把当前帧的场景调整（白平衡、曝光、影调、曲线）写入本卷其他所有帧。'}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <ctl:Icon Data="{StaticResource IcoCheck}" />
                                         <TextBlock Text="{i18n:T '应用 Display 参数到整卷'}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                        </ScrollViewer>
+                        </Border>
                     </TabItem>
 
                     <!-- 卷注释 used to be a third tab here. The fields moved into the 印样 dialog
@@ -1118,32 +1139,29 @@
                          identification strip burned onto the sheet — you want to be typing them
                          while looking at the roll they label, not in a side panel. -->
                 </TabControl>
-                <!-- Shown while the open tab still has content below the fold. The fixed block
-                     under the tabs eats height, so it is easy to lose the bottom of a tab. -->
-                <Border Name="TabsMoreHint" IsVisible="False" IsHitTestVisible="False"
-                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,4"
-                        Padding="6,2" CornerRadius="3" Background="{DynamicResource ElevatedBrush}"
-                        BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                    <TextBlock Classes="fieldLabel" Text="{i18n:T '↓ 还有内容，向下滚动'}" />
-                </Border>
+                <!-- Shown while the open tab still has content below the fold. The fixed
+                     block under the tabs eats height, so it is easy to lose the bottom of a
+                     tab.
+
+                     A FADE, not a chip. The chip was a labelled box floating over the panel
+                     at the bottom right, which is where the panel keeps its widest buttons —
+                     so the notice that there was more to see arrived on top of the thing it
+                     was hiding. A row dissolving into the panel edge says the same thing
+                     without a word on it, and without covering anything: the cut-off row IS
+                     the message. -->
                 </Panel>
 
                 <!-- 齿孔遮罩 / 几何裁切 live below the tabs, not inside Cineon: neither is a
                      colour parameter, and you want them at hand whichever stage you are on. -->
-                <Grid Grid.Row="2" RowDefinitions="Auto,*">
+                <Grid RowDefinitions="Auto,Auto">
                     <!-- Header bar doubles as the divider: a full-width groove plus a rubric,
                          so it reads as its own region rather than the tail of the open tab. -->
-                    <Border Grid.Row="0" Padding="12,5" Background="{DynamicResource Panel2Brush}"
-                            BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="0,1,0,1">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '通用 · 不随标签切换'}" />
-                            <TextBlock Grid.Column="1" Name="FixedMoreHint" IsVisible="False" Classes="fieldLabel"
-                                       Foreground="{DynamicResource WarnBrush}" Text="{i18n:T '↓ 还有内容，向下滚动'}" />
-                        </Grid>
+                    <Border Grid.Row="0" Padding="22,6,14,6" Background="{DynamicResource Panel2Brush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+                        <TextBlock Classes="fieldLabel" Text="{i18n:T '通用 · 不随标签切换'}" />
                     </Border>
-                    <ScrollViewer Grid.Row="1" Name="FixedScroll" HorizontalScrollBarVisibility="Disabled"
-                                  AllowAutoHide="False" MaxHeight="420">
-                        <StackPanel Spacing="0" Margin="8,4,8,10">
+                    <Border Grid.Row="1">
+                        <StackPanel Spacing="0" Margin="22,0,14,14">
                             <!-- 齿孔遮罩 -->
                             <Expander Header="{i18n:T '齿孔遮罩'}">
                                 <StackPanel Spacing="4">
@@ -1187,12 +1205,12 @@
                                         <Button Classes="icon" Click="OnApplyGeometryClick" IsEnabled="{Binding HasImage}"
                                                 Margin="8,0,0,0"
                                                 AutomationProperties.Name="{i18n:T '同步几何到其他帧'}"
-                                                ToolTip.Tip="{i18n:T '把本帧的旋转 / 翻转和拉直应用到勾选帧；没有勾选则应用到整卷（不含裁切）'}">
+                                                ToolTip.Tip="{i18n:T '把本帧的旋转 / 翻转和拉直应用到勾选帧，未勾选则整卷；不含裁切'}">
                                             <ctl:Icon Data="{StaticResource IcoBroadcast}" />
                                         </Button>
                                     </StackPanel>
                                     <Grid ColumnDefinitions="Auto,*">
-                                        <TextBlock Grid.Column="0" Classes="fieldLabel" MinWidth="44" Text="{i18n:T '预设'}" />
+                                        <TextBlock Grid.Column="0" Classes="fieldLabel spine" Text="{i18n:T '预设'}" />
                                         <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
                                                   SelectedIndex="0" SelectionChanged="OnCropPresetChanged"
                                                   ToolTip.Tip="{i18n:T '选择后裁切框以此比例居中显示，拖框时保持该比例'}">
@@ -1223,7 +1241,7 @@
                                     <Grid ColumnDefinitions="*,*">
                                         <ToggleButton Name="StraightenHBtn" Grid.Column="0" Classes="sampling"
                                                       Click="OnStraightenHClick" IsEnabled="{Binding HasImage}"
-                                                      ToolTip.Tip="{i18n:T '在预览上拖一条『应当水平』的参考线（如地平线），松开即转正'}">
+                                                      ToolTip.Tip="{i18n:T '在预览上拖一条应当水平的参考线，松开即转正'}">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <ctl:Icon Data="{StaticResource IcoLevelH}" />
                                                 <TextBlock Text="{i18n:T '取水平'}" VerticalAlignment="Center" />
@@ -1232,7 +1250,7 @@
                                         <ToggleButton Name="StraightenVBtn" Grid.Column="1" Classes="sampling"
                                                       Margin="6,0,0,0"
                                                       Click="OnStraightenVClick" IsEnabled="{Binding HasImage}"
-                                                      ToolTip.Tip="{i18n:T '在预览上拖一条『应当垂直』的参考线（如门框、旗杆），松开即转正'}">
+                                                      ToolTip.Tip="{i18n:T '在预览上拖一条应当垂直的参考线，松开即转正'}">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <ctl:Icon Data="{StaticResource IcoLevelV}" />
                                                 <TextBlock Text="{i18n:T '取垂直'}" VerticalAlignment="Center" />
@@ -1242,8 +1260,25 @@
                                 </StackPanel>
                             </Expander>
                         </StackPanel>
-                    </ScrollViewer>
+                    </Border>
                 </Grid>
+                </StackPanel>
+                </ScrollViewer>
+                <!-- Shown while the panel has content below the fold. A FADE, not a chip: the
+                     chip was a labelled box floating at the bottom right, which is where the
+                     panel keeps its widest buttons, so the notice that there was more to see
+                     arrived on top of the thing it was hiding. A row dissolving into the edge
+                     says the same thing without a word on it. -->
+                <Border Name="TabsMoreHint" IsVisible="False" IsHitTestVisible="False"
+                        Height="26" VerticalAlignment="Bottom">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                            <GradientStop Offset="0" Color="#00000000" />
+                            <GradientStop Offset="1" Color="#B0000000" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                </Panel>
             </Grid>
         </Grid>
 

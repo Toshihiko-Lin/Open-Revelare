@@ -75,6 +75,18 @@ public static class Settings
         /// <summary>Ceiling in GB; least-recently-written sheets are dropped past it.</summary>
         public int SheetCacheBudgetGb { get; set; } = 1;
 
+        // ── 图库 wall ───────────────────────────────────────────────────────────
+        // Both persisted, because how a wall is arranged is a standing preference: a user who
+        // works by roll number re-picks it on every launch otherwise.
+
+        /// <summary>Which <see cref="RollSortKey"/> the roll wall is ordered by. Stored by NAME
+        /// rather than as a number so a settings file survives the enum gaining a member.</summary>
+        public string LibrarySortKey { get; set; } = nameof(RollSortKey.ImportedAt);
+
+        /// <summary>Newest / Z→A first. Defaults to true with the default key, which is the order
+        /// the wall has always had: the roll you just imported sits next to the 新建 tile.</summary>
+        public bool LibrarySortDescending { get; set; } = true;
+
         /// <summary>Which contact-sheet look to print (印样窗口 → 深色/浅色). Independent of
         /// <see cref="Theme"/>: the sheet is an artefact you hand to someone else, so the look you
         /// want on paper has nothing to do with the chrome you edit in.</summary>

@@ -28,6 +28,9 @@ public partial class LibraryView : UserControl
     private void OnClearFiltersClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => Vm?.ClearFilters();
 
+    private void OnSortDirectionClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => Vm?.ToggleSortDirection();
+
     /// <summary>The card a menu item or gesture came from — every handler needs it, and the
     /// context menu's DataContext is the card itself.</summary>
     private static RollCard? CardOf(object? sender) => sender switch

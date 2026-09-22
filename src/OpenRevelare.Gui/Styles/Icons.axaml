@@ -52,6 +52,9 @@
     <StreamGeometry x:Key="IcoTrash">M3 4.5H13M6.5 4.5V3A0.5 0.5 0 0 1 7 2.5H9A0.5 0.5 0 0 1 9.5 3V4.5M4.5 4.5V13A1 1 0 0 0 5.5 14H10.5A1 1 0 0 0 11.5 13V4.5M6.8 7V11.5M9.2 7V11.5</StreamGeometry>
     <!-- Shortest-to-longest bars beside a down arrow: sort ascending. -->
     <StreamGeometry x:Key="IcoSort">M2.5 4H7.5M2.5 8H9.5M2.5 12H11.5M13 3V12M11 10L13 12L15 10</StreamGeometry>
+    <!-- Its mirror: longest first, arrow up. The pair is one control's two states, so they have
+         to be the same drawing read in the two directions. -->
+    <StreamGeometry x:Key="IcoSortDesc">M2.5 4H11.5M2.5 8H9.5M2.5 12H7.5M13 12V3M11 5L13 3L15 5</StreamGeometry>
 
     <!-- ── Output ──────────────────────────────────────────────────────────── -->
     <StreamGeometry x:Key="IcoExport">M8 2.5V10M5.2 7.3L8 10.1L10.8 7.3M2.5 11V12.5A1 1 0 0 0 3.5 13.5H12.5A1 1 0 0 0 13.5 12.5V11</StreamGeometry>

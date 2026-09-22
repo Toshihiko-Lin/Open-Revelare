@@ -8,16 +8,28 @@
 
     <UserControl.Styles>
         <!-- Everything on this wall is clickable, so everything on it has to react to the
-             pointer. Border only — a background change would fight the contact sheet's paper. -->
+             pointer. Border only — a background change would fight the contact sheet's paper.
+             Nothing lifts, scales or shadows on hover either: that is a web gallery's idiom,
+             and here it would set a wall of photographs in motion under the cursor. -->
+        <Style Selector="Border.tile">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+                    <BrushTransition Property="Background" Duration="0:0:0.12" />
+                </Transitions>
+            </Setter>
+        </Style>
         <Style Selector="Border.tile:pointerover">
-            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
         </Style>
         <!-- Selected reads as a filled-in border, not a colour wash: the card is mostly a
              photograph, and tinting it would lie about the print. -->
         <Style Selector="Border.tile.selected">
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
-            <Setter Property="BorderThickness" Value="2" />
-            <Setter Property="Padding" Value="9" />
+        </Style>
+        <Style Selector="Border.tile.selected:pointerover">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
         </Style>
     </UserControl.Styles>
 
@@ -27,11 +39,11 @@
 
         <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="18,14,18,10">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="{i18n:T '图库'}" FontSize="17" FontWeight="SemiBold"
+                <TextBlock Text="{i18n:T '图库'}" FontSize="{DynamicResource FontLg}" FontWeight="SemiBold"
                            Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding RollCountText}" FontSize="12"
+                <TextBlock Text="{Binding RollCountText}" Classes="readout"
                            Foreground="{DynamicResource TextMuteBrush}" VerticalAlignment="Bottom"
-                           Margin="0,0,0,2" />
+                           Margin="0,0,0,3" />
             </StackPanel>
         </Border>
 
@@ -47,11 +59,38 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Spacing="6">
                     <TextBox Text="{Binding SearchText}" Watermark="{i18n:T '搜索卷名 / 卷号 / 胶卷 / 相机'}" />
+                    <!-- 排序: the key picker and its direction. Here rather than in the header
+                         because this sidebar is already the "how am I looking at this wall"
+                         column; the header is the wall's name and its count. -->
                     <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0" Text="{Binding FilterSummary}" FontSize="11"
+                        <ComboBox Grid.Column="0" HorizontalAlignment="Stretch"
+                                  ItemsSource="{Binding SortOptions}"
+                                  SelectedItem="{Binding SelectedSort}"
+                                  ToolTip.Tip="{i18n:T '卷墙的排列顺序。该项为空的卷排在最后'}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SortOption">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button Grid.Column="1" Classes="icon" Margin="4,0,0,0"
+                                Click="OnSortDirectionClick"
+                                AutomationProperties.Name="{i18n:T '排序方向'}"
+                                ToolTip.Tip="{Binding SortDirectionTip}">
+                            <!-- Two glyphs, one visible: a converter for a two-state icon is a
+                                 class to find and a binding to read, where this is the state
+                                 itself. -->
+                            <Panel>
+                                <ctl:Icon Data="{StaticResource IcoSortDesc}" IsVisible="{Binding SortDescending}" />
+                                <ctl:Icon Data="{StaticResource IcoSort}" IsVisible="{Binding !SortDescending}" />
+                            </Panel>
+                        </Button>
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="{Binding FilterSummary}" FontSize="{DynamicResource FontXs}"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextMuteBrush}" />
-                        <Button Grid.Column="1" Content="{i18n:T '清除'}" FontSize="11" Padding="8,2"
+                        <Button Grid.Column="1" Content="{i18n:T '清除'}" FontSize="{DynamicResource FontXs}" Padding="8,1"
                                 IsVisible="{Binding HasActiveFilter}" Click="OnClearFiltersClick" />
                     </Grid>
                 </StackPanel>
@@ -61,14 +100,14 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:FilterFacet">
                                 <StackPanel Margin="0,0,0,14" Spacing="3">
-                                    <TextBlock Text="{Binding Name}" FontSize="11" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Name}" FontSize="{DynamicResource FontXs}" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextDimBrush}" />
                                     <ItemsControl ItemsSource="{Binding Options}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:FilterOption">
                                                 <CheckBox IsChecked="{Binding IsChecked}"
-                                                          Content="{Binding Label}" FontSize="12"
-                                                          MinHeight="0" Padding="6,1,0,1" />
+                                                          Content="{Binding Label}" FontSize="{DynamicResource FontSm}"
+                                                          MinHeight="0" Padding="7,1,0,1" />
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -80,7 +119,7 @@
             </DockPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="1" Grid.Column="1" Padding="12,0,12,16">
+        <ScrollViewer Grid.Row="1" Grid.Column="1" Padding="13,0,13,16">
             <ItemsControl ItemsSource="{Binding Rolls}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -93,34 +132,40 @@
 
                         <!-- 新建卷 tile: same footprint as a roll card so the wall stays a grid,
                              and it leads the row it is in. One click, not two — it is a button. -->
-                        <Border Classes="tile" IsVisible="{Binding IsNewTile}" Margin="6" Width="272"
-                                Background="{DynamicResource Panel2Brush}"
+                        <Border Classes="tile" IsVisible="{Binding IsNewTile}" Margin="5" Width="272"
+                                Background="Transparent"
                                 BorderBrush="{DynamicResource BorderSoftBrush}"
-                                BorderThickness="1" CornerRadius="3" Padding="10"
+                                BorderThickness="1" CornerRadius="{DynamicResource RadiusMd}" Padding="9"
                                 Cursor="Hand" Tapped="OnNewTileTapped">
-                            <StackPanel Spacing="8">
-                                <Border Height="150" CornerRadius="2"
-                                        Background="{DynamicResource ChromeBrush}">
-                                    <TextBlock Text="＋" FontSize="40"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextMuteBrush}" />
+                            <StackPanel Spacing="9">
+                                <!-- Empty, not filled: this cell is a slot waiting for a roll, and
+                                     drawing it as a filled frame with a big ＋ made it compete with
+                                     the photographs beside it for the eye. -->
+                                <Border Height="150" CornerRadius="{DynamicResource RadiusSm}"
+                                        Background="Transparent"
+                                        BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+                                    <ctl:Icon Data="{StaticResource IcoPlus}" Width="22" Height="22"
+                                              StrokeThickness="1.4"
+                                              Foreground="{DynamicResource TextMuteBrush}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="{i18n:T '新建卷…'}" FontSize="13" FontWeight="SemiBold"
+                                    <TextBlock Text="{i18n:T '新建卷…'}" FontSize="{DynamicResource FontMd}" FontWeight="SemiBold"
                                                Foreground="{DynamicResource TextBrush}" />
-                                    <TextBlock Text="{i18n:T '选择一张或多张负片（多选 = 整卷）'}" FontSize="11"
+                                    <TextBlock Text="{i18n:T '选择一张或多张负片（多选 = 整卷）'}" FontSize="{DynamicResource FontXs}"
+                                               TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextMuteBrush}" />
-                                    <TextBlock Text=" " FontSize="11" />
+                                    <TextBlock Text=" " FontSize="{DynamicResource FontXs}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
 
                         <Border Name="Card" Classes="tile" Classes.selected="{Binding IsSelected}"
-                                Margin="6" Width="272" Cursor="Hand"
+                                Margin="5" Width="272" Cursor="Hand"
                                 IsVisible="{Binding !IsNewTile}"
-                                Background="{DynamicResource PanelBrush}"
+                                Background="{DynamicResource Panel2Brush}"
                                 BorderBrush="{DynamicResource BorderSoftBrush}"
-                                BorderThickness="1" CornerRadius="3" Padding="10"
+                                BorderThickness="1" CornerRadius="{DynamicResource RadiusMd}" Padding="9"
                                 DoubleTapped="OnCardDoubleTapped"
                                 PointerPressed="OnCardPressed">
                             <Border.ContextMenu>
@@ -141,11 +186,14 @@
                                 </ContextMenu>
                             </Border.ContextMenu>
 
-                            <StackPanel Spacing="8">
-                                <Border Height="150" Background="{DynamicResource ChromeBrush}"
-                                        CornerRadius="2" ClipToBounds="True">
+                            <StackPanel Spacing="9">
+                                <!-- The cover sits on the DARKEST surface in the window, not on a
+                                     panel grey: a contact sheet is a print, and the darker the
+                                     mount the less the chrome argues with what is on it. -->
+                                <Border Height="150" Background="{DynamicResource GrooveBrush}"
+                                        CornerRadius="{DynamicResource RadiusSm}" ClipToBounds="True">
                                     <Panel>
-                                        <TextBlock Text="{i18n:T '（暂无印样）'}" FontSize="11"
+                                        <TextBlock Text="{i18n:T '（暂无印样）'}" FontSize="{DynamicResource FontXs}"
                                                    IsVisible="{Binding HasNoCover}"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextMuteBrush}" />
@@ -154,14 +202,16 @@
                                 </Border>
 
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding Title}" FontSize="{DynamicResource FontMd}" FontWeight="SemiBold"
                                                TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextBrush}" />
-                                    <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                    <TextBlock Text="{Binding Subtitle}" FontSize="{DynamicResource FontXs}"
                                                TextTrimming="CharacterEllipsis"
                                                IsVisible="{Binding Subtitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                                Foreground="{DynamicResource TextDimBrush}" />
-                                    <TextBlock Text="{Binding Detail}" FontSize="11"
+                                    <!-- Frame count and timestamp are measurements, so they are set
+                                         like the other readouts in the app rather than as prose. -->
+                                    <TextBlock Text="{Binding Detail}" Classes="readout"
                                                Foreground="{DynamicResource TextMuteBrush}" />
                                 </StackPanel>
                             </StackPanel>

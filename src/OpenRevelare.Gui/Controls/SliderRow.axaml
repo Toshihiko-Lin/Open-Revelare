@@ -19,15 +19,16 @@
         </Style>
     </UserControl.Styles>
     <!-- 标签（双击重置）| 滑条 | 数字框 —— 复刻 Python _make_row 布局 -->
-    <!-- Auto, not a fixed 44: 「曝光」 is two glyphs and "Exposure" is eight, so a width that
-         fits the Chinese label clips the English one. MinWidth keeps the sliders lined up in
-         Chinese, where every label is short enough that Auto would ragged-edge them. -->
-    <Grid ColumnDefinitions="Auto,*,64" Margin="0,2">
+    <!-- Auto, not a fixed width: 「曝光」 is two glyphs and "Exposure" is eight, so a width
+         that fits the Chinese label clips the English one. The MinWidth is the panel's shared
+         LabelColumn, which is what lines this row's slider up with every other control in the
+         panel — the pickers and the crop preset break at the same x. -->
+    <Grid ColumnDefinitions="Auto,*,70" Margin="0,2">
         <TextBlock Name="LabelText"
                    Grid.Column="0"
                    Text="{Binding Label, ElementName=Root}"
-                   MinWidth="44"
-                   VerticalAlignment="Center" FontSize="12"
+                   MinWidth="{DynamicResource LabelColumn}"
+                   VerticalAlignment="Center" FontSize="{DynamicResource FontSm}"
                    Foreground="{DynamicResource TextDimBrush}"
                    ToolTip.Tip="{i18n:T '双击重置'}"
                    DoubleTapped="OnLabelDoubleTapped" />

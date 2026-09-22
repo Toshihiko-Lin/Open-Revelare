@@ -111,6 +111,22 @@ public sealed partial class FilterFacet : ObservableObject
     public void RefreshText() => OnPropertyChanged(nameof(Name));
 }
 
+/// <summary>One row of the 排序 picker. Wraps the key so the ComboBox has something with a
+/// translatable label to bind to; the key itself is what gets persisted.</summary>
+public sealed partial class SortOption : ObservableObject
+{
+    public RollSortKey Key { get; }
+
+    /// <summary>Resolved on read, so a language switch is one re-raise rather than a rebuild.</summary>
+    public string Name => Loc.T(_label);
+
+    private readonly string _label;
+
+    public SortOption(RollSortKey key, string label) { Key = key; _label = label; }
+
+    public void RefreshText() => OnPropertyChanged(nameof(Name));
+}
+
 /// <summary>
 /// The 图库 module: every roll this install knows about, as a wall of contact sheets.
 ///
@@ -142,13 +158,19 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// The subscription is never unhooked because there is nothing to unhook it from: one of
     /// these exists per run, owned by <see cref="MainViewModel.Library"/> for the app's lifetime.
     /// </summary>
-    public LibraryViewModel() => Loc.Changed += RetranslateText;
+    public LibraryViewModel()
+    {
+        RestoreSort();
+        Loc.Changed += RetranslateText;
+    }
 
     private void RetranslateText()
     {
         OnPropertyChanged(nameof(FilterSummary));
         OnPropertyChanged(nameof(RollCountText));
+        OnPropertyChanged(nameof(SortDirectionTip));
         foreach (FilterFacet f in Facets) f.RefreshText();
+        foreach (SortOption o in SortOptions) o.RefreshText();
         // _all, not Rolls: a card the filter is hiding right now still has to be right when the
         // filter is cleared, and re-raising a property on a card nobody is drawing costs nothing.
         foreach (RollCard c in _all) c.RefreshText();
@@ -162,6 +184,68 @@ public sealed partial class LibraryViewModel : ObservableObject
     private readonly List<RollCard> _all = new();
 
     public ObservableCollection<FilterFacet> Facets { get; } = new();
+
+    // ── 排序 ────────────────────────────────────────────────────────────────────
+    //
+    // Applied where the shown list is built, over the cards that already exist — reordering is a
+    // list rebuild, never a cover re-decode, so switching keys is instant even on a long wall.
+
+    public ObservableCollection<SortOption> SortOptions { get; } =
+        new(RollOrder.Keys.Select(k => new SortOption(k.Key, k.Label)));
+
+    /// <summary>Bound to the picker. Setting it re-sorts and remembers the choice.</summary>
+    [ObservableProperty] private SortOption? _selectedSort;
+
+    partial void OnSelectedSortChanged(SortOption? value)
+    {
+        if (value is null || _restoringSort) return;
+        Settings.Current.LibrarySortKey = value.Key.ToString();
+        Settings.Save();
+        ApplyFilter();
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SortDirectionTip))]
+    private bool _sortDescending = true;
+
+    /// <summary>Set while the persisted choice is being installed, so restoring it does not write
+    /// the settings file straight back out (and does not sort before the cards exist).</summary>
+    private bool _restoringSort;
+
+    /// <summary>Flip the direction. A button rather than a second row of "×× (升序)" entries: the
+    /// direction is orthogonal to the key, and spelling out the product of the two doubles the
+    /// list for nothing.</summary>
+    public void ToggleSortDirection()
+    {
+        SortDescending = !SortDescending;
+        Settings.Current.LibrarySortDescending = SortDescending;
+        Settings.Save();
+        ApplyFilter();
+    }
+
+    /// <summary>
+    /// What the direction button means for the key in force. "新 → 旧" reads as an order;
+    /// "降序" makes the user work out what is大 for a date.
+    /// </summary>
+    public string SortDirectionTip => (SelectedSort?.Key ?? RollSortKey.ImportedAt) switch
+    {
+        RollSortKey.Title or RollSortKey.RollNumber =>
+            SortDescending ? Loc.T("倒序（Z → A）") : Loc.T("顺序（A → Z）"),
+        _ => SortDescending ? Loc.T("新的在前") : Loc.T("旧的在前"),
+    };
+
+    /// <summary>Install the persisted sort. Called once, before the first wall is built.</summary>
+    private void RestoreSort()
+    {
+        _restoringSort = true;
+        try
+        {
+            RollSortKey key = RollOrder.Parse(Settings.Current.LibrarySortKey);
+            SelectedSort = SortOptions.FirstOrDefault(o => o.Key == key) ?? SortOptions[0];
+            SortDescending = Settings.Current.LibrarySortDescending;
+        }
+        finally { _restoringSort = false; }
+    }
 
     [ObservableProperty] private string _searchText = "";
 
@@ -199,17 +283,20 @@ public sealed partial class LibraryViewModel : ObservableObject
         : Loc.F($"{_all.Count} 卷");
 
     /// <summary>
-    /// Reload from the catalog and decode the covers. Ordered by IMPORT time, newest first — so a
-    /// roll keeps its place in the wall, and the roll you just made is the one next to the 新建
-    /// tile. Sorting by last-opened instead would reshuffle the wall every time you looked at an
-    /// old roll, which makes the layout impossible to remember.
+    /// Reload from the catalog and decode the covers. The ORDER is applied further down, in
+    /// <see cref="ApplyFilter"/>, so that changing it never comes back through here.
+    ///
+    /// The default is still import time, newest first — the one order in which a roll never moves,
+    /// so the wall can be navigated from memory and the roll you just made is the one next to the
+    /// 新建 tile. Last-opened, by contrast, reshuffles every time you look at an old roll; it is
+    /// offered but it is not what a wall starts as.
     /// </summary>
     public async Task RefreshAsync()
     {
         foreach (RollCard c in _all) { c.Cover?.Dispose(); c.Cover = null; }
         _all.Clear();
 
-        List<Catalog.Roll> rolls = Catalog.Rolls.OrderByDescending(r => r.ImportedAt).ToList();
+        List<Catalog.Roll> rolls = Catalog.Rolls.ToList();
         foreach (Catalog.Roll r in rolls) _all.Add(new RollCard(r));
         IsEmpty = rolls.Count == 0;
 
@@ -287,8 +374,13 @@ public sealed partial class LibraryViewModel : ObservableObject
 
         RollCard? previous = Selected;
         Rolls.Clear();
-        Rolls.Add(new RollCard(null));   // the 新建卷 tile always leads, filter or no filter
-        foreach (RollCard card in _all.Where(Matches)) Rolls.Add(card);
+        Rolls.Add(new RollCard(null));   // the 新建卷 tile always leads, filter or sort aside
+        RollSortKey key = SelectedSort?.Key ?? RollSortKey.ImportedAt;
+        IEnumerable<RollCard> shown = _all
+            .Where(Matches)
+            .OrderBy(c => c.Roll!, Comparer<Catalog.Roll>.Create(
+                (a, b) => RollOrder.Compare(a, b, key, SortDescending)));
+        foreach (RollCard card in shown) Rolls.Add(card);
 
         HasActiveFilter = !string.IsNullOrWhiteSpace(SearchText)
                           || Facets.Any(f => f.Options.Any(o => o.IsChecked));

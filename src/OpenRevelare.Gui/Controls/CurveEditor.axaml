@@ -19,6 +19,6 @@
         </StackPanel>
         <ctl:CurveCanvas Name="Canvas" Height="220" HorizontalAlignment="Stretch" />
         <CheckBox Name="PreserveChk" Content="{i18n:T '白光曲线保留色相'}" IsChecked="True"
-                  ToolTip.Tip="{i18n:T '勾选：W 曲线只改亮度、按比例保持颜色（推荐）；取消：传统 RGB 曲线，会改色相/饱和度。'}" />
+                  ToolTip.Tip="{i18n:T '勾选（W 键）只改亮度，按比例保持颜色；取消则为传统 RGB 曲线，会改色相与饱和度。'}" />
     </StackPanel>
 </UserControl>

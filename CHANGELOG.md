@@ -4,6 +4,8 @@
 
 **改进**
 
+- **图库可以排序了**。侧栏搜索框下面选依据：添加时间（默认，新的在前）、最近修改、最近打开、卷名、卷号、冲洗日期，右边按钮切正倒序，选择会记住。这一项没填的卷永远排在最后；冲洗日期认得出的（`2025.09`、`2025-09-12`、`2025年9月`、`20250912`）按时间排，认不出的排在日期之后。
+
 - **胶片条勾选多帧后，右键「创建虚拟副本」「从卷中移除」对每个勾选帧执行**。没有勾选时仍只作用于当前帧。
 
 - **虚拟副本复制母帧的全部参数（含 Display 参数和裁切）**，不再重置场景；做半格的另一半、第二种调法时不用从头调。
@@ -21,6 +23,8 @@
 ---
 
 **Improved**
+
+- **The library can be sorted.** The picker under the sidebar's search box orders the wall by added time (the default, newest first), last modified, last opened, roll name, roll number or dev date, with a button to reverse it; the choice is remembered. A roll with that field empty always goes last, and a dev date a date can be read out of (`2025.09`, `2025-09-12`, `2025年9月`, `20250912`) sorts chronologically while anything else sorts after all of them.
 
 - **With several frames ticked in the film strip, right-click "Create virtual copy" and "Remove from roll" act on each ticked frame.** With nothing ticked they still act on the current frame alone.
 

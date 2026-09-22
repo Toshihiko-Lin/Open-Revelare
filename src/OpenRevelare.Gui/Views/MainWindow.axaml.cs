@@ -29,11 +29,10 @@ public partial class MainWindow : Window
         // "More below" hints for the right-hand panel: the fixed block under the tabs takes
         // height away from them, so both the open tab and the block itself can have controls
         // hidden past the fold without any obvious sign.
-        WireMoreBelowHint(CineonScroll, TabsMoreHint);
-        WireMoreBelowHint(DisplayScroll, TabsMoreHint);
-        WireMoreBelowHint(FixedScroll, FixedMoreHint);
+        // One scroller for the whole panel now, so one thing to watch.
+        WireMoreBelowHint(PanelScroll, TabsMoreHint);
         PanelTabs.SelectionChanged += (_, _) => Dispatcher.UIThread.Post(() =>
-            TabsMoreHint.IsVisible = HasMoreBelow(CalibrationTabOpen ? CineonScroll : DisplayScroll));
+            TabsMoreHint.IsVisible = HasMoreBelow(PanelScroll));
         // Drag mode for every parameter control in the window. SliderRow's events bubble, so one
         // subscription here covers all of them — including rows added later.
         AddHandler(SliderRow.InteractionStartedEvent, (_, _) => Vm?.BeginInteractive());
@@ -268,6 +267,51 @@ public partial class MainWindow : Window
     /// </summary>
     private Bitmap? PreviewBitmap => Vm?.PreviewImage;
 
+    /// <summary>
+    /// Source pixels across the picture currently on screen.
+    ///
+    /// The bitmap in the viewport is a PREVIEW — the decoded region box-downsampled to
+    /// <c>PreviewMaxEdge</c> — so its own pixel count says nothing about the negative. A 11648 px
+    /// scan arrives here as ~1600 px, and a zoom of "100%" measured against THAT is 1:1 with a
+    /// seventh of the file: the number told the user they were at full resolution while seven
+    /// source pixels sat behind every screen pixel, and the one thing 100% is for — judging focus
+    /// and grain — could not be done at it.
+    ///
+    /// <see cref="MainViewModel.CropFrameSize"/> is the decoded region's SOURCE size, oriented;
+    /// an applied crop takes its fraction of that. Zero when nothing is loaded.
+    /// </summary>
+    private double DisplayedSourceWidth()
+    {
+        if (Vm?.CropFrameSize is not { } src || src.W <= 0) return 0;
+        // While the crop tool is open the preview deliberately shows the frame WHOLE, so the
+        // stored rect is not what is on screen — see MainViewModel.CropEditing.
+        double fraction = Vm.CropEditing ? 1.0 : Vm.CurrentCrop?.W ?? 1.0;
+        return src.W * fraction;
+    }
+
+    /// <summary>
+    /// DEVICE pixels per logical pixel. Everything the layout deals in is logical, so on a 150%
+    /// display one logical pixel is a pixel and a half — and 100% has to mean one source pixel on
+    /// one pixel of the panel, not one and a half, or the whole point of it (judging focus and
+    /// grain) is lost on exactly the displays where those are hardest to judge.
+    /// </summary>
+    private double RenderScale()
+    {
+        double s = (TopLevel.GetTopLevel(this)?.RenderScaling) ?? 1.0;
+        return s > 0 ? s : 1.0;
+    }
+
+    /// <summary>Device pixels per SOURCE pixel — what the zoom readout states. Falls back to the
+    /// preview's own ratio when the source size is unknown (nothing decoded yet).</summary>
+    private double SourcePixelRatio()
+    {
+        double onScreen = PreviewBitmap is { } bmp
+            ? bmp.PixelSize.Width * _zoom * FitScale() * RenderScale()
+            : 0;
+        double source = DisplayedSourceWidth();
+        return source > 0 && onScreen > 0 ? onScreen / source : _zoom * FitScale();
+    }
+
     private double FitScale()
     {
         if (PreviewBitmap is not { } bmp) return 1;
@@ -344,7 +388,7 @@ public partial class MainWindow : Window
         ClampPan();
         _scale.ScaleX = _scale.ScaleY = _zoom;
         _translate.X = _pan.X; _translate.Y = _pan.Y;
-        ZoomLabel.Text = $"{_zoom * FitScale() * 100:F0}%";   // true on-screen pixel ratio
+        ZoomLabel.Text = $"{SourcePixelRatio() * 100:F0}%";   // screen pixels per SOURCE pixel
         UpdatePanCursor();
         UpdatePatchLayout();
         RenderCropFrame();
@@ -776,10 +820,19 @@ public partial class MainWindow : Window
     private void OnActualSizeClick(object? sender, RoutedEventArgs e)
     {
         double fit = FitScale();
-        if (fit <= 0) return;
-        // 1:1 with the displayed bitmap. Floor is MinZoom(), not 1.0, so this still works on a
-        // cropped frame that fit has upscaled — see MinZoom.
-        double target = Math.Clamp(1.0 / fit, MinZoom(), 40.0);
+        if (fit <= 0 || PreviewBitmap is not { } bmp || bmp.PixelSize.Width <= 0) return;
+        // 1:1 with the SOURCE FILE, not with the preview buffer — see SourcePixelRatio. Solving
+        // bmp.Width · zoom · fit = sourceWidth for zoom. Past it the sharp patch is active
+        // (SharpPatchThreshold is far below), so what lands on screen at 100% is re-rendered from
+        // the original pixels rather than preview pixels magnified.
+        double source = DisplayedSourceWidth();
+        double oneToOne = source > 0
+            ? source / (bmp.PixelSize.Width * fit * RenderScale())
+            : 1.0 / fit;
+        // Floor is MinZoom(), not 1.0, so this still works on a cropped frame that fit has
+        // upscaled — see MinZoom. The ceiling is generous: a 100 MP scan in a small window needs
+        // a larger multiple of fit to reach 1:1 than a 24 MP one does.
+        double target = Math.Clamp(oneToOne, MinZoom(), 80.0);
         // Zoom about the viewport centre.
         Point c = new(ViewPort.Bounds.Width / 2, ViewPort.Bounds.Height / 2);
         double factor = target / _zoom;
@@ -793,7 +846,9 @@ public partial class MainWindow : Window
     {
         if (Vm?.HasImage != true) return;
         Point cur = e.GetPosition(ViewPort);
-        double newZoom = Math.Clamp(_zoom * (e.Delta.Y > 0 ? 1.15 : 1 / 1.15), MinZoom(), 40.0);
+        // Same ceiling as 实际像素: on a high-resolution scan 1:1 is itself a large multiple of
+        // fit, and a wheel that stopped at 40 could not reach the zoom the button jumps to.
+        double newZoom = Math.Clamp(_zoom * (e.Delta.Y > 0 ? 1.15 : 1 / 1.15), MinZoom(), 80.0);
         double factor = newZoom / _zoom;
         _pan = new Point(cur.X - (cur.X - _pan.X) * factor, cur.Y - (cur.Y - _pan.Y) * factor);
         _zoom = newZoom;
