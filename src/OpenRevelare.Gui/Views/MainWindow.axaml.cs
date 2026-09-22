@@ -738,12 +738,48 @@ public partial class MainWindow : Window
         return new RegionRender.Roi(x0, y0, x1 - x0, y1 - y0);
     }
 
-    /// <summary>Ask for (or drop) the sharp patch for the current view.</summary>
+    /// <summary>
+    /// Ask for (or drop) the sharp patch for the current view.
+    ///
+    /// DEBOUNCED, because a patch is the most expensive thing the window can ask for and a zoom
+    /// is not one event. Six wheel notches used to start a render at the first of them — a
+    /// whole-file unpack, a second or more — for a zoom level the pointer had already left, and
+    /// the request for where the user actually stopped could not start until that finished. The
+    /// cost of arriving late is nothing (the soft preview stands in either way); the cost of
+    /// starting early is that the right answer comes twice as slowly.
+    ///
+    /// Dropping the patch is NOT debounced: it is free, and leaving a stale sharp rectangle over
+    /// a picture that has moved is a visible error rather than a delay.
+    /// </summary>
     private void SyncSharpPatch()
     {
         if (Vm is not { HasImage: true } vm) return;
-        if (_zoom <= SharpPatchThreshold) { vm.ClearSharpPatch(); return; }
-        if (VisibleRoiNorm() is { } roi) _ = vm.RequestSharpPatchAsync(roi);
+        if (_zoom <= SharpPatchThreshold)
+        {
+            _patchDebounce?.Stop();
+            vm.ClearSharpPatch();
+            return;
+        }
+        _patchDebounce ??= CreatePatchDebounce();
+        _patchDebounce.Stop();
+        _patchDebounce.Start();
+    }
+
+    private DispatcherTimer? _patchDebounce;
+
+    private DispatcherTimer CreatePatchDebounce()
+    {
+        // Short enough to feel like a consequence of letting go, long enough to swallow a wheel
+        // gesture: a notch every ~40 ms while spinning, so 140 ms coalesces the run and still
+        // fires well inside the time the decode itself takes.
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
+        t.Tick += (_, _) =>
+        {
+            t.Stop();
+            if (Vm is not { HasImage: true } vm || _zoom <= SharpPatchThreshold) return;
+            if (VisibleRoiNorm() is { } roi) _ = vm.RequestSharpPatchAsync(roi);
+        };
+        return t;
     }
 
     /// <summary>Place the patch over the sub-rectangle of the letterbox it covers. Runs inside

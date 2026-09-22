@@ -4,6 +4,10 @@
 
 **改进**
 
+- **放大后局部全分辨率出得更快**。区域解码有 94% 的时间花在整文件 unpack 上，裁剪只省去马赛克，所以按最小框解码是最亏的做法——同样一秒，换来的缓存下一次平移就落空。现在按显存预算取尽可能大的框（整帧不超预算时直接整帧读入），并且复用导出留下的全分辨率缓冲；滚轮缩放加了 140 ms 防抖，一次手势只触发一次解码，而不是在中途位置先解一次。
+
+- **100% 缩放改为源像素 1:1**。此前按预览缓冲计算，11648px 的扫描在「100%」下实际是 1:7，而 100% 唯一的用途（看实焦与颗粒）恰恰在那个比例上做不到。读数现在是每个源像素占多少设备像素，并计入显示器缩放。
+
 - **图库可以排序了**。侧栏搜索框下面选依据：添加时间（默认，新的在前）、最近修改、最近打开、卷名、卷号、冲洗日期，右边按钮切正倒序，选择会记住。这一项没填的卷永远排在最后；冲洗日期认得出的（`2025.09`、`2025-09-12`、`2025年9月`、`20250912`）按时间排，认不出的排在日期之后。
 
 - **胶片条勾选多帧后，右键「创建虚拟副本」「从卷中移除」对每个勾选帧执行**。没有勾选时仍只作用于当前帧。
@@ -23,6 +27,10 @@
 ---
 
 **Improved**
+
+- **The full-resolution patch arrives faster when zoomed in.** A region decode spends ~94% of its time on a whole-file unpack — the crop box only saves demosaic — so decoding the smallest box that answers the request is the worst of both: the same second of work, and a cache the next pan misses. The slice is now taken as large as the memory budget allows (the whole frame when it fits), reuses the full-resolution buffer an export leaves behind, and wheel zoom is debounced by 140 ms so one gesture costs one decode instead of two.
+
+- **100% zoom now means one source pixel per screen pixel.** It was measured against the preview buffer, so "100%" on an 11648 px scan was really 1:7 — and judging focus and grain, the only thing 100% is for, could not be done at it. The readout states device pixels per source pixel and accounts for display scaling.
 
 - **The library can be sorted.** The picker under the sidebar's search box orders the wall by added time (the default, newest first), last modified, last opened, roll name, roll number or dev date, with a button to reverse it; the choice is remembered. A roll with that field empty always goes last, and a dev date a date can be read out of (`2025.09`, `2025-09-12`, `2025年9月`, `20250912`) sorts chronologically while anything else sorts after all of them.
 

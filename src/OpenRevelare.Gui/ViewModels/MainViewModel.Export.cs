@@ -121,11 +121,55 @@ public partial class MainViewModel
 
     /// <summary>
     /// How much bigger than the strictly-needed rectangle to decode, as a fraction of its size
-    /// on each side. Pure pan buffer: the decode's unpack stage is whole-file and irreducible
-    /// (~1.07 s of a 1.14 s region decode on a 60 MP ARW), so re-decoding for every nudge is
-    /// what would make panning unusable — whereas the extra pixels cost almost nothing.
+    /// on each side — the FLOOR, before <see cref="RegionSlotMaxPixels"/> grows it further. Pure
+    /// pan buffer: the decode's unpack stage is whole-file and irreducible (~1.07 s of a 1.14 s
+    /// region decode on a 60 MP ARW), so re-decoding for every nudge is what would make panning
+    /// unusable — whereas the extra pixels cost almost nothing.
     /// </summary>
     private const double RegionPanMargin = 0.35;
+
+    /// <summary>
+    /// Ceiling on the decoded slice, in source pixels — and, because of where the time goes, the
+    /// thing that decides how often pixel-peeping has to wait at all.
+    ///
+    /// A region decode is ~94% unpack, which is whole-file and cannot be narrowed: the crop box
+    /// only saves demosaic and output. So the box costs almost the same whatever size it is, and
+    /// decoding the SMALLEST box that satisfies the request is the worst of both — the same
+    /// second of unpack, and a cache that the next pan or zoom-out immediately misses, buying
+    /// another second. Decoding the LARGEST box the memory budget allows costs the same second
+    /// once and then answers every subsequent request in the area for free.
+    ///
+    /// 16 MP is ~190 MB as float RGB, on the order of the full-resolution slot the export path
+    /// already holds, and it only exists while the user is zoomed in. On a frame at or below it
+    /// the whole file is taken in one go and nothing in that frame ever decodes twice.
+    /// </summary>
+    private const long RegionSlotMaxPixels = 16_000_000;
+
+    /// <summary>
+    /// Grow <paramref name="need"/> about its own centre to fill <see cref="RegionSlotMaxPixels"/>,
+    /// clamped to the frame. Keeps the need's aspect so the slack is spread the way a pan is
+    /// likely to use it, and never shrinks the request.
+    /// </summary>
+    internal static (int X0, int Y0, int X1, int Y1) ExpandToSlotBudget(
+        (int X0, int Y0, int X1, int Y1) need, int frameW, int frameH)
+    {
+        long frame = (long)frameW * frameH;
+        if (frame <= RegionSlotMaxPixels) return (0, 0, frameW, frameH);   // take it whole
+
+        double w = Math.Max(1, need.X1 - need.X0), h = Math.Max(1, need.Y1 - need.Y0);
+        // Area scales with the square of a linear factor applied to both sides.
+        double grow = Math.Sqrt(RegionSlotMaxPixels / (w * h));
+        if (grow <= 1.0) return need;
+
+        double cx = (need.X0 + need.X1) / 2.0, cy = (need.Y0 + need.Y1) / 2.0;
+        double hw = w * grow / 2.0, hh = h * grow / 2.0;
+        int x0 = (int)Math.Max(0, Math.Floor(cx - hw)), y0 = (int)Math.Max(0, Math.Floor(cy - hh));
+        int x1 = (int)Math.Min(frameW, Math.Ceiling(cx + hw)), y1 = (int)Math.Min(frameH, Math.Ceiling(cy + hh));
+        // Clamping at one edge frees budget the other side can use, which is what keeps a patch
+        // near a border as well cached as one in the middle.
+        return (Math.Min(x0, need.X0), Math.Min(y0, need.Y0),
+                Math.Max(x1, need.X1), Math.Max(y1, need.Y1));
+    }
 
     /// <summary>
     /// The decoded slice covering <paramref name="need"/>, from the cache when it already does.
@@ -147,10 +191,34 @@ public partial class MainViewModel
             && s.X0 <= need.X0 && s.Y0 <= need.Y0 && s.X1 >= need.X1 && s.Y1 >= need.Y1)
             return s.Working;
 
+        // A full-resolution decode of this very file may already be resident — the export path
+        // leaves one behind, and the fallback below puts one there whenever a source cannot be
+        // region-decoded. It covers every possible request, so taking it costs nothing where the
+        // alternative is a second whole-file decode of the same pixels.
+        FullSlot? full;
+        lock (_fullSlotGate) full = _fullSlot;
+        if (full is not null
+            && string.Equals(full.Path, path, StringComparison.OrdinalIgnoreCase)
+            && full.PipelineVersion == pipelineVersion
+            && full.TiffInputAssumption == tiffInputAssumption
+            // Only when it really is THIS frame's grid. A split roll's full slot holds the whole
+            // scan while frameW/frameH are derived by scaling the region entry back up, and the
+            // two can land a pixel or two apart — enough to offset every patch on the frame.
+            && full.Working.Pixels.Width == frameW
+            && full.Working.Pixels.Height == frameH)
+        {
+            _regionSlot = new RegionSlot(
+                path, pipelineVersion, tiffInputAssumption, full.Working,
+                0, 0, full.Working.Pixels.Width, full.Working.Pixels.Height);
+            return full.Working;
+        }
+
         int mw = (int)((need.X1 - need.X0) * RegionPanMargin);
         int mh = (int)((need.Y1 - need.Y0) * RegionPanMargin);
         int x0 = Math.Max(0, need.X0 - mw), y0 = Math.Max(0, need.Y0 - mh);
         int x1 = Math.Min(frameW, need.X1 + mw), y1 = Math.Min(frameH, need.Y1 + mh);
+        // Then out to the memory budget: see RegionSlotMaxPixels for why bigger is cheaper here.
+        (x0, y0, x1, y1) = ExpandToSlotBudget((x0, y0, x1, y1), frameW, frameH);
 
         var decoded = ImageIo.LoadWorkingRegion(
             path,
