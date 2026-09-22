@@ -4,6 +4,10 @@
 
 **改进**
 
+- **放大到 100% 终于能看到真实像素**。锐化补丁的请求用裸路径去查预览缓存，而缓存键在加入色彩管线版本后已变成 `路径|color-pipeline:N|tiff-input:N`，于是整帧分支永远查不中——非分格的卷在那一行直接返回，补丁从未发出，放大只是把预览像素放大，且没有任何提示。
+
+- **缩放时补丁边缘那圈接缝大幅减少**。补丁原本只覆盖可见区加 10%，稍一平移或缩小就露出"锐利方块 + 周围柔和预览"的边界；现在把渲染预算里没用掉的部分全用来加宽它（每边最多 1.7 倍），深度放大时余量最大，正是接缝最扎眼的地方。
+
 - **放大后局部全分辨率出得更快**。区域解码有 94% 的时间花在整文件 unpack 上，裁剪只省去马赛克，所以按最小框解码是最亏的做法——同样一秒，换来的缓存下一次平移就落空。现在按显存预算取尽可能大的框（整帧不超预算时直接整帧读入），并且复用导出留下的全分辨率缓冲；滚轮缩放加了 140 ms 防抖，一次手势只触发一次解码，而不是在中途位置先解一次。
 
 - **100% 缩放改为源像素 1:1**。此前按预览缓冲计算，11648px 的扫描在「100%」下实际是 1:7，而 100% 唯一的用途（看实焦与颗粒）恰恰在那个比例上做不到。读数现在是每个源像素占多少设备像素，并计入显示器缩放。
@@ -27,6 +31,10 @@
 ---
 
 **Improved**
+
+- **Zooming to 100% finally shows real pixels.** The sharp-patch request looked the preview cache up by bare path, but the cache key had grown `path|color-pipeline:N|tiff-input:N` — so the whole-frame branch never matched and an unsplit roll returned before asking for a patch at all. Zooming magnified preview pixels, silently.
+
+- **Far less of a seam around the patch while zooming.** It covered the visible area plus 10%, so a small pan or zoom-out exposed the boundary between the sharp rectangle and the soft preview around it. The patch now spends whatever render budget the visible area left unused on being wider (up to 1.7× a side), which is widest at the deep zooms where the seam was most obvious.
 
 - **The full-resolution patch arrives faster when zoomed in.** A region decode spends ~94% of its time on a whole-file unpack — the crop box only saves demosaic — so decoding the smallest box that answers the request is the worst of both: the same second of work, and a cache the next pan misses. The slice is now taken as large as the memory budget allows (the whole frame when it fits), reuses the full-resolution buffer an export leaves behind, and wheel zoom is debounced by 140 ms so one gesture costs one decode instead of two.
 

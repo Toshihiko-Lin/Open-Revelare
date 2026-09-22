@@ -89,6 +89,30 @@ public partial class MainViewModel
     internal static bool ShouldPresentSharpPatch(bool showClipping, bool showSprocketMask) =>
         !showClipping && !showSprocketMask;
 
+    /// <summary>The most a patch may be grown past what is visible, per side. Beyond this the
+    /// extra pixels stop buying seam-free pans and start being render time nobody sees.</summary>
+    private const double MaxRoiGrowth = 1.7;
+
+    /// <summary>
+    /// Grow <paramref name="roi"/> about its centre to use up <see cref="RegionRender.MaxSourcePixels"/>,
+    /// given that it currently costs <paramref name="cost"/> source pixels. Clamped to the frame
+    /// and to <see cref="MaxRoiGrowth"/>; never shrinks.
+    /// </summary>
+    internal static RegionRender.Roi GrowRoiIntoBudget(RegionRender.Roi roi, long cost)
+    {
+        if (cost <= 0) return roi;
+        double linear = Math.Min(MaxRoiGrowth, Math.Sqrt(RegionRender.MaxSourcePixels / (double)cost));
+        if (linear <= 1.0) return roi;
+
+        double w = Math.Min(1.0, roi.W * linear), h = Math.Min(1.0, roi.H * linear);
+        double cx = roi.X + roi.W / 2, cy = roi.Y + roi.H / 2;
+        // Centred, then slid back inside the frame — which is what keeps a patch near an edge as
+        // wide as one in the middle rather than losing the half that fell outside.
+        double x = Math.Clamp(cx - w / 2, 0, 1 - w);
+        double y = Math.Clamp(cy - h / 2, 0, 1 - h);
+        return new RegionRender.Roi(x, y, w, h);
+    }
+
     private CancellationTokenSource? _patchCts;
     private int _patchToken;
 
@@ -325,17 +349,32 @@ public partial class MainViewModel
         // a region key — and returning early there silently disabled the sharp patch on every split
         // scan, so fall back to the region entry and scale the margin box back up to the file.
         var splitPre = SplitCropOf(frame);
-        if (_previews.Get(srcPath) is { } full) (frameW, frameH) = (full.SourceWidth, full.SourceHeight);
+        // PreviewKey, not the bare path. The cache key grew "|color-pipeline:N|tiff-input:N"
+        // when those became part of a decode's identity, and this lookup was left passing the
+        // path on its own — so it matched nothing, the whole-file branch always missed, and for
+        // an ordinary frame (no region key to fall back to) the method returned here before ever
+        // asking for a patch. The sharp patch had been dead on every unsplit roll since: zooming
+        // to 100% kept magnifying preview pixels, with no error to say why.
+        if (_previews.Get(PreviewKey(srcPath, null)) is { } full)
+            (frameW, frameH) = (full.SourceWidth, full.SourceHeight);
         else if (splitPre is { } sp && _previews.Get(PreviewKey(srcPath, sp)) is { } part)
             (frameW, frameH) = ((int)Math.Round(part.SourceWidth / Math.Max(sp.W, 1e-9)),
                                 (int)Math.Round(part.SourceHeight / Math.Max(sp.H, 1e-9)));
         else return;
-        if (RegionRender.SourcePixelsFor(frameW, frameH, p, roi)
-            > RegionRender.MaxSourcePixels)
+        long cost = RegionRender.SourcePixelsFor(frameW, frameH, p, roi);
+        if (cost > RegionRender.MaxSourcePixels)
         {
             SchedulePatchCleanup();   // zooming back out lands here, over and over
             return;
         }
+        // Spend whatever budget the visible area did not use on a WIDER patch. The patch's edge
+        // is where the sharp render meets the soft preview, and that seam is visible: zoom out or
+        // pan a little and the old patch no longer reaches the edge of the view, leaving a ring
+        // of preview around a rectangle of real pixels. Pushing the edge off-screen is worth more
+        // than the pixels cost, and at the deep zooms where a patch matters most the visible area
+        // is a fraction of the ceiling — so the margin is widest exactly where the seam would
+        // otherwise be most obvious.
+        roi = GrowRoiIntoBudget(roi, cost);
 
         // One at a time; the newest request wins the queue slot.
         if (_patchRunning) { _patchQueued = roi; return; }
