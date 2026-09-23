@@ -4,6 +4,18 @@
 
 **改进**
 
+- **黑白负片有了自己的模式**。整卷校准最上面勾「黑白负片（整卷）」，三通道在进密度域前折成一路亮度，反相只用一对端点，出图按构造中性；白平衡、色偏修正、逐通道端点这些对银影没意义的控件一并收起。折叠只发生在渲染时，切回彩色，调过的参数原样还在。
+
+- **Display 的白平衡多了吸管**。在正片上框一块本应中性的地方，直接解出色温 / 色调；它只动这两条滑条，不碰 Cineon 的两端。解算取在 Stage 2 入口（白平衡正是那里的第一步），一次到位。
+
+- **示波器加了波形图，溢出判据也能调了**。波形横轴是画面位置，能看出偏色是均匀的还是渐变的——灯板不匀、翻拍架偏斜在直方图上和均匀偏色长得一样。过曝 / 欠曝的两个阈值改为可调（原来固定 2% / 98%），随程序保存。
+
+- **导出可以指定文件名模板，长边也终于落在你要的那个数上**。模板支持 `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`，没填的字段不留痕迹，对话框实时显示第一张写成什么；尺寸此前按整数倍缩小，要 2048 实际给 1943，现在正好是 2048，并可选允许放大。
+
+- **新增线性 DNG 导出**。去掉显示曲线的正片，输出空间的原色写进 DNG 标签，到 Lightroom / Camera Raw 里 RAW 面板可用、高光有东西可拉。它不是相机 RAW 的原样封装，反相与帧编辑都已烘焙进去。
+
+- **【帮助 → 本帧技术报告】**。一页列出这一帧渲染所依赖的全部数字以及每个数字的来源：输入域是读自文件还是按约定推定、相机矩阵有没有、片基是标定所得还是默认值、反相的六个绝对密度。可一键复制。
+
 - **放大到 100% 终于能看到真实像素**。锐化补丁的请求用裸路径去查预览缓存，而缓存键在加入色彩管线版本后已变成 `路径|color-pipeline:N|tiff-input:N`，于是整帧分支永远查不中——非分格的卷在那一行直接返回，补丁从未发出，放大只是把预览像素放大，且没有任何提示。
 
 - **缩放时补丁边缘那圈接缝大幅减少**。补丁原本只覆盖可见区加 10%，稍一平移或缩小就露出"锐利方块 + 周围柔和预览"的边界；现在把渲染预算里没用掉的部分全用来加宽它（每边最多 1.7 倍），深度放大时余量最大，正是接缝最扎眼的地方。
@@ -24,6 +36,8 @@
 
 **修复**
 
+- **尼康 High Efficiency / HE★ 的 NEF 不再显示成彩条**。LibRaw 不支持这两种压缩，此前解出的坏像素被当作有效画面显示，看着像原片损坏；现在解码前就认出并明确报错，并说明改用无损压缩或先转 16-bit TIFF。
+
 - **从图库重新进入正在打开的卷，不再丢失还没自动保存的裁切等修改**。当前卷不再从文件重新读回，直接回到修片；切卷前的保存会等正在进行的写入完成，写入失败则不切卷并留下原因；工程文件被杀毒软件或索引短暂占用时会自动重试。
 
 - **切卷时中止上一卷的整卷分析**，它的结果不再落到后打开的卷上。
@@ -31,6 +45,18 @@
 ---
 
 **Improved**
+
+- **Black-and-white negatives have a mode of their own.** Tick "Black-and-white negative (whole roll)" at the top of Roll calibration: the three channels fold into one luminance signal before the density domain, the inversion uses a single pair of endpoints, and the output is neutral by construction. White balance, the colour-cast tools and the per-channel ends are hidden with it. The fold happens at render time, so switching back to colour brings your grade back untouched.
+
+- **The Display white balance has an eyedropper.** Drag over something on the positive that ought to be neutral and it solves temperature and tint, moving those two sliders only and never the Cineon ends. It solves at Stage 2's door, where white balance is actually applied, so one sample lands it.
+
+- **A waveform, and adjustable clipping thresholds.** The waveform's x axis is position across the frame, which is what tells a uniform cast from one that drifts — an uneven light board looks exactly like a uniform tint in a histogram. The over/under-exposure ends are now sliders instead of a fixed 2% / 98%, saved with the application.
+
+- **Export takes a filename template, and the long edge finally lands on the number you asked for.** The template takes `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`, a field left empty leaves no trace, and the dialog shows what the first file will be called. Resizing used to shrink by an integer factor — asked for 2048 it delivered 1943 — and now lands exactly, with enlargement available as a choice.
+
+- **Linear DNG export.** The finished positive with the display curve removed and the output space's primaries written into the DNG tags, so Lightroom and Camera Raw open it with the raw panel live and something left in the highlights. It is not a repackaged camera RAW: the inversion and the frame edits are baked in.
+
+- **Help → Frame technical report.** One page listing every number this frame's rendering rests on and where each came from: whether the input domain was read from the file or taken by convention, whether a camera matrix was available, whether the film base is this roll's calibration or the default, and the inversion's six absolute densities. With a copy button.
 
 - **Zooming to 100% finally shows real pixels.** The sharp-patch request looked the preview cache up by bare path, but the cache key had grown `path|color-pipeline:N|tiff-input:N` — so the whole-frame branch never matched and an unsplit roll returned before asking for a patch at all. Zooming magnified preview pixels, silently.
 
@@ -51,6 +77,8 @@
 - **The preview's right-click menu is shorter and shows its shortcuts.** Items that already live in the panel or the menu bar (clear crop, straighten lines, sprocket mask, background colour) are no longer repeated; Ctrl+C / Ctrl+V, J and Ctrl+Z / Ctrl+Y are stated in the menu and under "Shortcuts…".
 
 **Fixed**
+
+- **Nikon High Efficiency / HE★ NEFs no longer show as colour bars.** LibRaw supports neither codec, and the damaged pixels it returned were being presented as a valid frame, which reads as a corrupt original. They are now recognised before decoding, with a message saying to re-shoot losslessly or convert to 16-bit TIFF first.
 
 - **Re-entering the open roll from the library no longer loses edits (crops and more) that autosave had not yet written.** The open roll is no longer re-read from disk; the save before a roll switch waits for a write in flight, a failed write cancels the switch and keeps its reason on the status line, and a project file briefly held by an antivirus scan or indexer is retried.
 

@@ -223,6 +223,9 @@ public static class RegionRender
         bool trackFill, out bool[]? fill)
     {
         fill = null;
+        // Same collapse as Pipeline.ProcessFrame, for the same reason: the patch must predict the
+        // frame it sits on top of. A colour roll is handed back untouched.
+        cal = Monochrome.Collapse(cal);
         var (rect, realised) = Realise(frameW, frameH, cal, roi);
         var b = SourceBounds(frameW, frameH, cal, rect);
 
@@ -289,6 +292,11 @@ public static class RegionRender
 
         if (cal.DecoupleMatrix != null)
             Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
+
+        // Mirrors Pipeline.ProcessFrame again: the patch is the same picture at full resolution,
+        // so it has to fold the same way or a zoomed-in black-and-white frame would show a
+        // differently balanced rectangle over the preview.
+        if (cal.Monochrome) Monochrome.FoldInPlace(slice.Data);
 
         ImageBuffer inverted = Inversion.Invert(slice, cal, cal.DecoupleChromaAmp,
                                                 Pipeline.ResolveChromaMatrix(cal));

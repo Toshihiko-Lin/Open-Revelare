@@ -91,6 +91,11 @@ single leader frame carries every reference the calibration needs:
 
 ## 3. Importing
 
+> **Nikon High Efficiency / HE★ NEFs cannot be used.** LibRaw does not support either codec, and
+> forcing it produces colour bars rather than a picture. The program recognises them before
+> decoding and says so, instead of presenting the damage as valid pixels. Re-shoot with lossless
+> NEF compression, or export a 16-bit TIFF from NX Studio or Lightroom first.
+
 **File → New roll…** (Ctrl+N), or the first toolbar button.
 
 **Pick the files.** Drag them in or click "Add files…". RAW covers ARW / NEF / CR2 / CR3 / DNG /
@@ -200,7 +205,27 @@ property** of this roll of film.
 > it out with "**Apply calibration to the whole roll**" — there is no "select on a grid of the whole
 > roll". ("Auto (whole roll)" at the top of the panel is the exception: it writes the roll itself.)
 
-### 4.0 One-press mask removal
+### 4.0 Black-and-white film
+
+The "**Black-and-white negative (whole roll)**" checkbox at the top of the panel states what kind
+of film this roll is. It applies to the whole roll.
+
+With it on, the three channels are folded into one luminance signal (Rec.709 weights) **before** the
+density domain, the inversion uses **one** pair of endpoints, and the output is neutral by
+construction — not because a cast was corrected, but because there is nothing left to be cast. The
+controls that mean nothing to a silver image — white balance, the colour-cast tools, the
+per-channel ends — are hidden with it.
+
+> **Why not "process it in colour and desaturate".** The six degrees of freedom exist for three dye
+> layers. A black-and-white negative's three channels carry the same silver image, and what differs
+> between them belongs to the camera's spectral response and the copy light, not to the film.
+> Correcting that as a colour cast means grading a picture that has no colour in it.
+
+> **Switching modes loses nothing.** The fold happens at render time; the white balance and R/G/B
+> curves you set stay in the project and come back when you switch to colour. Switching rebuilds
+> the roll's thumbnails.
+
+### 4.1 One-press mask removal
 
 The two buttons at the top of the panel are the shortcut through all of Stage 1. They run, in order:
 **film base T_base → highlight WB → D-max → black/white points**, with no region to select
@@ -220,7 +245,7 @@ anywhere.
 Every step remains redoable on its own afterwards — the buttons in the groups below are unchanged.
 The automatic pass only strings them together and runs them once.
 
-### 4.1 Film base and mask removal (T_base / D_max)
+### 4.2 Film base and mask removal (T_base / D_max)
 
 **Sample the film base** — click the button, then drag a rectangle over the **semi-transparent
 orange base**: between the sprocket holes, or the margin. It must contain **no picture at all**.
@@ -231,7 +256,7 @@ density that follows is measured against it.
 > Hard to see? Press **N** for a temporary negative view (gamma-encoded, so the base is legible),
 > sample, then press N again.
 
-### 4.2 The inversion's two ends
+### 4.3 The inversion's two ends
 
 The inversion is decided entirely by its two ends, and underneath they are **six absolute
 densities** (three per end) — exactly as many numbers as the render actually consumes. This section
@@ -320,7 +345,7 @@ correction group above.
 > changed lightness and contrast at once, so the panel showed two sliders doing one job. Fixed, the
 > black point holds still and lightness and contrast are expressed by the ends instead.
 
-### 4.3 Lens correction (manual, optional)
+### 4.4 Lens correction (manual, optional)
 
 Distortion, vignetting, **LCC flat field**. Besides fixing the optical faults themselves, the flat
 field improves the accuracy of the auto analysis — vignetting distorts the base and D_max statistics
@@ -354,19 +379,27 @@ Stage 1's physical restoration.
 
 | Panel | What is in it |
 |---|---|
+| White balance | Temperature · tint, with an **eyedropper** beside them |
 | Tone | Black · shadows · highlights · white; with "Auto levels (0.1% / 99.9%)" |
 | — | Exposure, contrast, saturation |
 | Tone curve | M / R / G / B curves, with an optional "Preserve hue on the white curve" |
 
-> **Temperature and tint are not here — they are in Roll calibration → Highlight end.** Colour
-> balance is a property of the inversion's white end, and there should only ever be one place for
-> it. This tab used to carry a second temperature/tint pair, which amounted to stacking another
-> layer on top of endpoints that were already settled: the two sets masked each other, and a cast
-> could not be traced to either one.
+> **The white balance here is about the LIGHT, not about the film.** The film's own cast — what the
+> stock, the scan and the base left on the two ends — lives in D_min / D_max under Roll
+> calibration. Whether this lamp was warm or cool, and whether to keep its warmth, is a judgement
+> about the positive, and it belongs on this page.
 
-> If an old project stored a temperature/tint here, that layer **still applies** and the roll looks
-> as it did. A notice at the top of the tab points it out and offers a "clear" button that hands
-> colour back to the highlight end (the picture will shift when you do).
+**The white-balance eyedropper** (the marquee button beside the temperature slider): drag over
+something on the positive that **ought to be neutral** — a grey wall, white paper, tarmac — and
+release to solve temperature and tint.
+
+- It moves those two sliders only and **never touches the Cineon ends**, so the physical
+  restoration is unaffected and undo takes back just this step.
+- It solves at Stage 2's door, which is where white balance is applied, so one sample lands it
+  rather than converging over several.
+- When the cast is larger than the two sliders can express it says so; the rest belongs to the two
+  ends under Roll calibration, which is where it actually came from.
+- A black-and-white roll does not offer it — there is no colour to balance.
 
 The **output space** is chosen in the toolbar at the foot of the main window (sRGB / Display P3 /
 Adobe RGB). It is the target of step 4 in the Cineon chain: the inversion is converted into it,
@@ -422,8 +455,32 @@ is remembered between sessions.
 
 **File → Export this frame…** (Ctrl+E) / **Export roll…** / **Export contact sheet…**
 
-**Format**: 16-bit TIFF (best quality, for further grading or archiving) or JPEG (smaller, for
-sharing).
+**Format**: 16-bit TIFF (best quality, for further grading or archiving), JPEG (smaller, for
+sharing), or **linear DNG**.
+
+> **A linear DNG** carries the finished positive with the display curve removed: the inversion, the
+> lens corrections and the frame edits are all baked in, but the output space's encoding curve is
+> not applied, so the pixels are linear light in that space's primaries, at 16 bits. In Lightroom or
+> Camera Raw it arrives as MATERIAL rather than as a finished picture — the raw panel is live, the
+> white balance slider works, and the highlights have something to recover. The output space's
+> primaries are written into the DNG's `ColorMatrix1`, and `AsShotNeutral` is 1/1/1 because the
+> balance was already solved in the density domain (declaring it again would have the host undo it).
+>
+> It is **not** a repackaged camera RAW — the mosaic is gone long before this point — and not the
+> scene-linear ACEScg master either; that is the 32-bit float TIFF below, which keeps values above 1
+> and outside the primaries. An HDR roll exports its SDR rendition here; for the highlight master,
+> use TIFF.
+
+**Size**: a target long edge lands **exactly** on the value given, with the short edge following the
+aspect ratio. Reduction is an area average and enlargement is Catmull-Rom, and enlargement is off by
+default — a picture smaller than the target stays its own size unless "Enlarge when the long edge is
+shorter" is ticked, because interpolation cannot add detail the negative does not hold.
+
+**File names** (roll export): the template takes `{Original}` · `{Seq}` · `{Roll}` · `{RollNo}` ·
+`{Camera}` · `{Film}` · `{Date}`, and the dialog shows what the first file will be called as you
+type. A field left empty leaves no trace (`{Roll}_{Camera}_{Seq}` on a roll with no camera gives
+`roll_001`, not `roll__001`). When a name is taken you can keep both (the default), replace or skip;
+nothing is ever overwritten silently.
 
 **Colour space** is not in the export dialog — it is the "output space" in the main window's footer,
 as in section 6. Export branches from the same rendered result as preview and embeds the exact ICC
@@ -474,7 +531,38 @@ roll-wide samples — nothing to set by hand.
 
 ---
 
-## 10. Keyboard
+## 10. Three ways to look at a frame
+
+The histogram is pinned at the top of the right-hand panel, with two switches under it:
+
+- **Waveform**: x is position across the frame, y is display level, the three channels drawn over
+  each other. A neutral reads grey and a cast separates the channels vertically. It answers the
+  question a histogram cannot — **is the cast uniform or does it drift across the frame** — because
+  an uneven light board or a tilted copy stand looks exactly like a uniform tint in a histogram and
+  is obvious here. Computed only while it is on.
+- **Over / under-exposure overlay** (J): red is clipped highlights, blue is crushed shadows. Both
+  thresholds are adjustable now — switching the overlay on reveals two sliders, in percent of
+  display luma. A print can hold to 98%, while on screen 95% often already reads as paper white.
+  The two values are saved with the application, not with the project.
+
+**Help → Frame technical report…** prints every number this frame's rendering rests on, and **where
+each one came from**:
+
+- how the input domain was settled (read from the file's own declaration, or taken by convention —
+  the latter being the thing to change first when a result looks wrong)
+- whether a camera matrix was available, and why not when it was not
+- the three T_base readings, whether they are this roll's calibration or the default, and whether
+  they have the R ≥ G ≥ B shape a colour negative's base must have
+- the inversion's six absolute densities and the three channels' spans
+- output space, print film emulation, HDR
+
+There is a "Copy all" button for pasting into an issue. It divides work with **Help → Copy colour
+diagnostics**: that one describes the DISPLAY path (this machine, this screen), this one describes
+THIS FRAME. Wrong on screen — start with the former; wrong in the export too — start with this.
+
+---
+
+## 11. Keyboard
 
 | Key | Action |
 |---|---|

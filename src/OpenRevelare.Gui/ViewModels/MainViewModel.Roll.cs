@@ -114,6 +114,56 @@ public partial class MainViewModel
     /// <summary>The roll's output space — what an export will be written in.</summary>
     public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
 
+    // ══ 黑白负片 ═══════════════════════════════════════════════════════════════
+    //
+    // 与【输出空间】一样是卷级的：一卷要么整卷是黑白片，要么整卷不是。打开后三通道在进密度域
+    // 之前折成一路亮度信号，反相只用一对端点，输出按构造中性——见 Core 的 Monochrome。
+    // 界面上随之收起所有对黑白片没有意义的控件（白平衡、色偏修正、逐通道端点、R/G/B 曲线）：
+    // 留着它们既无处可用，又会让人以为这张片子有色彩可调。
+    private bool _monochrome;
+
+    /// <summary>This roll is black-and-white negative film.</summary>
+    public bool Monochrome
+    {
+        get => _monochrome;
+        set
+        {
+            if (_monochrome == value) return;
+            _monochrome = value;
+            OnPropertyChanged(nameof(Monochrome));
+            OnPropertyChanged(nameof(IsColourRoll));
+            OnPropertyChanged(nameof(MonochromeHint));
+
+            foreach (RollFrame f in Frames) f.Params.Monochrome = value;
+            if (Frames.Count > 0) MarkRollDirty();
+
+            // Every thumbnail is now a different picture, exactly as an output-space change makes
+            // them: a strip still showing the colour render of a black-and-white roll would be
+            // showing something the export will not produce.
+            foreach (RollFrame f in Frames) SetThumbnail(f, null);
+            RestartThumbnails();
+            ScheduleRender();
+        }
+    }
+
+    /// <summary>Adopt a loaded roll's mode without treating it as a change the user made: no
+    /// dirty mark, no thumbnail rebuild, no render — the caller is already doing all three.</summary>
+    private void SyncMonochrome(bool value)
+    {
+        if (_monochrome == value) return;
+        _monochrome = value;
+        OnPropertyChanged(nameof(Monochrome));
+        OnPropertyChanged(nameof(IsColourRoll));
+        OnPropertyChanged(nameof(MonochromeHint));
+    }
+
+    /// <summary>The inverse, for binding visibility of the colour-only controls.</summary>
+    public bool IsColourRoll => !_monochrome;
+
+    public string MonochromeHint => _monochrome
+        ? Loc.T("三通道折成一路亮度后反相，只用一对端点；白平衡与逐通道端点对银影没有意义，已收起。")
+        : Loc.T("彩色负片：橙色片基与三层染料，六个自由度各自独立。");
+
     // ══ HDR ═══════════════════════════════════════════════════════════════════
     //
     // 与【输出空间】并列而不并入其中，因为它们回答的是不同的问题：输出空间决定画面装进哪个
@@ -1329,6 +1379,23 @@ public partial class MainViewModel
         ExportOptions opt,
         ColorPipelineVersion pipelineVersion)
     {
+        if (opt.Format == ExportFormat.Dng)
+        {
+            // A DNG is a BOUNDED, linear file, so it starts from the SDR rendition in the roll's
+            // output space — on an SDR roll that is the ordinary render (SdrRendition returns the
+            // params unchanged), and on an HDR roll it is the same bounded rendition a gain-map
+            // JPEG uses for its base. LinearDng then undoes that space's encoding curve; the
+            // highlights above diffuse white belong to the float32 master, not here.
+            ColorSpaceDef dngSpace = opt.ResolvedColorSpace;
+            RenderedFrame positive = Pipeline.Render(
+                working, ep.SdrRendition(dngSpace), pipelineVersion, ColorManagement);
+            ImageBuffer pixels = opt.Downsample
+                ? Resample.ToLongEdge(positive.Pixels, opt.MaxLongEdge, opt.AllowUpscale)
+                : positive.Pixels;
+            LinearDng.Write(pixels, dngSpace, path);
+            return null;
+        }
+
         RenderedFrame rendered = Pipeline.Render(working, ep, pipelineVersion, ColorManagement);
         // Decided off the frame the render actually produced rather than the params: a LegacyV1
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
@@ -1341,8 +1408,12 @@ public partial class MainViewModel
             working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
         if (opt.Downsample)
         {
-            sdrBase = sdrBase.WithPixels(Resample.Box(sdrBase.Pixels, opt.MaxLongEdge));
-            rendered = rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge));
+            // Both layers, with the same call: a gain map is only valid against a base of exactly
+            // its own dimensions, and ToLongEdge is a function of the source size alone.
+            sdrBase = sdrBase.WithPixels(
+                Resample.ToLongEdge(sdrBase.Pixels, opt.MaxLongEdge, opt.AllowUpscale));
+            rendered = rendered.WithPixels(
+                Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale));
         }
         if (opt.MaxFileBytes is { } gainMapCeiling)
         {
@@ -1383,7 +1454,7 @@ public partial class MainViewModel
         // whereas shrinking the negative first would throw away detail the render still needed
         // — and would move every Stage-1 measurement with it.
         RenderedFrame output = opt.Downsample
-            ? rendered.WithPixels(Resample.Box(rendered.Pixels, opt.MaxLongEdge))
+            ? rendered.WithPixels(Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale))
             : rendered;
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
@@ -1427,6 +1498,43 @@ public partial class MainViewModel
             : " · " + Loc.F($"实际 {mb}（品质 {fit.Quality}）");
     }
 
+    /// <summary>
+    /// What a filename template may spend on one frame: the roll's own fields as they stand right
+    /// now (<see cref="Notes"/>, not the last saved project — the person may have just typed the
+    /// film stock), plus the two things that vary per frame.
+    /// </summary>
+    /// <param name="sequence">1-based position in the roll, as the film strip shows it.</param>
+    public ExportNaming.Fields ExportNameFields(RollFrame frame, int sequence) => new(
+        Roll: _roll?.Title ?? "",
+        RollNumber: Notes.RollNumber,
+        Camera: Notes.CameraBody,
+        Film: Notes.FilmStock,
+        Date: Notes.DevDate,
+        Original: Path.GetFileNameWithoutExtension(frame.Path),
+        Sequence: sequence);
+
+    /// <summary>
+    /// The name a SINGLE-frame export should be offered in its save dialog. The template is a roll
+    /// export's rule, but suggesting the same name here is what makes one frame exported by hand sit
+    /// next to the batch instead of standing out — and the dialog still lets it be changed.
+    /// </summary>
+    public string SuggestedExportName(ExportOptions opt) => ExportNamePreview(opt.NameTemplate);
+
+    /// <summary>
+    /// A template expanded against a real frame — the current one, or the roll's first when nothing
+    /// is open. This is what the export dialog's live preview shows: a template is only checkable
+    /// against its own output.
+    /// </summary>
+    public string ExportNamePreview(string template)
+    {
+        RollFrame? frame = CurrentFrame ?? Frames.FirstOrDefault();
+        if (frame is null)
+            return ExportNaming.Expand(template, new ExportNaming.Fields(
+                Roll: "", RollNumber: "", Camera: "", Film: "", Date: "",
+                Original: "positive", Sequence: 1));
+        return ExportNaming.Expand(template, ExportNameFields(frame, Math.Max(1, Frames.IndexOf(frame) + 1)));
+    }
+
     /// <summary>Export every frame at full resolution into a folder, each with its own params.</summary>
     public async Task ExportRollAsync(string folder, ExportOptions opt)
     {
@@ -1449,7 +1557,9 @@ public partial class MainViewModel
                 StatusText = Loc.F($"导出 {i + 1}/{frames.Count}：{f.FileName} …");
                 FrameParams p = f.Params;
                 // Virtual copies share the source file name — disambiguate so they don't overwrite.
-                string baseName = Path.GetFileNameWithoutExtension(f.Path);
+                // (They also share every OTHER field a template can name, so this stays necessary
+                // whatever the template is.)
+                string baseName = ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1));
                 string name = baseName;
                 for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{baseName}_副本{dup - 1}");
                 // A roll export names its files after the SCANS and runs unattended, so the folder

@@ -132,6 +132,20 @@ public static class Settings
         // in the LUT folder. Old settings files still carrying the key are harmless: unknown
         // members are ignored on read, and the key disappears on the next save.
 
+        /// <summary>
+        /// Where the over/under-exposure overlay (J) puts its two ends, as display luma in [0,1].
+        ///
+        /// Adjustable because "clipped" is a judgement about the DELIVERY, not a property of the
+        /// picture: 98% is right for a file going to a lab that will hold the last two percent, and
+        /// far too lax for a screen-only JPEG where the top three percent will read as paper white.
+        /// The defaults are the fixed values the overlay used before, so nobody's reading of it
+        /// changes until they move a slider.
+        /// </summary>
+        public double ClipShadowThreshold { get; set; } = 0.02d;
+
+        /// <inheritdoc cref="ClipShadowThreshold"/>
+        public double ClipHighlightThreshold { get; set; } = 0.98d;
+
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
         public Models.ExportOptions Export { get; set; } = new();

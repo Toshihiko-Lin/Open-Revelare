@@ -314,6 +314,12 @@ public static class Pipeline
     private static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal, bool trackFill, out bool[]? fill)
     {
         fill = null;
+        // Black-and-white rolls run the whole rest of this method on COLLAPSED parameters: one pair
+        // of endpoints, no white balance, no channel curves. Monochrome.Collapse returns the input
+        // untouched for a colour roll, and works on a copy for a black-and-white one, so the user's
+        // stored grade survives switching the roll back.
+        cal = Monochrome.Collapse(cal);
+
         // ── Pre-inversion linear-domain corrections (distortion → vignette) ───────
         // Order mirrors pipeline.py: (lensfun) → distortion → (lcc) → vignette → (decouple).
         //
@@ -343,7 +349,7 @@ public static class Pipeline
         // caller's buffer on the one configuration that reaches it.
         double[,]? inputMatrix = InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint);
         bool inPlaceOps = cal.LccFlatField != null || cal.VignetteAmount != 0.0
-                          || cal.DecoupleMatrix != null || inputMatrix != null;
+                          || cal.DecoupleMatrix != null || inputMatrix != null || cal.Monochrome;
         if (inPlaceOps && ReferenceEquals(src, img))
             src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone())
                       .InheritSourceFrom(img);
@@ -391,7 +397,14 @@ public static class Pipeline
         // reconcile them was D_min, which is calibration, not rendering.
         //
         // So Stage 1 now stops at 10^D_adj and both exits go through the same Cineon encoding.
-        ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp, ResolveChromaMatrix(cal));
+        // ── Black and white: one silver image, folded out of three samples ───────
+        // After every linear-domain correction (they are per-channel operations on what the sensor
+        // saw) and before the density conversion (which is where three channels would start being
+        // read as three dye layers). See Monochrome.
+        if (cal.Monochrome) Monochrome.FoldInPlace(src.Data);
+
+        ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp,
+                                              ResolveChromaMatrix(cal));
 
         // Apply sprocket mask after inversion + black floor: fill masked pixels white.
         if (sprocketMask != null)

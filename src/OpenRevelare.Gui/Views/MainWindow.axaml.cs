@@ -185,7 +185,7 @@ public partial class MainWindow : Window
     // Esc. The tools are mutually exclusive — arming one disarms the others.
     private enum SampleMode
     {
-        None, FilmBase, DMax, NeutralGrey, Black, White, Crop,
+        None, FilmBase, DMax, NeutralGrey, DisplayNeutral, Black, White, Crop,
         StraightenH, StraightenV,
     }
 
@@ -1216,6 +1216,11 @@ public partial class MainWindow : Window
             Loc.T("中性灰采样：预览已切到负片。对准画面里的【灰卡 / 中性物】拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
+    private void OnSampleDisplayNeutralClick(object? sender, RoutedEventArgs e) =>
+        ToggleSampling(sender, SampleMode.DisplayNeutral,
+            Loc.T("白平衡吸管：在正片上框选一块【本应中性】的地方（灰墙、白纸、路面），松开即解出色温 / 色调。按 Esc 取消。"),
+            useNegative: false);
+
     private void OnSampleBlackClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.Black,
             Loc.T("采样黑场：在正片【最暗有效区】拖框，松开即把该处设为黑场端点。按 Esc 取消。"),
@@ -1759,6 +1764,7 @@ public partial class MainWindow : Window
                 case SampleMode.FilmBase: Vm.SampleFilmBase(rect.Value); break;
                 case SampleMode.DMax: Vm.SampleDMax(rect.Value); break;
                 case SampleMode.NeutralGrey: Vm.SampleNeutralGrey(rect.Value); break;
+                case SampleMode.DisplayNeutral: Vm.SampleDisplayNeutral(rect.Value); break;
                 case SampleMode.Black: Vm.SampleBlack(rect.Value); break;
                 case SampleMode.White: Vm.SampleWhite(rect.Value); break;
             }
@@ -2149,14 +2155,20 @@ public partial class MainWindow : Window
         Models.ExportOptions opt = opts.Options;
 
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
+        bool dng = opt.Format == Models.ExportFormat.Dng;
         bool floatTiff = opt.ExportLinear || opt.IsHdr;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.T("导出正片"),
             DefaultExtension = opt.Extension,
+            // The name a roll export would have given this frame: one frame done by hand then sits
+            // next to the batch instead of standing out. Still editable in the dialog.
+            SuggestedFileName = Vm.SuggestedExportName(opt),
             FileTypeChoices = new List<FilePickerFileType>
             {
-                jpeg
+                dng
+                    ? new FilePickerFileType(Loc.T("线性 DNG")) { Patterns = new[] { "*.dng" } }
+                    : jpeg
                     ? new FilePickerFileType(opt.WritesGainMap ? Loc.T("HDR JPEG（增益图）") : "JPEG")
                         { Patterns = new[] { "*.jpg", "*.jpeg" } }
                     : new FilePickerFileType(floatTiff ? "32-bit float TIFF" : "16-bit TIFF")
@@ -2206,7 +2218,8 @@ public partial class MainWindow : Window
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
-        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
+        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
+                                    namePreview: Vm.ExportNamePreview);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
@@ -2267,6 +2280,12 @@ public partial class MainWindow : Window
 
     private async void OnDocsClick(object? sender, RoutedEventArgs e)
         => await new DocDialog().ShowDialog(this);
+
+    private async void OnFrameReportClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        await new FrameReportDialog(vm.BuildFrameReport()).ShowDialog(this);
+    }
 
     /// <summary>
     /// Opens the drop-in LUT folder in the file manager, creating it first.

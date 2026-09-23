@@ -13,6 +13,12 @@ public enum ExportFormat
     Tiff16,
     /// <summary>8-bit JPEG, 4:4:4.</summary>
     Jpeg,
+    /// <summary>
+    /// 16-bit LinearRaw DNG: the finished positive with the display curve undone, for grading in
+    /// Lightroom / Camera Raw / Capture One. See <see cref="LinearDng"/> for what that does and does
+    /// not include.
+    /// </summary>
+    Dng,
 }
 
 /// <summary>
@@ -64,8 +70,9 @@ public static class ExportIccUiPolicy
 ///
 /// Sharpening is still absent on purpose: there is no sharpening implementation to call.
 ///
-/// Resizing is offered but honestly labelled: <see cref="Resample.Box"/> averages by an INTEGER
-/// factor, so it lands at or under the requested long edge rather than exactly on it.
+/// Resizing lands on the requested long edge exactly, via <see cref="Resample.ToLongEdge"/>. It used
+/// to be an integer box factor — right for a preview, wrong for a delivery file, where "2048" came
+/// out as 1943 and read as a bug.
 /// </summary>
 public sealed class ExportOptions
 {
@@ -168,8 +175,24 @@ public sealed class ExportOptions
 
     public bool Downsample { get; set; }
 
-    /// <summary>Ceiling for the long edge when <see cref="Downsample"/> is on.</summary>
+    /// <summary>The long edge when <see cref="Downsample"/> is on, hit EXACTLY (see
+    /// <see cref="Resample.ToLongEdge"/>).</summary>
     public int MaxLongEdge { get; set; } = 2048;
+
+    /// <summary>
+    /// Also ENLARGE a frame whose long edge is already under <see cref="MaxLongEdge"/>. Off by
+    /// default and stated as a choice, because interpolation cannot add detail the scan did not
+    /// record — the person asking for a fixed delivery size wants it anyway, and the person asking
+    /// for "no bigger than 2048" would be startled by it.
+    /// </summary>
+    public bool AllowUpscale { get; set; }
+
+    /// <summary>
+    /// The filename template a ROLL export names its files with; see <see cref="ExportNaming"/>.
+    /// Single-frame export only borrows it for the save dialog's suggested name, because that
+    /// dialog already asks.
+    /// </summary>
+    public string NameTemplate { get; set; } = ExportNaming.Default;
 
     /// <summary>
     /// Keep a JPEG under <see cref="MaxFileSizeMb"/>. JPEG only: it is the one container with a
@@ -194,7 +217,19 @@ public sealed class ExportOptions
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ExportFile.ConflictPolicy Conflict { get; set; } = ExportFile.ConflictPolicy.Unique;
 
-    public string Extension => Format == ExportFormat.Jpeg ? "jpg" : "tiff";
+    public string Extension => Format switch
+    {
+        ExportFormat.Jpeg => "jpg",
+        ExportFormat.Dng => "dng",
+        _ => "tiff",
+    };
+
+    /// <summary>
+    /// A DNG is linear by construction and carries its colour as DNG tags rather than as an ICC
+    /// profile, so the two options that describe a display-referred file do not apply to it.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsDng => Format == ExportFormat.Dng;
 
     public ExportOptions Clone() => (ExportOptions)MemberwiseClone();
 
@@ -202,18 +237,22 @@ public sealed class ExportOptions
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
     public string Summary()
     {
+        string size = Downsample
+            ? Loc.F($"长边 {MaxLongEdge}px") + (AllowUpscale ? Loc.T("（含放大）") : "")
+            : Loc.T("原始尺寸");
         string compression = TiffCompression switch
         {
             TiffIO.CompressionMode.None => Loc.T("不压缩"),
             TiffIO.CompressionMode.Deflate => "Deflate",
             _ => "LZW",
         };
+        if (IsDng)
+            return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色 · 不含显示曲线");
         string format = ExportLinear
             ? Loc.F($"32-bit float TIFF · {compression}")
             : Format == ExportFormat.Jpeg
             ? Loc.F($"JPEG 品质 {JpegQuality}")
             : Loc.F($"16-bit TIFF · {compression}");
-        string size = Downsample ? Loc.F($"长边 ≤ {MaxLongEdge}px") : Loc.T("原始尺寸");
         if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");
         if (ExportLinear)
             return $"{format} · {size} · " + Loc.T("场景线性 ACEScg · 嵌入 ICC");

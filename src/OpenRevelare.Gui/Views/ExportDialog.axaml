@@ -30,6 +30,8 @@
                                  IsCheckedChanged="OnFormatChanged" />
                     <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
                                  IsCheckedChanged="OnFormatChanged" />
+                    <RadioButton Name="FmtDng" GroupName="fmt" Content="{i18n:T 'DNG（线性）'}"
+                                 IsCheckedChanged="OnFormatChanged" />
                 </StackPanel>
                 <TextBlock Classes="groupHint" Name="FormatHint" TextWrapping="Wrap" />
 
@@ -81,18 +83,20 @@
             <!-- ── 尺寸：多大 ────────────────────────────────────────── -->
             <StackPanel Spacing="4">
                 <TextBlock Text="{i18n:T '尺寸'}" FontWeight="SemiBold" />
-                <CheckBox Name="DownsampleChk" Content="{i18n:T '缩小到指定长边'}"
+                <CheckBox Name="DownsampleChk" Content="{i18n:T '缩放到指定长边'}"
                           IsCheckedChanged="OnDownsampleToggled" />
                 <Grid Name="LongEdgeRow" ColumnDefinitions="Auto,Auto,*" Margin="20,2,0,0">
-                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边不超过'}"
+                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边'}"
                                Margin="0,0,8,0" />
                     <NumericUpDown Grid.Column="1" Name="LongEdgeBox" Width="130"
                                    Minimum="256" Maximum="20000" Increment="256"
                                    FormatString="0" ValueChanged="OnAnyChanged" />
                     <TextBlock Grid.Column="2" Classes="fieldLabel" Text="px" Margin="6,0,0,0" />
                 </Grid>
+                <CheckBox Name="UpscaleChk" Margin="20,2,0,0"
+                          Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
-                           Text="{i18n:T '按整数倍缩小，实际长边会略小于这个值；不会放大。'}" />
+                           Text="{i18n:T '长边正好落在这个值上，短边按比例。缩小是面积平均，放大是 Catmull-Rom——放大不会增加底片上没有的细节。'}" />
             </StackPanel>
 
             <!-- ── 色彩：什么颜色 ────────────────────────────────────── -->
@@ -117,6 +121,16 @@
                 <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}" Margin="0,6,0,0"
                           IsCheckedChanged="OnIccChanged" />
                 <TextBlock Classes="groupHint" Name="IccHint" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- ── 命名 ─────────────────────────────────────────────── -->
+            <StackPanel Name="NamingGroup" Spacing="4">
+                <TextBlock Text="{i18n:T '文件名'}" FontWeight="SemiBold" />
+                <TextBox Name="NameTemplateBox" TextChanged="OnTemplateChanged" />
+                <!-- Both hints are set from code-behind: their text contains braces, which the XAML
+                     parser would read as a markup extension. -->
+                <TextBlock Classes="groupHint" Name="NamePreviewLbl" TextWrapping="Wrap" />
+                <TextBlock Classes="groupHint" Name="NameTokensLbl" TextWrapping="Wrap" />
             </StackPanel>
 
             <!-- ── 重名 ─────────────────────────────────────────────── -->

@@ -153,6 +153,18 @@ public sealed class FrameParams
     /// </summary>
     public double[] DMinPerChannel { get; set; } = { 0.0, 0.0, 0.0 };
 
+    /// <summary>
+    /// 这卷是黑白负片：三个通道承载的是同一张银影，不是三层染料。
+    ///
+    /// 打开后，线性域校正做完、进密度域之前把三通道折成一路亮度信号，反相只用一对端点
+    /// （见 <see cref="Monochrome"/>）。结果按构造是中性的——不是"把色偏修掉了"，而是
+    /// 根本没有可偏的东西。片基去色罩、高光白平衡这些概念对黑白片不成立，界面在这个模式下
+    /// 也不再提供它们。
+    ///
+    /// 属于胶卷层面的判断（一卷要么是黑白要么不是），随工程保存。
+    /// </summary>
+    public bool Monochrome { get; set; }
+
     /// <summary>Per-channel chroma compression for the RGB-decouple path (× before chroma_grade).</summary>
     public double[] ChromaChannelScale { get; set; } = { 1.0, 1.0, 1.0 };
 
@@ -519,6 +531,7 @@ public sealed class FrameParams
         DMaxPerChannel = (double[])DMaxPerChannel.Clone(),
         DMinPerChannel = (double[])DMinPerChannel.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
+        Monochrome = Monochrome,
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,

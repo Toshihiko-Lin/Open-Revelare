@@ -1055,6 +1055,69 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _showClipping;
     [ObservableProperty] private Bitmap? _clippingOverlay;
 
+    /// <summary>
+    /// The two ends of the overlay, as percentages of display luma. They belong to the PERSON, not
+    /// to the roll — "clipped" is a judgement about where the file is going, and the same negative
+    /// is judged differently for a screen JPEG and for a print — so they live in settings and
+    /// persist across rolls rather than in the project.
+    /// </summary>
+    [ObservableProperty] private double _clipShadowPercent = Settings.Current.ClipShadowThreshold * 100d;
+
+    /// <inheritdoc cref="ClipShadowPercent"/>
+    [ObservableProperty] private double _clipHighlightPercent = Settings.Current.ClipHighlightThreshold * 100d;
+
+    /// <summary>
+    /// Whether the waveform is shown under the histogram. Off by default and computed only while
+    /// on: it is a per-pixel pass on every published preview, and most of the time the histogram
+    /// answers the question.
+    /// </summary>
+    [ObservableProperty] private bool _showWaveform;
+    [ObservableProperty] private WaveformData? _waveform;
+
+    /// <summary>
+    /// The other half of the scope switch. The two share one slot in the panel — they answer the
+    /// same question from two directions and nobody reads both at once — so this is the inverse of
+    /// <see cref="ShowWaveform"/> rather than a second flag that could disagree with it.
+    /// </summary>
+    public bool ShowHistogram
+    {
+        get => !ShowWaveform;
+        set => ShowWaveform = !value;
+    }
+
+    partial void OnShowWaveformChanged(bool value) =>
+        UpdatePresentation(() =>
+        {
+            // Built from the retained frame, like the clipping overlay: the pixels it describes are
+            // already on screen, so switching it on must not wait for a render.
+            Waveform = value && _previewRenderedFrame is { } rendered
+                ? WaveformData.FromBuffer(rendered.Pixels)
+                : null;
+            OnPropertyChanged(nameof(ShowHistogram));
+            InvalidatePresentation();
+        });
+
+    partial void OnClipShadowPercentChanged(double value) => ApplyClipThresholds();
+    partial void OnClipHighlightPercentChanged(double value) => ApplyClipThresholds();
+
+    /// <summary>Shadow end, in [0, 0.5]: past half the range it stops being a shadow warning.</summary>
+    private float ClipShadowLevel => (float)Math.Clamp(ClipShadowPercent / 100d, 0d, 0.5d);
+
+    /// <summary>Highlight end, always at least a percent above the shadow end — crossed thresholds
+    /// would paint every pixel both colours and mean nothing.</summary>
+    private float ClipHighlightLevel =>
+        (float)Math.Clamp(ClipHighlightPercent / 100d, ClipShadowLevel + 0.01d, 1d);
+
+    private void ApplyClipThresholds()
+    {
+        Settings.Current.ClipShadowThreshold = ClipShadowLevel;
+        Settings.Current.ClipHighlightThreshold = ClipHighlightLevel;
+        Settings.Save();
+        // Same one-generation rebuild as the toggle itself: the overlay is a diagnostic of pixels
+        // that are already on screen, so moving a threshold must not cost a render.
+        if (ShowClipping) OnShowClippingChanged(true);
+    }
+
     partial void OnShowClippingChanged(bool value)
     {
         UpdatePresentation(() =>
@@ -1086,7 +1149,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private WriteableBitmap? BuildClippingOverlay(ImageBuffer outImg)
     {
         ClippingDetect.Detect(outImg.Data, outImg.PixelCount,
-                              0.02f, 0.98f, out bool[] shadows, out bool[] highlights);
+                              ClipShadowLevel, ClipHighlightLevel,
+                              out bool[] shadows, out bool[] highlights);
         return BitmapConvert.ToClippingOverlay(shadows, highlights, outImg.Width, outImg.Height);
     }
 
@@ -1563,6 +1627,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DecoupleChromaMatrix = _decoupleChromaMatrix,
         SprocketEnabled = SprocketEnabled,
         SprocketThreshold = SprocketThreshold,
+        Monochrome = Monochrome,
         // Stage 1 — 反相的全部自由度：片基 + 两端各三个绝对密度
         TBase = TBaseArr(),
         DMinPerChannel = DMinPerChannel,
@@ -1866,7 +1931,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (neg is null) return null;
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
-        if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null) return neg;
+        if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
         var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
         if (lcc is not null)
@@ -1875,6 +1940,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             LensCorrections.ApplyVignette(src.Data, src.Width, src.Height, VignetteAmount, VignetteFalloff);
         if (_decoupleMatrix is not null)
             Decouple.Apply(src.Data, _decoupleMatrix, DecoupleMode.Linear);
+        // The fold belongs here for the same reason decouple does: this method's contract is "the
+        // buffer the density inversion is handed", and on a black-and-white roll that buffer is
+        // folded. Measuring the unfolded channels and then rendering the folded one would put every
+        // endpoint out by the difference between green and the luminance mix — around 0.08 D on a
+        // copy light that is not neutral, which lands squarely in the shadows.
+        // Fully qualified: the view model's own Monochrome property shadows the Core type's name.
+        if (Monochrome) OpenRevelare.Core.Monochrome.FoldInPlace(src.Data);
         return src;
     }
 
@@ -3354,6 +3426,86 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     // ── Black / white eyedropper (levels endpoints on the rendered positive) ─────
+    // ── Neutral eyedropper (Display white balance: 色温 / 色调) ──────────────────
+    /// <summary>
+    /// Sample something that ought to be neutral → the 色温 / 色调 sliders.
+    ///
+    /// DELIBERATELY A DISPLAY TOOL, NOT A CINEON ONE. The Cineon side already owns the film's
+    /// colour balance — it IS the difference between the two ends' per-channel densities — and
+    /// giving a second control authority over the same degree of freedom is what the endpoint model
+    /// was introduced to stop. What this does instead is the ordinary darkroom move on the FINISHED
+    /// print: this wall was grey, make it grey. It moves two sliders the user can see, undo and
+    /// reason about, and it leaves the physical reconstruction exactly where it was.
+    ///
+    /// WHY IT MEASURES A RE-RENDER RATHER THAN THE PICTURE ON SCREEN. The gains are step 1 of
+    /// Stage 2, applied to LINEAR values before levels, contrast, the tone ops and the curves. The
+    /// picture on screen has all of those in it, so solving against it would answer a different
+    /// question and land beside the mark. Rendering the frame with the scene reset puts the
+    /// measurement exactly where the gains act — after the print LUT, which is also where it
+    /// belongs, since a stock's own cast is part of what the eyedropper is asked to neutralise.
+    /// </summary>
+    public void SampleDisplayNeutral((double X, double Y, double W, double H) rect) =>
+        TrySample(Loc.T("白平衡吸管"), () =>
+        {
+            if (_previewWorking is null) return;
+            FrameParams p = BuildParams();
+            RollFrame.ResetScene(p);    // measure at Stage 2's door: the gains are its first op
+            ImageBuffer positive = Pipeline.Render(
+                _previewWorking,
+                ForPreview(p),
+                _colorPipelineVersion,
+                ColorManagement).Pixels;
+
+            var (x0, y0, x1, y1) = PixelBounds(positive, rect);
+            int width = positive.Width;
+            float[] d = positive.Data;
+            int n = Math.Max(0, (x1 - x0) * (y1 - y0));
+            if (n == 0) { StatusText = Loc.T("白平衡吸管：取样区域为空"); return; }
+
+            // Copied out and decoded in one call, through the same curve the render encoded with:
+            // the gains multiply LINEAR light, and OutputRender.Decode is the inverse of the exact
+            // encode this buffer went through, whichever space the roll outputs in.
+            var patch = new float[n * 3];
+            int at = 0;
+            for (int y = y0; y < y1; y++)
+                for (int x = x0; x < x1; x++)
+                {
+                    int i = (y * width + x) * 3;
+                    patch[at++] = d[i]; patch[at++] = d[i + 1]; patch[at++] = d[i + 2];
+                }
+            OutputRender.Decode(patch, CurrentOutputSpace);
+
+            double sumR = 0, sumG = 0, sumB = 0;
+            for (int i = 0; i < patch.Length; i += 3)
+            {
+                sumR += patch[i]; sumG += patch[i + 1]; sumB += patch[i + 2];
+            }
+
+            double[] mean = { sumR / n, sumG / n, sumB / n };
+            const double Floor = 1e-5;   // a patch this dark carries no colour to read
+            if (mean[0] < Floor || mean[1] < Floor || mean[2] < Floor)
+            {
+                StatusText = Loc.T("白平衡吸管：取样区域太暗，换一块亮一些的中性面");
+                return;
+            }
+
+            // Gains that take the patch to its own geometric mean: neutral, and no brighter or
+            // darker than it was — brightness belongs to 曝光, which this must not disturb.
+            double geomean = Math.Cbrt(mean[0] * mean[1] * mean[2]);
+            double[] gains = { geomean / mean[0], geomean / mean[1], geomean / mean[2] };
+            var (temp, tint, _) = WbMath.GainsToTempTint(gains);
+
+            double clampedTemp = Math.Clamp(temp, -WbMath.WbRange, WbMath.WbRange);
+            double clampedTint = Math.Clamp(tint, -WbMath.WbRange, WbMath.WbRange);
+            Temp = clampedTemp;
+            Tint = clampedTint;
+
+            bool clipped = Math.Abs(temp - clampedTemp) > 0.5 || Math.Abs(tint - clampedTint) > 0.5;
+            StatusText = clipped
+                ? Loc.F($"白平衡吸管 → 色温 {clampedTemp:F0} / 色调 {clampedTint:F0}（已到滑条尽头，偏色超出两条滑条能表达的范围，余下的请回【整卷校准】的两端）")
+                : Loc.F($"白平衡吸管 → 色温 {clampedTemp:F0} / 色调 {clampedTint:F0}");
+        });
+
     /// <summary>Sample the darkest luma in a rect → 黑场 slider.</summary>
     public void SampleBlack((double X, double Y, double W, double H) rect)
     {

@@ -184,6 +184,10 @@
                     <MenuItem Header="_Help">
                         <MenuItem Header="{i18n:T '操作指引 / 技术原理…'}" Click="OnDocsClick" />
                         <MenuItem Header="{i18n:T '快捷键…'}" Click="OnHelpClick" />
+                        <!-- 与【复制色彩诊断】分工：那一项报告的是显示链路（这台机器、这块屏），
+                             这一项报告的是这一帧本身——输入域怎么判定的、片基是什么、六个端点是多少。
+                             出问题时先看哪一边，取决于是「屏上不对」还是「导出也不对」。 -->
+                        <MenuItem Header="{i18n:T '本帧技术报告…'}" Click="OnFrameReportClick" />
                         <Separator />
                         <!-- 放进【帮助】而不是【设置】：它是「东西放哪儿」的答案，不是一个可调的项。 -->
                         <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
@@ -831,7 +835,30 @@
                 <Border Grid.Row="0" Padding="22,8,14,6" Background="{DynamicResource Panel2Brush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
-                        <ctl:HistogramView Data="{Binding Histogram}" DisplayHeadroom="{Binding DisplayHdrHeadroom}" ToolTip.Tip="{Binding HistogramTooltip}" Height="78" HorizontalAlignment="Stretch" />
+                        <!-- One slot, two readings of it. They are not shown together: both answer
+                             "how is this frame exposed", and stacking them spent twice the height of
+                             the pinned block on one question. The switch sits under the plot, right
+                             where the eye already is. -->
+                        <ctl:HistogramView Data="{Binding Histogram}" IsVisible="{Binding ShowHistogram}"
+                                           DisplayHeadroom="{Binding DisplayHdrHeadroom}" ToolTip.Tip="{Binding HistogramTooltip}"
+                                           Height="78" HorizontalAlignment="Stretch" />
+                        <ctl:WaveformView Data="{Binding Waveform}" IsVisible="{Binding ShowWaveform}"
+                                          Height="78" HorizontalAlignment="Stretch"
+                                          ToolTip.Tip="{i18n:T '波形：横轴是画面的横向位置，纵轴是显示亮度，三通道叠加。中性是灰的，偏色会看到通道上下分开；整幅渐变（灯板不匀、翻拍架偏斜）在直方图上看不出来，在这里一眼可见。'}" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4" Margin="0,2,0,0">
+                            <ToggleButton Name="HistogramBtn" Padding="6,1" Height="19" MinHeight="19"
+                                          IsChecked="{Binding ShowHistogram, Mode=TwoWay}"
+                                          IsEnabled="{Binding HasImage}"
+                                          ToolTip.Tip="{i18n:T '直方图：各亮度上有多少像素。判断有没有溢出。'}">
+                                <TextBlock Text="{i18n:T '直方图'}" FontSize="10" VerticalAlignment="Center" />
+                            </ToggleButton>
+                            <ToggleButton Name="WaveformBtn" Padding="6,1" Height="19" MinHeight="19"
+                                          IsChecked="{Binding ShowWaveform, Mode=TwoWay}"
+                                          IsEnabled="{Binding HasImage}"
+                                          ToolTip.Tip="{i18n:T '波形：同样的亮度分布，但保留横向位置。判断偏色是整幅均匀还是渐变。'}">
+                                <TextBlock Text="{i18n:T '波形'}" FontSize="10" VerticalAlignment="Center" />
+                            </ToggleButton>
+                        </StackPanel>
                         <!-- Lightroom's HDR Limit, where Lightroom puts it: under the histogram whose
                              right quarter it governs, only while HDR is on. Stops above SDR white;
                              the readout also says the mastering peak in nits. It is the MASTER's
@@ -846,9 +873,18 @@
                         <ToggleButton Name="ClippingBtn" Padding="6,2" Height="22" MinHeight="22"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}"
                                       IsEnabled="{Binding HasImage}"
-                                      ToolTip.Tip="{i18n:T '在预览上叠加红色（过曝 ≥98%）和蓝色（欠曝 ≤2%）指示（J）'}">
+                                      ToolTip.Tip="{i18n:T '在预览上叠加红色（过曝）和蓝色（欠曝）指示（J）。两端的判据在下面调，按显示亮度计。'}">
                             <TextBlock Text="{i18n:T '过曝 / 欠曝指示'}" FontSize="11" VerticalAlignment="Center" />
                         </ToggleButton>
+                        <!-- The two ends are only asked about while the overlay is on: off, they
+                             are two numbers governing nothing visible. -->
+                        <StackPanel IsVisible="{Binding ShowClipping}"
+                                    ToolTip.Tip="{i18n:T '什么算溢出取决于交付去向：送印可以留到 98%，纯屏幕看的图往往 95% 就已经是白纸。数值为显示亮度百分比，随程序保存，不写进工程。'}">
+                            <ctl:SliderRow Label="{i18n:T '欠曝 ≤'}" Minimum="0" Maximum="20" Decimals="0"
+                                           Increment="1" DefaultValue="2" Value="{Binding ClipShadowPercent}" />
+                            <ctl:SliderRow Label="{i18n:T '过曝 ≥'}" Minimum="80" Maximum="100" Decimals="0"
+                                           Increment="1" DefaultValue="98" Value="{Binding ClipHighlightPercent}" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -881,6 +917,15 @@
                                                Foreground="{DynamicResource WarnBrush}"
                                                Text="{i18n:T '这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。'}" />
                                 </Border>
+
+                                <!-- ── 片型 ──────────────────────────────────────────
+                                     卷级判断，放在最前面：它决定下面这些控件里哪些还有意义。
+                                     打开后三通道在进密度域前折成一路亮度，反相只用一对端点。 -->
+                                <CheckBox Margin="0,0,0,6" IsChecked="{Binding Monochrome, Mode=TwoWay}"
+                                          IsEnabled="{Binding HasImage}"
+                                          ToolTip.Tip="{Binding MonochromeHint}">
+                                    <TextBlock Text="{i18n:T '黑白负片（整卷）'}" VerticalAlignment="Center" />
+                                </CheckBox>
 
                                 <!-- ── 一键去色罩 ────────────────────────────────────
                                      The whole chain, at the top, before the parameters it
@@ -948,7 +993,8 @@
                                              D_min 描述的是同一件事——黑端在哪、暗部偏什么色（实测
                                              改任一个都在动同一个量）。T_base 由【片基采样】写入，
                                              D_min 才是与 D_max 同量纲、可直接相减的那个。-->
-                                        <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0">
+                                        <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
+                                                  IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" TrackBrush="{DynamicResource TrackRBrush}" />
                                                 <ctl:SliderRow Label="G" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" TrackBrush="{DynamicResource TrackGBrush}" />
@@ -981,7 +1027,8 @@
                                                 </StackPanel>
                                             </Button>
                                         </Grid>
-                                        <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0">
+                                        <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
+                                                  IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxR}" TrackBrush="{DynamicResource TrackRBrush}" />
                                                 <ctl:SliderRow Label="G" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxG}" TrackBrush="{DynamicResource TrackGBrush}" />
@@ -996,6 +1043,7 @@
                                      智能色偏修正是神经网络的推测。答案都写进亮端三个数（反相只从那里读白端），
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
                                 <Expander Header="{i18n:T '色偏修正'}" IsExpanded="True" Tag="3"
+                                          IsVisible="{Binding IsColourRoll}"
                                           ToolTip.Tip="{i18n:T '解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入 D_max 的三个密度，与高光采样互为替代，后执行者生效。'}">
                                     <StackPanel Spacing="2">
                                         <Grid ColumnDefinitions="*,*">
@@ -1069,9 +1117,21 @@
                                      场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
                                      问题，不再互相掩盖。曾经因为"同一件事两处调"而撤掉，那时标定组还叫白平衡。-->
                                 <Expander Header="{i18n:T '白平衡'}" IsExpanded="True"
+                                          IsVisible="{Binding IsColourRoll}"
                                           ToolTip.Tip="{i18n:T '场景白平衡，正片域的线性增益，只管光源的冷暖。片子本身的色偏在 Cineon 标签中标定。'}">
                                     <StackPanel Spacing="1">
-                                        <ctl:SliderRow Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" Bipolar="True" TrackBrush="{DynamicResource TrackTempBrush}" />
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <ctl:SliderRow Grid.Column="0" Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" Bipolar="True" TrackBrush="{DynamicResource TrackTempBrush}" />
+                                            <!-- The eyedropper sets BOTH sliders, so it sits on the
+                                                 pair rather than on either one; it is anchored to
+                                                 the first row for the same reason the levels
+                                                 samplers are anchored to theirs. -->
+                                            <ToggleButton Name="NeutralBtn" Grid.Column="1" Classes="sampling icon" Margin="6,0,0,0"
+                                                          Click="OnSampleDisplayNeutralClick" IsEnabled="{Binding HasImage}"
+                                                          ToolTip.Tip="{i18n:T '框选一块本应中性的地方（灰墙、白纸、路面），解出色温 / 色调。只动这两条滑条，不碰 Cineon 两端。'}">
+                                                <ctl:Icon Data="{StaticResource IcoMarquee}" />
+                                            </ToggleButton>
+                                        </Grid>
                                         <ctl:SliderRow Label="{i18n:T '色调'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Tint}" Bipolar="True" TrackBrush="{DynamicResource TrackTintBrush}" />
                                     </StackPanel>
                                 </Expander>

@@ -858,6 +858,10 @@ public partial class MainViewModel
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
         LccEnabled = p.LccFlatField != null;
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
+        // Adopted through the field, not the property: the property is the USER's switch and
+        // rebuilds every thumbnail, which is not what loading a roll that was always black and
+        // white should do.
+        SyncMonochrome(p.Monochrome);
         // p.OutputIntent is deliberately NOT adopted: a roll saved with the old NONE intent would
         // otherwise load with a blank-looking preview and no control left to change it back.
         // The preview is always the full render now; linear is an export-time choice.

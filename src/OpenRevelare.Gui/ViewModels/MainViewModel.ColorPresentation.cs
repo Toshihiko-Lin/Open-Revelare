@@ -184,6 +184,8 @@ public partial class MainViewModel
             _previewRenderedFrame = rendered;
             PreviewImage = fallback;
             Histogram = histogram;
+            // One place for every publication path, and only when it is on screen.
+            Waveform = ShowWaveform ? WaveformData.FromBuffer(rendered.Pixels) : null;
             ClippingOverlay = clippingOverlay;
             ClippingScene = clippingScene;
             if (refreshSprocketMask && ShowSprocketMask) UpdateSprocketOverlay();
@@ -235,13 +237,13 @@ public partial class MainViewModel
             CanonicalPreviewReferenceWhiteScale);
     }
 
-    private static PresentationScene BuildClippingPresentationScene(ImageBuffer image)
+    private PresentationScene BuildClippingPresentationScene(ImageBuffer image)
     {
         ClippingDetect.Detect(
             image.Data,
             image.PixelCount,
-            0.02f,
-            0.98f,
+            ClipShadowLevel,
+            ClipHighlightLevel,
             out bool[] shadows,
             out bool[] highlights);
 

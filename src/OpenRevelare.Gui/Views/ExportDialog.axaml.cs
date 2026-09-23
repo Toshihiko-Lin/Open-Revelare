@@ -38,6 +38,13 @@ public partial class ExportDialog : Window
 
     private bool _syncingIccControl;
 
+    /// <summary>
+    /// Expands a template against a REAL frame of the open roll, for the live preview. Supplied by
+    /// the caller because the dialog knows nothing about rolls; null when there is no roll to
+    /// preview against, and then the preview line simply stays empty.
+    /// </summary>
+    private readonly Func<string, string>? _namePreview;
+
     /// <summary>What the user confirmed. Only meaningful once ShowDialog returned true.</summary>
     public ExportOptions Options { get; private set; } = new();
 
@@ -49,15 +56,25 @@ public partial class ExportDialog : Window
     /// <param name="space">The roll's output space, for the summary and the hint.</param>
     /// <param name="hdrLimitStops">The roll's HDR limit in stops above SDR white, zero when HDR
     /// is off. With it on, TIFF is the float32 master and JPEG is a gain-map JPEG.</param>
-    public ExportDialog(bool rollMode, ColorSpaceDef space, double hdrLimitStops)
+    public ExportDialog(bool rollMode, ColorSpaceDef space, double hdrLimitStops,
+                        Func<string, string>? namePreview = null)
     {
         _space = space;
         _hdrLimitStops = hdrLimitStops;
+        _namePreview = namePreview;
         InitializeComponent();
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
         OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
         ConflictGroup.IsVisible = rollMode;
+        // A single frame goes through a save dialog where the name is typed, so a template would be
+        // asking for the same thing twice. It is still COLLECTED below, so the setting a roll export
+        // established survives an intervening single export instead of being reset by it.
+        NamingGroup.IsVisible = rollMode;
+        NameTokensLbl.Text = Loc.T(
+            "可用变量：{Original} 原文件名 · {Seq} 帧序号 · {Roll} 卷名 · {RollNo} 卷号 · "
+            + "{Camera} 机身 · {Film} 胶卷 · {Date} 冲洗日期。没填的字段不留痕迹，"
+            + "同一批次内重名一律另存。");
 
         Load(Settings.Current.Export);
         SyncEnabledState();
@@ -66,7 +83,8 @@ public partial class ExportDialog : Window
     private void Load(ExportOptions saved)
     {
         FmtJpeg.IsChecked = saved.Format == ExportFormat.Jpeg;
-        FmtTiff.IsChecked = saved.Format != ExportFormat.Jpeg;
+        FmtDng.IsChecked = saved.Format == ExportFormat.Dng;
+        FmtTiff.IsChecked = saved.Format is not (ExportFormat.Jpeg or ExportFormat.Dng);
         CompressBox.SelectedIndex = saved.TiffCompression switch
         {
             TiffIO.CompressionMode.Deflate => 1,
@@ -81,6 +99,10 @@ public partial class ExportDialog : Window
         IccChk.IsChecked = saved.EmbedIcc;
         DownsampleChk.IsChecked = saved.Downsample;
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
+        UpscaleChk.IsChecked = saved.AllowUpscale;
+        NameTemplateBox.Text = string.IsNullOrWhiteSpace(saved.NameTemplate)
+            ? ExportNaming.Default
+            : saved.NameTemplate;
         SizeLimitChk.IsChecked = saved.LimitFileSize;
         SizeLimitBox.Value = (decimal)Math.Clamp(saved.MaxFileSizeMb, 0.1d, 1000d);
         ConflictOverwrite.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Overwrite;
@@ -109,12 +131,15 @@ public partial class ExportDialog : Window
 
     private ExportOptions Collect()
     {
-        bool exportLinear = LinearChk.IsChecked == true;
+        bool dng = FmtDng.IsChecked == true;
+        // Scene-linear ACEScg is a TIFF decision; a DNG is already linear and in its own space, so
+        // the checkbox cannot follow the format into it.
+        bool exportLinear = !dng && LinearChk.IsChecked == true;
         bool jpeg = FmtJpeg.IsChecked == true;
         ExportIccUiState icc = ResolveIcc(jpeg, exportLinear);
         return new ExportOptions
         {
-            Format = jpeg ? ExportFormat.Jpeg : ExportFormat.Tiff16,
+            Format = dng ? ExportFormat.Dng : jpeg ? ExportFormat.Jpeg : ExportFormat.Tiff16,
             TiffCompression = CompressBox.SelectedIndex switch
             {
                 1 => TiffIO.CompressionMode.Deflate,
@@ -132,6 +157,10 @@ public partial class ExportDialog : Window
             EmbedIcc = icc.EmbedIcc,
             Downsample = DownsampleChk.IsChecked == true,
             MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
+            AllowUpscale = UpscaleChk.IsChecked == true,
+            NameTemplate = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
+                ? ExportNaming.Default
+                : NameTemplateBox.Text!,
             LimitFileSize = SizeLimitChk.IsChecked == true,
             MaxFileSizeMb = (double)(SizeLimitBox.Value ?? 10m),
             Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
@@ -155,13 +184,17 @@ public partial class ExportDialog : Window
         // controls up, before every named field exists.
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
             || ColorSpaceHint is null || LinearChk is null || IccHint is null
-            || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null) return;
+            || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null
+            || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
-        TiffGroup.IsVisible = !jpeg;
+        bool dng = FmtDng.IsChecked == true;
+        TiffGroup.IsVisible = !jpeg && !dng;
         JpegGroup.IsVisible = jpeg;
-        if (jpeg && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
+        if ((jpeg || dng) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
+        UpscaleChk.IsEnabled = DownsampleChk.IsChecked == true;
+        RefreshNamePreview();
         SizeLimitRow.IsEnabled = SizeLimitChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
@@ -172,6 +205,10 @@ public partial class ExportDialog : Window
         bool hdrMaster = IsHdr && !jpeg && !linear;
         ExportIccUiState icc = ResolveIcc(jpeg, linear);
         ColorSpaceHint.IsEnabled = !linear;
+        // A DNG states its colour as ColorMatrix1 — the DNG way — so there is no ICC decision to
+        // offer, and showing a disabled checkbox would only invite the question.
+        IccChk.IsVisible = !dng;
+        IccHint.IsVisible = !dng;
         IccChk.IsEnabled = icc.CanChange;
         if (IccChk.IsChecked != icc.EmbedIcc)
         {
@@ -184,11 +221,17 @@ public partial class ExportDialog : Window
         // rendition to relate to, and a TIFF of an HDR roll is the master, not a container.
         HdrBaseGroup.IsVisible = gainMap;
 
-        FormatHint.Text = IsHdr
+        FormatHint.Text = dng
+            ? Loc.T("DNG 写的是去掉显示曲线的线性正片，交给 Lightroom / Camera Raw 等继续调色——到那边 RAW 面板是可用的。不是相机 RAW 的原样封装：反相、镜头校正与帧编辑都已烘焙进去。")
+            : IsHdr
             ? Loc.F($"HDR 已开（+{_hdrLimitStops:0.0} 档）：TIFF 是 32-bit float 线性母版；JPEG 是增益图 JPEG，任何看图软件都能打开，HDR 屏上还原高光。")
             : Loc.T("TIFF 保留全部层次，适合存档或继续修图；JPEG 适合直接分享。");
 
-        ColorSpaceHint.Text = linear
+        ColorSpaceHint.Text = dng
+            ? (IsHdr
+                ? Loc.F($"{DisplayName(_space)} 的原色写进 DNG 标签；HDR 卷按 SDR 渲染导出，高光母版请用 TIFF。")
+                : Loc.F($"{DisplayName(_space)} 的原色写进 DNG 标签（ColorMatrix1）。"))
+            : linear
             ? Loc.T("场景线性 ACEScg，输出空间不参与。")
             : hdrMaster
                 ? Loc.T("HDR 母版为线性扩展 sRGB，不裁色域；输出空间不参与。")
@@ -207,6 +250,24 @@ public partial class ExportDialog : Window
         SummaryLbl.Text = Collect().Summary();
     }
     private void OnFormatChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
+    /// <summary>
+    /// The name the first exported file would get, under the template as it currently reads. Shown
+    /// because a template is only checkable against its output: "{Roll}_{Seq}" is not obviously
+    /// "Portra400-03_001.tiff" until it says so.
+    /// </summary>
+    private void RefreshNamePreview()
+    {
+        if (NamePreviewLbl is null || NameTemplateBox is null) return;
+        if (_namePreview is null) { NamePreviewLbl.Text = ""; return; }
+
+        string template = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
+            ? ExportNaming.Default
+            : NameTemplateBox.Text!;
+        NamePreviewLbl.Text = Loc.F($"第一张将写成：{_namePreview(template)}.{Collect().Extension}");
+    }
+
+    private void OnTemplateChanged(object? sender, TextChangedEventArgs e) => RefreshNamePreview();
+
     private void OnDownsampleToggled(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnAnyChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnIccChanged(object? sender, RoutedEventArgs e)

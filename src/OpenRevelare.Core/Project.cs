@@ -309,6 +309,7 @@ public static class Project
             ["vignette_falloff"] = p.VignetteFalloff,
             ["distortion_k1"] = p.DistortionK1,
             ["lcc_enabled"] = p.LccFlatField != null,
+            ["monochrome"] = p.Monochrome,
             // SceneBase adjustments
             ["wb_gains"] = Arr(p.WbGains),
             ["exposure_ev"] = p.ExposureEv,
@@ -379,6 +380,7 @@ public static class Project
             PrintLut = Str(d, "print_lut", ""),
             PrintLutOutput = Str(d, "print_lut_output", ""),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
+            Monochrome = Bool(d, "monochrome", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),
             VignetteFalloff = Dbl(d, "vignette_falloff", 2.5),

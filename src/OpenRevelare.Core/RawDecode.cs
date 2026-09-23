@@ -149,6 +149,130 @@ public static class RawDecode
         ? ((uint)b[0] << 24) | ((uint)b[1] << 16) | ((uint)b[2] << 8) | b[3]
         : ((uint)b[3] << 24) | ((uint)b[2] << 16) | ((uint)b[1] << 8) | b[0];
 
+    /// <summary>
+    /// Nikon's <c>NEFCompression</c> (MakerNote tag 0x0093), or null when the file is not a NEF
+    /// whose MakerNote could be read.
+    ///
+    /// Only two of its values matter here: 13 (High Efficiency) and 14 (High Efficiency*), the
+    /// Z-series' TicoRAW-derived codecs. The public LibRaw cannot decode either — the entitlement
+    /// is Nikon-SDK-only — and it does not FAIL on them: it reports "Data corrupted at ..." on
+    /// stderr and hands back a garbage frame of horizontal colour bars, which every stage after it
+    /// then treats as pixels. The embedded JPEG is fine, so the import thumbnail looks correct and
+    /// only the workbench shows the damage, which reads as "my NEF is corrupt" rather than "this
+    /// compression is unsupported". Hence a metadata probe ahead of the decode: the file itself
+    /// states the codec, so there is no reason to guess from the output.
+    /// </summary>
+    public static int? ReadNefCompression(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (!ReadTiffHeader(fs, out bool big, out long ifd0)) return null;
+
+            // IFD0 → Exif IFD → MakerNote. The Exif pointer is a LONG offset; the MakerNote is an
+            // UNDEFINED blob far longer than four bytes, so its entry holds an offset too.
+            if (!FindIfdEntry(fs, ifd0, big, 0x8769, out _, out _, out uint exifIfd)) return null;
+            if (!FindIfdEntry(fs, exifIfd, big, 0x927C, out _, out _, out uint maker)) return null;
+
+            // Nikon's MakerNote is a TIFF inside the TIFF: the signature "Nikon\0", a two-byte
+            // version, two pad bytes, and then a complete TIFF header at +10 whose IFD offsets are
+            // relative to THAT header rather than to the file. Anything not in this form is left
+            // alone — the pre-Z "no header" variants cannot carry a High Efficiency frame anyway,
+            // and a wrong parse here would reject a file that decodes perfectly.
+            Span<byte> sig = stackalloc byte[10];
+            fs.Seek(maker, SeekOrigin.Begin);
+            if (fs.Read(sig) != 10) return null;
+            if (!sig[..6].SequenceEqual("Nikon\0"u8)) return null;
+
+            long baseOffset = maker + 10;
+            fs.Seek(baseOffset, SeekOrigin.Begin);
+            if (!ReadTiffHeader(fs, out bool makerBig, out long makerIfd, baseOffset)) return null;
+
+            return FindIfdEntry(fs, makerIfd, makerBig, 0x0093, out int type, out _, out uint value)
+                   && type == 3                       // SHORT; anything else is not this tag
+                ? (int)value
+                : null;
+        }
+        catch (Exception)
+        {
+            return null;   // a probe never decides anything by failing
+        }
+    }
+
+    /// <summary>
+    /// The reason this file cannot be decoded CORRECTLY, or null when nothing is known against it.
+    ///
+    /// Distinct from "LibRaw refuses to open it", which reports itself. This is for the narrower
+    /// and more damaging case: a file the decoder accepts and then gets wrong. Checked before
+    /// every LibRaw open (see <see cref="OpenAndProcess"/>) rather than at import alone, so a
+    /// project carrying such a frame from an older version says the same thing.
+    /// </summary>
+    public static string? UnsupportedRawReason(string path)
+    {
+        string ext = Path.GetExtension(path);
+        if (!ext.Equals(".nef", StringComparison.OrdinalIgnoreCase)
+            && !ext.Equals(".nrw", StringComparison.OrdinalIgnoreCase)) return null;
+
+        return ReadNefCompression(path) switch
+        {
+            13 or 14 => CoreText.T("此 NEF 用尼康 High Efficiency / High Efficiency★ 压缩，LibRaw 无法解码（强制解码只会得到彩条，不是文件损坏）。请在相机里改用无损压缩 NEF 重拍，或先用 NX Studio、Lightroom 等导出 16-bit TIFF 再导入。"),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The 8-byte TIFF header at the stream's current position: byte order, magic 42, and the
+    /// offset of the first IFD. <paramref name="baseOffset"/> is what that offset is relative to —
+    /// 0 for a file, the MakerNote's own header position for a maker note.
+    /// </summary>
+    private static bool ReadTiffHeader(FileStream fs, out bool big, out long firstIfd,
+                                       long baseOffset = 0)
+    {
+        big = false;
+        firstIfd = 0;
+
+        Span<byte> head = stackalloc byte[8];
+        if (fs.Read(head) != 8) return false;
+
+        big = head[0] == 'M' && head[1] == 'M';
+        if (!big && !(head[0] == 'I' && head[1] == 'I')) return false;
+        if (ReadU16(head[2..4], big) != 42) return false;        // 43 == BigTIFF, not handled here
+
+        firstIfd = baseOffset + ReadU32(head[4..8], big);
+        return firstIfd >= 8 && firstIfd < fs.Length;
+    }
+
+    /// <summary>
+    /// Finds one tag in the IFD at <paramref name="ifdOffset"/>. <paramref name="value"/> is the
+    /// entry's four value bytes read as its own type — an inline value for a SHORT, otherwise the
+    /// offset the value sits at, which is the same thing the caller needs in both of the shapes
+    /// used here.
+    /// </summary>
+    private static bool FindIfdEntry(FileStream fs, long ifdOffset, bool big, int wanted,
+                                     out int type, out uint count, out uint value)
+    {
+        type = -1; count = 0; value = 0;
+        if (ifdOffset < 8 || ifdOffset >= fs.Length) return false;
+        fs.Seek(ifdOffset, SeekOrigin.Begin);
+
+        Span<byte> buf = stackalloc byte[12];
+        if (fs.Read(buf[..2]) != 2) return false;
+        int entries = ReadU16(buf[..2], big);
+        if (entries is <= 0 or > 512) return false;
+
+        for (int i = 0; i < entries; i++)
+        {
+            if (fs.Read(buf) != 12) return false;
+            if (ReadU16(buf[..2], big) != wanted) continue;
+
+            type = ReadU16(buf[2..4], big);
+            count = ReadU32(buf[4..8], big);
+            value = type == 3 ? (uint)ReadU16(buf[8..10], big) : ReadU32(buf[8..12], big);
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>The RAW extensions above, for callers that build file-dialog filters or scan a
     /// folder. Exposed so the GUI's lists derive from this one rather than restating it — three
     /// hand-copied lists is how <c>.3fr</c> ended up decodable but unselectable.</summary>
@@ -463,6 +587,10 @@ public static class RawDecode
                                              Demosaic demosaic = Demosaic.Full,
                                              System.Drawing.Rectangle? regionInFrame = null)
     {
+        // Ahead of the read, not after it: a file LibRaw would silently get wrong must not reach
+        // the decoder at all (see UnsupportedRawReason).
+        if (UnsupportedRawReason(path) is { } unsupported) throw new NotSupportedException(unsupported);
+
         byte[] bytes = ReadFilePinned(path);
         RawContext ctx = RawContext.FromBuffer(bytes);
         try
