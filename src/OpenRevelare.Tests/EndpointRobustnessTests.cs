@@ -341,6 +341,13 @@ public class EndpointRobustnessTests
     /// in every case. Now that the cut sits in the middle of the board↔film gap, a bright ramp
     /// straddles it, and the tests would be asserting a property of the cut's placement rather
     /// than of the shoulder measurement they are named for.
+    ///
+    /// The orange cast belongs to the FILM, so only the film carries it. The board is bare lamp
+    /// and is left neutral: it is the light the mask is subtracted from, not light that has been
+    /// through the mask, and the board estimator now says so outright (Sprocket's
+    /// MaxBoardRedOverBlue). Tinting the whole frame, board included, gave the "board" a red over
+    /// blue of 3.3 — a colour no light source in a copy stand has — and the estimator rightly
+    /// stopped calling it one.
     /// </summary>
     private static ImageBuffer BoardFrame(int shoulder, int boardWidth = 12)
     {
@@ -349,11 +356,13 @@ public class EndpointRobustnessTests
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
-                float v;
-                if (x < boardWidth) v = 0.95f;                       // board: blown white
-                else if (x < boardWidth + shoulder) v = 0.02f;       // opaque rim
-                else v = 0.20f;                                      // film base
                 int i = (y * w + x) * 3;
+                if (x < boardWidth)                                  // board: blown white, neutral
+                {
+                    data[i] = 0.95f; data[i + 1] = 0.95f; data[i + 2] = 0.95f;
+                    continue;
+                }
+                float v = x < boardWidth + shoulder ? 0.02f : 0.20f; // opaque rim, then film base
                 data[i] = v; data[i + 1] = v * 0.6f; data[i + 2] = v * 0.3f;
             }
         return new ImageBuffer(w, h, data);

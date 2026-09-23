@@ -27,7 +27,15 @@ public class SprocketThresholdTests
         public double Next() { _s = _s * 1664525u + 1013904223u; return _s / 2147483648.0 - 1.0; }
     }
 
-    private static ImageBuffer Build(System.Func<int, int, Lcg, float> luma)
+    private static ImageBuffer Build(System.Func<int, int, Lcg, float> luma) => Build(luma, 1, 1, 1);
+
+    /// <summary>
+    /// The same scene under a channel tint. The weights are applied to every pixel and must
+    /// average to 1, so the LUMA histogram — the whole of what the estimator reads apart from the
+    /// colour test — is bit for bit the grey version's. A tinted case therefore differs from its
+    /// grey twin in exactly one thing, which is what makes the pair a test of the colour rule.
+    /// </summary>
+    private static ImageBuffer Build(System.Func<int, int, Lcg, float> luma, float r, float g, float b)
     {
         var rng = new Lcg();
         var data = new float[W * H * 3];
@@ -36,7 +44,7 @@ public class SprocketThresholdTests
             {
                 float v = luma(x, y, rng);
                 int i = (y * W + x) * 3;
-                data[i] = v; data[i + 1] = v; data[i + 2] = v;
+                data[i] = v * r; data[i + 1] = v * g; data[i + 2] = v * b;
             }
         return new ImageBuffer(W, H, data);
     }
@@ -96,6 +104,64 @@ public class SprocketThresholdTests
             double u = (body++ + 0.5) / (W * H - 6400 - 1200);
             return (float)(0.56 + System.Math.Log(tail + u * (1 - tail)) / a);                    // body, inverse CDF
         });
+
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+    }
+
+    /// <summary>
+    /// A FULL-BLEED SCAN HAS NO HARDWARE IN IT AT ALL.
+    ///
+    /// A lab TIFF cropped to the picture: no rebate, no holes, no board, one population filling
+    /// the frame. Its luma runs from a mode at 0.17 down a flank that never turns back up, so the
+    /// walk off the top cluster runs all the way to the bottom bin, the "film" it lands on is the
+    /// picture's own shadow tail and the cut comes out at the 0.1 floor — which masks and whitens
+    /// all but the darkest few percent of the frame. Four frames of the 7344 PORTRA400 roll read
+    /// exactly this way, and since the roll pass keeps the HIGHEST cut of its sample frames, the
+    /// one frame the user happened to open was enough to whiten the roll.
+    ///
+    /// Nothing about the histogram's SHAPE says no here — the gap is real, the valley is deep,
+    /// the lit region reaches every edge because it is the picture. What says no is how much of
+    /// the frame the "board" claims: at 0.96 there is no film left for it to be the hardware
+    /// around.
+    /// </summary>
+    [Fact]
+    public void A_full_bleed_picture_is_not_a_board()
+    {
+        const double top = 0.34, pedestal = 0.10;   // triangular picture on [0, 0.34], mode 0.17
+        int i = 0;
+        ImageBuffer f = Build((x, y, _) =>
+        {
+            double u = (i++ + 0.5) / (W * H);
+            // A thin uniform floor under the picture: it is what keeps the bottom bin populated,
+            // and so what lets the walk treat it as film rather than stopping above it.
+            if (u < pedestal) return (float)(top * (u / pedestal));
+            double v = (u - pedestal) / (1 - pedestal);
+            return (float)(v <= 0.5
+                ? top * System.Math.Sqrt(v / 2)
+                : top * (1 - System.Math.Sqrt((1 - v) / 2)));
+        });
+
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+    }
+
+    /// <summary>
+    /// A BOARD IS WHITE OR GREY, NEVER ORANGE.
+    ///
+    /// <see cref="A_bimodal_board_is_cut_below_the_whole_board"/>'s scene under a tint that leaves
+    /// its luma histogram untouched and puts red 3.4× over blue — the signature of the orange mask,
+    /// which is to say of film. Everything the shape tests look at is identical to the grey case
+    /// that must keep detecting, so this is the colour rule on its own: a bare lamp is the light
+    /// itself and cannot come out the colour of the film in front of it.
+    /// </summary>
+    [Fact]
+    public void An_orange_cluster_is_film_not_a_board()
+    {
+        ImageBuffer f = Build((x, y, rng) =>
+        {
+            if (x < 24) return (float)((x < 8 ? 0.58 : 0.62) + 0.012 * rng.Next());
+            if (x < 40 || y < 20 || y >= H - 20) return (float)(0.20 + 0.006 * rng.Next());
+            return (float)(0.10 + 0.02 * rng.Next());
+        }, 1.62f, 0.90f, 0.48f);
 
         Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
     }

@@ -54,6 +54,55 @@ public static class Sprocket
     private const double MinBoardShare = 0.002;
 
     /// <summary>
+    /// Greatest share of the frame a light board may occupy and still be believed.
+    ///
+    /// The board is the hardware AROUND the film, so the film has to be left in frame. At this
+    /// share under a quarter of the picture is negative, which is not a scan anyone makes — and
+    /// the two-population reading it would rest on has the film as a sliver, which is precisely
+    /// when the histogram cannot tell one from the other.
+    ///
+    /// What it stops is the mirror of the <see cref="MinBoardShare"/> case, and it is the failure
+    /// this bound was added for: on a FULL-BLEED scan — a lab TIFF cropped to the picture, no
+    /// rebate, no holes, no board — the topmost cluster is the picture's own highlight mode and
+    /// the "film" below it is the picture's shadow tail, which in linear light is thin enough to
+    /// pass the depth test. Four frames of the 7344 PORTRA400 roll read that way, with the
+    /// "board" at 0.96-1.00 of the frame and the cut clamped to its 0.1 floor; the roll then took
+    /// that cut (the roll pass keeps the HIGHEST of its sample frames) and painted almost every
+    /// frame white.
+    ///
+    /// Measured over the whole sample library — 28 rolls, copy-stand RAW and scanner TIFF/FFF
+    /// alike: every genuine board sits between 0.003 and 0.32 of the frame, with one crowded
+    /// copy-stand frame at 0.56. The false positives are 0.88-1.00. The bar goes between the two
+    /// groups, nearer the false one, since a board that really does cover three quarters of the
+    /// shot leaves a negative too small to be worth the detection either way.
+    /// </summary>
+    private const double MaxBoardShare = 0.75;
+
+    /// <summary>
+    /// Greatest red-over-blue ratio a bright cluster may have and still be a light board.
+    ///
+    /// A board is BARE LIGHT — near white, or grey when the rig is exposed down, but never
+    /// coloured. Film is that same light seen through the orange mask, which costs blue the best
+    /// part of two stops. So a cluster carrying the mask's own colour is film or picture, whatever
+    /// its shape and brightness say.
+    ///
+    /// Stated as red over blue rather than as a distance from neutral, because "neutral" is not
+    /// the same vector in the two buffers that reach here: a TIFF arrives in the scanner's space,
+    /// where neutral is R=G=B, while a RAW arrives CAMERA-NATIVE and unbalanced (RawDecode's
+    /// UniWB baseline), where the same lamp reads around (0.5, 1.0, 0.55) and a test on channel
+    /// spread would throw out a perfectly good board. The mask's DIRECTION survives both: it
+    /// always suppresses blue against red, and no white balance turns that around.
+    ///
+    /// Measured over the whole sample library: EVERY genuine board reads 0.83-1.06 — the copy-stand
+    /// ones camera-native and unbalanced, the Flextight lamp seen through a sprocket hole at 1.00 —
+    /// while the clusters that are really film read 2.3 upward, and the false boards on the 7344
+    /// PORTRA400 roll 5.7-8.3 against that roll's own base at 4.5. The bar goes at three, which is
+    /// three times the worst genuine reading and still under the film ones. A B&W negative has no
+    /// mask and reads 1.0, so the test never touches one.
+    /// </summary>
+    private const double MaxBoardRedOverBlue = 3.0;
+
+    /// <summary>
     /// Least luma gap between the board's peak and the valley below it.
     ///
     /// Expresses "the board stands clear of the film" — the board↔base boundary is a step, not a
@@ -260,8 +309,11 @@ public static class Sprocket
         if (total <= 0) return NoBoard;
         double boardShare = 0;
         for (int i = boardFoot + 1; i < smooth.Length; i++) boardShare += smooth[i];
-        // (a) The board occupies a real share of the frame — it is a physical object in shot.
+        // (a) The board occupies a real share of the frame — it is a physical object in shot —
+        //     and not the whole of it, because it is the hardware AROUND the film and the film
+        //     has to still be there. Both bounds are the same measurement; see the two constants.
         if (boardShare < MinBoardShare * total) return NoBoard;
+        if (boardShare > MaxBoardShare * total) return NoBoard;
 
         // (b) The board stands CLEAR of the film. Both halves are needed: the brightness gap says
         //     the cluster is somewhere else on the scale, and the valley DEPTH says the two are
@@ -271,17 +323,22 @@ public static class Sprocket
         if (Centre(boardPk) - valleyLuma < MinBoardSeparation) return NoBoard;
         if (smooth[valleyIdx] > MaxValleyDepth * smooth[boardPk]) return NoBoard;
 
-        // (c) The cluster is HARDWARE rather than picture. Two shapes qualify, and a frame need
+        // (c) The cluster is BARE LIGHT rather than light through the orange mask. Cheap, and it
+        //     answers a question neither the shape nor the brightness tests ask: a board is white
+        //     or grey, never orange. See <see cref="MaxBoardRedOverBlue"/>.
+        if (RedOverBlue(image, luma, valleyLuma) > MaxBoardRedOverBlue) return NoBoard;
+
+        // (d) The cluster is HARDWARE rather than picture. Two shapes qualify, and a frame need
         //     only match one — see <see cref="LooksLikeHardware"/> for why the edge test alone
         //     rejected the sprocket case this feature is named after.
         if (!LooksLikeHardware(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
 
-        // (d) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
+        // (e) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
         //     brightest thing present.
         //
         // Without this, the bare film-base rebate at the edge of a scan is mistaken for a board:
         // it is a separate cluster, it is at the edge, and it is the brightest thing in frame, so
-        // it passes (a) through (c). On 图像 003c the base sliver at luma 0.28 was read as a board
+        // it passes (a) through (d). On 图像 003c the base sliver at luma 0.28 was read as a board
         // and the cut placed at 0.178, which then removed the base itself from every statistic —
         // and, because the roll pass applies one cut to all frames, took the whole roll's t_base
         // with it (0.163, 0.094, 0.048 against a correct 0.397, 0.273, 0.155).
@@ -532,6 +589,30 @@ public static class Sprocket
     /// </summary>
     private static bool LooksLikeHardware(float[] luma, int w, int h, double cut)
         => BorderDominant(luma, w, h, cut) || RepeatedHoles(luma, w, h, cut);
+
+    /// <summary>
+    /// Mean red over mean blue among the pixels above <paramref name="cut"/>: how far the bright
+    /// cluster carries the orange mask's colour. 1 is neutral, and the mask's direction is always
+    /// upward — see <see cref="MaxBoardRedOverBlue"/> for why the ratio and not a channel spread.
+    /// </summary>
+    /// <returns>The ratio; +∞ when the cluster has red but no blue at all (maximally orange),
+    /// and 1 when it is empty or black, neither of which the caller can reach.</returns>
+    private static double RedOverBlue(ImageBuffer image, float[] luma, double cut)
+    {
+        float[] d = image.Data;
+        double r = 0, b = 0;
+        long n = 0;
+        for (int p = 0; p < luma.Length; p++)
+        {
+            if (luma[p] <= cut) continue;
+            r += d[p * 3];
+            b += d[p * 3 + 2];
+            n++;
+        }
+        if (n == 0) return 1.0;
+        if (b <= 0) return r > 0 ? double.PositiveInfinity : 1.0;
+        return r / b;
+    }
 
     /// <summary>
     /// True when the lit pixels form several interior blobs of the SAME size and shape — a row of
