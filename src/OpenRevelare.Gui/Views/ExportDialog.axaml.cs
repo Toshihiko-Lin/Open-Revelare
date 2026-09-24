@@ -1,5 +1,8 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Platform;
+using Avalonia.Threading;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
@@ -75,12 +78,43 @@ public partial class ExportDialog : Window
             SharpenBox.Items.Add(new ComboBoxItem { Content = ExportOptions.SharpenName(level) });
 
         NameTokensLbl.Text = Loc.T(
-            "可用变量：{Original} 原文件名 · {Seq} 帧序号 · {Roll} 卷名 · {RollNo} 卷号 · "
-            + "{Camera} 机身 · {Film} 胶卷 · {Date} 冲洗日期。没填的字段不留痕迹，"
-            + "同一批次内重名一律另存。");
+            "{Original} 原文件名 · {Seq} 帧序号 · {Roll} 卷名 · {RollNo} 卷号 · "
+            + "{Camera} 机身 · {Film} 胶卷 · {Date} 冲洗日期；空字段连同相邻分隔符一并省略。");
 
         Load(Settings.Current.Export);
         SyncEnabledState();
+    }
+
+    /// <summary>
+    /// Cap the dialog against the screen it actually opened on. The height follows the content and
+    /// the content is long — a whole-roll export of an HDR roll has five groups open at once, more
+    /// than fits on a 1080p screen — and what falls off the bottom is the button row, so the
+    /// content scrolls instead. The XAML <c>MaxHeight</c> is only the design cap; this is the real
+    /// one, and it is why the content sits in a ScrollViewer.
+    /// </summary>
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        Screen? screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null) return;
+
+        double scaling = screen.Scaling > 0d ? screen.Scaling : 1d;
+        // Room for the title bar plus a little air; below 400 the dialog would be unusable anyway,
+        // so a freakishly short screen gets a window that hangs off rather than one 200px tall.
+        double usable = screen.WorkingArea.Height / scaling - 48d;
+        if (usable < MaxHeight) MaxHeight = Math.Max(400d, usable);
+
+        // CenterOwner placed the window for the height it asked for, which the cap may just have
+        // taken away; the frame can therefore still hang off either edge. Re-clamp once the final
+        // frame size is known — before that FrameSize is still the pre-cap one.
+        Dispatcher.UIThread.Post(() =>
+        {
+            PixelRect area = screen.WorkingArea;
+            int frame = (int)Math.Ceiling(((FrameSize ?? Bounds.Size).Height) * scaling);
+            int y = Math.Clamp(Position.Y, area.Y, Math.Max(area.Y, area.Bottom - frame));
+            if (y != Position.Y) Position = new PixelPoint(Position.X, y);
+        }, DispatcherPriority.Loaded);
     }
 
     private void Load(ExportOptions saved)
@@ -189,51 +223,42 @@ public partial class ExportDialog : Window
         // Guard: the IsCheckedChanged handlers fire while InitializeComponent is still wiring
         // controls up, before every named field exists.
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
-            || ColorSpaceHint is null || LinearChk is null || IccHint is null
+            || ColorSpaceHint is null || LinearChk is null || SpaceRow is null
             || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null
             || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null
-            || SharpenBox is null || SharpenHint is null || SharpenRow is null) return;
+            || SharpenBox is null || SharpenRow is null || IccRow is null
+            || LongEdgeRow is null || PreviewRow is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
-        bool linearPending = !dng && LinearChk.IsChecked == true;
         TiffGroup.IsVisible = !jpeg && !dng;
         JpegGroup.IsVisible = jpeg;
         if ((jpeg || dng) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
-        LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
-        UpscaleChk.IsEnabled = DownsampleChk.IsChecked == true;
+        bool linear = LinearChk.IsChecked == true;
 
-        // Three of the four deliveries have nothing for an unsharp mask to act on; the row stays
-        // visible and says why rather than vanishing, because "where did sharpening go" is a worse
-        // question than a greyed control with a reason next to it.
-        // Same rule as ExportOptions.SharpenApplies, read off the controls rather than off a
-        // collected options object, so the dialog cannot disagree with the export.
-        bool sharpenApplies = !dng && !linearPending && !IsHdr;
-        SharpenRow.IsEnabled = sharpenApplies;
-        SharpenHint.Text = sharpenApplies
-            ? Loc.T("在缩放之后、写文件之前做，只动亮度不动色彩——锐化的量是按成品尺寸定的。颗粒也会被锐化，要保留颗粒就选「无」。")
-            : dng
-                ? Loc.T("DNG 是交给别处继续调色的素材，锐化应当在那一端按最终尺寸做，这里不做。")
-                : linearPending
-                    ? Loc.T("场景线性输出是中间文件，锐化应当在下游按最终尺寸做，这里不做。")
-                    : Loc.T("HDR 渲染没有上界，锐化的过冲会在高光上留下空洞，这里不做。");
+        // Every row below is shown or hidden, never greyed: the dialog shows the parameters of the
+        // file it is about to write and nothing else. What a hidden row would have said is in the
+        // summary strip, which always describes the whole file.
+        LongEdgeRow.IsVisible = DownsampleChk.IsChecked == true;
+        SizeLimitRow.IsVisible = SizeLimitChk.IsChecked == true;
+
+        // Three of the four deliveries have nothing for an unsharp mask to act on. Same rule as
+        // ExportOptions.SharpenApplies, read off the controls rather than off a collected options
+        // object, so the dialog cannot disagree with the export. Where the row goes away because
+        // of a choice just made — scene-linear, DNG — that choice's own hint says so.
+        SharpenRow.IsVisible = !dng && !linear && !IsHdr;
 
         RefreshNamePreview();
-        SizeLimitRow.IsEnabled = SizeLimitChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
 
         // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
         // the effective value independently of the control so a stale false preset is harmless.
-        bool linear = LinearChk.IsChecked == true;
         bool gainMap = IsHdr && jpeg && !linear;
         bool hdrMaster = IsHdr && !jpeg && !linear;
         ExportIccUiState icc = ResolveIcc(jpeg, linear);
-        ColorSpaceHint.IsEnabled = !linear;
         // A DNG states its colour as ColorMatrix1 — the DNG way — so there is no ICC decision to
-        // offer, and showing a disabled checkbox would only invite the question.
-        IccChk.IsVisible = !dng;
-        IccHint.IsVisible = !dng;
-        IccChk.IsEnabled = icc.CanChange;
+        // offer; nor is there one when the profile is forced. The summary reports what was embedded.
+        IccRow.IsVisible = !dng && icc.CanChange;
         if (IccChk.IsChecked != icc.EmbedIcc)
         {
             _syncingIccControl = true;
@@ -242,34 +267,26 @@ public partial class ExportDialog : Window
         }
 
         // The base-space picker exists only for a gain-map JPEG — an SDR roll has no second
-        // rendition to relate to, and a TIFF of an HDR roll is the master, not a container.
+        // rendition to relate to, and a TIFF of an HDR roll is the master, not a container. For
+        // that JPEG the base IS the file's space, so the reported space row would say it twice.
         HdrBaseGroup.IsVisible = gainMap;
+        SpaceRow.IsVisible = !gainMap;
 
         FormatHint.Text = dng
-            ? Loc.T("DNG 写的是去掉显示曲线的线性正片，交给 Lightroom / Camera Raw 等继续调色——到那边 RAW 面板是可用的。不是相机 RAW 的原样封装：反相、镜头校正与帧编辑都已烘焙进去。")
+            ? Loc.T("线性正片，不含显示曲线；反相、镜头校正与帧编辑已烘焙其中，不是相机 RAW 的原样封装。在 Lightroom / Camera Raw 中 RAW 面板可用，不做输出锐化。")
             : IsHdr
-            ? Loc.F($"HDR 已开（+{_hdrLimitStops:0.0} 档）：TIFF 是 32-bit float 线性母版；JPEG 是增益图 JPEG，任何看图软件都能打开，HDR 屏上还原高光。")
+            ? Loc.F($"HDR +{_hdrLimitStops:0.0} 档：TIFF 为 32-bit float 线性母版，JPEG 为增益图 JPEG，普通看图软件可开、HDR 屏还原高光。两者均不做输出锐化。")
             : Loc.T("TIFF 保留全部层次，适合存档或继续修图；JPEG 适合直接分享。");
 
         ColorSpaceHint.Text = dng
             ? (IsHdr
-                ? Loc.F($"{DisplayName(_space)} 的原色写进 DNG 标签；HDR 卷按 SDR 渲染导出，高光母版请用 TIFF。")
-                : Loc.F($"{DisplayName(_space)} 的原色写进 DNG 标签（ColorMatrix1）。"))
+                ? Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签；HDR 卷按 SDR 导出，高光母版用 TIFF。")
+                : Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签（ColorMatrix1）。"))
             : linear
             ? Loc.T("场景线性 ACEScg，输出空间不参与。")
             : hdrMaster
-                ? Loc.T("HDR 母版为线性扩展 sRGB，不裁色域；输出空间不参与。")
-                : gainMap
-                    ? Loc.T("增益图 JPEG 的基底空间在下面选。")
-                    : Loc.F($"{DisplayName(_space)}，在主窗口选定，导出即所见。");
-
-        IccHint.Text = linear
-            ? Loc.T("场景线性文件必须嵌入 ACEScg 配置文件。")
-            : hdrMaster
-                ? Loc.T("HDR 母版必须嵌入配置文件，否则无法被正确解读。")
-                : icc.IsForced
-                    ? Loc.T("非 sRGB 文件必须嵌入配置文件，以免被当作 sRGB 显示。")
-                    : Loc.T("sRGB 可不嵌入：看图软件默认按 sRGB 处理。");
+                ? Loc.T("线性扩展 sRGB，不裁色域；输出空间不参与。")
+                : Loc.F($"{DisplayName(_space)}，在主窗口选定。");
 
         SummaryLbl.Text = Collect().Summary();
     }
@@ -281,13 +298,16 @@ public partial class ExportDialog : Window
     /// </summary>
     private void RefreshNamePreview()
     {
-        if (NamePreviewLbl is null || NameTemplateBox is null) return;
+        if (NamePreviewLbl is null || NameTemplateBox is null || PreviewRow is null) return;
+        // No roll to expand against, so there is nothing to show and no row to show it in.
+        PreviewRow.IsVisible = _namePreview is not null;
         if (_namePreview is null) { NamePreviewLbl.Text = ""; return; }
 
         string template = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
             ? ExportNaming.Default
             : NameTemplateBox.Text!;
-        NamePreviewLbl.Text = Loc.F($"第一张将写成：{_namePreview(template)}.{Collect().Extension}");
+        // Just the name: the 首张 label says what it is, so the line does not have to.
+        NamePreviewLbl.Text = $"{_namePreview(template)}.{Collect().Extension}";
     }
 
     private void OnTemplateChanged(object? sender, TextChangedEventArgs e) => RefreshNamePreview();

@@ -2,159 +2,259 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ExportDialog"
-        Width="520" SizeToContent="Height"
+        Width="560" SizeToContent="Height" MaxHeight="780"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '导出选项'}">
+    <!--
+      高度跟着内容走，上限 780，再由 OnOpened 按实际开在哪块屏上收紧：内容装在
+      ScrollViewer 里，溢出时滚动而不是把底部的按钮顶到屏幕外。同 InfoDialog。
+
+      ══ 版式 ══════════════════════════════════════════════════════════════════
+      每一节是一张 Panel2 的卡片，节名在卡片左上；卡片内所有控件一律从 62 px 起排，
+      也就是 App.axaml 里 LabelColumn 那一列 —— 主窗口每一行参数用的就是这个数，
+      于是这个窗口和面板共用一条脊。有标签的行标签落在这一列里，没标签的行（勾选框、
+      提示）直接从 62 起，因此无论一节里有几行，控件左缘只有一个。
+
+      之前是每组自己开一个 Grid、标签列各自 Auto：压缩、品质、长边、输出锐化、
+      不超过 五处的控件各从不同的 x 开始，同一个窗口里有五条左缘。
+
+      ══ 不适用就隐藏 ══════════════════════════════════════════════════════════
+      只显示将要写出的那个文件的参数。不适用的行隐藏，不灰着占位 —— 灰掉的控件每次
+      都要用眼睛跳过去，而它说的又是「这里没事可做」。凡被隐藏的事实都在底部「将写出」
+      那一条里报告，所以隐藏不会藏掉信息。
+    -->
+    <Window.Styles>
+        <Style Selector="Border.section">
+            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
+            <Setter Property="Padding" Value="12,10,12,11" />
+        </Style>
+        <Style Selector="TextBlock.sectionHead">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+        <!-- 行距由所在 StackPanel 的 Spacing 一处决定，所以把 groupHint 自带的下边距
+             去掉：两者叠加会让「最后一行是提示」的节比别的节多出 6 px。 -->
+        <Style Selector="TextBlock.groupHint">
+            <Setter Property="Margin" Value="0" />
+        </Style>
+    </Window.Styles>
+
     <DockPanel Margin="16">
-        <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,14,0,0">
-            <Border Background="{DynamicResource Panel2Brush}" Padding="10,7" CornerRadius="3">
-                <TextBlock Name="SummaryLbl" TextWrapping="Wrap" FontSize="11"
-                           Foreground="{DynamicResource TextMuteBrush}" />
+        <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,14,0,0">
+            <!-- 结论条：这些选项最后写出的是什么文件。也是被隐藏的那些参数的唯一去处。 -->
+            <Border Classes="section" Padding="12,8">
+                <Grid ColumnDefinitions="62,*">
+                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '将写出'}"
+                               VerticalAlignment="Top" Margin="0,1,0,0" />
+                    <TextBlock Grid.Column="1" Name="SummaryLbl" TextWrapping="Wrap"
+                               FontSize="{DynamicResource FontXs}" />
+                </Grid>
             </Border>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="{i18n:T '取消'}" Click="OnCancelClick" />
-                <Button Classes="primary" Name="OkBtn" Content="{i18n:T '选择位置 →'}" Click="OnAcceptClick" />
+                <!-- IsCancel / IsDefault：Esc 退出，Enter 确认，同 InfoDialog 与 PromptDialog。 -->
+                <Button Content="{i18n:T '取消'}" IsCancel="True" Click="OnCancelClick" />
+                <Button Classes="primary" Name="OkBtn" IsDefault="True"
+                        Content="{i18n:T '选择位置 →'}" Click="OnAcceptClick" />
             </StackPanel>
         </StackPanel>
 
-        <StackPanel Spacing="14">
-            <!-- ── 格式：写什么 ──────────────────────────────────────
-                 The two per-format blocks live INSIDE the format group, indented under a
-                 row label, so they read as the format's own parameters rather than as two
-                 more top-level decisions. Only the chosen format's block is shown. -->
-            <StackPanel Spacing="4">
-                <TextBlock Text="{i18n:T '格式'}" FontWeight="SemiBold" />
-                <StackPanel Orientation="Horizontal" Spacing="16">
-                    <RadioButton Name="FmtTiff" GroupName="fmt" Content="TIFF"
-                                 IsCheckedChanged="OnFormatChanged" />
-                    <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
-                                 IsCheckedChanged="OnFormatChanged" />
-                    <RadioButton Name="FmtDng" GroupName="fmt" Content="{i18n:T 'DNG（线性）'}"
-                                 IsCheckedChanged="OnFormatChanged" />
-                </StackPanel>
-                <TextBlock Classes="groupHint" Name="FormatHint" TextWrapping="Wrap" />
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="10" Margin="0,0,6,0">
+                <!-- ── 格式 ─────────────────────────────────────────────
+                     每个格式自己的参数缩在同一节里，跟在格式后面，只显示选中那个格式的
+                     那一块：它们是这个格式的参数，不是另外两个要做的决定。 -->
+                <Border Classes="section">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '格式'}" />
+                        <Grid ColumnDefinitions="62,*">
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="18">
+                                <RadioButton Name="FmtTiff" GroupName="fmt" Content="TIFF"
+                                             IsCheckedChanged="OnFormatChanged" />
+                                <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
+                                             IsCheckedChanged="OnFormatChanged" />
+                                <RadioButton Name="FmtDng" GroupName="fmt" Content="{i18n:T 'DNG（线性）'}"
+                                             IsCheckedChanged="OnFormatChanged" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="1" Classes="groupHint" Name="FormatHint" />
+                        </Grid>
 
-                <Grid Name="TiffGroup" ColumnDefinitions="44,*" RowDefinitions="Auto,Auto,Auto"
-                      Margin="0,2,0,0">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="TIFF" />
-                    <ComboBox Grid.Row="0" Grid.Column="1" Name="CompressBox" HorizontalAlignment="Stretch"
-                              SelectionChanged="OnAnyChanged">
-                        <ComboBoxItem Content="{i18n:T 'LZW（无损，推荐）'}" />
-                        <ComboBoxItem Content="{i18n:T 'Deflate（无损，文件更小、更慢）'}" />
-                        <ComboBoxItem Content="{i18n:T '不压缩（最快、最大）'}" />
-                    </ComboBox>
-                    <!-- Scene-linear is a TIFF decision — it turns the file into a 32-bit float
-                         master — so it sits with the TIFF options, not with colour. -->
-                    <CheckBox Grid.Row="1" Grid.Column="1" Name="LinearChk" Margin="0,6,0,0"
-                              Content="{i18n:T '导出为场景线性 ACEScg（32-bit float，跳过帧编辑）'}"
-                              IsCheckedChanged="OnAnyChanged" />
-                    <TextBlock Grid.Row="2" Grid.Column="1" Classes="groupHint"
-                               Text="{i18n:T '给外部调色用的中间文件，不含帧编辑；在普通看图软件里会显得很暗很平，属正常。'}" />
-                </Grid>
+                        <StackPanel Name="TiffGroup" Spacing="6">
+                            <Grid ColumnDefinitions="62,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '压缩'}" />
+                                <ComboBox Grid.Column="1" Name="CompressBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnAnyChanged">
+                                    <ComboBoxItem Content="{i18n:T 'LZW（无损，推荐）'}" />
+                                    <ComboBoxItem Content="{i18n:T 'Deflate（无损，文件更小、更慢）'}" />
+                                    <ComboBoxItem Content="{i18n:T '不压缩（最快、最大）'}" />
+                                </ComboBox>
+                            </Grid>
+                            <!-- 场景线性是 TIFF 的决定 —— 它把文件变成 32-bit float 母版 ——
+                                 所以它归在格式里，不在色彩里。 -->
+                            <Grid ColumnDefinitions="62,*">
+                                <StackPanel Grid.Column="1" Spacing="3">
+                                    <CheckBox Name="LinearChk"
+                                              Content="{i18n:T '场景线性 ACEScg（32-bit float，不含帧编辑）'}"
+                                              IsCheckedChanged="OnAnyChanged" />
+                                    <TextBlock Classes="groupHint"
+                                               Text="{i18n:T '外部调色用的中间文件，不做输出锐化；在普通看图软件中偏暗偏平。'}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
 
-                <Grid Name="JpegGroup" ColumnDefinitions="44,*" RowDefinitions="Auto,Auto,Auto,Auto"
-                      Margin="0,4,0,0">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="JPEG" />
-                    <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="Auto,*,Auto">
-                        <TextBlock Grid.Column="0" Text="{i18n:T '品质'}" VerticalAlignment="Center" />
-                        <Slider Grid.Column="1" Name="QualitySlider" Minimum="40" Maximum="100"
-                                TickFrequency="1" IsSnapToTickEnabled="True" Margin="12,0"
-                                ValueChanged="OnQualityChanged" />
-                        <TextBlock Grid.Column="2" Name="QualityLbl" MinWidth="28"
-                                   VerticalAlignment="Center" HorizontalAlignment="Right" />
-                    </Grid>
-                    <CheckBox Grid.Row="1" Grid.Column="1" Name="SizeLimitChk" Margin="0,4,0,0"
-                              Content="{i18n:T '限制文件大小'}" IsCheckedChanged="OnAnyChanged" />
-                    <Grid Grid.Row="2" Grid.Column="1" Name="SizeLimitRow" ColumnDefinitions="Auto,Auto,*"
-                          Margin="20,2,0,0">
-                        <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '不超过'}"
-                                   Margin="0,0,8,0" />
-                        <NumericUpDown Grid.Column="1" Name="SizeLimitBox" Width="130"
-                                       Minimum="0.1" Maximum="1000" Increment="0.5"
-                                       FormatString="0.#" ValueChanged="OnAnyChanged" />
-                        <TextBlock Grid.Column="2" Classes="fieldLabel" Text="MB" Margin="6,0,0,0" />
-                    </Grid>
-                    <TextBlock Grid.Row="3" Grid.Column="1" Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '超限时先降品质（最低 40），仍超限再缩小尺寸；实际结果在状态栏报告。'}" />
-                </Grid>
+                        <StackPanel Name="JpegGroup" Spacing="6">
+                            <Grid ColumnDefinitions="62,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
+                                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                                    <Slider Grid.Column="0" Name="QualitySlider" Minimum="40" Maximum="100"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            ValueChanged="OnQualityChanged" />
+                                    <!-- readout：滑块在动时读数不能跟着抖，见 App.axaml 的说明。 -->
+                                    <TextBlock Grid.Column="1" Name="QualityLbl" Classes="readout"
+                                               MinWidth="26" Margin="10,0,0,0"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                            </Grid>
+                            <Grid ColumnDefinitions="62,*">
+                                <CheckBox Grid.Column="1" Name="SizeLimitChk"
+                                          Content="{i18n:T '限制文件大小'}" IsCheckedChanged="OnAnyChanged" />
+                            </Grid>
+                            <!-- 带提示的行做成两排：标签只跟第一排的控件对齐，不去跟整块居中。 -->
+                            <Grid Name="SizeLimitRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel"
+                                           Text="{i18n:T '上限'}" />
+                                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                    <NumericUpDown Name="SizeLimitBox" Width="130"
+                                                   Minimum="0.1" Maximum="1000" Increment="0.5"
+                                                   FormatString="0.#" ValueChanged="OnAnyChanged" />
+                                    <TextBlock Classes="fieldLabel" Text="MB" />
+                                </StackPanel>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                           Text="{i18n:T '先降品质（下限 40），仍超限再缩尺寸；结果在状态栏报告。'}" />
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ── 尺寸 ───────────────────────────────────────────── -->
+                <Border Classes="section">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '尺寸'}" />
+                        <Grid ColumnDefinitions="62,*">
+                            <CheckBox Grid.Column="1" Name="DownsampleChk"
+                                      Content="{i18n:T '缩放到指定长边'}" IsCheckedChanged="OnDownsampleToggled" />
+                        </Grid>
+                        <Grid Name="LongEdgeRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边'}" />
+                            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <NumericUpDown Name="LongEdgeBox" Width="130"
+                                               Minimum="256" Maximum="20000" Increment="256"
+                                               FormatString="0" ValueChanged="OnAnyChanged" />
+                                <TextBlock Classes="fieldLabel" Text="px" />
+                            </StackPanel>
+                            <CheckBox Grid.Row="1" Grid.Column="1" Name="UpscaleChk" Margin="0,6,0,0"
+                                      Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                       Text="{i18n:T '长边精确落位，短边按比例；缩小为面积平均，放大为 Catmull-Rom。'}" />
+                        </Grid>
+
+                        <!-- 锐化归在尺寸里，不在格式里：它的量是按成品像素定的，就在缩放之后做。 -->
+                        <Grid Name="SharpenRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '锐化'}" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" Name="SharpenBox"
+                                      HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                       Text="{i18n:T '缩放之后施加，只作用于亮度；颗粒同样被锐化。'}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ── 色彩 ───────────────────────────────────────────── -->
+                <Border Classes="section">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '色彩'}" />
+                        <!-- 输出空间是报告，不是选择：它是渲染参数，在主窗口选定，文件继承屏上那个。 -->
+                        <Grid Name="SpaceRow" ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '空间'}"
+                                       VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Name="ColorSpaceHint" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource FontXs}" VerticalAlignment="Top" />
+                        </Grid>
+
+                        <!-- 只有 HDR 卷的增益图 JPEG 有基底可选；见 ExportOptions.HdrBaseSpace。 -->
+                        <Grid Name="HdrBaseGroup" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '基底'}" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" Name="HdrBaseBox"
+                                      HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged">
+                                <ComboBoxItem Content="{i18n:T 'sRGB（通用，所有看图软件都按它假定）'}" />
+                                <ComboBoxItem Content="{i18n:T 'Display P3（手机相册的选择，保留更多宽色域高光）'}" />
+                            </ComboBox>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                       Text="{i18n:T '超出基底色域的颜色会被裁掉；完整母版用 TIFF。'}" />
+                        </Grid>
+
+                        <!-- 只在确实可选时出现：被强制嵌入的那几种文件没有决定可做，结论条会报告。 -->
+                        <Grid Name="IccRow" ColumnDefinitions="62,*">
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}"
+                                          IsCheckedChanged="OnIccChanged" />
+                                <TextBlock Classes="groupHint"
+                                           Text="{i18n:T 'sRGB 可不嵌入：看图软件默认按 sRGB 处理。'}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ── 文件名 ─────────────────────────────────────────── -->
+                <Border Name="NamingGroup" Classes="section">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '文件名'}" />
+                        <Grid ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '模板'}"
+                                       VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Name="NameTemplateBox" TextChanged="OnTemplateChanged" />
+                        </Grid>
+                        <!-- 两行都由 code-behind 填：文本里带花括号，XAML 解析器会把它读成标记扩展。 -->
+                        <Grid Name="PreviewRow" ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '首张'}"
+                                       VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Name="NamePreviewLbl" Classes="readout"
+                                       TextWrapping="Wrap" VerticalAlignment="Top" />
+                        </Grid>
+                        <Grid ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '变量'}"
+                                       VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Classes="groupHint" Name="NameTokensLbl" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ── 重名 ───────────────────────────────────────────── -->
+                <Border Name="ConflictGroup" Classes="section">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '目标已有同名文件时'}" />
+                        <Grid ColumnDefinitions="62,*">
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <StackPanel Orientation="Horizontal" Spacing="18">
+                                    <RadioButton Name="ConflictUnique" GroupName="conflict"
+                                                 Content="{i18n:T '另存为新名'}" IsCheckedChanged="OnAnyChanged" />
+                                    <RadioButton Name="ConflictOverwrite" GroupName="conflict"
+                                                 Content="{i18n:T '覆盖'}" IsCheckedChanged="OnAnyChanged" />
+                                    <RadioButton Name="ConflictSkip" GroupName="conflict"
+                                                 Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
+                                </StackPanel>
+                                <TextBlock Classes="groupHint"
+                                           Text="{i18n:T '整卷批量写入，不逐个询问；同批次内重名一律另存。'}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
-
-            <!-- ── 尺寸：多大 ────────────────────────────────────────── -->
-            <StackPanel Spacing="4">
-                <TextBlock Text="{i18n:T '尺寸'}" FontWeight="SemiBold" />
-                <CheckBox Name="DownsampleChk" Content="{i18n:T '缩放到指定长边'}"
-                          IsCheckedChanged="OnDownsampleToggled" />
-                <Grid Name="LongEdgeRow" ColumnDefinitions="Auto,Auto,*" Margin="20,2,0,0">
-                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边'}"
-                               Margin="0,0,8,0" />
-                    <NumericUpDown Grid.Column="1" Name="LongEdgeBox" Width="130"
-                                   Minimum="256" Maximum="20000" Increment="256"
-                                   FormatString="0" ValueChanged="OnAnyChanged" />
-                    <TextBlock Grid.Column="2" Classes="fieldLabel" Text="px" Margin="6,0,0,0" />
-                </Grid>
-                <CheckBox Name="UpscaleChk" Margin="20,2,0,0"
-                          Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
-                <TextBlock Classes="groupHint"
-                           Text="{i18n:T '长边正好落在这个值上，短边按比例。缩小是面积平均，放大是 Catmull-Rom——放大不会增加底片上没有的细节。'}" />
-
-                <!-- Sharpening lives WITH the size, not with the format: it is sized to the
-                     delivered pixels and runs right after the resize. -->
-                <Grid Name="SharpenRow" ColumnDefinitions="Auto,*" Margin="0,6,0,0">
-                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出锐化'}"
-                               VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox Grid.Column="1" Name="SharpenBox" HorizontalAlignment="Stretch"
-                              SelectionChanged="OnAnyChanged" />
-                </Grid>
-                <TextBlock Classes="groupHint" Name="SharpenHint" TextWrapping="Wrap" />
-            </StackPanel>
-
-            <!-- ── 色彩：什么颜色 ────────────────────────────────────── -->
-            <StackPanel Spacing="4">
-                <TextBlock Text="{i18n:T '色彩'}" FontWeight="SemiBold" />
-                <!-- The output space is reported, not chosen: it is a render parameter picked
-                     in the main window, and the file inherits what is on screen. -->
-                <TextBlock Name="ColorSpaceHint" TextWrapping="Wrap" />
-
-                <!-- Only an HDR roll has a gain-map base to choose; see ExportOptions.HdrBaseSpace. -->
-                <StackPanel Name="HdrBaseGroup" Spacing="4" Margin="0,6,0,0">
-                    <TextBlock Classes="fieldLabel" Text="{i18n:T '增益图基底'}" />
-                    <ComboBox Name="HdrBaseBox" HorizontalAlignment="Stretch"
-                              SelectionChanged="OnAnyChanged">
-                        <ComboBoxItem Content="{i18n:T 'sRGB（通用，所有看图软件都按它假定）'}" />
-                        <ComboBoxItem Content="{i18n:T 'Display P3（手机相册的选择，保留更多宽色域高光）'}" />
-                    </ComboBox>
-                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '超出基底色域的颜色在这个文件里会被裁掉；完整母版请导出 TIFF。'}" />
-                </StackPanel>
-
-                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}" Margin="0,6,0,0"
-                          IsCheckedChanged="OnIccChanged" />
-                <TextBlock Classes="groupHint" Name="IccHint" TextWrapping="Wrap" />
-            </StackPanel>
-
-            <!-- ── 命名 ─────────────────────────────────────────────── -->
-            <StackPanel Name="NamingGroup" Spacing="4">
-                <TextBlock Text="{i18n:T '文件名'}" FontWeight="SemiBold" />
-                <TextBox Name="NameTemplateBox" TextChanged="OnTemplateChanged" />
-                <!-- Both hints are set from code-behind: their text contains braces, which the XAML
-                     parser would read as a markup extension. -->
-                <TextBlock Classes="groupHint" Name="NamePreviewLbl" TextWrapping="Wrap" />
-                <TextBlock Classes="groupHint" Name="NameTokensLbl" TextWrapping="Wrap" />
-            </StackPanel>
-
-            <!-- ── 重名 ─────────────────────────────────────────────── -->
-            <StackPanel Name="ConflictGroup" Spacing="4">
-                <TextBlock Text="{i18n:T '目标已有同名文件时'}" FontWeight="SemiBold" />
-                <RadioButton Name="ConflictUnique" GroupName="conflict"
-                             Content="{i18n:T '另存为新名（原文件保持不动）'}" IsCheckedChanged="OnAnyChanged" />
-                <RadioButton Name="ConflictOverwrite" GroupName="conflict"
-                             Content="{i18n:T '覆盖'}" IsCheckedChanged="OnAnyChanged" />
-                <RadioButton Name="ConflictSkip" GroupName="conflict"
-                             Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
-                <TextBlock Classes="groupHint"
-                           Text="{i18n:T '整卷导出按扫描文件名批量写入，不逐个询问；同一批次内重名一律另存。'}" />
-            </StackPanel>
-        </StackPanel>
+        </ScrollViewer>
     </DockPanel>
 </Window>
