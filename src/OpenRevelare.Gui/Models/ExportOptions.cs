@@ -68,8 +68,6 @@ public static class ExportIccUiPolicy
 /// window. The export writes what the render already produced and labels it accordingly — which
 /// is what makes the preview WYSIWYG rather than an approximation of the file.
 ///
-/// Sharpening is still absent on purpose: there is no sharpening implementation to call.
-///
 /// Resizing lands on the requested long edge exactly, via <see cref="Resample.ToLongEdge"/>. It used
 /// to be an integer box factor — right for a preview, wrong for a delivery file, where "2048" came
 /// out as 1943 and read as a bug.
@@ -188,6 +186,26 @@ public sealed class ExportOptions
     public bool AllowUpscale { get; set; }
 
     /// <summary>
+    /// Output sharpening for the delivered file; see <see cref="OutputSharpen"/>. Persisted, because
+    /// it follows from where the files go and that rarely changes between sessions.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public OutputSharpen.Level Sharpen { get; set; } = OutputSharpen.Level.None;
+
+    /// <summary>
+    /// Whether sharpening applies to the file this export is about to write.
+    ///
+    /// It is an operation on FINISHED, bounded, display-encoded pixels, so three of the four
+    /// deliveries are out and each for its own reason. A scene-linear TIFF and a linear DNG are
+    /// material for another program's grade: the receiving application sharpens at ITS output size,
+    /// and detail baked in here would be sharpened twice. An HDR render is unbounded, and an unsharp
+    /// mask's overshoot on a 4-stop highlight is not a halo but a hole. What is left — the ordinary
+    /// TIFF and JPEG — is exactly the case output sharpening exists for.
+    /// </summary>
+    [JsonIgnore]
+    public bool SharpenApplies => !ExportLinear && !IsDng && !IsHdr;
+
+    /// <summary>
     /// The filename template a ROLL export names its files with; see <see cref="ExportNaming"/>.
     /// Single-frame export only borrows it for the save dialog's suggested name, because that
     /// dialog already asks.
@@ -233,6 +251,24 @@ public sealed class ExportOptions
 
     public ExportOptions Clone() => (ExportOptions)MemberwiseClone();
 
+    /// <summary>The picker's label for a level — named after the delivery, as the levels are.</summary>
+    public static string SharpenName(OutputSharpen.Level level) => level switch
+    {
+        OutputSharpen.Level.Low => Loc.T("低（屏幕）"),
+        OutputSharpen.Level.Standard => Loc.T("标准"),
+        OutputSharpen.Level.High => Loc.T("高（送印）"),
+        _ => Loc.T("无（保留颗粒）"),
+    };
+
+    /// <summary>The levels, in the order the picker offers them.</summary>
+    public static IReadOnlyList<OutputSharpen.Level> SharpenLevels { get; } =
+    [
+        OutputSharpen.Level.None,
+        OutputSharpen.Level.Low,
+        OutputSharpen.Level.Standard,
+        OutputSharpen.Level.High,
+    ];
+
     /// <summary>One line naming the decisions that change the file, for the dialog footer and the
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
     public string Summary()
@@ -240,6 +276,8 @@ public sealed class ExportOptions
         string size = Downsample
             ? Loc.F($"长边 {MaxLongEdge}px") + (AllowUpscale ? Loc.T("（含放大）") : "")
             : Loc.T("原始尺寸");
+        if (SharpenApplies && Sharpen != OutputSharpen.Level.None)
+            size += " · " + Loc.F($"锐化{SharpenName(Sharpen)}");
         string compression = TiffCompression switch
         {
             TiffIO.CompressionMode.None => Loc.T("不压缩"),

@@ -12,6 +12,8 @@
 
 - **导出新增文件名模板，长边尺寸精确落位**。模板字段为 `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`，空字段连同相邻分隔符一并省略；尺寸可选择允许放大。
 
+- **导出新增输出锐化**。四档：无（保留颗粒）/ 低 / 标准 / 高；在缩放之后、写文件之前施加，只作用于亮度以避免彩色边缘出现彩边。线性 TIFF、线性 DNG 与 HDR 输出不做锐化。
+
 - **新增线性 DNG 导出**。去除显示曲线的正片，在 Lightroom / Camera Raw 中可用 RAW 面板调整。反相与帧编辑已烘焙其中，并非相机 RAW 的原样封装。
 
 - **新增【帮助 → 本帧技术报告】**。逐项列出本帧渲染所依赖的数值及其来源，支持一键复制。
@@ -55,6 +57,8 @@
 - **A waveform, and adjustable clipping thresholds.** The over- and under-exposure ends are now adjustable instead of a fixed 2% / 98%, saved with the application.
 
 - **Export takes a filename template, and the long edge lands exactly on the number asked for.** The template takes `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`, a field left empty is dropped along with its separator, and enlargement is available as a choice.
+
+- **Output sharpening on export.** Four levels: none (keeps the grain), low, standard and high. It is applied after the resize and before the file is written, on luminance alone so that coloured edges do not gain a fringe. Linear TIFF, linear DNG and HDR exports are not sharpened.
 
 - **Linear DNG export.** The finished positive with the display curve removed, which Lightroom and Camera Raw open with the raw panel live. It is not a repackaged camera RAW: the inversion and the frame edits are baked in.
 

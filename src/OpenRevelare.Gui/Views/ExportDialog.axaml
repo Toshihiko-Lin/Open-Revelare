@@ -97,6 +97,16 @@
                           Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
                 <TextBlock Classes="groupHint"
                            Text="{i18n:T '长边正好落在这个值上，短边按比例。缩小是面积平均，放大是 Catmull-Rom——放大不会增加底片上没有的细节。'}" />
+
+                <!-- Sharpening lives WITH the size, not with the format: it is sized to the
+                     delivered pixels and runs right after the resize. -->
+                <Grid Name="SharpenRow" ColumnDefinitions="Auto,*" Margin="0,6,0,0">
+                    <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '输出锐化'}"
+                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox Grid.Column="1" Name="SharpenBox" HorizontalAlignment="Stretch"
+                              SelectionChanged="OnAnyChanged" />
+                </Grid>
+                <TextBlock Classes="groupHint" Name="SharpenHint" TextWrapping="Wrap" />
             </StackPanel>
 
             <!-- ── 色彩：什么颜色 ────────────────────────────────────── -->

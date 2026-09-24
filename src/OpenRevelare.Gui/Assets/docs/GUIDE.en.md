@@ -482,6 +482,22 @@ aspect ratio. Reduction is an area average and enlargement is Catmull-Rom, and e
 default — a picture smaller than the target stays its own size unless "Enlarge when the long edge is
 shorter" is ticked, because interpolation cannot add detail the negative does not hold.
 
+**Output sharpening**: none (keeps the grain) / low (screen) / standard / high (print).
+
+> It runs **after the resize and before the file is written** — the amount is sized to the delivered
+> pixels, and sharpening at full resolution before a shrink throws the sharpening away along with
+> the detail it was applied to, leaving only the halo. It works on **luminance** alone: a per-channel
+> mask leaves a colour fringe at coloured edges, which is exactly where a film scan's chroma grain
+> already lives.
+>
+> **Grain is sharpened too**, unavoidably — nothing can tell a grain cluster from a detail. The
+> threshold only keeps a smooth area (a sky) from having every speck outlined. To keep the grain as
+> the film left it, choose none.
+>
+> Linear TIFF, linear DNG and HDR exports are **not** sharpened: the first two are material for
+> another program, which should sharpen at its own output size, and an HDR render is unbounded, so
+> the overshoot would punch holes in the highlights rather than draw a halo.
+
 **File names** (roll export): the template takes `{Original}` · `{Seq}` · `{Roll}` · `{RollNo}` ·
 `{Camera}` · `{Film}` · `{Date}`, and the dialog shows what the first file will be called as you
 type. A field left empty leaves no trace (`{Roll}_{Camera}_{Seq}` on a roll with no camera gives

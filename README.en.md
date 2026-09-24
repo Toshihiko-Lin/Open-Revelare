@@ -221,7 +221,7 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 | **Scanner input** | Hasselblad Flextight `.fff` (detected by content, linearised automatically) |
 | **Other input** | TIFF / JPEG / PNG |
 | **Export** | 16-bit TIFF, JPEG, **linear DNG** (the finished positive with the display curve removed, for grading on in Lightroom / Camera Raw), three output colour spaces; plus a 32-bit floating-point scene-linear ACEScg TIFF that preserves extended range; a matching ICC is embedded by default, and only standard sRGB may explicitly omit it |
-| **Export options** | Filename template (`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`), an exact long edge, and a name-collision policy (keep both / replace / skip) |
+| **Export options** | Filename template (`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`), an exact long edge, output sharpening (after the resize, on luminance only), and a name-collision policy (keep both / replace / skip) |
 
 ## How it works
 

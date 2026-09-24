@@ -71,6 +71,9 @@ public partial class ExportDialog : Window
         // asking for the same thing twice. It is still COLLECTED below, so the setting a roll export
         // established survives an intervening single export instead of being reset by it.
         NamingGroup.IsVisible = rollMode;
+        foreach (OutputSharpen.Level level in ExportOptions.SharpenLevels)
+            SharpenBox.Items.Add(new ComboBoxItem { Content = ExportOptions.SharpenName(level) });
+
         NameTokensLbl.Text = Loc.T(
             "可用变量：{Original} 原文件名 · {Seq} 帧序号 · {Roll} 卷名 · {RollNo} 卷号 · "
             + "{Camera} 机身 · {Film} 胶卷 · {Date} 冲洗日期。没填的字段不留痕迹，"
@@ -100,6 +103,7 @@ public partial class ExportDialog : Window
         DownsampleChk.IsChecked = saved.Downsample;
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
         UpscaleChk.IsChecked = saved.AllowUpscale;
+        SharpenBox.SelectedIndex = Math.Max(0, ExportOptions.SharpenLevels.ToList().IndexOf(saved.Sharpen));
         NameTemplateBox.Text = string.IsNullOrWhiteSpace(saved.NameTemplate)
             ? ExportNaming.Default
             : saved.NameTemplate;
@@ -158,6 +162,8 @@ public partial class ExportDialog : Window
             Downsample = DownsampleChk.IsChecked == true,
             MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
             AllowUpscale = UpscaleChk.IsChecked == true,
+            Sharpen = ExportOptions.SharpenLevels[
+                Math.Clamp(SharpenBox.SelectedIndex, 0, ExportOptions.SharpenLevels.Count - 1)],
             NameTemplate = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
                 ? ExportNaming.Default
                 : NameTemplateBox.Text!,
@@ -185,15 +191,33 @@ public partial class ExportDialog : Window
         if (SummaryLbl is null || TiffGroup is null || JpegGroup is null
             || ColorSpaceHint is null || LinearChk is null || IccHint is null
             || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null
-            || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null) return;
+            || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null
+            || SharpenBox is null || SharpenHint is null || SharpenRow is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
+        bool linearPending = !dng && LinearChk.IsChecked == true;
         TiffGroup.IsVisible = !jpeg && !dng;
         JpegGroup.IsVisible = jpeg;
         if ((jpeg || dng) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         LongEdgeRow.IsEnabled = DownsampleChk.IsChecked == true;
         UpscaleChk.IsEnabled = DownsampleChk.IsChecked == true;
+
+        // Three of the four deliveries have nothing for an unsharp mask to act on; the row stays
+        // visible and says why rather than vanishing, because "where did sharpening go" is a worse
+        // question than a greyed control with a reason next to it.
+        // Same rule as ExportOptions.SharpenApplies, read off the controls rather than off a
+        // collected options object, so the dialog cannot disagree with the export.
+        bool sharpenApplies = !dng && !linearPending && !IsHdr;
+        SharpenRow.IsEnabled = sharpenApplies;
+        SharpenHint.Text = sharpenApplies
+            ? Loc.T("在缩放之后、写文件之前做，只动亮度不动色彩——锐化的量是按成品尺寸定的。颗粒也会被锐化，要保留颗粒就选「无」。")
+            : dng
+                ? Loc.T("DNG 是交给别处继续调色的素材，锐化应当在那一端按最终尺寸做，这里不做。")
+                : linearPending
+                    ? Loc.T("场景线性输出是中间文件，锐化应当在下游按最终尺寸做，这里不做。")
+                    : Loc.T("HDR 渲染没有上界，锐化的过冲会在高光上留下空洞，这里不做。");
+
         RefreshNamePreview();
         SizeLimitRow.IsEnabled = SizeLimitChk.IsChecked == true;
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();

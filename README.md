@@ -218,7 +218,7 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 | **扫描仪输入** | 哈苏 Flextight `.fff`（按内容识别，自动线性化） |
 | **其他输入** | TIFF / JPEG / PNG |
 | **导出** | 16-bit TIFF、JPEG、**线性 DNG**（去掉显示曲线的正片，交 Lightroom / Camera Raw 继续调色），三种输出色彩空间；另可导出保留扩展范围的 32-bit 浮点场景线性 ACEScg TIFF；默认嵌入与实际像素一致的 ICC，仅标准 sRGB 可显式省略 |
-| **导出选项** | 文件名模板（`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`）、长边精确落位、重名策略（另存 / 覆盖 / 跳过） |
+| **导出选项** | 文件名模板（`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`）、长边精确落位、输出锐化（缩放后做、只动亮度）、重名策略（另存 / 覆盖 / 跳过） |
 
 ## 工作原理
 

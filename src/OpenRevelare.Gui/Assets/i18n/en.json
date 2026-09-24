@@ -770,5 +770,15 @@
   "  折叠　　三通道按 Rec.709 加权折成一路亮度后再进密度域": "  Fold      the three channels are folded into one luminance signal (Rec.709 weights) before the density domain",
   "  注意　　黑白卷叠了印片 LUT：中性是反相的结果，印片自身的色偏会加在其上": "  Note      a black-and-white roll with a print LUT: the inversion is neutral, and the stock's own cast is added on top of it",
   "白平衡吸管：取样区域几乎全是溢出像素（高光或齿孔填白），换一块有层次的中性面": "White-balance eyedropper: almost every sample is clipped (a blown highlight, or the white the sprocket mask paints in). Try a neutral surface that still holds detail.",
-  "（已跳过 {0}% 的溢出像素）": " ({0}% of the patch was clipped and skipped)"
+  "（已跳过 {0}% 的溢出像素）": " ({0}% of the patch was clipped and skipped)",
+  "输出锐化": "Output sharpening",
+  "无（保留颗粒）": "None (keeps the grain)",
+  "低（屏幕）": "Low (screen)",
+  "标准": "Standard",
+  "高（送印）": "High (print)",
+  "锐化{0}": "sharpening {0}",
+  "在缩放之后、写文件之前做，只动亮度不动色彩——锐化的量是按成品尺寸定的。颗粒也会被锐化，要保留颗粒就选「无」。": "Applied after the resize and before the file is written, on luminance only so colour is left where the render put it — the amount is sized to the delivered pixels. Grain is sharpened along with everything else; choose None to keep it as the film left it.",
+  "DNG 是交给别处继续调色的素材，锐化应当在那一端按最终尺寸做，这里不做。": "A DNG is material for another program's grade, which will sharpen at its own output size. Not applied here.",
+  "场景线性输出是中间文件，锐化应当在下游按最终尺寸做，这里不做。": "A scene-linear file is an intermediate; sharpening belongs downstream, at the final size. Not applied here.",
+  "HDR 渲染没有上界，锐化的过冲会在高光上留下空洞，这里不做。": "An HDR render is unbounded, and the overshoot would punch holes in the highlights rather than draw a halo. Not applied here."
 }

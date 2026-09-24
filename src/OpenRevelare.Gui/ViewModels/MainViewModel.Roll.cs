@@ -1461,6 +1461,25 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// Output sharpening, on a COPY of the render's pixels — the caller's frame may be the retained
+    /// preview, and a sharpened preview would be a different picture from the one that was graded.
+    ///
+    /// Applied here, after the resize and before the encode, because that is what output sharpening
+    /// means: the correction is sized to the delivered pixels. Anything the option does not apply to
+    /// (see <see cref="ExportOptions.SharpenApplies"/>) passes through untouched.
+    /// </summary>
+    private static RenderedFrame Sharpened(RenderedFrame output, ExportOptions opt)
+    {
+        if (!opt.SharpenApplies || opt.Sharpen == OutputSharpen.Level.None) return output;
+
+        ImageBuffer pixels = output.Pixels;
+        var copy = new ImageBuffer(pixels.Width, pixels.Height, (float[])pixels.Data.Clone())
+            .InheritSourceFrom(pixels);
+        OutputSharpen.Apply(copy, opt.Sharpen);
+        return output.WithPixels(copy);
+    }
+
+    /// <summary>
     /// Scene-linear/extended output is only portable with its exact profile. The old dialog
     /// setting may contain a stale "omit ICC" value from an sRGB export; it must not turn a later
     /// linear or HDR export into an error or an uncharacterized file.
@@ -1478,6 +1497,7 @@ public partial class MainViewModel
         RenderedFrame output = opt.Downsample
             ? rendered.WithPixels(Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale))
             : rendered;
+        output = Sharpened(output, opt);
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
         if (opt.Format == ExportFormat.Jpeg)
