@@ -2150,7 +2150,10 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         // Options first, destination second: the format decides the extension the save dialog
         // should be offering, so asking for a filename first asks in the wrong order.
-        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops);
+        // namePreview: the naming scheme decides the name this export is OFFERED below, so the
+        // dialog shows what the scheme makes of this frame.
+        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
+                                    namePreview: Vm.ExportNamePreview);
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 

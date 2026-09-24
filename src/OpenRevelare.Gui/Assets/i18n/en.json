@@ -762,7 +762,6 @@
   "空间": "Space",
   "基底": "Base",
   "模板": "Template",
-  "首张": "First file",
   "变量": "Variables",
   "场景线性 ACEScg（32-bit float，不含帧编辑）": "Scene-linear ACEScg (32-bit float, no frame edits)",
   "外部调色用的中间文件，不做输出锐化；在普通看图软件中偏暗偏平。": "An intermediate for external grading, unsharpened; dark and flat in ordinary viewers.",
@@ -781,5 +780,15 @@
   "整卷批量写入，不逐个询问；同批次内重名一律另存。": "A roll is written in one batch without prompting; duplicates inside a batch always get a new name.",
   "sRGB（通用）": "sRGB (general)",
   "Adobe RGB（宽色域）": "Adobe RGB (wide gamut)",
-  "Display P3（宽色域）": "Display P3 (wide gamut)"
+  "Display P3（宽色域）": "Display P3 (wide gamut)",
+  "命名": "Naming",
+  "实例": "Example",
+  "原文件名": "Source name",
+  "卷名 + 序号": "Roll + number",
+  "卷号 + 序号": "Roll no. + number",
+  "冲洗日期 + 卷名 + 序号": "Date + roll + number",
+  "卷名 + 胶卷 + 序号": "Roll + film + number",
+  "卷名 + 原文件名": "Roll + source name",
+  "自定义…": "Custom…",
+  "保存对话框会预填这个名字，仍可修改。": "The save dialog opens with this name, and it can still be changed."
 }

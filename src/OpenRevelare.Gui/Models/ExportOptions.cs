@@ -269,6 +269,43 @@ public sealed class ExportOptions
         OutputSharpen.Level.High,
     ];
 
+    /// <summary>
+    /// The ready-made naming schemes, in the order the picker offers them. A template is exact and
+    /// unreadable — "{Roll}_{Seq}" says nothing until something expands it — so what the dialog
+    /// offers is this list by name, with the expanded result of the choice shown beside it. A
+    /// preset is only a spelling of a template, not a second kind of setting: what is stored and
+    /// what the export reads is still <see cref="NameTemplate"/>.
+    ///
+    /// The scan's own name comes first because it is <see cref="ExportNaming.Default"/> — what a
+    /// roll export did before templates existed. Anything not in this list is a template the user
+    /// wrote, and the dialog says so rather than pretending one of these was chosen.
+    /// </summary>
+    public static IReadOnlyList<string> NameTemplates { get; } =
+    [
+        ExportNaming.Default,          // {Original}
+        "{Roll}_{Seq}",
+        "{RollNo}_{Seq}",
+        "{Date}_{Roll}_{Seq}",
+        "{Roll}_{Film}_{Seq}",
+        "{Roll}_{Original}",
+    ];
+
+    /// <summary>
+    /// What a scheme is called. Named after what it spends, in the order it spends it, so the name
+    /// and the example under it say the same thing twice — once in words, once in a filename.
+    /// Anything unrecognised is the user's own template.
+    /// </summary>
+    public static string NameTemplateName(string? template) => (template ?? "").Trim() switch
+    {
+        "{Original}" => Loc.T("原文件名"),
+        "{Roll}_{Seq}" => Loc.T("卷名 + 序号"),
+        "{RollNo}_{Seq}" => Loc.T("卷号 + 序号"),
+        "{Date}_{Roll}_{Seq}" => Loc.T("冲洗日期 + 卷名 + 序号"),
+        "{Roll}_{Film}_{Seq}" => Loc.T("卷名 + 胶卷 + 序号"),
+        "{Roll}_{Original}" => Loc.T("卷名 + 原文件名"),
+        _ => Loc.T("自定义…"),
+    };
+
     /// <summary>One line naming the decisions that change the file, for the dialog footer and the
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
     public string Summary()

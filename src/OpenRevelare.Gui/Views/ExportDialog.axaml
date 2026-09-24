@@ -210,26 +210,38 @@
                     </StackPanel>
                 </Border>
 
-                <!-- ── 文件名 ─────────────────────────────────────────── -->
-                <Border Name="NamingGroup" Classes="section">
+                <!-- ── 文件名 ───────────────────────────────────────────
+                     选一个现成命名，底下一行给出这一卷第一张的实际文件名。花括号那套写法
+                     不出现在这里：它精确但没法读，「{Roll}_{Seq}」要看见展开的结果才知道
+                     是什么。写模板的入口留在「自定义…」里，选中它才露出输入框与字段表。 -->
+                <Border Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '文件名'}" />
                         <Grid ColumnDefinitions="62,*">
-                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '模板'}"
-                                       VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1" Name="NameTemplateBox" TextChanged="OnTemplateChanged" />
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '命名'}" />
+                            <ComboBox Grid.Column="1" Name="NamePresetBox" HorizontalAlignment="Stretch"
+                                      SelectionChanged="OnNamePresetChanged" />
                         </Grid>
-                        <!-- 两行都由 code-behind 填：文本里带花括号，XAML 解析器会把它读成标记扩展。 -->
+                        <!-- 字段表由 code-behind 填：文本里带花括号，XAML 解析器会把它读成标记扩展。 -->
+                        <Grid Name="CustomNameRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel"
+                                       Text="{i18n:T '模板'}" />
+                            <TextBox Grid.Row="0" Grid.Column="1" Name="NameTemplateBox"
+                                     TextChanged="OnTemplateChanged" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                       Name="NameTokensLbl" />
+                        </Grid>
                         <Grid Name="PreviewRow" ColumnDefinitions="62,*">
-                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '首张'}"
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '实例'}"
                                        VerticalAlignment="Top" />
                             <TextBlock Grid.Column="1" Name="NamePreviewLbl" Classes="readout"
                                        TextWrapping="Wrap" VerticalAlignment="Top" />
                         </Grid>
-                        <Grid ColumnDefinitions="62,*">
-                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '变量'}"
-                                       VerticalAlignment="Top" />
-                            <TextBlock Grid.Column="1" Classes="groupHint" Name="NameTokensLbl" />
+                        <!-- 单张导出：这一节决定的是保存对话框预填的名字，说一句，否则这里的
+                             选择看起来像是会直接落盘。 -->
+                        <Grid Name="SingleNameHintRow" ColumnDefinitions="62,*">
+                            <TextBlock Grid.Column="1" Classes="groupHint"
+                                       Text="{i18n:T '保存对话框会预填这个名字，仍可修改。'}" />
                         </Grid>
                     </StackPanel>
                 </Border>

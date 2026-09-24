@@ -1,4 +1,5 @@
 using OpenRevelare.Core;
+using OpenRevelare.Gui.Models;
 using Xunit;
 
 namespace OpenRevelare.Tests;
@@ -101,5 +102,38 @@ public sealed class ExportNamingTests
     public void Steps_around_a_reserved_device_name(string camera)
     {
         Assert.Equal(camera + "_", ExportNaming.Expand("{Camera}", Roll(camera: camera)));
+    }
+
+    /// <summary>
+    /// The dialog offers the schemes by NAME, so a scheme with no name of its own would appear in
+    /// the picker as a second 自定义… — indistinguishable from the escape hatch, and selecting it
+    /// would then reveal the template box. Adding a template to
+    /// <see cref="ExportOptions.NameTemplates"/> without naming it in
+    /// <see cref="ExportOptions.NameTemplateName"/> is the way that happens.
+    /// </summary>
+    [Fact]
+    public void Every_offered_naming_scheme_is_named()
+    {
+        string custom = ExportOptions.NameTemplateName(null);
+        foreach (string template in ExportOptions.NameTemplates)
+            Assert.NotEqual(custom, ExportOptions.NameTemplateName(template));
+
+        Assert.Equal(ExportOptions.NameTemplates.Count,
+                     ExportOptions.NameTemplates
+                         .Select(ExportOptions.NameTemplateName).Distinct().Count());
+    }
+
+    /// <summary>Every scheme has to produce a usable name for an ordinary roll, and a different one
+    /// per frame — two frames sharing a name is a batch that overwrites itself.</summary>
+    [Fact]
+    public void Every_offered_naming_scheme_expands_to_a_distinct_usable_name()
+    {
+        foreach (string template in ExportOptions.NameTemplates)
+        {
+            string first = ExportNaming.Expand(template, Roll(sequence: 1, original: "_DSC7659"));
+            string second = ExportNaming.Expand(template, Roll(sequence: 2, original: "_DSC7660"));
+            Assert.NotEqual("", first);
+            Assert.NotEqual(first, second);
+        }
     }
 }

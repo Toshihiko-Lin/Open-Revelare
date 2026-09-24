@@ -42,6 +42,12 @@ public partial class ExportDialog : Window
     private bool _syncingIccControl;
 
     /// <summary>
+    /// The scheme last selected in the naming picker. Kept so that choosing 自定义… can seed the
+    /// template box with the scheme that was in force instead of with an empty line.
+    /// </summary>
+    private int _lastSchemeIndex;
+
+    /// <summary>
     /// Expands a template against a REAL frame of the open roll, for the live preview. Supplied by
     /// the caller because the dialog knows nothing about rolls; null when there is no roll to
     /// preview against, and then the preview line simply stays empty.
@@ -70,12 +76,22 @@ public partial class ExportDialog : Window
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
         OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
         ConflictGroup.IsVisible = rollMode;
-        // A single frame goes through a save dialog where the name is typed, so a template would be
-        // asking for the same thing twice. It is still COLLECTED below, so the setting a roll export
-        // established survives an intervening single export instead of being reset by it.
-        NamingGroup.IsVisible = rollMode;
+        // Naming shows in BOTH modes. It used to be roll-only, on the grounds that a single frame
+        // types its name in the save dialog anyway — but that dialog opens with the name this
+        // scheme produced (MainViewModel.SuggestedExportName), so hiding the scheme left a single
+        // export governed by a setting it could neither see nor change: to change it you had to
+        // open the roll-export dialog. What a single frame does NOT need is the conflict policy,
+        // because its save dialog does ask before replacing a file.
+        SingleNameHintRow.IsVisible = !rollMode;
         foreach (OutputSharpen.Level level in ExportOptions.SharpenLevels)
             SharpenBox.Items.Add(new ComboBoxItem { Content = ExportOptions.SharpenName(level) });
+
+        // The schemes, then the way out: 自定义… is last and is the only place the token syntax
+        // appears. Its index is ExportOptions.NameTemplates.Count, which is what CustomNameIndex
+        // reads — nothing else may be appended after it.
+        foreach (string template in ExportOptions.NameTemplates)
+            NamePresetBox.Items.Add(new ComboBoxItem { Content = ExportOptions.NameTemplateName(template) });
+        NamePresetBox.Items.Add(new ComboBoxItem { Content = ExportOptions.NameTemplateName(null) });
 
         NameTokensLbl.Text = Loc.T(
             "{Original} 原文件名 · {Seq} 帧序号 · {Roll} 卷名 · {RollNo} 卷号 · "
@@ -138,14 +154,43 @@ public partial class ExportDialog : Window
         LongEdgeBox.Value = Math.Clamp(saved.MaxLongEdge, 256, 20000);
         UpscaleChk.IsChecked = saved.AllowUpscale;
         SharpenBox.SelectedIndex = Math.Max(0, ExportOptions.SharpenLevels.ToList().IndexOf(saved.Sharpen));
-        NameTemplateBox.Text = string.IsNullOrWhiteSpace(saved.NameTemplate)
+        // A saved template that is one of the schemes selects that scheme; anything else is the
+        // user's own and selects 自定义…, with the text kept verbatim. The box is filled either
+        // way, so picking 自定义… later starts from the scheme that was in force rather than blank.
+        string savedTemplate = string.IsNullOrWhiteSpace(saved.NameTemplate)
             ? ExportNaming.Default
-            : saved.NameTemplate;
+            : saved.NameTemplate.Trim();
+        int preset = ExportOptions.NameTemplates.ToList()
+            .FindIndex(t => string.Equals(t, savedTemplate, StringComparison.OrdinalIgnoreCase));
+        NameTemplateBox.Text = savedTemplate;
+        NamePresetBox.SelectedIndex = preset >= 0 ? preset : CustomNameIndex;
+        _lastSchemeIndex = Math.Max(0, preset);
         SizeLimitChk.IsChecked = saved.LimitFileSize;
         SizeLimitBox.Value = (decimal)Math.Clamp(saved.MaxFileSizeMb, 0.1d, 1000d);
         ConflictOverwrite.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Overwrite;
         ConflictSkip.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Skip;
         ConflictUnique.IsChecked = saved.Conflict == ExportFile.ConflictPolicy.Unique;
+    }
+
+    /// <summary>The 自定义… item's index: after the schemes, which is where the ctor appends it.</summary>
+    private static int CustomNameIndex => ExportOptions.NameTemplates.Count;
+
+    private bool IsCustomName => NamePresetBox.SelectedIndex >= CustomNameIndex;
+
+    /// <summary>
+    /// The template in force: the selected scheme's, or whatever the user typed under 自定义…. Blank
+    /// falls back to the default rather than to an empty name.
+    /// </summary>
+    private string SelectedNameTemplate
+    {
+        get
+        {
+            if (!IsCustomName && NamePresetBox.SelectedIndex >= 0)
+                return ExportOptions.NameTemplates[NamePresetBox.SelectedIndex];
+            return string.IsNullOrWhiteSpace(NameTemplateBox.Text)
+                ? ExportNaming.Default
+                : NameTemplateBox.Text!;
+        }
     }
 
     /// <summary>The gain-map base the picker currently shows.</summary>
@@ -198,9 +243,7 @@ public partial class ExportDialog : Window
             AllowUpscale = UpscaleChk.IsChecked == true,
             Sharpen = ExportOptions.SharpenLevels[
                 Math.Clamp(SharpenBox.SelectedIndex, 0, ExportOptions.SharpenLevels.Count - 1)],
-            NameTemplate = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
-                ? ExportNaming.Default
-                : NameTemplateBox.Text!,
+            NameTemplate = SelectedNameTemplate,
             LimitFileSize = SizeLimitChk.IsChecked == true,
             MaxFileSizeMb = (double)(SizeLimitBox.Value ?? 10m),
             Conflict = ConflictOverwrite.IsChecked == true ? ExportFile.ConflictPolicy.Overwrite
@@ -227,7 +270,8 @@ public partial class ExportDialog : Window
             || HdrBaseGroup is null || FormatHint is null || SizeLimitRow is null
             || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null
             || SharpenBox is null || SharpenRow is null || IccRow is null
-            || LongEdgeRow is null || PreviewRow is null) return;
+            || LongEdgeRow is null || PreviewRow is null
+            || NamePresetBox is null || CustomNameRow is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
@@ -241,6 +285,9 @@ public partial class ExportDialog : Window
         // summary strip, which always describes the whole file.
         LongEdgeRow.IsVisible = DownsampleChk.IsChecked == true;
         SizeLimitRow.IsVisible = SizeLimitChk.IsChecked == true;
+        // The token syntax is the one thing in here that has to be read rather than recognised, so
+        // it exists only for whoever asked for it by name.
+        CustomNameRow.IsVisible = IsCustomName;
 
         // Three of the four deliveries have nothing for an unsharp mask to act on. Same rule as
         // ExportOptions.SharpenApplies, read off the controls rather than off a collected options
@@ -298,19 +345,43 @@ public partial class ExportDialog : Window
     /// </summary>
     private void RefreshNamePreview()
     {
-        if (NamePreviewLbl is null || NameTemplateBox is null || PreviewRow is null) return;
+        if (NamePreviewLbl is null || NameTemplateBox is null || PreviewRow is null
+            || NamePresetBox is null) return;
         // No roll to expand against, so there is nothing to show and no row to show it in.
         PreviewRow.IsVisible = _namePreview is not null;
         if (_namePreview is null) { NamePreviewLbl.Text = ""; return; }
 
-        string template = string.IsNullOrWhiteSpace(NameTemplateBox.Text)
-            ? ExportNaming.Default
-            : NameTemplateBox.Text!;
-        // Just the name: the 首张 label says what it is, so the line does not have to.
-        NamePreviewLbl.Text = $"{_namePreview(template)}.{Collect().Extension}";
+        // Just the name: the 实例 label says what it is, so the line does not have to.
+        NamePreviewLbl.Text = $"{_namePreview(SelectedNameTemplate)}.{Collect().Extension}";
     }
 
     private void OnTemplateChanged(object? sender, TextChangedEventArgs e) => RefreshNamePreview();
+
+    /// <summary>
+    /// A naming scheme was picked. Choosing 自定义… seeds the template box with the scheme that was
+    /// in force, so a custom template starts from something that works — unless the box already
+    /// holds a template the user wrote, which looking at the schemes and coming back must not lose.
+    /// </summary>
+    private void OnNamePresetChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (NamePresetBox is not null && NameTemplateBox is not null)
+        {
+            if (!IsCustomName)
+            {
+                if (NamePresetBox.SelectedIndex >= 0) _lastSchemeIndex = NamePresetBox.SelectedIndex;
+            }
+            else
+            {
+                string text = (NameTemplateBox.Text ?? "").Trim();
+                bool authored = text.Length > 0 && !ExportOptions.NameTemplates.Any(
+                    t => string.Equals(t, text, StringComparison.OrdinalIgnoreCase));
+                if (!authored)
+                    NameTemplateBox.Text = ExportOptions.NameTemplates[
+                        Math.Clamp(_lastSchemeIndex, 0, ExportOptions.NameTemplates.Count - 1)];
+            }
+        }
+        SyncEnabledState();
+    }
 
     private void OnDownsampleToggled(object? sender, RoutedEventArgs e) => SyncEnabledState();
     private void OnAnyChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
