@@ -110,7 +110,19 @@ public static class ExportNaming
     }
 
     /// <summary>
-    /// A filename stem the filesystem will accept: invalid characters become <c>_</c>, a repeated
+    /// The characters a name may not carry — Windows' set, on every platform, plus the control
+    /// characters. Deliberately NOT <see cref="Path.GetInvalidFileNameChars"/>, which on Unix is
+    /// only <c>/</c> and NUL: an exported file is meant to travel — to a Windows machine, an SMB
+    /// share, an external disk — and "Kodak:Gold*200.tiff" written on a Mac is a file that cannot
+    /// be copied to the other end. Portability is also what the reserved-device-name rule below
+    /// already assumed, since it applies Windows' rules wherever it runs.
+    /// </summary>
+    private static readonly char[] Invalid = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+    private static bool IsInvalid(char c) => c < ' ' || Array.IndexOf(Invalid, c) >= 0;
+
+    /// <summary>
+    /// A filename stem every platform will accept: invalid characters become <c>_</c>, a repeated
     /// separator collapses, and the surrounding whitespace and trailing dots that Windows silently
     /// strips (and then disagrees with you about) are removed.
     ///
@@ -122,11 +134,10 @@ public static class ExportNaming
     /// </summary>
     public static string Sanitize(string name)
     {
-        char[] bad = Path.GetInvalidFileNameChars();
         var sb = new System.Text.StringBuilder(name.Length);
         foreach (char c in name)
         {
-            char mapped = Array.IndexOf(bad, c) >= 0 ? '_' : c;
+            char mapped = IsInvalid(c) ? '_' : c;
             // Collapse a REPEATED separator, so "{Roll}_{Camera}_{Seq}" with no camera reads
             // "roll_003" rather than "roll__003". Only a repeat of the same character: a template
             // that deliberately writes " - " means it, and must survive.

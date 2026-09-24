@@ -1,4 +1,4 @@
-using OpenRevelare.Core;
+﻿using OpenRevelare.Core;
 using Xunit;
 
 namespace OpenRevelare.Tests;
@@ -10,6 +10,37 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public sealed class LinearDngTests
 {
+    /// <summary>
+    /// Whether LibRaw's native library can be loaded here. Probed by handing it sixteen bytes of
+    /// nothing: the library is initialised before it looks at them, so a missing library fails with
+    /// DllNotFoundException while a present one fails complaining about the data.
+    /// </summary>
+    private static readonly Lazy<bool> LibRawPresent = new(() =>
+    {
+        try
+        {
+            using var ctx = Sdcb.LibRaw.RawContext.FromBuffer(new byte[16]);
+            return true;
+        }
+        catch (DllNotFoundException) { return false; }
+        catch { return true; }
+    });
+
+    /// <summary>
+    /// For the tests that read the file back. CI's macOS job deliberately does not build LibRaw —
+    /// that is release.yml's job, and building it costs minutes (see .github/workflows/ci.yml) — so
+    /// there the decoder is absent and these three would report a missing dylib as a DNG bug. They
+    /// still run on Windows, on Linux, and on a Mac that has the bundled dylib, which is what a
+    /// "nobody can read it" regression would surface on.
+    /// </summary>
+    private sealed class LibRawFactAttribute : FactAttribute
+    {
+        public LibRawFactAttribute()
+        {
+            if (!LibRawPresent.Value) Skip = "LibRaw native library not present on this machine";
+        }
+    }
+
     /// <summary>A display-referred frame: sRGB-encoded, the way a finished render arrives here.</summary>
     private static ImageBuffer Encoded(int w, int h, Func<int, int, (float R, float G, float B)> f)
     {
@@ -27,7 +58,7 @@ public sealed class LinearDngTests
     private static string NewPath() =>
         Path.Combine(TestDataIsolation.Root, $"linear-{Guid.NewGuid():N}.dng");
 
-    [Fact]
+    [LibRawFact]
     public void Writes_a_file_libraw_can_decode()
     {
         string path = NewPath();
@@ -49,7 +80,7 @@ public sealed class LinearDngTests
     /// its own sanity floor for a raw file, reached before it looks at a single tag. The written
     /// file is well-formed below that; nothing can read it back here to prove it.
     /// </remarks>
-    [Fact]
+    [LibRawFact]
     public void Carries_linear_light_rather_than_the_display_encoding()
     {
         string path = NewPath();
@@ -66,7 +97,7 @@ public sealed class LinearDngTests
 
     /// <summary>Black and white have to land exactly on the ends, or every subsequent grade in the
     /// host starts from a file that cannot reach them.</summary>
-    [Fact]
+    [LibRawFact]
     public void Puts_black_at_zero_and_white_at_full_scale()
     {
         string path = NewPath();
