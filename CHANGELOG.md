@@ -1,88 +1,90 @@
 # OpenRevelare — 更新日志
 
-## v1.7.4（未发布）
+## v1.8.0（未发布）
 
 **改进**
 
-- **黑白负片有了自己的模式**。整卷校准最上面勾「黑白负片（整卷）」，三通道在进密度域前折成一路亮度，反相只用一对端点，出图按构造中性；白平衡、色偏修正、逐通道端点这些对银影没意义的控件一并收起。折叠只发生在渲染时，切回彩色，调过的参数原样还在。
+- **黑白负片模式**。整卷校准顶部勾选「黑白负片（整卷）」；与银影无关的白平衡、色偏与逐通道控件随之隐藏，切回彩色时参数完整保留。
 
-- **Display 的白平衡多了吸管**。在正片上框一块本应中性的地方，直接解出色温 / 色调；它只动这两条滑条，不碰 Cineon 的两端。解算取在 Stage 2 入口（白平衡正是那里的第一步），一次到位。
+- **Display 白平衡新增吸管**。在正片上框选应为中性的区域即可解出色温与色调，不触及 Cineon 两端。
 
-- **示波器加了波形图，溢出判据也能调了**。波形横轴是画面位置，能看出偏色是均匀的还是渐变的——灯板不匀、翻拍架偏斜在直方图上和均匀偏色长得一样。过曝 / 欠曝的两个阈值改为可调（原来固定 2% / 98%），随程序保存。
+- **示波器新增波形图，溢出阈值开放调整**。过曝 / 欠曝由固定的 2% / 98% 改为可调，随程序保存。
 
-- **导出可以指定文件名模板，长边也终于落在你要的那个数上**。模板支持 `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`，没填的字段不留痕迹，对话框实时显示第一张写成什么；尺寸此前按整数倍缩小，要 2048 实际给 1943，现在正好是 2048，并可选允许放大。
+- **导出新增文件名模板，长边尺寸精确落位**。模板字段为 `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`，空字段连同相邻分隔符一并省略；尺寸可选择允许放大。
 
-- **新增线性 DNG 导出**。去掉显示曲线的正片，输出空间的原色写进 DNG 标签，到 Lightroom / Camera Raw 里 RAW 面板可用、高光有东西可拉。它不是相机 RAW 的原样封装，反相与帧编辑都已烘焙进去。
+- **新增线性 DNG 导出**。去除显示曲线的正片，在 Lightroom / Camera Raw 中可用 RAW 面板调整。反相与帧编辑已烘焙其中，并非相机 RAW 的原样封装。
 
-- **【帮助 → 本帧技术报告】**。一页列出这一帧渲染所依赖的全部数字以及每个数字的来源：输入域是读自文件还是按约定推定、相机矩阵有没有、片基是标定所得还是默认值、反相的六个绝对密度。可一键复制。
+- **新增【帮助 → 本帧技术报告】**。逐项列出本帧渲染所依赖的数值及其来源，支持一键复制。
 
-- **放大到 100% 终于能看到真实像素**。锐化补丁的请求用裸路径去查预览缓存，而缓存键在加入色彩管线版本后已变成 `路径|color-pipeline:N|tiff-input:N`，于是整帧分支永远查不中——非分格的卷在那一行直接返回，补丁从未发出，放大只是把预览像素放大，且没有任何提示。
+- **放大至 100% 可见真实像素**。
 
-- **缩放时补丁边缘那圈接缝大幅减少**。补丁原本只覆盖可见区加 10%，稍一平移或缩小就露出"锐利方块 + 周围柔和预览"的边界；现在把渲染预算里没用掉的部分全用来加宽它（每边最多 1.7 倍），深度放大时余量最大，正是接缝最扎眼的地方。
+- **缩放时补丁边缘的接缝显著减少**。
 
-- **放大后局部全分辨率出得更快**。区域解码有 94% 的时间花在整文件 unpack 上，裁剪只省去马赛克，所以按最小框解码是最亏的做法——同样一秒，换来的缓存下一次平移就落空。现在按显存预算取尽可能大的框（整帧不超预算时直接整帧读入），并且复用导出留下的全分辨率缓冲；滚轮缩放加了 140 ms 防抖，一次手势只触发一次解码，而不是在中途位置先解一次。
+- **放大后的局部全分辨率出图更快**。
 
-- **100% 缩放改为源像素 1:1**。此前按预览缓冲计算，11648px 的扫描在「100%」下实际是 1:7，而 100% 唯一的用途（看实焦与颗粒）恰恰在那个比例上做不到。读数现在是每个源像素占多少设备像素，并计入显示器缩放。
+- **100% 缩放改按源像素 1:1 计**，读数计入显示器缩放。
 
-- **图库可以排序了**。侧栏搜索框下面选依据：添加时间（默认，新的在前）、最近修改、最近打开、卷名、卷号、冲洗日期，右边按钮切正倒序，选择会记住。这一项没填的卷永远排在最后；冲洗日期认得出的（`2025.09`、`2025-09-12`、`2025年9月`、`20250912`）按时间排，认不出的排在日期之后。
+- **图库支持排序**。可选依据：添加时间（默认）、最近修改、最近打开、卷名、卷号、冲洗日期，可切换正倒序；该项为空的卷排在末尾。
 
-- **胶片条勾选多帧后，右键「创建虚拟副本」「从卷中移除」对每个勾选帧执行**。没有勾选时仍只作用于当前帧。
+- **胶片条支持批量操作**。勾选多帧后，右键「创建虚拟副本」「从卷中移除」对每个勾选帧执行。
 
-- **虚拟副本复制母帧的全部参数（含 Display 参数和裁切）**，不再重置场景；做半格的另一半、第二种调法时不用从头调。
+- **虚拟副本继承母帧的全部参数**，含 Display 参数与裁切。
 
-- **几何 / 裁切面板翻转按钮旁新增同步按钮**：把本帧的旋转 / 翻转和拉直应用到勾选帧，没有勾选则整卷；不带裁切。
+- **几何 / 裁切面板新增同步按钮**。将本帧的旋转、翻转与拉直应用于勾选帧，未勾选时应用于整卷；不含裁切。
 
-- **预览区右键菜单精简，并标出快捷键**。面板和菜单栏里已有的项（清除裁切、拉线、齿孔遮罩、背景色）不再重复；Ctrl+C / Ctrl+V、J、Ctrl+Z / Ctrl+Y 在菜单和「快捷键…」里都写明了。
+- **预览区右键菜单精简并标注快捷键**。
 
 **修复**
 
-- **满幅扫描（无齿孔、无片基边）不再被当成有灯板、整卷大面积发白**。灯板判据补了两条物理约束：它是胶片周围的硬件，占不满画幅；它是裸光源，不会是片基那种橙色。此前一整张底片会被读成"灯板"，阈值压到下限，而整卷又取各抽样帧中最高的那个，于是开哪一张就白哪一卷。
+- **满幅扫描不再被判为存在灯板、整卷大面积发白**。
 
-- **尼康 High Efficiency / HE★ 的 NEF 不再显示成彩条**。LibRaw 不支持这两种压缩，此前解出的坏像素被当作有效画面显示，看着像原片损坏；现在解码前就认出并明确报错，并说明改用无损压缩或先转 16-bit TIFF。
+- **尼康 High Efficiency / HE★ 的 NEF 不再显示为彩条**。LibRaw 不支持这两种压缩，请改用无损压缩或先转为 16-bit TIFF。
 
-- **从图库重新进入正在打开的卷，不再丢失还没自动保存的裁切等修改**。当前卷不再从文件重新读回，直接回到修片；切卷前的保存会等正在进行的写入完成，写入失败则不切卷并留下原因；工程文件被杀毒软件或索引短暂占用时会自动重试。
+- **从图库重新进入当前卷，不再丢失尚未自动保存的修改**。
 
-- **切卷时中止上一卷的整卷分析**，它的结果不再落到后打开的卷上。
+- **切卷时中止上一卷的整卷分析**，其结果不再落入随后打开的卷。
 
 ---
 
 **Improved**
 
-- **Black-and-white negatives have a mode of their own.** Tick "Black-and-white negative (whole roll)" at the top of Roll calibration: the three channels fold into one luminance signal before the density domain, the inversion uses a single pair of endpoints, and the output is neutral by construction. White balance, the colour-cast tools and the per-channel ends are hidden with it. The fold happens at render time, so switching back to colour brings your grade back untouched.
+- **Black-and-white negatives have a mode of their own.** Tick "Black-and-white negative (whole roll)" at the top of Roll calibration; the white balance, colour-cast and per-channel controls are hidden with it, and switching back to colour restores the grade untouched.
 
-- **The Display white balance has an eyedropper.** Drag over something on the positive that ought to be neutral and it solves temperature and tint, moving those two sliders only and never the Cineon ends. It solves at Stage 2's door, where white balance is actually applied, so one sample lands it.
+- **The Display white balance has an eyedropper.** Drag over something on the positive that ought to be neutral to solve temperature and tint, leaving the Cineon ends alone.
 
-- **A waveform, and adjustable clipping thresholds.** The waveform's x axis is position across the frame, which is what tells a uniform cast from one that drifts — an uneven light board looks exactly like a uniform tint in a histogram. The over/under-exposure ends are now sliders instead of a fixed 2% / 98%, saved with the application.
+- **A waveform, and adjustable clipping thresholds.** The over- and under-exposure ends are now adjustable instead of a fixed 2% / 98%, saved with the application.
 
-- **Export takes a filename template, and the long edge finally lands on the number you asked for.** The template takes `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`, a field left empty leaves no trace, and the dialog shows what the first file will be called. Resizing used to shrink by an integer factor — asked for 2048 it delivered 1943 — and now lands exactly, with enlargement available as a choice.
+- **Export takes a filename template, and the long edge lands exactly on the number asked for.** The template takes `{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`, a field left empty is dropped along with its separator, and enlargement is available as a choice.
 
-- **Linear DNG export.** The finished positive with the display curve removed and the output space's primaries written into the DNG tags, so Lightroom and Camera Raw open it with the raw panel live and something left in the highlights. It is not a repackaged camera RAW: the inversion and the frame edits are baked in.
+- **Linear DNG export.** The finished positive with the display curve removed, which Lightroom and Camera Raw open with the raw panel live. It is not a repackaged camera RAW: the inversion and the frame edits are baked in.
 
-- **Help → Frame technical report.** One page listing every number this frame's rendering rests on and where each came from: whether the input domain was read from the file or taken by convention, whether a camera matrix was available, whether the film base is this roll's calibration or the default, and the inversion's six absolute densities. With a copy button.
+- **Help → Frame technical report.** Every number this frame's rendering rests on, each with its source, with a copy button.
 
-- **Zooming to 100% finally shows real pixels.** The sharp-patch request looked the preview cache up by bare path, but the cache key had grown `path|color-pipeline:N|tiff-input:N` — so the whole-frame branch never matched and an unsplit roll returned before asking for a patch at all. Zooming magnified preview pixels, silently.
+- **Zooming to 100% shows real pixels.**
 
-- **Far less of a seam around the patch while zooming.** It covered the visible area plus 10%, so a small pan or zoom-out exposed the boundary between the sharp rectangle and the soft preview around it. The patch now spends whatever render budget the visible area left unused on being wider (up to 1.7× a side), which is widest at the deep zooms where the seam was most obvious.
+- **Far less of a seam around the patch while zooming.**
 
-- **The full-resolution patch arrives faster when zoomed in.** A region decode spends ~94% of its time on a whole-file unpack — the crop box only saves demosaic — so decoding the smallest box that answers the request is the worst of both: the same second of work, and a cache the next pan misses. The slice is now taken as large as the memory budget allows (the whole frame when it fits), reuses the full-resolution buffer an export leaves behind, and wheel zoom is debounced by 140 ms so one gesture costs one decode instead of two.
+- **The full-resolution patch arrives faster when zoomed in.**
 
-- **100% zoom now means one source pixel per screen pixel.** It was measured against the preview buffer, so "100%" on an 11648 px scan was really 1:7 — and judging focus and grain, the only thing 100% is for, could not be done at it. The readout states device pixels per source pixel and accounts for display scaling.
+- **100% zoom now means one source pixel per screen pixel**, with display scaling accounted for.
 
-- **The library can be sorted.** The picker under the sidebar's search box orders the wall by added time (the default, newest first), last modified, last opened, roll name, roll number or dev date, with a button to reverse it; the choice is remembered. A roll with that field empty always goes last, and a dev date a date can be read out of (`2025.09`, `2025-09-12`, `2025年9月`, `20250912`) sorts chronologically while anything else sorts after all of them.
+- **The library can be sorted.** By added time (the default), last modified, last opened, roll name, roll number or dev date, either direction; a roll whose field is empty goes last.
 
-- **With several frames ticked in the film strip, right-click "Create virtual copy" and "Remove from roll" act on each ticked frame.** With nothing ticked they still act on the current frame alone.
+- **The film strip supports batch actions.** With several frames ticked, right-click "Create virtual copy" and "Remove from roll" act on each ticked frame.
 
-- **A virtual copy now takes every parameter of its parent, Display parameters and crop included,** instead of resetting the scene — the other half of a half-frame scan or a second grade no longer starts from scratch.
+- **A virtual copy now takes every parameter of its parent**, Display parameters and crop included.
 
-- **A sync button next to the flip buttons in the Geometry / crop panel** applies this frame's rotation / flips and straighten to the ticked frames, or to the whole roll when none are ticked; the crop is not included.
+- **A sync button in the Geometry / crop panel** applies this frame's rotation, flips and straighten to the ticked frames, or to the whole roll when none are ticked; the crop is not included.
 
-- **The preview's right-click menu is shorter and shows its shortcuts.** Items that already live in the panel or the menu bar (clear crop, straighten lines, sprocket mask, background colour) are no longer repeated; Ctrl+C / Ctrl+V, J and Ctrl+Z / Ctrl+Y are stated in the menu and under "Shortcuts…".
+- **The preview's right-click menu is shorter and shows its shortcuts.**
 
 **Fixed**
 
-- **Nikon High Efficiency / HE★ NEFs no longer show as colour bars.** LibRaw supports neither codec, and the damaged pixels it returned were being presented as a valid frame, which reads as a corrupt original. They are now recognised before decoding, with a message saying to re-shoot losslessly or convert to 16-bit TIFF first.
+- **A full-bleed scan is no longer read as having a light board and whitened across the roll.**
 
-- **Re-entering the open roll from the library no longer loses edits (crops and more) that autosave had not yet written.** The open roll is no longer re-read from disk; the save before a roll switch waits for a write in flight, a failed write cancels the switch and keeps its reason on the status line, and a project file briefly held by an antivirus scan or indexer is retried.
+- **Nikon High Efficiency / HE★ NEFs no longer show as colour bars.** LibRaw supports neither codec; re-shoot losslessly or convert to 16-bit TIFF first.
+
+- **Re-entering the open roll from the library no longer loses edits that autosave had not yet written.**
 
 - **A roll-wide analysis is cancelled when the roll changes**, so its result no longer lands on the roll opened next.
 
