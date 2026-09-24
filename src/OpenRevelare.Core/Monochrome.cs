@@ -14,8 +14,15 @@ namespace OpenRevelare.Core;
 ///
 /// WHAT THIS DOES INSTEAD. Fold the three samples into one signal before the density conversion,
 /// and give the inversion ONE pair of endpoints instead of three. After that the whole existing
-/// pipeline applies unchanged and its output is neutral by construction rather than by correction:
-/// there is no cast to chase, because the three channels are the same number.
+/// pipeline applies unchanged and the INVERSION's output is neutral by construction rather than by
+/// correction: there is no cast to chase, because the three channels are the same number.
+///
+/// WHAT STILL COMES AFTER IT. A print-film LUT sits between the inversion and Stage 2, and a colour
+/// stock has a cast of its own — so a black-and-white roll rendered through Kodak 2383 is NOT
+/// neutral, and should not be: printing black-and-white on colour paper is a real thing people do,
+/// and the program has no business refusing it. The guarantee is therefore exact and narrow: neutral
+/// under the standard display rendering, and neutral plus whatever stock was asked for otherwise.
+/// The frame report says so when both are in play.
 ///
 /// THE FOLD IS LUMINANCE-WEIGHTED (Rec.709), IN LINEAR LIGHT. Of the obvious candidates it is the
 /// least noisy: green alone throws away two thirds of the samples (and on a Bayer sensor green

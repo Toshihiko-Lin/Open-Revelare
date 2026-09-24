@@ -211,10 +211,16 @@ The "**Black-and-white negative (whole roll)**" checkbox at the top of the panel
 of film this roll is. It applies to the whole roll.
 
 With it on, the three channels are folded into one luminance signal (Rec.709 weights) **before** the
-density domain, the inversion uses **one** pair of endpoints, and the output is neutral by
+density domain, the inversion uses **one** pair of endpoints, and the INVERSION's output is neutral by
 construction — not because a cast was corrected, but because there is nothing left to be cast. The
-controls that mean nothing to a silver image — white balance, the colour-cast tools, the
-per-channel ends — are hidden with it.
+controls that mean nothing to a silver image — white balance, Deep-WB, the per-channel ends — are
+hidden with it. **The grey-card sampler stays**: it sets the exposure anchor (Cineon standard grey),
+and a black-and-white roll needs that more than a colour one, having no colour left to judge by.
+
+> **One exception: print film emulation.** The LUT sits after the inversion and a colour stock has a
+> cast of its own, so a black-and-white roll rendered through Kodak 2383 is **not** neutral. That is
+> deliberate — printing black and white on colour paper is a real practice. For strict neutrality,
+> leave the print film on "standard display rendering".
 
 > **Why not "process it in colour and desaturate".** The six degrees of freedom exist for three dye
 > layers. A black-and-white negative's three channels carry the same silver image, and what differs

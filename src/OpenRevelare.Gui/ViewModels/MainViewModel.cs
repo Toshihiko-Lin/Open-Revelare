@@ -3473,15 +3473,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     int i = (y * width + x) * 3;
                     patch[at++] = d[i]; patch[at++] = d[i + 1]; patch[at++] = d[i + 2];
                 }
-            OutputRender.Decode(patch, CurrentOutputSpace);
-
-            double sumR = 0, sumG = 0, sumB = 0;
-            for (int i = 0; i < patch.Length; i += 3)
+            if (NeutralPatch.MeanOfUnclipped(patch, CurrentOutputSpace) is not { } reading)
             {
-                sumR += patch[i]; sumG += patch[i + 1]; sumB += patch[i + 2];
+                StatusText = Loc.T("白平衡吸管：取样区域几乎全是溢出像素（高光或齿孔填白），换一块有层次的中性面");
+                return;
             }
-
-            double[] mean = { sumR / n, sumG / n, sumB / n };
+            double[] mean = reading.Mean;
+            int clipped = reading.Clipped;
             const double Floor = 1e-5;   // a patch this dark carries no colour to read
             if (mean[0] < Floor || mean[1] < Floor || mean[2] < Floor)
             {
@@ -3500,10 +3498,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Temp = clampedTemp;
             Tint = clampedTint;
 
-            bool clipped = Math.Abs(temp - clampedTemp) > 0.5 || Math.Abs(tint - clampedTint) > 0.5;
-            StatusText = clipped
+            bool atLimit = Math.Abs(temp - clampedTemp) > 0.5 || Math.Abs(tint - clampedTint) > 0.5;
+            string dropped = clipped > 0
+                ? Loc.F($"（已跳过 {clipped * 100.0 / n:F0}% 的溢出像素）")
+                : "";
+            StatusText = atLimit
                 ? Loc.F($"白平衡吸管 → 色温 {clampedTemp:F0} / 色调 {clampedTint:F0}（已到滑条尽头，偏色超出两条滑条能表达的范围，余下的请回【整卷校准】的两端）")
-                : Loc.F($"白平衡吸管 → 色温 {clampedTemp:F0} / 色调 {clampedTint:F0}");
+                : Loc.F($"白平衡吸管 → 色温 {clampedTemp:F0} / 色调 {clampedTint:F0}") + dropped;
         });
 
     /// <summary>Sample the darkest luma in a rect → 黑场 slider.</summary>

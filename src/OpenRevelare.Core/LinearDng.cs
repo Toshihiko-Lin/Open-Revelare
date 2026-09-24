@@ -24,9 +24,15 @@ namespace OpenRevelare.Core;
 ///
 /// STRUCTURE. DNG asks for a reduced-size preview in IFD0 and the real image in a SubIFD, which is
 /// also what readers look for first, so that is what this writes: an 8-bit RGB thumbnail in IFD0
-/// carrying the colour tags, and the 16-bit LinearRaw in one SubIFD. Both are uncompressed — the
-/// file is an intermediate on its way into another program, and a deflate pass would trade its one
-/// virtue (nothing between the pixels and the reader) for disk space the user did not ask to save.
+/// carrying the colour tags, and the 16-bit LinearRaw in one SubIFD.
+///
+/// Both strips are UNCOMPRESSED, and that is a decision rather than an omission. DNG allows deflate
+/// (compression 8) and a 60 MP frame at 360 MB is a real argument for it — but the LibRaw this
+/// program ships is built without zlib, so it answers a deflated DNG with LIBRAW_DATA_ERROR
+/// (measured, not assumed: the round-trip test below failed on exactly that). A linear DNG is also
+/// an INPUT route here — scanner linear DNGs come in through the same decoder — so writing a
+/// variant the program cannot read back would mean an export that will not re-import. A large file
+/// beats a file our own decoder rejects. Revisit if LibRaw is ever rebuilt with zlib.
 /// </summary>
 public static class LinearDng
 {
@@ -82,6 +88,10 @@ public static class LinearDng
             Entry.Rationals(50728, 1d, 1d, 1d),                    // AsShotNeutral: already balanced
             Entry.SignedRationals(50721, ColorMatrixD50(space)),   // ColorMatrix1
             Entry.Short(50778, 23),                                // CalibrationIlluminant1: D50
+            // The PREVIEW's profile, not the raw's: IFD0 holds display-referred pixels encoded in
+            // the output space, and a file browser that assumed sRGB would show an Adobe RGB or P3
+            // roll's thumbnail undersaturated. The raw itself is described by ColorMatrix1 above.
+            Entry.Undefined(34675, IccProfiles.Build(space)),       // InterColorProfile
         };
 
         var subIfd = new List<Entry>
@@ -90,7 +100,7 @@ public static class LinearDng
             Entry.Long(256, (uint)linear.Width),
             Entry.Long(257, (uint)linear.Height),
             Entry.Shorts(258, 16, 16, 16),
-            Entry.Short(259, 1),
+            Entry.Short(259, 1),                                   // Compression: none (see the remarks)
             Entry.Short(262, PhotometricLinearRaw),
             Entry.Placeholder(273, EntryType.Long, 1),             // StripOffsets — patched below
             Entry.Short(277, 3),
@@ -153,7 +163,10 @@ public static class LinearDng
     // one strip each, little-endian — so the layout can be computed in one pass and written in the
     // next.
 
-    private enum EntryType : ushort { Byte = 1, Ascii = 2, Short = 3, Long = 4, Rational = 5, SignedRational = 10 }
+    private enum EntryType : ushort
+    {
+        Byte = 1, Ascii = 2, Short = 3, Long = 4, Rational = 5, Undefined = 7, SignedRational = 10,
+    }
 
     /// <summary>One IFD entry. <see cref="Payload"/> is the value as bytes; anything over four of
     /// them is written in the value area and referred to by offset.</summary>
@@ -172,6 +185,7 @@ public static class LinearDng
         public static Entry Longs(ushort tag, params uint[] values)
             => new(tag, EntryType.Long, (uint)values.Length, values.SelectMany(BitConverter.GetBytes).ToArray());
         public static Entry Bytes(ushort tag, params byte[] values) => new(tag, EntryType.Byte, (uint)values.Length, values);
+        public static Entry Undefined(ushort tag, byte[] values) => new(tag, EntryType.Undefined, (uint)values.Length, values);
 
         public static Entry Ascii(ushort tag, string text)
         {

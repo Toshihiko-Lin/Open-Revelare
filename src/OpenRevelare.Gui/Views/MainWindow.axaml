@@ -1042,12 +1042,14 @@
                                      两个入口解的是同一个量：灰卡是测量（一个已知中性、已知落点 Cineon 470 的点），
                                      智能色偏修正是神经网络的推测。答案都写进亮端三个数（反相只从那里读白端），
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
-                                <Expander Header="{i18n:T '色偏修正'}" IsExpanded="True" Tag="3"
-                                          IsVisible="{Binding IsColourRoll}"
-                                          ToolTip.Tip="{i18n:T '解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入 D_max 的三个密度，与高光采样互为替代，后执行者生效。'}">
+                                <!-- Header and hint follow the film type: the grey card is an exposure
+                                     anchor on a black-and-white roll, not a cast correction. -->
+                                <Expander Header="{Binding CastCardHeader}" IsExpanded="True" Tag="3"
+                                          ToolTip.Tip="{Binding CastCardHint}">
                                     <StackPanel Spacing="2">
                                         <Grid ColumnDefinitions="*,*">
-                                            <ToggleButton Name="GreyBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                            <ToggleButton Name="GreyBtn" Grid.Column="0" Grid.ColumnSpan="{Binding GreyCardSpan}"
+                                                          Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleNeutralGreyClick" IsEnabled="{Binding HasImage}"
                                                           ToolTip.Tip="{i18n:T '框选画面中拍到的灰卡，将其定为 Cineon 标准灰：三通道落在码值 470，色偏与曝光位置一同确定。与高光采样互为替代，后执行者生效。'}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -1056,6 +1058,7 @@
                                                 </StackPanel>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                                    IsVisible="{Binding IsColourRoll}"
                                                     Click="OnAutoWbAiClick" IsEnabled="{Binding HasImage}"
                                                     ToolTip.Tip="{i18n:T 'Deep-WB 神经网络推断色偏（不需画面中有中性物）。建议先裁掉齿孔/片边。'}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">

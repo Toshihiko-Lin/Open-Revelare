@@ -108,9 +108,17 @@ public sealed partial class MainViewModel
         // red most and blue least. A reading that does not is a reading taken off something that
         // is not the base — the board, a fogged frame, the surround — and saying so here is
         // cheaper than the hour it otherwise costs.
-        sb.AppendLine(tb[0] >= tb[1] && tb[1] >= tb[2]
-            ? Loc.T("  形态　　R ≥ G ≥ B，与彩负橙色片基一致")
-            : Loc.T("  形态　　不是 R ≥ G ≥ B —— 彩负片基不该是这个次序，请确认采样取到的是片基而非灯板或画面"));
+        //
+        // ON A BLACK-AND-WHITE ROLL THE RULE DOES NOT APPLY AND MUST NOT BE PRINTED. A silver
+        // image has no mask, so the three readings differ only by the sensor and the light, in
+        // whatever order those happen to fall — and the check would then accuse a perfectly good
+        // roll of having sampled the light board. What matters there is which reading is used, so
+        // that is what it says instead.
+        sb.AppendLine(Monochrome
+            ? Loc.F($"  形态　　黑白卷，不适用色罩次序；渲染只用 G 的读数 {tb[1]:F4}（三通道已折成一路）")
+            : tb[0] >= tb[1] && tb[1] >= tb[2]
+                ? Loc.T("  形态　　R ≥ G ≥ B，与彩负橙色片基一致")
+                : Loc.T("  形态　　不是 R ≥ G ≥ B —— 彩负片基不该是这个次序，请确认采样取到的是片基而非灯板或画面"));
         sb.AppendLine(Math.Abs(tb[0] - 1.0) < 1e-9 && Math.Abs(tb[1] - 1.0) < 1e-9 && Math.Abs(tb[2] - 1.0) < 1e-9
             ? Loc.T("  来源　　默认值 1/1/1（未采样：色罩由黑端承载，或这卷尚未标定）")
             : Loc.T("  来源　　本卷标定所得（采样或自动分析）"));
@@ -119,8 +127,23 @@ public sealed partial class MainViewModel
     private void AppendEndpoints(StringBuilder sb)
     {
         sb.AppendLine();
-        sb.AppendLine(Loc.T("【反相的六个数（绝对密度）】"));
+        sb.AppendLine(Monochrome
+            ? Loc.T("【反相的两个数（绝对密度）· 黑白】")
+            : Loc.T("【反相的六个数（绝对密度）】"));
         double[] dmin = DMinPerChannel, dmax = DMaxPerChannel;
+        if (Monochrome)
+        {
+            // The stored triples are whatever the roll last measured; the render collapses them
+            // onto green. Printing all six here would show numbers the picture does not use.
+            sb.AppendLine(Loc.F($"  D_min　 {dmin[1]:F3}　（黑端，片基一侧）"));
+            sb.AppendLine(Loc.F($"  D_max　 {dmax[1]:F3}　（白端，全曝光一侧）"));
+            sb.AppendLine(Loc.F($"  跨度　　{dmax[1] - dmin[1]:F3}　（两端之差＝反差；黑白卷没有通道间之差可言）"));
+            if (dmax[1] - dmin[1] <= 0)
+                sb.AppendLine(Loc.T("  ⚠ 白端不高于黑端，无法反相，请重新标定两端"));
+            sb.AppendLine(Loc.T("  折叠　　三通道按 Rec.709 加权折成一路亮度后再进密度域"));
+            return;
+        }
+
         sb.AppendLine(Loc.F($"  D_min　 R {dmin[0]:F3} · G {dmin[1]:F3} · B {dmin[2]:F3}　（黑端，片基一侧）"));
         sb.AppendLine(Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（白端，全曝光一侧）"));
 
@@ -138,6 +161,11 @@ public sealed partial class MainViewModel
         sb.AppendLine(HasPrintLut
             ? Loc.F($"  胶片风格　{PrintLutNames[PrintLutIndex]}（{PrintLutContractText}）")
             : Loc.T("  胶片风格　标准显示渲染（无印片 LUT）"));
+        // A print stock carries its own cast, and on a black-and-white roll that is the ONE thing
+        // that can put colour back into a picture the inversion made neutral. Said here because
+        // "why is my black-and-white frame warm" has exactly one answer and this is it.
+        if (Monochrome && HasPrintLut)
+            sb.AppendLine(Loc.T("  注意　　黑白卷叠了印片 LUT：中性是反相的结果，印片自身的色偏会加在其上"));
         sb.AppendLine(ExportHdrLimitStops > 0d
             ? Loc.F($"  HDR　　　 已开，上限 +{ExportHdrLimitStops:0.0} 档")
             : Loc.T("  HDR　　　 关"));

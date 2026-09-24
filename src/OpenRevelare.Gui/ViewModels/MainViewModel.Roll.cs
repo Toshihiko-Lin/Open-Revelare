@@ -133,6 +133,9 @@ public partial class MainViewModel
             OnPropertyChanged(nameof(Monochrome));
             OnPropertyChanged(nameof(IsColourRoll));
             OnPropertyChanged(nameof(MonochromeHint));
+            OnPropertyChanged(nameof(CastCardHeader));
+            OnPropertyChanged(nameof(CastCardHint));
+            OnPropertyChanged(nameof(GreyCardSpan));
 
             foreach (RollFrame f in Frames) f.Params.Monochrome = value;
             if (Frames.Count > 0) MarkRollDirty();
@@ -155,13 +158,32 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(Monochrome));
         OnPropertyChanged(nameof(IsColourRoll));
         OnPropertyChanged(nameof(MonochromeHint));
+        OnPropertyChanged(nameof(CastCardHeader));
+        OnPropertyChanged(nameof(CastCardHint));
+        OnPropertyChanged(nameof(GreyCardSpan));
     }
 
     /// <summary>The inverse, for binding visibility of the colour-only controls.</summary>
     public bool IsColourRoll => !_monochrome;
 
+    // The 色偏修正 card holds two tools that are NOT the same kind of thing, and hiding the card
+    // wholesale on a black-and-white roll took the wrong one away. Deep-WB infers a COLOUR cast and
+    // has nothing to infer here. The grey card is an EXPOSURE anchor — it puts a measured neutral on
+    // Cineon's standard grey — and a black-and-white roll needs that more than a colour one does,
+    // because it has no colour left to judge exposure by. So the card stays and only Deep-WB goes.
+
+    /// <summary>What the card is FOR, which is not the same thing on the two kinds of film.</summary>
+    public string CastCardHeader => _monochrome ? Loc.T("灰卡锚点") : Loc.T("色偏修正");
+
+    public string CastCardHint => _monochrome
+        ? Loc.T("把画面里拍到的灰卡定为 Cineon 标准灰（码值 470），也就是确定这一卷的曝光位置。黑白片没有色偏可解，但灰卡仍然是唯一客观的曝光参照。")
+        : Loc.T("解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入 D_max 的三个密度，与高光采样互为替代，后执行者生效。");
+
+    /// <summary>The grey-card button takes the whole row once Deep-WB is gone from beside it.</summary>
+    public int GreyCardSpan => _monochrome ? 2 : 1;
+
     public string MonochromeHint => _monochrome
-        ? Loc.T("三通道折成一路亮度后反相，只用一对端点；白平衡与逐通道端点对银影没有意义，已收起。")
+        ? Loc.T("三通道折成一路亮度后反相，只用一对端点；白平衡与逐通道端点对银影没有意义，已收起。印片风格仍会叠加它自己的色偏。")
         : Loc.T("彩色负片：橙色片基与三层染料，六个自由度各自独立。");
 
     // ══ HDR ═══════════════════════════════════════════════════════════════════

@@ -195,8 +195,9 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 - **窄带光源解耦（Path A）**——用 LED / 荧光灯箱翻拍时，三通道之间的串扰可以靠一组 R/G/B 标定帧解算出 3×3 矩阵消掉。做法源自 [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **自动标定**——从整卷估片基、齿孔阈值、暗端谷底、`d_max`、亮部白平衡
 - **智能色偏修正**——DeepWB 神经网络一键估算色偏（模型单独授权，[见下](#智能色偏修正模型--单独授权请读一下)）
+- **黑白负片模式**——整卷开关。三通道在进密度域前折成一路亮度，反相只用一对端点，结果按构造中性；对银影没有意义的白平衡与逐通道控件随之收起，灰卡采样保留（它定的是曝光位置）
 - **预反转校正**——LCC 平场、镜头畸变、暗角、齿孔遮罩，全部在线性光域完成
-- **Stage 2 调整**——曝光 / 色阶 / 对比度 / 高光阴影 / PCHIP 曲线 / 饱和度
+- **Stage 2 调整**——曝光 / 色阶 / 对比度 / 高光阴影 / PCHIP 曲线 / 饱和度；白平衡吸管点一块中性面即解出色温色调
 
 ### 工作流
 
@@ -205,6 +206,8 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 - **整卷同步**——虚拟副本、整卷或勾选帧同步标定与场景
 - **画幅预设**——135 全幅（含边框）/ 半格 / XPan / 645 / 6×6 / 6×7 / 6×9 / 6×12
 - **80 步撤销重做**（整卷快照，连续微调自动合并）
+- **示波器**——直方图与波形图切换；过曝 / 欠曝指示的两端阈值可调
+- **本帧技术报告**——输入域怎么判定的、片基从哪来、反相的六个数是多少，逐项列出来源，可一键复制
 - **冲印店风格整版印样**，底部自带卷标识条
 
 ### 输入输出
@@ -214,7 +217,8 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 | **RAW 输入** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ 等（LibRaw） |
 | **扫描仪输入** | 哈苏 Flextight `.fff`（按内容识别，自动线性化） |
 | **其他输入** | TIFF / JPEG / PNG |
-| **导出** | 16-bit TIFF、JPEG，三种输出色彩空间；另可导出保留扩展范围的 32-bit 浮点场景线性 ACEScg TIFF；默认嵌入与实际像素一致的 ICC，仅标准 sRGB 可显式省略 |
+| **导出** | 16-bit TIFF、JPEG、**线性 DNG**（去掉显示曲线的正片，交 Lightroom / Camera Raw 继续调色），三种输出色彩空间；另可导出保留扩展范围的 32-bit 浮点场景线性 ACEScg TIFF；默认嵌入与实际像素一致的 ICC，仅标准 sRGB 可显式省略 |
+| **导出选项** | 文件名模板（`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`）、长边精确落位、重名策略（另存 / 覆盖 / 跳过） |
 
 ## 工作原理
 

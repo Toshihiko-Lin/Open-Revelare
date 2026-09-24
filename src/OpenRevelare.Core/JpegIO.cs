@@ -89,7 +89,8 @@ public static class JpegIO
         ImageBuffer scaled = full;
         var (file, fit) = FitToSize(full.Width, full.Height, quality, maxBytes, (maxEdge, q) =>
         {
-            if (Math.Max(scaled.Width, scaled.Height) > maxEdge) scaled = Resample.Box(full, maxEdge);
+            if (Math.Max(scaled.Width, scaled.Height) > maxEdge)
+                scaled = Resample.ToLongEdge(full, maxEdge, allowUpscale: false);
             return Encode(scaled, q, description, profileBytes, xmp: null);
         });
         ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
@@ -146,8 +147,10 @@ public static class JpegIO
 
         for (int factor = 1; ; factor++)
         {
-            // Resample.Box picks its factor as ceil(edge / maxEdge); this ceiling makes it pick
-            // exactly `factor`, so the size steps are the same ladder the long-edge option uses.
+            // The search ladder: the source edge divided by 1, 2, 3 … Each step is hit EXACTLY by
+            // Resample.ToLongEdge, so the size the fit reports is the size the file has — it used
+            // to be an integer box factor, which landed at or under the step and made "长边 2048 +
+            // 不超过 10 MB" produce a number neither option had asked for.
             int maxEdge = (sourceEdge + factor - 1) / factor;
             if (factor > 1 && (width / factor < 1 || height / factor < 1 || maxEdge < 64))
             {
@@ -241,8 +244,12 @@ public static class JpegIO
         {
             if (Math.Max(scaledBase.Pixels.Width, scaledBase.Pixels.Height) > maxEdge)
             {
-                scaledBase = sdrBase.WithPixels(Resample.Box(sdrBase.Pixels, maxEdge));
-                scaledHdr = hdr.WithPixels(Resample.Box(hdr.Pixels, maxEdge));
+                // Both layers through the same call, as everywhere else: a gain map is only valid
+                // against a base of exactly its own dimensions.
+                scaledBase = sdrBase.WithPixels(
+                    Resample.ToLongEdge(sdrBase.Pixels, maxEdge, allowUpscale: false));
+                scaledHdr = hdr.WithPixels(
+                    Resample.ToLongEdge(hdr.Pixels, maxEdge, allowUpscale: false));
             }
             return EncodeGainMapJpeg(
                 scaledBase, scaledHdr, baseSpace, target, q, description, profileBytes);

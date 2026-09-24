@@ -198,8 +198,9 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 - **Narrowband source decoupling (Path A)** — for LED / fluorescent light-box copying, inter-channel crosstalk is solved out with a 3×3 matrix from a set of R/G/B calibration frames. Method from [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)
 - **Auto-calibration** — estimates base, sprocket threshold, dark-end valley, `d_max`, highlight white balance from the roll
 - **Smart white balance** — DeepWB neural network estimates the white point in one click (model separately licensed, [see below](#smart-white-balance-model--separate-licence-read-this))
+- **Black-and-white mode** — a whole-roll switch. The three channels fold into one luminance signal before the density domain and the inversion uses a single pair of endpoints, so its output is neutral by construction; white balance and the per-channel controls, which mean nothing to a silver image, are hidden with it, while the grey-card sampler stays because it sets the exposure anchor
 - **Pre-inversion corrections** — LCC flat-field, lens distortion, vignetting, sprocket mask; all done in the linear-light domain
-- **Stage 2 adjustments** — exposure / levels / contrast / shadows-highlights / PCHIP curves / saturation
+- **Stage 2 adjustments** — exposure / levels / contrast / shadows-highlights / PCHIP curves / saturation; a white-balance eyedropper solves temperature and tint from any patch that ought to be neutral
 
 ### Workflow
 
@@ -208,6 +209,8 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 - **Roll sync** — virtual copies, whole-roll or per-frame parameter sync
 - **Format presets** — 135 full frame (with borders) / half frame / XPan / 645 / 6×6 / 6×7 / 6×9 / 6×12
 - **80-step undo/redo** (roll snapshots, consecutive tweaks merged)
+- **Scopes** — histogram and waveform, switched in place; the over/under-exposure overlay's two ends are adjustable
+- **Frame technical report** — how the input domain was settled, where the film base came from, what the inversion's six numbers are, each with its source and a copy button
 - **Lab-style full-roll contact sheets** with a roll-identifier strip at the bottom
 
 ### Input & output
@@ -217,7 +220,8 @@ There is no Save button — everything is written automatically to a `.ncproj` n
 | **RAW input** | DNG / NEF / CR2 / CR3 / ARW / RAF / RW2 / ORF / PEF / IIQ etc. (LibRaw) |
 | **Scanner input** | Hasselblad Flextight `.fff` (detected by content, linearised automatically) |
 | **Other input** | TIFF / JPEG / PNG |
-| **Export** | 16-bit TIFF, JPEG, three output colour spaces; plus a 32-bit floating-point scene-linear ACEScg TIFF that preserves extended range; a matching ICC is embedded by default, and only standard sRGB may explicitly omit it |
+| **Export** | 16-bit TIFF, JPEG, **linear DNG** (the finished positive with the display curve removed, for grading on in Lightroom / Camera Raw), three output colour spaces; plus a 32-bit floating-point scene-linear ACEScg TIFF that preserves extended range; a matching ICC is embedded by default, and only standard sRGB may explicitly omit it |
+| **Export options** | Filename template (`{Original}` / `{Seq}` / `{Roll}` / `{RollNo}` / `{Camera}` / `{Film}` / `{Date}`), an exact long edge, and a name-collision policy (keep both / replace / skip) |
 
 ## How it works
 

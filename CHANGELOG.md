@@ -4,7 +4,7 @@
 
 **改进**
 
-- **黑白负片模式**。整卷校准顶部勾选「黑白负片（整卷）」；与银影无关的白平衡、色偏与逐通道控件随之隐藏，切回彩色时参数完整保留。
+- **黑白负片模式**。整卷校准顶部勾选「黑白负片（整卷）」；与银影无关的白平衡、智能色偏修正与逐通道控件随之隐藏，灰卡采样保留（它定的是曝光位置），切回彩色时参数完整保留。选用印片风格时，印片自身的色偏仍会叠加在中性结果之上。
 
 - **Display 白平衡新增吸管**。在正片上框选应为中性的区域即可解出色温与色调，不触及 Cineon 两端。
 
@@ -48,7 +48,7 @@
 
 **Improved**
 
-- **Black-and-white negatives have a mode of their own.** Tick "Black-and-white negative (whole roll)" at the top of Roll calibration; the white balance, colour-cast and per-channel controls are hidden with it, and switching back to colour restores the grade untouched.
+- **Black-and-white negatives have a mode of their own.** Tick "Black-and-white negative (whole roll)" at the top of Roll calibration; white balance, Deep-WB and the per-channel controls are hidden with it, while the grey-card sampler stays because it sets the exposure anchor. Switching back to colour restores every parameter. A print film emulation still adds its own cast on top of the neutral result.
 
 - **The Display white balance has an eyedropper.** Drag over something on the positive that ought to be neutral to solve temperature and tint, leaving the Cineon ends alone.
 

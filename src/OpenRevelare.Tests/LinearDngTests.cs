@@ -103,6 +103,47 @@ public sealed class LinearDngTests
         Assert.Equal(d50[1], d50[2], 3);
     }
 
+    /// <summary>
+    /// The embedded preview is display-referred in the ROLL's output space, so it carries that
+    /// space's profile — without it a file browser reads an Adobe RGB or P3 roll's thumbnail as
+    /// sRGB and shows it undersaturated. Checked by the profile's own signature rather than by
+    /// re-parsing the IFD: what matters is that the bytes are in the file and the file still
+    /// decodes (which the tests above establish), not where exactly the tag sits.
+    /// </summary>
+    [Theory]
+    [InlineData("sRGB")]
+    [InlineData("AdobeRGB")]
+    [InlineData("DisplayP3")]
+    public void Tags_the_preview_with_the_output_spaces_profile(string spaceName)
+    {
+        string path = NewPath();
+        ColorSpaceDef space = ColorSpaces.ByName(spaceName, ColorSpaces.Srgb);
+
+        LinearDng.Write(Encoded(64, 48, (_, _) => (0.5f, 0.5f, 0.5f)), space, path);
+
+        byte[] file = File.ReadAllBytes(path);
+        byte[] profile = IccProfiles.Build(space);
+        Assert.Contains("acsp"u8.ToArray(), Window(file));          // an ICC profile is in there
+        Assert.True(IndexOf(file, profile) >= 0, "the space's own profile bytes are not in the file");
+    }
+
+    /// <summary>Every 4-byte window of the file, for a signature search.</summary>
+    private static IEnumerable<byte[]> Window(byte[] file)
+    {
+        for (int i = 0; i + 4 <= file.Length; i++) yield return file[i..(i + 4)];
+    }
+
+    private static int IndexOf(byte[] haystack, byte[] needle)
+    {
+        for (int i = 0; i + needle.Length <= haystack.Length; i++)
+        {
+            int j = 0;
+            while (j < needle.Length && haystack[i + j] == needle[j]) j++;
+            if (j == needle.Length) return i;
+        }
+        return -1;
+    }
+
     [Fact]
     public void Leaves_the_buffer_it_was_given_untouched()
     {
