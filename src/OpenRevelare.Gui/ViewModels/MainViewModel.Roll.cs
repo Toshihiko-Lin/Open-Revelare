@@ -1118,6 +1118,12 @@ public partial class MainViewModel
         return CurrentFrame is { } cur ? new List<RollFrame> { cur } : new List<RollFrame>();
     }
 
+    /// <summary>Finish a one-shot batch selection after its command has run.</summary>
+    private void ClearStripSelection()
+    {
+        foreach (RollFrame frame in Frames) frame.IsSelected = false;
+    }
+
     /// <summary>
     /// A virtual copy of each target frame (the ticked frames, else the current one), inserted
     /// right after its original. A single copy is selected so it can be adjusted at once; a batch
@@ -1130,6 +1136,7 @@ public partial class MainViewModel
     {
         List<RollFrame> parents = StripTargets();
         if (parents.Count == 0) return;
+        bool usedSelection = parents.Any(f => f.IsSelected);
 
         CommitUndo();
         CommitLiveParams(CurrentFrame);   // capture live edits before anything is cloned
@@ -1148,6 +1155,7 @@ public partial class MainViewModel
         StatusText = parents.Count == 1
             ? Loc.T("已创建虚拟副本（参数已复制）")
             : Loc.F($"已为 {parents.Count} 个勾选帧各创建虚拟副本");
+        if (usedSelection) ClearStripSelection();
         RestartThumbnails();
     }
 
@@ -1305,6 +1313,7 @@ public partial class MainViewModel
         StatusText = targets.Count > 1
             ? (copies > 0 ? Loc.F($"已移除 {targets.Count} 帧及其 {copies} 个副本") : Loc.F($"已移除 {targets.Count} 帧"))
             : (copies > 0 ? Loc.F($"已移除该帧及其 {copies} 个副本") : Loc.T("已从卷中移除该帧"));
+        ClearStripSelection();
     }
 
     /// <summary>

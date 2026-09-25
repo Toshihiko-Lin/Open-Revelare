@@ -614,8 +614,9 @@ current monitor ICC before a BGRA8 upload, so the application owns that single t
 contract belongs to the preview surface: moving it between displays, or changing the profile, DPI,
 or Advanced Color state, invalidates presentation only and cannot alter the render/export
 fingerprint. An invalid monitor ICC or presenter failure must visibly fall back to emergency sRGB8
-with diagnostics rather than claim WYSIWYG. The macOS final hop remains for a later dedicated
-presenter.
+with diagnostics rather than claim WYSIWYG. Linux explicitly uses Avalonia's SDR sRGB8 fallback;
+HDR rendering and export remain available, while HDR display preview waits for compositor-thread
+HDR GPU interop from Avalonia instead of accessing raw Wayland handles.
 
 ### 6.7 Roll-wide consistency
 

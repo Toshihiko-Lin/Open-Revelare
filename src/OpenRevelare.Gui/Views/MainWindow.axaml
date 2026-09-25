@@ -349,7 +349,7 @@
                                             IsHitTestVisible="False" />
                                     <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Left"
                                               VerticalAlignment="Top" Margin="2"
-                                              ToolTip.Tip="{i18n:T '勾选为「应用到勾选帧」的目标'}" />
+                                              ToolTip.Tip="{i18n:T '批量操作目标；Ctrl 点选，Shift 连选'}" />
                                 </Grid>
                                 <!-- Left-aligned, not centred: forty file names down a column are
                                      read by their differences, and centring puts the difference

@@ -177,6 +177,10 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 FUSE is bundled; no libfuse2 needed. If it still won't start, run with `--appimage-extract-and-run`.
 
+> Linux currently previews through Avalonia's SDR surface. HDR editing, gain-map JPEG and float32
+> TIFF export remain available, but HDR display preview is waiting for safe compositor-thread HDR
+> GPU interop from Avalonia; the application will not bypass the framework through private Wayland handles.
+
 </details>
 
 ## Quick start

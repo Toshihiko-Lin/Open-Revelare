@@ -174,6 +174,9 @@ chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
 
 本包自带 FUSE，不需要额外装 libfuse2。若系统实在起不来，加 `--appimage-extract-and-run` 参数运行。
 
+> Linux 当前使用 Avalonia 的 SDR surface 预览。HDR 调整、增益图 JPEG 与 float32 TIFF 导出仍然可用，
+> 但 HDR 屏幕预览等待 Avalonia 提供安全的合成线程 HDR GPU interop；不会通过私有 Wayland handle 绕过框架。
+
 </details>
 
 ## 快速上手

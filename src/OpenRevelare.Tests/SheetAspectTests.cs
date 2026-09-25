@@ -112,6 +112,24 @@ public class SheetAspectTests
         Assert.Equal(0, l.Rows * l.Cols - 36);
     }
 
+    /// <summary>A short final strip is preferable to shrinking all 24 frames just to make a
+    /// rectangular multiplication table. This is both denser and faithful to physical sheets,
+    /// whose final strip simply stops after the final exposure.</summary>
+    [Fact]
+    public void Four_three_prefers_the_denser_five_strip_contact_print()
+    {
+        var opt = new SheetComposer.Options
+        {
+            Aspect = SheetAspect.FourThree,
+            Orientation = SheetOrientation.Landscape,
+        };
+        ContactSheet.Layout l = SheetComposer.Plan(Roll(24), 2048, opt);
+
+        Assert.Equal(5, l.Cols);
+        Assert.Equal(5, l.Rows);
+        Assert.Equal(1, l.Rows * l.Cols - 24);
+    }
+
     /// <summary>Whichever way round it is read, the page comes out on the requested side of
     /// square. Auto included — a band still has a side.</summary>
     [Theory]
@@ -404,5 +422,60 @@ public class SheetAspectTests
             Assert.True(l.Width <= 2048 && l.Height <= 2048,
                         $"{want}/{o} n={n}: grid {l.Width}x{l.Height} past the cap");
         }
+    }
+
+    /// <summary>
+    /// The photographs, not the surround, are the visual subject. Across normal roll lengths,
+    /// source orientations and every selectable page shape, actual image pixels remain the page's
+    /// largest single element. This catches both an oversized footer and a planner that chooses
+    /// rows/columns by nominal aspect while leaving a smaller photo grid, while allowing the lab
+    /// record and brand lock-up enough size to be legible on a physical print.
+    /// </summary>
+    [Fact]
+    public void Photographs_occupy_most_of_a_normal_sheet()
+    {
+        foreach (int n in new[] { 12, 21, 24, 36, 37, 72 })
+        foreach (var (w, h) in new[] { (300, 200), (240, 240), (200, 300) })
+        foreach (SheetAspect a in Enum.GetValues<SheetAspect>())
+        foreach (SheetOrientation o in Enum.GetValues<SheetOrientation>())
+        {
+            var roll = Roll(n, w, h);
+            var opt = new SheetComposer.Options { Aspect = a, Orientation = o };
+            ContactSheet.Layout l = SheetComposer.Plan(roll, 2048, opt);
+            Avalonia.PixelSize page = SheetComposer.SizeFor(roll, 2048, opt);
+            double coverage = (double)n * l.ThumbW * l.ThumbH /
+                              ((double)page.Width * page.Height);
+
+            Assert.True(coverage >= 0.45,
+                        $"{a}/{o} n={n} {w}x{h}: photographs cover only {coverage:P1}");
+        }
+    }
+
+    /// <summary>A classic 36-frame roll should still read as six real strips, without the
+    /// numbering and enlarged lab record turning the selected 4:3 paper into side wings.</summary>
+    [Fact]
+    public void Classic_six_by_six_sheet_keeps_side_surround_compact()
+    {
+        var roll = Roll(36);
+        var opt = new SheetComposer.Options
+        {
+            Aspect = SheetAspect.FourThree,
+            Orientation = SheetOrientation.Landscape,
+        };
+        ContactSheet.Layout l = SheetComposer.Plan(roll, 2048, opt);
+        Avalonia.PixelSize page = SheetComposer.SizeFor(roll, 2048, opt);
+        double sideSurround = (double)(page.Width - l.Width) / page.Width;
+
+        Assert.Equal((6, 6), (l.Cols, l.Rows));
+        Assert.True(sideSurround <= 0.14,
+                    $"side surround is {sideSurround:P1} of the page ({page.Width} vs grid {l.Width})");
+    }
+
+    /// <summary>The metadata footer is large enough for four readable rows and the wordmark,
+    /// but remains far below the old four-row form's 284 px height.</summary>
+    [Fact]
+    public void Metadata_footer_balances_legibility_and_photo_area()
+    {
+        Assert.InRange(SheetInfoBar.HeightFor(2048), 224, 240);
     }
 }

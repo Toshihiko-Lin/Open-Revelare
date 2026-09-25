@@ -439,7 +439,8 @@ The order is saved with the project and sets the contact sheet's layout.
 **Virtual copies**: to keep several treatments of one frame (the other half of a half-frame scan, a
 second grade), right-click the thumbnail. A copy takes every parameter of its parent, crop included,
 and is independent from then on. With several frames ticked, right-click → create copy / remove
-from roll acts on each ticked frame.
+from roll acts on each ticked frame. Ctrl-click toggles individual frames and Shift-click ticks a
+range from the last click; the ticks clear automatically after the batch action finishes.
 
 **Sync geometry**: the sync button beside the flip buttons in the Geometry / crop panel applies this
 frame's rotation / flips and straighten to the ticked frames (the whole roll when none are ticked).
@@ -527,7 +528,8 @@ identification strip. Never written to EXIF.
 > DPI, or Advanced Color state, rebuilds presentation automatically. A failure is exposed as an
 > emergency-sRGB warning in the status bar, with full diagnostics available to copy. Measure the
 > screen with a colorimeter and register the correct system profile, then choose the output space
-> you actually deliver. The dedicated macOS presenter is outside this Windows repair.
+> you actually deliver. Linux currently uses Avalonia's SDR preview surface: HDR editing and export
+> remain available, while HDR display preview waits for compositor-thread HDR GPU interop from Avalonia.
 
 ---
 

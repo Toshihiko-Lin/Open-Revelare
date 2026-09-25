@@ -42,9 +42,10 @@ public partial class MainWindow
     private string _lastWindowsColorDiagnostics = "Native color presentation has not initialized.";
 
     /// <summary>
-    /// The native preview host for THIS platform, or null where there is none (Linux today). Both
-    /// hosts present the same contract-bound FP16 buffer the shared compositor produces; choosing
-    /// one here is the only place the composition root knows which OS it is on.
+    /// The native preview host for THIS platform, or null where there is none. Linux deliberately
+    /// stays on Avalonia's SDR bitmap surface until Avalonia exposes compositor-thread HDR GPU
+    /// interop; raw wl_display / wl_surface access is not a safe fallback (Avalonia #22223).
+    /// Windows and macOS present the same contract-bound FP16 buffer the shared compositor makes.
     /// </summary>
     private IPreviewHost? ActivePreview =>
         OperatingSystem.IsWindows() ? WindowsPreview
@@ -61,9 +62,9 @@ public partial class MainWindow
         MacOSPreview.IsVisible = ReferenceEquals(preview, MacOSPreview);
         UpdateNoticeStripPlacement();
         // 徽章和【帮助 → 复制色彩诊断】原本跟着 WindowsPreview 一起关掉。但它们承载的是两件事，
-        // 只有「显示链路契约」是 Windows 概念；「这一卷走的是哪条色彩管线、TIFF 输入按什么假设」
+        // 只有「显示链路契约」需要原生宿主；「这一卷走的是哪条色彩管线、TIFF 输入按什么假设」
         // 三平台同样成立，而这两个出口是它**唯一**的去处 —— ColorPipelineDiagnostic 在整个 GUI
-        // 里没有第二个消费者。于是 mac/Linux 用户既看不到自己这一卷按什么渲染，出了色彩问题也
+        // 里没有第二个消费者。于是没有原生宿主的用户既看不到自己这一卷按什么渲染，出了色彩问题也
         // 没有诊断可交。测试断言的是 VM 属性而不是 UI，所以三平台全绿也照不出这一条。
         CopyColorDiagnosticsMenuItem.IsVisible = true;
         if (!enabled)
@@ -587,11 +588,10 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// 非 Windows 平台的徽章内容：只有与平台无关的那一半 —— 色彩管线版本与 TIFF 输入假设。
+    /// 没有原生宿主的平台的徽章内容：色彩管线版本与 TIFF 输入假设，加上诚实的 surface 能力。
     ///
-    /// 显示链路那一半（contract / encoding / monitor / WYSIWYG）是 Windows 概念，这里没有，
-    /// 也不该编一个出来：mac/Linux 的最后一跳目前封顶在 sRGB，声称 WYSIWYG 会是假话。
-    /// 那半截属于能力对齐（M5/M6），不属于这条披露。
+    /// Linux 当前只有 Avalonia SDR bitmap surface，没有 display contract / HDR headroom，
+    /// 不能声称 WYSIWYG。HDR 渲染和导出仍然可用；这里只说明本机预览的最后一跳。
     ///
     /// 没有打开卷时整条徽章隐藏 —— 这条信息是按卷成立的，空着显示一个默认值只会误导。
     /// </summary>
@@ -605,10 +605,18 @@ public partial class MainWindow
         }
 
         ColorDiagnosticStatus.IsVisible = true;
-        ColorDiagnosticText.Text = vm.ColorPipelineDiagnostic;
+        bool linux = OperatingSystem.IsLinux();
+        ColorDiagnosticText.Text = linux
+            ? Loc.T("Linux 预览 · SDR") + " · " + vm.ColorPipelineDiagnostic
+            : vm.ColorPipelineDiagnostic;
         ColorDiagnosticText.Foreground = Brushes.Gray;
-        // 这一半没有告警态：它报告的是「按什么渲染的」，不是「哪里坏了」。
-        ToolTip.SetTip(ColorDiagnosticStatus, null);
+        // This is a declared platform limit, not a failed presenter. Keep the badge neutral while
+        // making the boundary discoverable where a Linux user will actually look for it.
+        ToolTip.SetTip(
+            ColorDiagnosticStatus,
+            linux
+                ? Loc.T("Linux 当前通过 Avalonia SDR surface 预览；HDR 渲染与导出仍可用，HDR 屏幕预览等待 Avalonia 提供合成线程内的 HDR GPU interop。")
+                : null);
     }
 
     private void UpdateWindowsColorStatus()
@@ -726,9 +734,19 @@ public partial class MainWindow
         // 而是一串看着像结论的空值。说清楚它为什么不在，比留一堆 unavailable 诚实。
         if (ActivePreview is not { } preview)
         {
-            text.AppendLine(
-                "Presenter contract: not applicable — this platform has no native preview host. " +
-                "Everything above applies on every platform.");
+            if (OperatingSystem.IsLinux())
+            {
+                text.AppendLine("Presenter contract: unavailable — Linux uses the Avalonia SDR sRGB8 surface.");
+                text.AppendLine("Linux HDR preview: deferred until Avalonia provides compositor-thread HDR GPU interop.");
+                text.AppendLine("HDR rendering/export: available; only the on-screen preview is SDR.");
+                text.AppendLine("Upstream: https://github.com/AvaloniaUI/Avalonia/issues/22223");
+            }
+            else
+            {
+                text.AppendLine(
+                    "Presenter contract: not applicable — this platform has no native preview host. " +
+                    "Everything above applies on every platform.");
+            }
             return text.ToString().TrimEnd();
         }
 

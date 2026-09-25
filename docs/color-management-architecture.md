@@ -493,7 +493,7 @@ public sealed record PresentationBuffer(
 | Windows legacy SDR 主预览 | monitor-device BGRA8 | `1.0` | shared LittleCMS |
 | macOS native 主预览 | linear extended-sRGB RGBA16F | SDR/WCG `1.0`；EDR 待 D-012 | Core Animation / ColorSync |
 | macOS/Windows Avalonia 次要图像 surface | **ACM 开启时必然是 sRGB**（见下）；否则优先 monitor-device BGRA8，能力不足则 emergency | `1.0` | ACM 开：DWM 按 sRGB；否则 shared LittleCMS 或明确无管理 |
-| Linux 初期 | 已验证 profile provider 时 monitor-device BGRA8，否则 emergency | `1.0` | shared LittleCMS 或无 |
+| Linux 当前 | Avalonia SDR sRGB8 fallback；不声明 WYSIWYG | `1.0` | compositor 的普通 SDR 路径；无 HDR contract |
 
 > [!IMPORTANT]
 > **次要 surface 那一格是 OS 约束，不是应用选择。** Advanced Color 激活时，Windows 的 profile
@@ -605,11 +605,22 @@ GUI composition root 选择实现。Core、ColorManagement、Preview 和 ViewMod
 
 ### 11.4 Linux
 
-Linux 第一轮不是硬件 WCG 验收平台，但仍走相同 contract：
+Linux 当前固定走 Avalonia 的 SDR sRGB8 bitmap fallback：HDR 卷仍按同一 Core 渲染并可导出 gain-map
+JPEG / float32 TIFF，但屏幕预览不声称 HDR、WCG 或 WYSIWYG。状态徽章与复制出的诊断必须明确写出
+“Linux preview = SDR”；不得为了“跨平台一致”静默假定 X11/Wayland compositor 管理颜色。
 
-- 能可靠取得当前窗口 monitor ICC 并证明 surface passthrough 时，用 app-managed device BGRA8；
-- 否则使用 `UnmanagedEmergencySrgb8`，在诊断中写明 display management unavailable；
-- 不为了“跨平台一致”静默假定所有 X11/Wayland compositor 都管理颜色。
+HDR 预览由 **D-037** 冻结为上游阻塞项：
+
+- 不通过反射、NWayland 私有对象、`TryGetPlatformHandle` 或 P/Invoke 取得 `wl_display` / `wl_surface`；
+- 不自建 `wl_event_queue`，不在 UI thread 或任意 callback 中调用 `MakeCurrent`；
+- 不以 Avalonia Wayland subcompositor / native embedding 实验替代 HDR surface contract；
+- 只在 Avalonia 提供正式的 compositor-thread HDR GPU interop 后实现 `LinuxPreviewHost`；上层继续接收
+  本项目现有的 contract-bound RGBA16F `PresentationBuffer`，真正的 upload / attach / detach / reconnect
+  全在 Avalonia 规定的 render-thread 生命周期内完成。
+
+解锁实现前，上游 API 至少必须能：创建局部 FP16 HDR surface、声明 transfer / primaries / reference
+white / luminance、报告 display headroom，并在 compositor reconnect / device loss 时给出可测试的资源重建
+契约。跟踪：https://github.com/AvaloniaUI/Avalonia/issues/22223
 
 ---
 
@@ -732,7 +743,8 @@ compositor。
 | M3 | Windows 切片完成；macOS 待办 | RenderedFrame → unclipped canonical；共享 F16 scene compositor；presentation abstractions；reference-white/EDR spikes | Windows 主图/patch/masks/crop 单一合成且末跳前无 8-bit/clamp；D-011 已关闭，D-012 留给 macOS |
 | M4 | 代码/自动化完成；硬件人工验收待办 | Windows legacy + Advanced Color presenter；跨屏/profile/Advanced 变化 | transform-count、ABI、recovery/fallback 与当前 EIZO 契约探针已验证；色度计/参考查看器和双屏人工比较待完成 |
 | M5 | **托管半边完成，原生半边待真机**（2026-09-12） | macOS Metal presenter；ColorSync contract；跨 built-in/external screen | `OpenRevelare.Presentation.MacOS`（环境 / 契约 / presenter）+ 25 条假件测试全绿；Avalonia 宿主 `MacOSPreviewHost` + backend（5 条 reconcile/recovery 测试）已接入组合根（`IPreviewHost` 按平台选宿主，Windows 回归实测不变）；`Presentation.MacOS.Native` 的 Obj-C++ 源码与 `build-macos-presenter.sh` 已写但**未在 Mac 上编译**；D-026 定了 mac 的 reference-white/headroom 政策，D-012 仍 Open，候选规则见 D-026 |
-| M6 | 部分完成 | Linux/secondary surfaces/fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux/macOS 部分待后续 |
+| M6 | 部分完成 | secondary surfaces / fallback honesty；perf/memory/security；CI；删除旧桥接与 feature flag；更新用户文档 | Windows fallback/diagnostics、native CI/发布校验、性能基线和 GUIDE/THEORY 已完成；Linux 已固定为有诊断的 SDR fallback，macOS 部分待后续 |
+| M7 | **上游阻塞** | Linux HDR preview；Avalonia compositor-thread HDR GPU interop | Avalonia #22223 所需 API 正式发布；KWin 与 Mutter 上验证 FP16、色彩标签、reference white、换屏、reconnect/device loss；失败仍回到有标注的 SDR fallback |
 
 ### 15.1 提交边界
 
@@ -804,6 +816,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 | D-020 | Accepted（**supersedes D-011**） | Windows 的 `ReferenceWhiteScale` 按 Advanced Color **模式**分流，不再是常量：WCG（SDR AC）与 legacy/emergency 仍为 `1.0`；**HDR 为 `SdrWhiteNits / 80`**。HDR 显示不再 fail-closed 到 emergency，走与 WCG 相同的 `LinearExtendedSrgbRgba16F` + `SystemCompositor` | 两种 Advanced Color 的亮度语义是**相反**的，而 D-011 只描述了其中一种。微软规范：SDR AC 是 display-referred，`1.0` 恒为该屏能达到的最大白，reference white **不适用**；HDR 是 scene-referred，`1.0` 恒为 80 nits，应用必须自行把 SDR 内容乘 `SdrWhiteLevelInNits / 80`。D-011 把 `1.0` 钉死，对 WCG 正确、对 HDR 错误，于是 HDR 分支只能 fail-closed——代价是 **HDR 屏用户比普通 SDR 屏用户体验更差**（连 legacy 的 LittleCMS 正确转换都拿不到，直接落无管理 emergency）。分流之后这个倒挂消失，且 `SdrWhiteNits` 早已由 `DISPLAYCONFIG_SDR_WHITE_LEVEL` 探到，管线的三处精确相等校验原样守住"恰好施加一次" |
 | D-021 | Accepted | 显示渲染的肩部改为**一族曲线**，SDR 是其 `asymptote = 1` 的成员：拐点（0.5）以下两者逐位相同，拐点之上 SDR 把负片宽容度压进 `[0.5, 1)`，扩展目标把同样的宽容度铺到 `[0.5, headroom)`。扩展渲染不走印相 LUT。SDR 输出**继续**走印相 LUT，D-010 / D-015 / D-018 / D-019 一字不改 | 印相纸没有镜面高光。把印相 roll-off 原样放进 HDR 容器，得到的只是"一张更亮的 SDR"——HDR headroom 一点没被使用，(a) 等于白做。负片本身约 13 档宽容度，**被印相曲线压掉的高光正是 HDR 唯一有内容可放的地方**，所以放开高光不是加特效，是不再丢弃已经拍到的信息。SDR 保留印相有两条硬理由：它是产品既有的渲染身份，且 D-013 要求旧工程可逆——删掉 SDR 那条会让每个已有工程的渲染结果改变、让全部 golden 无故变红。两者共存的代价是零：D-022 的 target 参数化本来就是一条代码路径 |
 | D-022 | Accepted | 三平台的统一点是**输出变换**（`scene-linear → OutputTarget{primaries, transfer, peakNits, refWhiteNits}`），不是 GPU API。平台 presenter 保持三份、各自原生、只做定格式上传 | 平台之间真正不同的不是"怎么把字节送过去"，是**最后一跳归谁**——`FinalTransformOwner` 那三个值就是这个差异，而 DWM / ColorSync / Wayland CM 各有自己的合成语义、reference white 定义和 profile 来源。统一 GPU API 消不掉任何一个平台相关决定，只会多一层翻译（理由见 §17.1）。反过来，输出变换是唯一**平台无关、且 (a) 预览与 (b) 导出共用**的东西：它住在 `Core`，按 §11.1 的禁令自动三平台一致。今天的行为必须是它的一个特例——`OutputTarget{Rec709, sRGB-TRC, 100, 100}` 逐位复现现有 golden，否则不许合 |
+| D-037 | Accepted（2026-09-25，clarifies D-022） | **Linux HDR 预览等待 Avalonia 的 compositor-thread HDR GPU interop。** 当前只保留明确标注的 Avalonia SDR fallback；HDR 渲染与导出不受影响。禁止应用层取得或缓存 raw `wl_display` / `wl_surface`，禁止反射 Wayland backend、自建 event queue 或把实验性 native embedding 当 HDR contract | Avalonia 维护者在 #22223 明确：Wayland 对象归 render thread，libwayland 无引用计数；UI thread 访问、compositor reconnect 时的销毁顺序和同步 roundtrip 都可能造成 use-after-free 或死锁。安全实现必须在 compositor thread 内由框架管理 attach/detach/parent-commit 与资源生命周期。等待正式 API 比维护一个不可证明正确的 backend fork 更符合 I1/I5 与 fallback honesty |
 
 | D-023 | **Superseded by D-032** | 扩展渲染只接受 Stage 2 的**白平衡与曝光**；色阶／对比度／高光阴影／曲线／饱和度非中性时**拒绝渲染**，而不是静默忽略 | 白平衡与曝光在线性光下是纯乘法，换到 scene-referred 目标上是同一个运算作用在同一个量上——托管的 display-referred 版本本来就先解码到线性再乘，这里只是数据本来就是线性的，解码与编码是"不存在"而非"跳过"。其余五项则是**按 display range 定义**的：对比度绕 0.5 取枢轴，色阶把黑白点映到 `[0,1]`，曲线是按归一化值索引的查表。把高光在 6.0 的 scene-referred 数据喂进去不会得到"略有不同的画面"，而是无意义的画面。静默丢弃用户的调整会交回一张不是他们做的图，且屏幕上没有任何东西说明这一点——所以按 D-015 的先例 fail closed。放宽是增量的，反过来不是 |
 | D-024 | Accepted | 扩展渲染的输出空间**恒为 `LinearExtendedSrgb`**（D-005 的 canonical 载体），不跟随工程的 output space 选择 | output space 选择器选的是 display-referred 编码（sRGB / Adobe RGB / Rec709），每一个都同时断言了一个有界范围和一条传递曲线，而扩展渲染两者都没有。载体是线性、Rec709 原色、无界，并且能用 `[0,1]` 之外的分量表示这些原色之外的颜色——选"Adobe RGB HDR"不会让色域变宽（载体本来就比 Adobe RGB 宽），只会多一条需要撤销的曲线。像素因此必须贴载体自己的 profile：给线性数值贴带 TRC 的 ICC 正是 D-003 要防的"只换标签不做转换" |
@@ -831,7 +844,7 @@ macOS 的 `bundle-libraw.sh` 会把 Homebrew 的 `liblcms2.2.dylib` 一并复制
 - **Windows/macOS 分别实现 overlay shader**：业务逻辑和几何必然漂移，airspace 问题也没有被统一解决。
 - **用 Electron/Chromium 绕过**：不能消除色彩契约问题，且违背现有基础上的修复目标。
 - **用一套 Vulkan presenter 统一三平台**（`VK_EXT_swapchain_colorspace` / `VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT`）：范畴错误。它统一的是"怎么把字节送过去"，而平台差异全在"送过去之后谁做什么"，一个平台相关决定都消不掉。三条具体理由：Windows 上 `EXTENDED_SRGB_LINEAR` 在 **ACM-SDR-WCG**（本应用的头号场景，HDR 关）下能否取得存疑，可能严格劣于 DXGI；macOS 上 MoltenVK 最终仍落到 `CAMetalLayer`，而 EDR 的 `wantsExtendedDynamicRangeContent` / `maximumExtendedDynamicRangeColorComponentValue` 是 layer 属性，**逃不掉原生层**；Linux 上 Mesa 的 Vulkan colorspace **本来就是靠 Wayland CM 协议实现的**，不会让我们提前拿到任何东西。外加丢失现有 WARP 软件回退、对 (b) 导出零帮助、以及一个需要按 D-002 纪律做 app-owned 校验的大型原生依赖。
-- **把预览搬进 Avalonia 自己的合成器**（`ICompositionGpuInterop` + `CompositionDrawingSurface`）：能消掉 airspace 税、让叠加层变成真正的 Avalonia 控件，但导入之后像素归 Avalonia 合成器管，而它是 8-bit sRGB 的——广色域在导入那一刻就死了。**airspace 与色域在 Avalonia 下二选一**，本应用选色域。这也是 D-007（叠加层在共享 F16 场景里合成）的最终理由。
+- **把预览搬进 Avalonia 当前的 SDR 合成器**（`ICompositionGpuInterop` + `CompositionDrawingSurface`）：当前 API 会把最终 surface 限在 8-bit sRGB，广色域在导入时就死了，因此仍拒绝。D-037 等待的是 Avalonia 新增的**低层 HDR-capable interop / surface contract**，不是把现有 SDR API 换个名字重试；新 API 发布后 Linux 可以成为例外，但共享 F16 scene（D-007）仍在导入前完成全部业务合成。
 - **HDR 用 `R10G10B10A2` + HDR10/BT.2100 swapchain**（微软的 Option 2）：只是性能优化，且要求无 alpha 混合、仅 HDR 屏，并**放弃负值与 sRGB 色域外表示**——那正是 D-005 要保的东西。FP16 + scRGB 是唯一对 SDR / WCG / HDR 三者通用的载体。
 
 ---

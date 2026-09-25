@@ -36,8 +36,8 @@ public partial class MainViewModel
 
     /// <summary>
     /// Paste onto the CURRENT frame only — the one-to-one case the roll-wide broadcasts could not
-    /// express. Matching one frame to another was otherwise a matter of ticking it in the strip,
-    /// pasting to "selected", and then unticking it.
+    /// express. Matching one frame to another is a matter of ticking it in the strip and pasting
+    /// to "selected"; successful batch actions clear their one-shot selection themselves.
     /// </summary>
     public void PasteCalibrationToCurrent() => PasteToCurrent(_calClipboard, cal: true, scene: false, Loc.T("标定"));
     public void PasteSceneToCurrent() => PasteToCurrent(_sceneClipboard, cal: false, scene: true, Loc.T("场景"));
@@ -74,6 +74,7 @@ public partial class MainViewModel
     public void ApplyGeometryToFrames()
     {
         if (CurrentFrame is null) return;
+        bool hadSelection = Frames.Any(f => f.IsSelected);
         CommitUndo();
         // Through ForStorage: with the crop tool open BuildParams suppresses the crop for the
         // render, and stored (here, and on every target) that null would erase it.
@@ -94,6 +95,7 @@ public partial class MainViewModel
         StatusText = onlySelected
             ? Loc.F($"已把旋转 / 翻转和拉直应用到勾选的 {n} 帧")
             : Loc.F($"已把旋转 / 翻转和拉直应用到整卷（{n} 帧）");
+        if (hadSelection) ClearStripSelection();
         MarkEdit();
         RestartThumbnails();
     }
@@ -129,6 +131,7 @@ public partial class MainViewModel
             SetThumbnail(f, null); n++;
         }
         StatusText = n == 0 ? Loc.F($"没有选中的目标帧（在胶片条勾选帧）") : Loc.F($"已把{what}粘贴到 {n} 帧");
+        if (n > 0) ClearStripSelection();
         MarkEdit();
         RestartThumbnails();
     }

@@ -369,7 +369,7 @@ Stage 2 在目标空间中完成。标准输出不再按空间名称重建 profi
 
 预览从同一 `RenderedFrame` 分支，但不是把文件编码值原样送到面板。它先按 exact output ICC 转到 D65 linear extended-sRGB，保留负值和大于 1 的分量，再与 patch、mask、crop 和 selection 在共享 FP16 scene 中合成。
 
-Windows Advanced Color presenter 上传 `R16G16B16A16_FLOAT` scRGB surface，由 DWM 作唯一一次 monitor transform；传统 SDR presenter 用应用级 LittleCMS 转到当前显示器 ICC 后上传 BGRA8，应用作唯一一次 monitor transform。contract 属于 preview surface，窗口跨屏、profile、DPI 或 Advanced Color 状态变化只使 presentation revision 失效，不得改变 render/export fingerprint。无效 monitor ICC 或 presenter 故障必须显式降级为 emergency sRGB8 并显示诊断，不能冒充所见即所得。macOS 最后一跳保留给后续专用 presenter。
+Windows Advanced Color presenter 上传 `R16G16B16A16_FLOAT` scRGB surface，由 DWM 作唯一一次 monitor transform；传统 SDR presenter 用应用级 LittleCMS 转到当前显示器 ICC 后上传 BGRA8，应用作唯一一次 monitor transform。contract 属于 preview surface，窗口跨屏、profile、DPI 或 Advanced Color 状态变化只使 presentation revision 失效，不得改变 render/export fingerprint。无效 monitor ICC 或 presenter 故障必须显式降级为 emergency sRGB8 并显示诊断，不能冒充所见即所得。Linux 当前明确使用 Avalonia SDR sRGB8 fallback；HDR 渲染与导出保留，HDR 屏幕预览等待 Avalonia 的合成线程 HDR GPU interop，不直接访问 raw Wayland handles。
 
 ### 6.7 整卷一致性
 

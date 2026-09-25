@@ -11,9 +11,10 @@ namespace OpenRevelare.Gui.ViewModels;
 
 /// <summary>
 /// Typed handoff from the shared render boundary to the platform-neutral canonical preview.
-/// The Avalonia bitmap remains a non-Windows/emergency shell fallback; Windows native
-/// presentation consumes <see cref="PreviewScene"/> instead and therefore never starts from the
-/// already-clipped BGRA8 bitmap.
+/// The Avalonia bitmap remains the no-native-host/emergency shell fallback; native presentation
+/// consumes <see cref="PreviewScene"/> instead and therefore never starts from the already-clipped
+/// BGRA8 bitmap. Linux intentionally remains on that SDR fallback until Avalonia provides safe
+/// compositor-thread HDR GPU interop (Avalonia #22223).
 /// </summary>
 public partial class MainViewModel
 {

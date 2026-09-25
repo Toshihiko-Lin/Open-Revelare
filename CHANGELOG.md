@@ -1,5 +1,25 @@
 # OpenRevelare — 更新日志
 
+## v1.8.1
+
+**改进**
+
+- **印样重新平衡画面与卷信息。** 自动排版改为按照片实际占页面积选择行列；原表格式标识栏改为更有分量的四行实验室记录页脚，只显示已填写内容，并使用独立放置的 `Revelare` 文字 Logo（深色版使用负片反相版本）。页脚高度为紧凑初版的两倍以上；独立页眉取消，让照片网格上移，避免放大页脚后重新撑出宽边。卷号 / 胶卷 / 帧数归入记录区首行，不再与 Logo 混排；其后三行依次为相机 / ISO / 日期、冲洗店 / 工艺 / 地点，以及独占末行的备注。外边距与帧号带保持紧凑，未满的末条仍像真实 contact sheet 一样左对齐；排版字体使用更接近胶片边码的 Bahnschrift（不可用时回退到 Noto Sans / Inter）。自动调整以及 1:1 / 4:3 / 3:2、横竖比例选择完整保留。
+
+- **胶片条多选支持 Ctrl 点选与 Shift 连选**。批量创建虚拟副本、移除帧、粘贴参数或同步几何后，会自动取消全部勾选。
+
+- **Linux HDR 预览明确延后至 Avalonia 提供安全接口**。Linux 继续使用有明确诊断的 SDR surface；HDR 调整、增益图 JPEG 与 float32 TIFF 导出不受影响，不再规划通过私有 Wayland handle 实现。
+
+---
+
+**Improved**
+
+- **Contact sheets now balance frames and roll information.** Automatic layout chooses rows and columns by actual photo coverage; the former form is now a substantial four-row lab-record footer containing only filled-in details and a separately placed `Revelare` wordmark (with a negative-inverted dark variant). The footer is more than twice the compact first revision's height. The separate header is gone, allowing the photo grid to rise and preventing the larger footer from recreating broad side borders. Roll number / film / frame count occupy the record's first row rather than sharing the logo lock-up; camera / ISO / date, lab / process / location, and Notes on its own final row follow. Print margins and frame-number bands stay tight, while a short final strip remains left-aligned like a physical contact print; typography uses film-edge-like Bahnschrift with Noto Sans / Inter fallbacks. Auto fitting and all 1:1 / 4:3 / 3:2 wide/tall choices remain available.
+
+- **The film strip supports Ctrl-click selection and Shift-click ranges.** After creating virtual copies, removing frames, pasting parameters or syncing geometry in a batch, all ticks are cleared automatically.
+
+- **Linux HDR display preview is explicitly deferred until Avalonia provides a safe API.** Linux keeps a clearly diagnosed SDR surface; HDR editing, gain-map JPEG and float32 TIFF export are unaffected, and private Wayland handles are no longer an implementation path.
+
 ## v1.8.0
 
 **改进**

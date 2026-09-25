@@ -66,8 +66,6 @@ public sealed record SheetTheme
     public required uint PaperRgb { get; init; }         // the sheet's ground
     public required uint KeylineRgb { get; init; }       // hairline around a frame
     public required uint FrameNumberRgb { get; init; }   // 1, 2, 3 … under each frame
-    public required uint HeaderTextRgb { get; init; }    // roll number / film / date
-    public required uint HeaderDimRgb { get; init; }     // frame count, secondary header text
     public required uint RuleRgb { get; init; }          // structural hairlines
     public required uint BarBgRgb { get; init; }         // info-strip ground, logo area included
     public required uint BarLabelRgb { get; init; }
@@ -82,8 +80,6 @@ public sealed record SheetTheme
     public IBrush Paper => Brush(PaperRgb);
     public IBrush Keyline => Brush(KeylineRgb);
     public IBrush FrameNumber => Brush(FrameNumberRgb);
-    public IBrush HeaderText => Brush(HeaderTextRgb);
-    public IBrush HeaderDim => Brush(HeaderDimRgb);
     public IBrush Rule => Brush(RuleRgb);
     public IBrush BarBg => Brush(BarBgRgb);
     public IBrush BarLabel => Brush(BarLabelRgb);
@@ -105,8 +101,6 @@ public sealed record SheetTheme
         GapRgb = new[] { 0.102f, 0.110f, 0.118f },   // == Paper
         KeylineRgb = 0x34373C,
         FrameNumberRgb = 0x8A9098,
-        HeaderTextRgb = 0xDCE0E4,
-        HeaderDimRgb = 0x7E848B,
         RuleRgb = 0x34373C,
         BarBgRgb = 0x212327,
         BarLabelRgb = 0x7E848B,
@@ -122,8 +116,6 @@ public sealed record SheetTheme
         GapRgb = new[] { 0.957f, 0.949f, 0.929f },   // == Paper
         KeylineRgb = 0xD3CFC6,
         FrameNumberRgb = 0x6B6862,
-        HeaderTextRgb = 0x23211E,
-        HeaderDimRgb = 0x86827A,
         RuleRgb = 0xD3CFC6,
         BarBgRgb = 0xE9E6DF,
         BarLabelRgb = 0x86827A,

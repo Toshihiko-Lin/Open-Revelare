@@ -89,4 +89,17 @@ public class ContactSheetLayoutTests
             Assert.InRange(y + l.ThumbH, 0, l.Height);
         }
     }
+
+    /// <summary>An incomplete final row starts at the left like a physical contact print; blank
+    /// positions remain visible at the right instead of turning into decorative centring.</summary>
+    [Fact]
+    public void Incomplete_last_row_stays_left_aligned()
+    {
+        ContactSheet.Layout l = ContactSheet.Plan(Roll(24), 2048, 20, 88, 5);
+        int lastCount = l.Count - (l.Rows - 1) * l.Cols;
+        int first = l.Count - lastCount;
+        (int x, _) = l.Origin(first);
+
+        Assert.Equal(0, x);
+    }
 }

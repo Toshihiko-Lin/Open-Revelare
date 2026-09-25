@@ -29,7 +29,8 @@ public static class ContactSheet
         public int Width => Cols * ThumbW + GapX * (Cols - 1);
         public int Height => Rows * ThumbH + GapY * (Rows - 1);
 
-        /// <summary>Top-left of cell <paramref name="index"/> within the grid.</summary>
+        /// <summary>Top-left of cell <paramref name="index"/> within the grid. Rows always begin
+        /// at the left edge, as they do on a physical contact print.</summary>
         public (int X, int Y) Origin(int index) =>
             (index % Cols * (ThumbW + GapX), index / Cols * (ThumbH + GapY));
     }

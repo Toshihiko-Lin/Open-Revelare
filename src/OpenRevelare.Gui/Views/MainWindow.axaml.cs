@@ -1353,6 +1353,7 @@ public partial class MainWindow : Window
     private Point _dragPos;            // latest pointer position, for the auto-scroll timer
     private bool _frameDragActive;     // past the threshold — the drop line is showing
     private DispatcherTimer? _dragScroll;
+    private Models.RollFrame? _stripSelectionAnchor;
     private const double FrameDragThreshold = 5;
 
     /// <summary>Select the thumbnail under a right-click before its context menu opens, and arm a
@@ -1366,12 +1367,55 @@ public partial class MainWindow : Window
 
         if (props.IsRightButtonPressed) { FilmStrip.SelectedItem = frame; return; }
         if (!props.IsLeftButtonPressed) return;
+
+        bool ctrl = e.KeyModifiers.HasFlag(Accel);
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        if (ctrl || shift)
+        {
+            // Ctrl/Command toggles one batch target. Shift replaces the batch selection with the
+            // inclusive range from the last ordinary/Ctrl click; Ctrl+Shift adds that range.
+            // Keep CurrentFrame in step with the clicked thumbnail, as native multi-selection
+            // controls do, while IsSelected remains the batch-action state shown by the ticks.
+            Models.RollFrame anchor = _stripSelectionAnchor is { } saved && Vm?.Frames.Contains(saved) == true
+                ? saved
+                : Vm?.CurrentFrame ?? frame;
+            if (Vm is { } vm)
+                ApplyFilmStripMultiSelection(vm.Frames, anchor, frame, range: shift, additive: ctrl);
+            if (!shift) _stripSelectionAnchor = frame;
+            FilmStrip.SelectedItem = frame;
+            e.Handled = true;
+            return;
+        }
+
+        _stripSelectionAnchor = frame;
         // The per-thumbnail tick box is a control in its own right; dragging from it would make
         // the checkbox impossible to hit without also nudging the roll's order.
         if (v.GetSelfAndVisualAncestors().OfType<CheckBox>().Any()) return;
 
         _dragFrom = Vm?.Frames.IndexOf(frame) ?? -1;
         _dragOrigin = _dragPos = e.GetPosition(FilmStrip);
+    }
+
+    /// <summary>Apply the file-manager-style modifier gesture to the strip's batch ticks.</summary>
+    internal static void ApplyFilmStripMultiSelection(IList<Models.RollFrame> frames,
+                                                       Models.RollFrame anchor,
+                                                       Models.RollFrame frame,
+                                                       bool range,
+                                                       bool additive)
+    {
+        if (!range)
+        {
+            frame.IsSelected = !frame.IsSelected;
+            return;
+        }
+
+        int first = frames.IndexOf(anchor);
+        int last = frames.IndexOf(frame);
+        if (first < 0 || last < 0) return;
+        if (!additive)
+            foreach (Models.RollFrame candidate in frames) candidate.IsSelected = false;
+        for (int i = Math.Min(first, last); i <= Math.Max(first, last); i++)
+            frames[i].IsSelected = true;
     }
 
     private void OnFilmStripPointerMoved(object? sender, PointerEventArgs e)

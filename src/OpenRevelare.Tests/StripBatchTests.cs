@@ -2,6 +2,7 @@ using BitMiracle.LibTiff.Classic;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.ViewModels;
+using OpenRevelare.Gui.Views;
 using Xunit;
 
 namespace OpenRevelare.Tests;
@@ -12,6 +13,24 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public sealed class StripBatchTests
 {
+    [Fact]
+    public void Modifier_selection_toggles_individual_frames_and_selects_ranges()
+    {
+        var frames = Enumerable.Range(1, 5).Select(i => new RollFrame($"/x/f{i}.tif")).ToList();
+
+        MainWindow.ApplyFilmStripMultiSelection(frames, frames[1], frames[1], range: false, additive: true);
+        MainWindow.ApplyFilmStripMultiSelection(frames, frames[3], frames[3], range: false, additive: true);
+        Assert.Equal(new[] { false, true, false, true, false }, frames.Select(f => f.IsSelected));
+
+        // Plain Shift replaces the old set with the inclusive anchored range.
+        MainWindow.ApplyFilmStripMultiSelection(frames, frames[1], frames[2], range: true, additive: false);
+        Assert.Equal(new[] { false, true, true, false, false }, frames.Select(f => f.IsSelected));
+
+        // Ctrl+Shift adds a range instead of replacing what is already ticked.
+        MainWindow.ApplyFilmStripMultiSelection(frames, frames[3], frames[4], range: true, additive: true);
+        Assert.Equal(new[] { false, true, true, true, true }, frames.Select(f => f.IsSelected));
+    }
+
     [Fact]
     public void A_virtual_copy_carries_both_stages_and_the_crop()
     {
@@ -59,10 +78,15 @@ public sealed class StripBatchTests
                          vm.Frames.Select(f => f.IsVirtual).ToArray());
             Assert.Same(vm.Frames[0], vm.CurrentFrame);
             Assert.Equal(vm.Frames[1].Params.ExposureEv, vm.Frames[2].Params.ExposureEv);
+            Assert.All(vm.Frames, f => Assert.False(f.IsSelected));
 
-            // Removing the ticked real frames takes their copies with them.
+            // A batch action consumes its one-shot selection. Tick the real frames again, then
+            // removing them takes their copies and clears the selection again.
+            vm.Frames[1].IsSelected = true;
+            vm.Frames[3].IsSelected = true;
             vm.RemoveFrames();
             Assert.Equal(new[] { "f1.tif" }, vm.Frames.Select(f => f.FileName).ToArray());
+            Assert.All(vm.Frames, f => Assert.False(f.IsSelected));
 
             // Never down to nothing.
             foreach (RollFrame f in vm.Frames) f.IsSelected = true;
@@ -94,8 +118,8 @@ public sealed class StripBatchTests
             Assert.Equal(1, vm.Frames[2].Params.QuarterTurns);
             Assert.Equal(2.5, vm.Frames[2].Params.Rotation);
             Assert.Null(vm.Frames[2].Params.CropRect);                  // the crop stays with its picture
+            Assert.All(vm.Frames, f => Assert.False(f.IsSelected));
 
-            vm.Frames[2].IsSelected = false;
             vm.ApplyGeometryToFrames();                                  // nothing ticked → whole roll
             Assert.All(vm.Frames, f =>
             {

@@ -9,8 +9,8 @@ using OpenRevelare.Gui.Models;
 namespace OpenRevelare.Gui.Services;
 
 /// <summary>
-/// Assembles the finished contact sheet: paper, an optional header, the thumbnail grid with a
-/// frame number under every cell, and the identification strip along the bottom — one image.
+/// Assembles the finished contact sheet: paper, the thumbnail grid with a frame number under
+/// every cell, and a substantial lab-record footer — one image.
 ///
 /// The grid itself comes from <see cref="ContactSheet"/> as pixels; everything drawn around it
 /// needs a text rasteriser, so the surround is drawn here through Avalonia rather than in Core.
@@ -21,23 +21,8 @@ public static class SheetComposer
 {
     private const double RefWidth = 2048.0;
 
-    /// <summary>
-    /// How tall the row gap may grow, as a multiple of the thumbnail height it separates.
-    ///
-    /// Row spacing is the ONLY lever the page fit has — the column gap is the rebate between
-    /// frames and does not move — so this bound decides which proportions are reachable at all.
-    /// Measured against the FRAME rather than against the sheet because that is what the eye
-    /// judges: a band up to about a frame tall reads as generous spacing, and past that it reads
-    /// as a hole. A 12-frame roll of square negatives asked to be a wide 4:3 is what set it —
-    /// at 1.4 frames the two rows looked like a mistake.
-    ///
-    /// It costs coverage on SHORT rolls, which have too few candidate grids to be spaced into
-    /// every shape: from 20 frames up — every real roll — each target is met exactly.
-    /// </summary>
-    private const double RowGapCapFrames = 1.0;
-
     private static readonly FontFamily Face =
-        new("Inter, Segoe UI, Microsoft YaHei, PingFang SC, sans-serif");
+        new("Bahnschrift, Noto Sans SC, Inter, Segoe UI, Microsoft YaHei, PingFang SC, sans-serif");
 
     /// <summary>What to print around the thumbnails. The palette and the page proportion are the
     /// choices — the lab-print furniture (header, keylines, frame numbers) is the house style,
@@ -71,12 +56,12 @@ public static class SheetComposer
 
     /// <summary>
     /// Pick the grid the requested proportion asks for. Every column count from 1 to n is planned
-    /// and MEASURED as a finished sheet — the margins, header and info strip are a fixed slab of
+    /// and MEASURED as a finished sheet — the margins, header and footer are a fixed slab of
     /// paper the grid does not know about, and at 12 frames they are enough to turn what looks
     /// like a square grid into a portrait page — then scored against the target.
     ///
-    /// Ties are broken on empty cells: two column counts that land equally close to 4:3 are not
-    /// equally good if one of them prints a half-empty last row.
+    /// Candidates are ranked by the actual photo area in the finished page; near-ties are broken
+    /// on empty cells so a complete grid wins when the visible size is effectively the same.
     /// </summary>
     public static ContactSheet.Layout Plan(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
     {
@@ -84,7 +69,7 @@ public static class SheetComposer
         int n = thumbs.Count;
 
         ContactSheet.Layout? best = null;
-        (double Pad, int Empty) bestScore = default;
+        (double Visual, int Empty) bestScore = default;
 
         for (int cols = 1; cols <= n; cols++)
         {
@@ -92,21 +77,26 @@ public static class SheetComposer
             // Both gaps are the design values and stay that way — see PadFor.
             ContactSheet.Layout l = ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi, cols);
             (int padX, int padY) = PadFor(l, opt);
-            PixelSize bare = BareSize(l);
-            // What fraction of the page is margin bought purely to make the proportion — the one
-            // thing that separates candidates now that every one of them can reach the target.
-            double pad = (double)(padX * 2) / (bare.Width + padX * 2)
-                       + (double)(padY * 2) / (bare.Height + padY * 2);
+            PixelSize page = PaddedSize(l, padX, padY);
+            // Optimise what the viewer actually sees: the share of the finished page occupied by
+            // photographs. This accounts for surround, aspect padding and incomplete last rows in
+            // one number; minimising padding alone could still choose a grid with smaller frames.
+            double coverage = (double)n * l.ThumbW * l.ThumbH / ((double)page.Width * page.Height);
+            // Horizontal ratio padding is especially conspicuous: it repeats beside every row and
+            // pulls the header inward. Prefer a grid that spends the unavoidable ratio difference
+            // vertically when the actual photo area is comparable.
+            double sidePadding = (double)(padX * 2) / page.Width;
+            double visual = coverage - sidePadding * 0.25;
             int empty = l.Rows * l.Cols - n;
 
-            // A per cent of the page is not a difference anyone sees, so inside that the fuller
-            // grid wins — which keeps a 36-frame roll on a complete 6×6.
+            // Inside a one-point visual difference the fuller grid wins. A clearly denser layout
+            // may still use a short final strip, as physical contact sheets routinely do.
             const double Same = 0.01;
-            if (best is null || pad < bestScore.Pad - Same ||
-                (pad < bestScore.Pad + Same && empty < bestScore.Empty))
+            if (best is null || visual > bestScore.Visual + Same ||
+                (visual > bestScore.Visual - Same && empty < bestScore.Empty))
             {
                 best = l;
-                bestScore = (pad, empty);
+                bestScore = (visual, empty);
             }
         }
         return best!;
@@ -129,11 +119,11 @@ public static class SheetComposer
     /// an extra ROW is usable too instead of only ever approaching from the wide side.
     ///
     /// Because it works in both directions every column count can reach every target, so the
-    /// search above is free to pick on how little margin it costs rather than on what it can
-    /// reach. Nothing is capped: margin is white paper around a grid that keeps every pixel of
-    /// its thumbnails, which is what a print with a generous border looks like — not a hole.
+    /// search above is free to pick the largest actual photo coverage rather than merely the
+    /// closest nominal grid shape. Nothing is capped: margin is paper around a grid that keeps
+    /// every pixel of its thumbnails; the compact base furniture keeps that paper subordinate.
     ///
-    /// Bisected rather than solved: the identification strip's height is derived from the page
+    /// Bisected rather than solved: the metadata footer's height is derived from the page
     /// WIDTH, so the page is a fixed point of the margin, not a formula with a closed form.
     /// </summary>
     private static (int X, int Y) PadFor(ContactSheet.Layout l, Options opt)
@@ -206,7 +196,7 @@ public static class SheetComposer
     {
         Metrics m = Metrics.Of(l.Width);
         int w = l.Width + (int)Math.Round(m.Margin * 2) + padX * 2;
-        int h = (int)Math.Round(m.Margin + m.HeaderH + l.Height + m.Margin) + padY * 2
+        int h = (int)Math.Round(m.Margin + l.Height + m.Margin) + padY * 2
               + SheetInfoBar.HeightFor(w);
         return new PixelSize(w, h);
     }
@@ -228,7 +218,7 @@ public static class SheetComposer
     {
         Metrics m = Metrics.Of(layout.Width);
         (int padX, int padY) = PadFor(layout, opt);
-        return ((int)(m.Margin + padX), (int)(m.Margin + padY + m.HeaderH));
+        return ((int)(m.Margin + padX), (int)(m.Margin + padY));
     }
 
     /// <summary>Compose the finished sheet. Must run on the UI thread (Avalonia rasteriser).</summary>
@@ -247,14 +237,12 @@ public static class SheetComposer
 
         // Kept identical to GridOrigin: the HDR sheet pastes its cells where these say.
         double gridX = marginX;
-        double gridY = marginY + m.HeaderH;
+        double gridY = marginY;
 
         var rtb = new RenderTargetBitmap(size, new Vector(96, 96));
         using (DrawingContext ctx = rtb.CreateDrawingContext())
         {
             ctx.FillRectangle(theme.Paper, new Rect(0, 0, size.Width, size.Height));
-
-            DrawHeader(ctx, m, notes, grid.Layout.Count, size.Width, marginX, marginY, theme);
 
             WriteableBitmap gridBmp = BitmapConvert.ToBitmap(grid.Image);
             ctx.DrawImage(gridBmp, new Rect(gridX, gridY, grid.Layout.Width, grid.Layout.Height));
@@ -262,30 +250,10 @@ public static class SheetComposer
             DrawCellAnnotations(ctx, m, grid.Layout, gridX, gridY, theme);
 
             SheetInfoBar.Draw(ctx, notes, size.Width,
-                              size.Height - SheetInfoBar.HeightFor(size.Width), theme);
+                              size.Height - SheetInfoBar.HeightFor(size.Width), theme,
+                              grid.Layout.Count);
         }
         return rtb;
-    }
-
-    private static void DrawHeader(DrawingContext ctx, Metrics m, RollNotes n, int count,
-                                   int width, double marginX, double marginY, SheetTheme theme)
-    {
-        // Roll identity, in the order you would read it off an envelope. The strip below carries
-        // the full record; this line exists so the sheet is identifiable at a glance when it is
-        // pinned to a wall and the bottom is out of view.
-        string lead = string.Join("  ·  ", new[] { n.RollNumber, n.FilmStock, n.DevDate }
-            .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim().ToUpperInvariant()));
-        if (lead.Length == 0) lead = "CONTACT SHEET";
-
-        FormattedText left = Text(lead, m.HeaderSize, theme.HeaderText, FontWeight.SemiBold);
-        FormattedText right = Text(Loc.F($"{count} 帧"), m.HeaderSize, theme.HeaderDim, FontWeight.Normal);
-
-        double baseline = marginY + (m.HeaderH - m.HeaderRuleGap - left.Height) / 2;
-        ctx.DrawText(left, new Point(marginX, baseline));
-        ctx.DrawText(right, new Point(width - marginX - right.Width, baseline));
-
-        double ruleY = marginY + m.HeaderH - m.HeaderRuleGap;
-        ctx.FillRectangle(theme.Rule, new Rect(marginX, ruleY, width - marginX * 2, m.Hairline));
     }
 
     private static void DrawCellAnnotations(DrawingContext ctx, Metrics m, ContactSheet.Layout l,
@@ -296,8 +264,7 @@ public static class SheetComposer
         // Repaint paper wherever film would not actually be: the bands between rows (which carry
         // the frame numbers) and any empty cells in a short last row. Core fills those from a
         // float triple while everything here is painted with the brush, so this also guarantees
-        // the two agree exactly rather than to within a rounding step — a one-count mismatch
-        // across a full-width band would read as a seam.
+        // the two agree exactly rather than to within a rounding step.
         for (int r = 0; r < l.Rows - 1; r++)
         {
             double bandY = gridY + r * (l.ThumbH + l.GapY) + l.ThumbH;
@@ -381,20 +348,16 @@ public static class SheetComposer
     private readonly struct Metrics
     {
         public readonly double Margin, Hairline, GapX, GapYExtra, NumberSize, NumberGap;
-        public readonly double HeaderSize, HeaderH, HeaderRuleGap;
 
         private Metrics(double s)
         {
-            Margin = Math.Round(58 * s);
+            Margin = Math.Round(16 * s);
             Hairline = Math.Max(1, Math.Round(2 * s));
-            GapX = Math.Round(10 * s);
+            GapX = Math.Round(8 * s);
             // Row gap = column gap plus the band the frame number sits in.
-            GapYExtra = Math.Round(34 * s);
-            NumberSize = 20 * s;
-            NumberGap = Math.Round(8 * s);
-            HeaderSize = 26 * s;
-            HeaderH = Math.Round(74 * s);
-            HeaderRuleGap = Math.Round(18 * s);
+            GapYExtra = Math.Round(18 * s);
+            NumberSize = 17 * s;
+            NumberGap = Math.Round(4 * s);
         }
 
         public int GapXi => (int)GapX;

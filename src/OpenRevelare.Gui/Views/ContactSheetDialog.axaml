@@ -40,7 +40,7 @@
                     <!-- The proportion of the WHOLE page, margins and strip included — not of the
                          thumbnail grid. The column count is solved backwards from it. -->
                     <TextBlock Text="{i18n:T '版面比例'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
-                    <TextBlock Classes="groupHint" Text="{i18n:T '决定排几列；差额落在页边距上，片间距不变。'}" />
+                    <TextBlock Classes="groupHint" Text="{i18n:T '自动选择照片占比最高的行列；所选页面比例保持不变。'}" />
                     <ComboBox Name="AspectBox" HorizontalAlignment="Stretch" Margin="0,2,0,6"
                               SelectionChanged="OnAspectChanged">
                         <ComboBoxItem Content="{i18n:T '自动（1:1 ~ 4:3）'}" />
@@ -66,7 +66,7 @@
                     </StackPanel>
 
                     <TextBlock Text="{i18n:T '卷信息'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
-                    <TextBlock Classes="groupHint" Text="{i18n:T '印在页眉与底部标识条上；留空显示为「—」。'}" />
+                    <TextBlock Classes="groupHint" Text="{i18n:T '文字标志独立放置；卷号、胶卷与帧数归入右侧四行实验室记录。'}" />
                     <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '相机'}" Margin="0,3,10,3" />
                         <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding CameraBody}" Margin="0,3" />
