@@ -2,6 +2,13 @@
 
 ## v1.8.1
 
+**构图同步与交互改进**
+
+- **底片、观感与构图同步明确分离。** Cineon / Display 同步不再携带旋转、翻转、拉直或裁切；几何面板提供独立的“同步旋转 / 翻转 / 拉直”和“同步裁切”，裁切会按目标帧自己的底片区域重新定位，适用于半格与不同分格的工程。
+- **修复裁切编辑状态下复制 / 粘贴可能丢失裁切的问题。** 复制和粘贴现在使用可保存快照，不会把裁切工具的临时渲染状态写回工程。
+- **降低信息密集区域的认知负荷。** 胶片条和预览区右键菜单按帧操作、底片、观感和构图分组；顶栏工具按钮补充明确的工作区 / 编辑提示。
+- **胶片条新增“全选帧”和“清除选择”。** 可直接准备下一次批量复制、同步或结构操作。
+
 **改进**
 
 - **印样重新平衡画面与卷信息。** 自动排版改为按照片实际占页面积选择行列；原表格式标识栏改为更有分量的四行实验室记录页脚，只显示已填写内容，并使用独立放置的 `Revelare` 文字 Logo（深色版使用负片反相版本）。页脚高度为紧凑初版的两倍以上；独立页眉取消，让照片网格上移，避免放大页脚后重新撑出宽边。卷号 / 胶卷 / 帧数归入记录区首行，不再与 Logo 混排；其后三行依次为相机 / ISO / 日期、冲洗店 / 工艺 / 地点，以及独占末行的备注。外边距与帧号带保持紧凑，未满的末条仍像真实 contact sheet 一样左对齐；排版字体使用更接近胶片边码的 Bahnschrift（不可用时回退到 Noto Sans / Inter）。自动调整以及 1:1 / 4:3 / 3:2、横竖比例选择完整保留。
@@ -13,6 +20,11 @@
 ---
 
 **Improved**
+
+- **Negative, look and composition sync are now explicit layers.** Cineon / Display sync never carries rotation, flips, straighten or crop; the Geometry / crop panel provides separate sync commands, and crop rectangles are rebased onto each target negative for half-frame and mixed-split rolls.
+- **Copying or pasting while the crop tool is open no longer loses the crop.** Parameter operations now use a storage snapshot instead of the crop tool's temporary render state.
+- **Dense interaction areas are grouped by intent.** Film-strip and preview context menus separate frame operations, negative sync, look sync and composition sync; toolbar actions have clearer workspace and editing hints.
+- **The film strip now offers Select all frames and Clear selection** for preparing the next batch operation.
 
 - **Contact sheets now balance frames and roll information.** Automatic layout chooses rows and columns by actual photo coverage; the former form is now a substantial four-row lab-record footer containing only filled-in details and a separately placed `Revelare` wordmark (with a negative-inverted dark variant). The footer is more than twice the compact first revision's height. The separate header is gone, allowing the photo grid to rise and preventing the larger footer from recreating broad side borders. Roll number / film / frame count occupy the record's first row rather than sharing the logo lock-up; camera / ISO / date, lab / process / location, and Notes on its own final row follow. Print margins and frame-number bands stay tight, while a short final strip remains left-aligned like a physical contact print; typography uses film-edge-like Bahnschrift with Noto Sans / Inter fallbacks. Auto fitting and all 1:1 / 4:3 / 3:2 wide/tall choices remain available.
 

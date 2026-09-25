@@ -1258,6 +1258,8 @@ public partial class MainWindow : Window
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
     private void OnApplyCalToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToRoll();
     private void OnApplySceneToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplySceneToRoll();
+    private void OnSelectAllFramesClick(object? sender, RoutedEventArgs e) => Vm?.SelectAllFrames();
+    private void OnClearFrameSelectionClick(object? sender, RoutedEventArgs e) => Vm?.ClearFrameSelection();
     private void OnCopyCalClick(object? sender, RoutedEventArgs e) => Vm?.CopyCalibration();
     private void OnPasteCalClick(object? sender, RoutedEventArgs e) => Vm?.PasteCalibrationToSelected();
     private void OnCopySceneClick(object? sender, RoutedEventArgs e) => Vm?.CopyScene();
@@ -1544,6 +1546,7 @@ public partial class MainWindow : Window
     // the in-progress draft and the locked ratio, so an edit in flight survives a 90° turn
     // instead of snapping back to the pre-turn shape.
     private void OnApplyGeometryClick(object? sender, RoutedEventArgs e) => Vm?.ApplyGeometryToFrames();
+    private void OnApplyCropClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCropToFrames();
 
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)
     {

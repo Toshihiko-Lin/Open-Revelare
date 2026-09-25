@@ -4,34 +4,28 @@
         xmlns:m="using:OpenRevelare.Gui.Models"
         x:Class="OpenRevelare.Gui.Views.SyncDialog"
         x:DataType="m:SyncOptions"
-        Width="320" Height="480"
+        Width="360" Height="430"
         WindowStartupLocation="CenterOwner"
-        Title="{i18n:T '选择同步项'}">
+        Title="{i18n:T '选择色彩同步项'}">
     <DockPanel Margin="14">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8"
-                   Text="{i18n:T '勾选「应用到整卷 / 复制·粘贴到选中」广播哪些项。几何默认不播。'}" />
+                   Text="{i18n:T '这里控制底片和观感参数的广播范围。构图（旋转、翻转、拉直、裁切）在几何面板中单独同步。'}" />
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
                     Spacing="8" Margin="0,10,0,0">
             <Button Content="{i18n:T '关闭'}" Click="OnCloseClick" />
         </StackPanel>
         <ScrollViewer>
             <StackPanel Spacing="4">
-                <TextBlock Text="{i18n:T '标定（Stage 1）'}" FontWeight="Bold" Margin="0,4" />
-                <!-- 两端端点即白平衡，没有独立的「白平衡」可勾——原先那个复选框与这个
-                     描述的是同一组数，勾一个漏一个就是半套标定。-->
-                <CheckBox Content="{i18n:T '片基与两端端点（含色偏）'}" IsChecked="{Binding CalFilmBase}" />
+                <TextBlock Text="{i18n:T '底片 · Cineon（Stage 1）'}" FontWeight="Bold" Margin="0,4" />
+                <CheckBox Content="{i18n:T '片基与两端点（含色偏）'}" IsChecked="{Binding CalFilmBase}" />
                 <CheckBox Content="{i18n:T '色度通道缩放'}" IsChecked="{Binding CalChroma}" />
-                <CheckBox Content="{i18n:T '镜头 畸变 / 暗角 / LCC'}" IsChecked="{Binding CalLens}" />
-                <CheckBox Content="{i18n:T '齿孔 启用 / 阈值'}" IsChecked="{Binding CalSprocket}" />
-                <TextBlock Text="{i18n:T '场景（Stage 2）'}" FontWeight="Bold" Margin="0,8,0,4" />
+                <CheckBox Content="{i18n:T '镜头畸变 / 暗角 / LCC'}" IsChecked="{Binding CalLens}" />
+                <CheckBox Content="{i18n:T '齿孔启用 / 阈值'}" IsChecked="{Binding CalSprocket}" />
+                <TextBlock Text="{i18n:T '观感 · Display（Stage 2）'}" FontWeight="Bold" Margin="0,8,0,4" />
                 <CheckBox Content="{i18n:T '白平衡（色温 / 色调）'}" IsChecked="{Binding SceneWb}" />
                 <CheckBox Content="{i18n:T '曝光'}" IsChecked="{Binding SceneExposure}" />
                 <CheckBox Content="{i18n:T '影调（黑白场 / 反差 / 高光阴影 / 饱和度）'}" IsChecked="{Binding SceneTone}" />
                 <CheckBox Content="{i18n:T '色调曲线'}" IsChecked="{Binding SceneCurves}" />
-                <TextBlock Text="{i18n:T '几何（默认不播）'}" FontWeight="Bold" Margin="0,8,0,4" />
-                <CheckBox Content="{i18n:T '翻转 / 90° 旋转'}" IsChecked="{Binding GeomOrientation}" />
-                <CheckBox Content="{i18n:T '拉直角度'}" IsChecked="{Binding GeomStraighten}" />
-                <CheckBox Content="{i18n:T '裁切'}" IsChecked="{Binding GeomCrop}" />
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

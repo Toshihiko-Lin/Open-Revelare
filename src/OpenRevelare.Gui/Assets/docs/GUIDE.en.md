@@ -442,9 +442,10 @@ and is independent from then on. With several frames ticked, right-click → cre
 from roll acts on each ticked frame. Ctrl-click toggles individual frames and Shift-click ticks a
 range from the last click; the ticks clear automatically after the batch action finishes.
 
-**Sync geometry**: the sync button beside the flip buttons in the Geometry / crop panel applies this
-frame's rotation / flips and straighten to the ticked frames (the whole roll when none are ticked).
-The crop is not included — to broadcast a crop, tick Sync options → Crop and use paste.
+**Sync composition**: the Geometry / crop panel has separate buttons. Sync rotation / flip /
+straighten applies the frame's orientation and straighten angle to ticked frames (the whole roll
+when none are ticked). Sync crop carries only the framing and rebases it onto each target's own
+negative. Neither action is included in Cineon or Display sync.
 
 **Library (roll wall)**: press **G** to switch between library and editing. "Scan a folder into the
 library…" re-registers `.ncproj` files that have been scattered around.

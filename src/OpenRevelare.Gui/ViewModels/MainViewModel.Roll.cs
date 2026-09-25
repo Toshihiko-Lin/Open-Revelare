@@ -1124,6 +1124,22 @@ public partial class MainViewModel
         foreach (RollFrame frame in Frames) frame.IsSelected = false;
     }
 
+    /// <summary>Select every frame as a batch target for the next strip operation.</summary>
+    public void SelectAllFrames()
+    {
+        if (Frames.Count == 0) return;
+        foreach (RollFrame frame in Frames) frame.IsSelected = true;
+        StatusText = Loc.F($"已选择全部 {Frames.Count} 帧");
+    }
+
+    /// <summary>Clear the batch-target ticks without changing the current frame.</summary>
+    public void ClearFrameSelection()
+    {
+        bool hadSelection = Frames.Any(frame => frame.IsSelected);
+        ClearStripSelection();
+        if (hadSelection) StatusText = Loc.T("已清除帧选择");
+    }
+
     /// <summary>
     /// A virtual copy of each target frame (the ticked frames, else the current one), inserted
     /// right after its original. A single copy is selected so it can be adjusted at once; a batch

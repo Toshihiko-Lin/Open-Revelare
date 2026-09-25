@@ -27,8 +27,8 @@ public partial class MainViewModel
     /// <summary>Copy Stage-2 scene adjustments (per SyncOptions) from the current frame to every other frame.</summary>
     public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, Loc.T("场景"));
 
-    public void CopyCalibration() { _calClipboard = BuildParams(); HasCalClipboard = true; StatusText = Loc.T("已复制 Cineon 标定"); }
-    public void CopyScene() { _sceneClipboard = BuildParams(); HasSceneClipboard = true; StatusText = Loc.T("已复制 Display 参数"); }
+    public void CopyCalibration() { _calClipboard = CurrentParamsForStorage(); HasCalClipboard = true; StatusText = Loc.T("已复制 Cineon 标定"); }
+    public void CopyScene() { _sceneClipboard = CurrentParamsForStorage(); HasSceneClipboard = true; StatusText = Loc.T("已复制 Display 参数"); }
 
     /// <summary>Paste the copied calibration onto the ticked frames.</summary>
     public void PasteCalibrationToSelected() => Paste(_calClipboard, cal: true, scene: false, Loc.T("标定"));
@@ -48,10 +48,10 @@ public partial class MainViewModel
         if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
         CommitUndo();   // close the previous edit as its own undo step
 
-        // Through BuildParams, not the stored params: the live control values are the truth for
+        // Through the live controls, not the stored params: the live values are the truth for
         // the frame on screen, and pasting must not silently discard an uncommitted tweak to a
-        // group the paste does not cover.
-        FrameParams target = BuildParams();
+        // group the paste does not cover. Restore render-only suppressions before storing.
+        FrameParams target = CurrentParamsForStorage();
         CopyGroups(clip, target, cal, scene);
         CurrentFrame.Params = target;
         LoadParams(target);          // push the result back into the controls
@@ -61,6 +61,14 @@ public partial class MainViewModel
         ScheduleRender();
         RestartThumbnails();
     }
+
+    /// <summary>
+    /// Snapshot the current controls for a parameter operation that writes a frame or clipboard.
+    /// The crop tool deliberately suppresses the crop in render params so its frame can be placed
+    /// over the excluded pixels; that suppression must never leak into copy/paste storage.
+    /// </summary>
+    private FrameParams CurrentParamsForStorage()
+        => LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
 
     /// <summary>
     /// The 几何 panel's own broadcast: the current frame's orientation and straighten angle onto
@@ -96,6 +104,29 @@ public partial class MainViewModel
             ? Loc.F($"已把旋转 / 翻转和拉直应用到勾选的 {n} 帧")
             : Loc.F($"已把旋转 / 翻转和拉直应用到整卷（{n} 帧）");
         if (hadSelection) ClearStripSelection();
+        MarkEdit();
+        RestartThumbnails();
+    }
+
+    /// <summary>Broadcast the current crop as an explicit framing operation.</summary>
+    public void ApplyCropToFrames()
+    {
+        if (CurrentFrame is null) return;
+        bool hadSelection = Frames.Any(f => f.IsSelected);
+        CommitUndo();
+        FrameParams source = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
+        CurrentFrame.Params = source;
+        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
+                                        && (!hadSelection || f.IsSelected)).ToList();
+        foreach (RollFrame frame in targets)
+        {
+            frame.Params.CropRect = RebaseCrop(source, frame.Params);
+            SetThumbnail(frame, null);
+        }
+        if (hadSelection) ClearStripSelection();
+        StatusText = hadSelection
+            ? Loc.F($"已把裁切应用到勾选的 {targets.Count} 帧")
+            : Loc.F($"已把裁切应用到整卷（{targets.Count} 帧）");
         MarkEdit();
         RestartThumbnails();
     }
@@ -176,13 +207,6 @@ public partial class MainViewModel
                 d.CurveHasEndpoints = s.CurveHasEndpoints;
             }
         }
-        if (Sync.GeomOrientation) { d.QuarterTurns = s.QuarterTurns; d.FlipH = s.FlipH; d.FlipV = s.FlipV; }
-        if (Sync.GeomStraighten) d.Rotation = s.Rotation;
-        // Re-anchored onto the target's own negative, not copied verbatim — see RebaseCrop.
-        // Runs AFTER the orientation groups above so it reads the orientation the target will
-        // actually have: the rect is stored in the oriented frame, and syncing a quarter turn in
-        // the same pass would otherwise leave the crop measured against the old axes.
-        if (Sync.GeomCrop) d.CropRect = RebaseCrop(s, d);
     }
 
     /// <summary>

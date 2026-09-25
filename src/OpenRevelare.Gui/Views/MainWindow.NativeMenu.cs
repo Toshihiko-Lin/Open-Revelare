@@ -138,6 +138,15 @@ public partial class MainWindow
             },
         };
 
+        var composition = new NativeMenu
+        {
+            Items =
+            {
+                Bind(Item(Loc.T("同步旋转 / 翻转 / 拉直"), OnApplyGeometryClick), nameof(Vm.HasImage)),
+                Bind(Item(Loc.T("同步裁切"), OnApplyCropClick), nameof(Vm.HasImage)),
+            },
+        };
+
         var edit = new NativeMenu
         {
             Items =
@@ -152,8 +161,9 @@ public partial class MainWindow
                 new NativeMenuItemSeparator(),
                 Bind(Sub(Loc.T("标定（Stage 1）"), cal), nameof(Vm.HasImage)),
                 Bind(Sub(Loc.T("场景（Stage 2）"), scene), nameof(Vm.HasImage)),
+                Bind(Sub(Loc.T("构图"), composition), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
-                Bind(Item(Loc.T("选择同步项…"), OnSyncOptionsClick), nameof(Vm.HasImage)),
+                Bind(Item(Loc.T("选择色彩同步项…"), OnSyncOptionsClick), nameof(Vm.HasImage)),
             },
         };
 
