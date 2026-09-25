@@ -2,6 +2,10 @@
 
 ## v1.8.1
 
+**品牌与发行资源**
+
+- 更新应用图标至新版胶片标识，并同步 Windows、Avalonia 窗口、关于页与 macOS 图标资源。
+
 **构图同步与交互改进**
 
 - **底片、观感与构图同步明确分离。** Cineon / Display 同步不再携带旋转、翻转、拉直或裁切；几何面板提供独立的“同步旋转 / 翻转 / 拉直”和“同步裁切”，裁切会按目标帧自己的底片区域重新定位，适用于半格与不同分格的工程。
@@ -20,6 +24,8 @@
 ---
 
 **Improved**
+
+- **Updated the application icon to the new film mark**, including the Windows, Avalonia window, About dialog and macOS icon resources.
 
 - **Negative, look and composition sync are now explicit layers.** Cineon / Display sync never carries rotation, flips, straighten or crop; the Geometry / crop panel provides separate sync commands, and crop rectangles are rebased onto each target negative for half-frame and mixed-split rolls.
 - **Copying or pasting while the crop tool is open no longer loses the crop.** Parameter operations now use a storage snapshot instead of the crop tool's temporary render state.
