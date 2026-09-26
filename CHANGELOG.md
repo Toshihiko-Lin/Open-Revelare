@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.8.2（未发布）
+
+**改进**
+
+- **印样信息区改为更完整的实验室记录签章。** 页脚不再显示总帧数；只排入已填写的卷信息，空字段会前移、空行会收起，不保留占位。相机 / ISO / EI / 日期与冲洗信息使用 38% / 24% / 38% 的宽 / 窄 / 宽列网格，各列独立对齐标签与内容；`ISO / EI` 可在同一字段中记录标称感光度和实际曝光指数（如 `400 / 320`），长内容保持单行省略。信息字号与行距加大，中英文及数字统一使用沉稳的 CJK 衬线字体；左侧 `Revelare` Logo 上方新增居中的半窄体 `NEGATIVE CONVERSION BY` 来源签章，明确负片转换由 Revelare 完成。
+
+---
+
+**Improved**
+
+- **The contact-sheet information area is now a fuller lab-record signature.** The footer no longer prints the total frame count and lays out only completed roll fields, moving later values forward and collapsing empty rows instead of reserving placeholders. Camera / ISO / EI / date and processing details use a 38% / 24% / 38% broad / compact / broad grid with independently aligned label and value tracks. The combined `ISO / EI` field can record box speed and actual exposure index together (for example `400 / 320`), while long values remain on one ellipsized line. Larger type and spacing use one restrained CJK serif family across Chinese, Latin text and numerals; a centred, semi-condensed `NEGATIVE CONVERSION BY` provenance line above the `Revelare` wordmark identifies the negative conversion.
+
 ## v1.8.1（2026-09-25）
 
 **品牌与发行资源**

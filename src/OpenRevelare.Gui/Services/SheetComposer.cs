@@ -22,7 +22,7 @@ public static class SheetComposer
     private const double RefWidth = 2048.0;
 
     private static readonly FontFamily Face =
-        new("Bahnschrift, Noto Sans SC, Inter, Segoe UI, Microsoft YaHei, PingFang SC, sans-serif");
+        new("Noto Sans SC, Microsoft YaHei, PingFang SC, Segoe UI, sans-serif");
 
     /// <summary>What to print around the thumbnails. The palette and the page proportion are the
     /// choices — the lab-print furniture (header, keylines, frame numbers) is the house style,
@@ -250,8 +250,7 @@ public static class SheetComposer
             DrawCellAnnotations(ctx, m, grid.Layout, gridX, gridY, theme);
 
             SheetInfoBar.Draw(ctx, notes, size.Width,
-                              size.Height - SheetInfoBar.HeightFor(size.Width), theme,
-                              grid.Layout.Count);
+                              size.Height - SheetInfoBar.HeightFor(size.Width), theme);
         }
         return rtb;
     }

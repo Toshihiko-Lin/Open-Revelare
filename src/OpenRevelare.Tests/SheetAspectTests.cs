@@ -467,7 +467,7 @@ public class SheetAspectTests
         double sideSurround = (double)(page.Width - l.Width) / page.Width;
 
         Assert.Equal((6, 6), (l.Cols, l.Rows));
-        Assert.True(sideSurround <= 0.14,
+        Assert.True(sideSurround <= 0.15,
                     $"side surround is {sideSurround:P1} of the page ({page.Width} vs grid {l.Width})");
     }
 
@@ -476,6 +476,6 @@ public class SheetAspectTests
     [Fact]
     public void Metadata_footer_balances_legibility_and_photo_area()
     {
-        Assert.InRange(SheetInfoBar.HeightFor(2048), 224, 240);
+        Assert.InRange(SheetInfoBar.HeightFor(2048), 240, 256);
     }
 }

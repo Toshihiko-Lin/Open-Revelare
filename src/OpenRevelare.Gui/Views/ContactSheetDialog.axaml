@@ -66,13 +66,13 @@
                     </StackPanel>
 
                     <TextBlock Text="{i18n:T '卷信息'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
-                    <TextBlock Classes="groupHint" Text="{i18n:T '文字标志独立放置；卷号、胶卷与帧数归入右侧四行实验室记录。'}" />
+                    <TextBlock Classes="groupHint" Text="{i18n:T '文字标志独立放置；右侧实验室记录仅排入已填写的卷信息。'}" />
                     <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '相机'}" Margin="0,3,10,3" />
                         <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding CameraBody}" Margin="0,3" />
                         <TextBlock Grid.Row="1" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '胶卷'}" Margin="0,3,10,3" />
                         <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding FilmStock}" Margin="0,3" />
-                        <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="ISO/ASA" Margin="0,3,10,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Classes="fieldLabel" Text="ISO / EI" Margin="0,3,10,3" />
                         <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding FilmIso}" Margin="0,3" />
                         <TextBlock Grid.Row="3" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '卷号'}" Margin="0,3,10,3" />
                         <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding RollNumber}" Margin="0,3" />
