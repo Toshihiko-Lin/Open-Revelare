@@ -91,7 +91,8 @@ public static class Stage2
             return;
         }
 
-        ApplyOperationChain(d, cal, output, encodeExit, curvesAlreadyEncoded: false);
+        ApplyOperationChain(d, cal, output, encodeExit, curvesAlreadyEncoded: false,
+                            preserveColourHeadroom: false);
     }
 
     /// <param name="rangeTop">The encoded value the RANGE-DEFINED ops span up to: 1 on an SDR
@@ -106,7 +107,8 @@ public static class Stage2
         ColorSpaceDef output,
         bool encodeExit,
         bool curvesAlreadyEncoded,
-        float rangeTop = 1f)
+        float rangeTop = 1f,
+        bool preserveColourHeadroom = true)
     {
         if (!float.IsFinite(rangeTop) || rangeTop < 1f)
             throw new ArgumentOutOfRangeException(nameof(rangeTop), rangeTop, "The range top must be finite and at least 1.");
@@ -252,6 +254,19 @@ public static class Stage2
                         outv = (1.0f - hiAmt) * outv + hiAmt * (1.0f - (float)Math.Pow(1.0f - c, hiGamma));
                     }
                     float scale = lumaC > 1e-6f ? outv * rangeTop / Math.Max(lumaC, 1e-6f) : 1.0f;
+
+                    // Keep the intermediate colour RAW-like, but do not let a shadow lift
+                    // overflow one component and rely on the final per-channel clamp.  That
+                    // would change the channel ratios (and therefore hue/saturation).  Limit
+                    // the whole colour by its largest non-negative component instead, leaving
+                    // the operation's hue-preserving contract intact.  Extended targets use
+                    // their actual headroom; SDR uses the display white at 1.
+                    if (preserveColourHeadroom)
+                    {
+                        float maxComponent = Math.Max(r, Math.Max(g, bl));
+                        if (float.IsFinite(maxComponent) && maxComponent > 0.0f)
+                            scale = Math.Min(scale, rangeTop / maxComponent);
+                    }
                     r *= scale; g *= scale; bl *= scale;
                 }
 
@@ -512,7 +527,8 @@ public static class Stage2
             ColorSpaces.LinearExtendedSrgb,
             encodeExit: false,
             curvesAlreadyEncoded: true,
-            rangeTop: Srgb.LinearToSrgbExtended(headroom));
+            rangeTop: Srgb.LinearToSrgbExtended(headroom),
+            preserveColourHeadroom: true);
 
         ParallelSweep.Over(d.Length, (from, to) =>
         {
@@ -577,13 +593,17 @@ public static class Stage2
             perceptual,
             output,
             encodeExit: false,
-            curvesAlreadyEncoded: true);
+            curvesAlreadyEncoded: true,
+            // SDR ManagedV2 deliberately keeps the carrier open during all Display operations.
+            // The final presentation bound below is the first place that resolves overshoot.
+            preserveColourHeadroom: false);
 
         ParallelSweep.Over(d.Length, (from, to) =>
         {
             for (int index = from; index < to; index++)
-                d[index] = Math.Clamp(d[index], 0.0f, 1.0f);
+                if (d[index] < 0.0f) d[index] = 0.0f;
         });
+        HighlightRolloff.BoundAbove(d, 1.0f);
     }
 
     /// <summary>

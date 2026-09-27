@@ -1,4 +1,8 @@
 {
+  "\u5e95\u7247 \u00b7 Cineon": "Negative \u00b7 Cineon",
+  "\u89c2\u611f \u00b7 Display": "Look \u00b7 Display",
+  "\u5e95\u7247\u4e0e\u626b\u63cf\u6821\u6b63": "Negative and scan correction",
+  "\u6210\u7247\u660e\u6697\u3001\u8272\u5f69\u4e0e\u98ce\u683c": "Finished-photo look",
   "Path A 校正观测必须包含 R、G、B 三个通道。": "A Path A calibration observation must contain R, G and B channels.",
   "Path A 校正观测必须是有限、非负且非全零的数值。": "A Path A calibration observation must be finite, non-negative and not all zero.",
   "解耦观测矩阵接近奇异：请检查 R/G/B 校正图。": "The decouple observation matrix is near-singular; check the R/G/B calibration frames.",

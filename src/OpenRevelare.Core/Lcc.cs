@@ -89,9 +89,13 @@ public static class Lcc
     public static ImageBuffer FromDecoded(ImageBuffer decoded)
     {
         ArgumentNullException.ThrowIfNull(decoded);
+        // Never blur the caller's decode in place. The GUI may keep the same preview buffer in
+        // its cache, and mutating it here makes a later render depend on whether an LCC field was
+        // loaded first. Large inputs are boxed; already bounded inputs still need an inexpensive
+        // data copy so FromDecoded has the same non-mutating contract at every size.
         ImageBuffer ff = Math.Max(decoded.Width, decoded.Height) > MaxEdge
             ? Resample.Box(decoded, MaxEdge)
-            : decoded;
+            : new ImageBuffer(decoded.Width, decoded.Height, (float[])decoded.Data.Clone());
 
         int w = ff.Width, h = ff.Height;
 

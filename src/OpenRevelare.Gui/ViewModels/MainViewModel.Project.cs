@@ -83,11 +83,11 @@ public partial class MainViewModel
 
     /// <summary>The migration dialog's body: what it does, then what it does to THIS roll.</summary>
     public string MigrationDialogText =>
-        Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。工程保存后不会自动退回 v1。")
+        Loc.T("迁移会把此工程从旧版兼容渲染切换到 v2：Display 调节会在保留浮点余量的中间结果上运行，避免提升阴影时单通道溢出；嵌入 ICC 的 TIFF 会完整转换，print LUT 会转换到所选 exact output profile，曲线在目标编码中运行。工程保存后不会自动退回 v1。")
         + "\n\n" + DescribeMigrationEffect();
 
     public string LegacyColorPipelineNotice => Loc.T(
-        "此工程仍使用旧版色彩管线。画面保持原样，但输出会嵌入准确的兼容 ICC；迁移到色彩管理版会重新渲染并可能改变外观。");
+        "此工程仍使用旧版色彩管线。画面保持原样，但 Display 调节仍可能造成通道溢出；点击“迁移到色彩管理版…”可切换到保留浮点余量的新管线。");
 
     public string ColorPipelineDiagnostic =>
         (_colorPipelineVersion == ColorPipelineVersion.LegacyV1

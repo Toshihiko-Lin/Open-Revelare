@@ -14,8 +14,45 @@
 
 ---
 
+- **界面标签更简洁，并增加视觉区分。** Cineon / Display 分别显示为底片与观感，并配合胶片 / 图层图标；顶部说明压缩为短句，详细说明保留在提示中。
+
+- **ManagedV2 的 Display 调整现在保留色彩余量。** 提升阴影或高光时，先对整体 RGB 颜色进行限幅，避免单通道溢出后导致偏色；LegacyV1 仍保留以兼容旧设备。
+- **旧工程支持明确的迁移按钮。** 界面会说明迁移可能带来的外观变化，确认后清理色彩缓存并使用 ManagedV2 重新渲染。
+- **Cineon 主 D_max 改为保持色彩比例的亮端映射。** 主滑块按三通道密度跨度共同缩放，改变高光反差和亮端位置而不引入轻微偏色；逐通道 D_max 仍可用于高级高光色偏调整。
+- **片基与高光置信度提示面向用户简化。** 主面板只显示“可靠 / 参考 / 需确认”和证据类型，详细统计信息保留在技术报告中。
+
 **Improved**
 
+- **The editing tabs are now shorter and more modern.** Cineon and Display use concise
+  negative/look labels with film/layers icons; the top explanations are reduced to one line,
+  while detailed guidance remains in tooltips.
+- **The Cineon master D_max now preserves colour ratios.** The main slider scales the three
+  density spans together, changing highlight contrast and endpoint placement without introducing
+  a small cast; per-channel D_max remains available for advanced highlight-colour control.
+- **Film-base and highlight confidence messages are now user-facing.** The main panel shows only
+  “reliable”, “reference” or “needs confirmation” plus the evidence type; detailed statistics
+  remain in the technical report.
+- **Display adjustments now use a RAW-like open intermediate in ManagedV2.** Shadow and highlight
+  lifts run before the final display bound; any overshoot is fitted as one RGB colour, preserving
+  channel ratios instead of clipping one channel. LegacyV1 remains available for compatibility.
+- **Legacy projects now have an explicit migration path.** The in-app banner offers
+  “Migrate to colour-managed rendering…”, explains the expected appearance change, invalidates
+  colour-dependent caches, and re-renders the project in ManagedV2 after confirmation.
+- **Roll-wide automatic inversion is now safe across roll changes.** Cancellation covers the
+  provisional current-frame stage as well as the background pass, so a roll replaced during
+  analysis cannot receive stale endpoints or film-base values from the previous roll.
+- **Path A highlight protection now matches the white-light safety envelope.** Its endpoint lift
+  uses only high-density endpoint candidates and applies one uniform factor, preserving the
+  measured red/green/blue ratios while reducing red/blue highlight clipping without treating
+  low-luminance saturated colours as extra exposure headroom.
+- **RAW and TIFF admission is more explicit and resilient.** RAW preview/flat-field decoding stays
+  bounded to the requested preview size, while TIFF input-space detection now reports usable ICC,
+  baseline chromaticity, Exif, vendor-gamma and known-writer evidence consistently with the actual
+  decoder path; malformed declarations fall back without aborting the import.
+- **LCC and Path A diagnostics now share the same input contract.** Mixed RAW/TIFF flat references
+  are rejected before processing, and roll-wide calibration retains the measured source evidence
+  when a frame cannot be decoded instead of silently changing the result. Loading a flat field no
+  longer mutates a cached preview buffer while smoothing it.
 - **Roll-wide automatic mask removal now produces an explainable, robust calibration.** Film-base evidence distinguishes a light-board-bounded physical carrier mode, a bare edge rebate and picture-content inference, with supporting-frame counts, log dispersion, confidence and quantisation risk. Weak or contradictory physical votes no longer masquerade as a confirmed carrier. Explicit monochrome mode can identify a colourless carrier by the same edge topology while still excluding the light board or scanner surround.
 - **The highlight endpoint remains explicitly a scene proxy, with more robust roll reduction.** Cross-frame colour consensus uses a quality-weighted log-chroma medoid, while the former 12-frame switch is replaced by a continuous robust upper percentile moving from P100 toward P95 as effective evidence grows. Candidate/effective frames, chroma dispersion, percentile, and clipping/quantisation risks persist with the project; scanner blacks near the 3.0 D real-density boundary are no longer reported as risk-free.
 - **Fixed inflated automatic Dmax on Path A making images too dark.** Highly saturated colours can drive one separated channel close to zero after narrow-band decoupling. Automatic calibration no longer treats that chroma extreme as roll-wide luminance headroom and lifts all three endpoints; Path A exposure placement now comes only from co-sited highlight tails. The broad-spectrum path keeps its existing per-channel clipping protection.

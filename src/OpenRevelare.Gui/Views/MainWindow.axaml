@@ -915,10 +915,18 @@
                         </ItemsPanelTemplate>
                     </TabControl.ItemsPanel>
                     <!-- ══ 整卷校准（FilmBase · Stage 1） ═══════════════════════ -->
-                    <TabItem Header="Cineon">
+                    <TabItem>
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <ctl:Icon Data="{StaticResource IcoFilm}" />
+                                <TextBlock Text="{i18n:T '底片 · Cineon'}" />
+                            </StackPanel>
+                        </TabItem.Header>
                         <!-- No scroller of its own: the panel scrolls as one column (see PanelScroll). -->
                         <Border>
                             <StackPanel Spacing="0" Margin="22,4,14,18">
+                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Text="{i18n:T '底片与扫描校正'}" />
                                 <!-- 旧模型存的 d_max / scan_ev 与现在固定的输出范围不是同一
                                      量纲，静默折算实测在薄部偏 -18%、浓部 +53%（比不折算更糟），
                                      所以如实提示重跑，而不是假装画面没变。-->
@@ -1021,7 +1029,8 @@
                                           ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。'}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
-                                                       Value="{Binding DMaxLevel}" />
+                                                       Value="{Binding DMaxLevel}"
+                                                       ToolTip.Tip="{i18n:T 'Cineon 亮端映射：改变高光反差和亮端位置，保持三通道色彩比例。需要整体提亮请使用 Display 曝光。'}" />
                                         <Grid ColumnDefinitions="*,*">
                                             <ToggleButton Name="DMaxBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
@@ -1045,9 +1054,9 @@
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
                                                   IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
-                                                <ctl:SliderRow Label="R" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxR}" TrackBrush="{DynamicResource TrackRBrush}" />
-                                                <ctl:SliderRow Label="G" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxG}" TrackBrush="{DynamicResource TrackGBrush}" />
-                                                <ctl:SliderRow Label="B" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxB}" TrackBrush="{DynamicResource TrackBBrush}" />
+                                                <ctl:SliderRow Label="R" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxR}" TrackBrush="{DynamicResource TrackRBrush}" ToolTip.Tip="{i18n:T '高级：单独改变红色亮端，会改变高光色偏。'}" />
+                                                <ctl:SliderRow Label="G" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxG}" TrackBrush="{DynamicResource TrackGBrush}" ToolTip.Tip="{i18n:T '高级：单独改变绿色亮端，会改变高光色偏。'}" />
+                                                <ctl:SliderRow Label="B" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxB}" TrackBrush="{DynamicResource TrackBBrush}" ToolTip.Tip="{i18n:T '高级：单独改变蓝色亮端，会改变高光色偏。'}" />
                                             </StackPanel>
                                         </Expander>
                                     </StackPanel>
@@ -1127,9 +1136,17 @@
                     </TabItem>
 
                     <!-- ══ 帧编辑（SceneBase · Stage 2） ═══════════════════════ -->
-                    <TabItem Header="Display">
+                    <TabItem>
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <ctl:Icon Data="{StaticResource IcoLayers}" />
+                                <TextBlock Text="{i18n:T '观感 · Display'}" />
+                            </StackPanel>
+                        </TabItem.Header>
                         <Border>
                             <StackPanel Spacing="0" Margin="22,4,14,18">
+                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Text="{i18n:T '成片明暗、色彩与风格'}" />
                                 <!-- 白平衡属于这里，不属于标定。标定阶段解的是【色偏】——胶片、扫描、片基
                                      留在两端上的偏差，写在 D_min / D_max 里，没有"白平衡"的概念；白平衡是
                                      场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
@@ -1158,7 +1175,8 @@
                                      cards; a slider outside any module has no home to be found in. -->
                                 <Expander Header="{i18n:T '基本'}" IsExpanded="True">
                                     <StackPanel Spacing="1">
-                                        <ctl:SliderRow Label="{i18n:T '曝光'}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}" />
+                                        <ctl:SliderRow Label="{i18n:T '曝光'}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                                       ToolTip.Tip="{i18n:T '成片曝光：改变最终照片亮度，不重新解释底片曝光位置。'}" />
                                         <ctl:SliderRow Label="{i18n:T '反差'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Contrast}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '饱和度'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Saturation}" Bipolar="True" TrackBrush="{DynamicResource TrackSatBrush}" />
                                     </StackPanel>
@@ -1175,8 +1193,10 @@
                                                 <ctl:Icon Data="{StaticResource IcoMarquee}" />
                                             </ToggleButton>
                                         </Grid>
-                                        <ctl:SliderRow Label="{i18n:T '阴影'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Shadows}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}" />
-                                        <ctl:SliderRow Label="{i18n:T '高光'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Highlights}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}" />
+                                        <ctl:SliderRow Label="{i18n:T '阴影'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Shadows}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                                       ToolTip.Tip="{i18n:T '调整照片阴影层次；新版会保留通道余量，避免单通道先溢出。'}" />
+                                        <ctl:SliderRow Label="{i18n:T '高光'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Highlights}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                                       ToolTip.Tip="{i18n:T '调整照片高光层次；不会改变 Cineon 的亮端标定。'}" />
                                         <Grid ColumnDefinitions="*,Auto">
                                             <ctl:SliderRow Grid.Column="0" Label="{i18n:T '白场'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding White}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}" />
                                             <ToggleButton Name="WhiteBtn" Grid.Column="1" Classes="sampling icon" Margin="6,0,0,0"

@@ -1072,8 +1072,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                double d = DMaxLevel - Mean(DMaxPerChannel);
-                DMaxR += d; DMaxG += d; DMaxB += d;
+                double[] dMin = DMinPerChannel;
+                double[] dMax = DMaxPerChannel;
+                double meanMin = Mean(dMin);
+                double meanMax = Mean(dMax);
+                double meanSpan = meanMax - meanMin;
+                if (meanSpan > 1e-9 && DMaxLevel > meanMin)
+                {
+                    // Scale all three density spans by one common factor. Adding the same
+                    // density to each D_max changes channels with different D_min values by
+                    // different relative amounts, which becomes a highlight cast after the
+                    // endpoint affine. A common span factor is a shared exposure move.
+                    double factor = (DMaxLevel - meanMin) / meanSpan;
+                    DMaxR = dMin[0] + (dMax[0] - dMin[0]) * factor;
+                    DMaxG = dMin[1] + (dMax[1] - dMin[1]) * factor;
+                    DMaxB = dMin[2] + (dMax[2] - dMin[2]) * factor;
+                }
             }
         }
         finally
@@ -2586,6 +2600,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_previewLinear is null) return;
 
+        // Cancellation must cover stage 1 as well as the roll-wide pass. Creating the token
+        // only after stage 1 allowed a roll switch to receive stale endpoints from the old roll.
+        var cts = new CancellationTokenSource();
+        _autoInvertCts?.Cancel();
+        _autoInvertCts = cts;
+        CancellationToken ct = cts.Token;
+
         // ── Stage 1: the current frame alone, so there is something to look at at once ──────
         //
         // This must measure BOTH endpoint triples, not just the base. Estimating DMin and stopping
@@ -2600,8 +2621,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // lands. That is why <see cref="RollAnalysisPending"/> exists: the provisional state is
         // announced rather than left to look like the finished result.
         double? cut = AutoBoardCut();
+        if (ct.IsCancellationRequested)
+        {
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
+            return;
+        }
         if (!AutoFilmBaseFromRoll(cut, useMode: true))
+        {
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
             return;   // AutoFilmBaseFromRoll already reported why; a base-less chain is meaningless
+        }
 
         _suppressRender = true;
         try
@@ -2628,6 +2657,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         finally { _suppressRender = false; }
 
+        if (ct.IsCancellationRequested)
+        {
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
+            return;
+        }
+
         ApplyAutoChainToRoll();
         ScheduleRender();
         // Thumbnails are already stale at this point — every frame just took the current frame's
@@ -2639,7 +2674,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         // ── Stage 2: pool the whole roll ───────────────────────────────────────────────────
         List<RollFrame> frames = Frames.ToList();
-        if (frames.Count <= 1) { FinishAutoInvert(); return; }
+        if (frames.Count <= 1) { FinishAutoInvert(cts); return; }
 
         // Everything on screen is now one frame's answer standing in for the roll. Say so, and
         // let the notice be dismissed — a user who already knows should not have to keep reading
@@ -2647,11 +2682,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // early return above) never has a provisional stage to warn about.
         RollAnalysisNoticeDismissed = false;
         RollAnalysisPending = true;
-
-        var cts = new CancellationTokenSource();
-        _autoInvertCts?.Cancel();
-        _autoInvertCts = cts;
-        CancellationToken ct = cts.Token;
 
         try
         {
@@ -2854,7 +2884,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             HighlightEndpointEstimate? highlightEstimate = await Task.Run(
                 () => FilmBase.DetectDMaxPerChannelFromRollDetailed(
                     values, rollBase, 90.0, masks, cut,
-                    protectIndependentChannelExtrema: _decoupleMatrix is null), ct);
+                    // Path A still needs the bounded no-clip lift: independent extrema are
+                    // collected only from the same high-density endpoint candidates, then one
+                    // uniform factor preserves the co-sited colour ratios.
+                    protectIndependentChannelExtrema: true), ct);
             if (highlightEstimate is { } indexedHighlight
                 && indexedHighlight.RepresentativeFrame >= 0
                 && indexedHighlight.RepresentativeFrame < sourceRollIndices.Count)
@@ -2902,7 +2935,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             UpdateCalibrationConfidence(baseEstimate, highlightEstimate, rollDMaxPerCh is null && rollWbHigh is not null);
             ApplyAutoChainToRoll();
             NeedsRecalibration = false;   // 重跑过了，提示可以撤下
-            FinishAutoInvert(masks.Count, failed, failReason);
+            FinishAutoInvert(cts, masks.Count, failed, failReason);
         }
         // Both failure paths clear the notice as well as the progress line. A cancelled or failed
         // analysis is exactly the case where "正在分析" must stop being displayed: the roll is
@@ -2912,6 +2945,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             ReportBackground("");
             RollAnalysisPending = false;
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
         }
         catch (Exception ex)
         {
@@ -2988,24 +3022,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _calibrationDiagnosticsRollWide = true;
         _rollBaseCalibration = baseEstimate;
         bool isMonochrome = monochromeOverride ?? Monochrome;
-        static string Confidence(double value) => value >= 0.75 ? Loc.T("高")
-            : value >= 0.50 ? Loc.T("中") : Loc.T("低");
-        static int Percent(double value) => (int)Math.Round(Math.Clamp(value, 0.0, 1.0) * 100.0);
-
-        string baseRisk = baseEstimate.QuantizationRisk ? Loc.T(" · 存在量化风险") : "";
-        string inferredEvidence = double.IsFinite(baseEstimate.LogDispersion)
-            ? Loc.F($"弱物理共识仅 {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧 · 对数离散 {baseEstimate.LogDispersion:F3}")
-            : Loc.T("未检测到裸露载体");
+        static string Confidence(double value) => value >= 0.75 ? Loc.T("可靠")
+            : value >= 0.50 ? Loc.T("参考") : Loc.T("需确认");
         FilmBaseText = baseEstimate.Evidence switch
         {
             FilmBaseEvidence.PhysicalMode =>
                 isMonochrome
-                    ? Loc.F($"片基：物理片基（灯板下无色载体峰）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}")
-                    : Loc.F($"片基：物理片基（灯板下色罩峰）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}"),
+                    ? Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板片基")
+                    : Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板色罩"),
             FilmBaseEvidence.PhysicalEdgeSliver =>
-                Loc.F($"片基：物理片基（边缘裸片基）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}"),
+                Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 边缘片基"),
             _ =>
-                Loc.F($"⚠ 片基：内容推断片基 · {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {inferredEvidence}{baseRisk}；建议手动【片基采样】"),
+                Loc.T("⚠ 片基：需确认 · 内容推断，建议片基采样"),
         };
 
         UpdateHighlightConfidence(highlightEstimate, usedFallbackHighlight);
@@ -3017,29 +3045,30 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _rollHighlightCalibration = highlightEstimate;
         _rollUsedFallbackHighlight = usedFallback;
-        static string Confidence(double value) => value >= 0.75 ? Loc.T("高")
-            : value >= 0.50 ? Loc.T("中") : Loc.T("低");
-        static int Percent(double value) => (int)Math.Round(Math.Clamp(value, 0.0, 1.0) * 100.0);
+        static string Confidence(double value) => value >= 0.75 ? Loc.T("可靠")
+            : value >= 0.50 ? Loc.T("参考") : Loc.T("需确认");
 
         if (highlightEstimate is { } high)
         {
-            string clipping = high.ClippingRisk ? Loc.T("极端帧可能裁切") : Loc.T("未见裁切风险");
-            string quantization = high.QuantizationRisk ? Loc.T("存在量化风险") : Loc.T("量化风险低");
-            HighlightConfidenceText = Loc.F($"高光：场景代理端点 · {Confidence(high.Confidence)}置信度 {Percent(high.Confidence)}% · {high.CandidateFrames}/{high.TotalFrames} 帧候选 / {high.EffectiveFrames:F1} 有效帧 · 色度代表第 {high.RepresentativeFrame + 1} 帧 · 对数色度离散 {high.LogChromaDispersion:F3} · 自适应 P{high.HeadroomPercentile:F1} · {clipping} · {quantization}");
+            string warning = high.ClippingRisk || high.QuantizationRisk
+                ? Loc.T(" · 建议人工检查")
+                : "";
+            HighlightConfidenceText = Loc.F($"高光：{Confidence(high.Confidence)} · 多帧场景高光{warning}");
         }
         else if (usedFallback)
         {
-            HighlightConfidenceText = Loc.T(
-                "⚠ 高光：备用场景代理端点 · 低置信度 · 主检测器没有足够的共址高光候选");
+            HighlightConfidenceText = Loc.T("⚠ 高光：需确认 · 使用了备用估计，建议高光采样");
         }
         else
         {
-            HighlightConfidenceText = Loc.T("⚠ 高光：未获得可用代理端点");
+            HighlightConfidenceText = Loc.T("⚠ 高光：未获得可靠估计，建议高光采样");
         }
     }
 
-    private void FinishAutoInvert(int voted = 1, int failed = 0, string? failReason = null)
+    private void FinishAutoInvert(CancellationTokenSource owner, int voted = 1, int failed = 0,
+                                  string? failReason = null)
     {
+        if (ReferenceEquals(_autoInvertCts, owner)) _autoInvertCts = null;
         // The roll-wide numbers are in: what is on screen is no longer provisional.
         RollAnalysisPending = false;
         // A short vote is reported as such. The numbers are still applied — they are the best
@@ -3144,7 +3173,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             highlightEstimate = FilmBase.DetectDMaxPerChannelFromRollDetailed(
                 new[] { src }, tBase, 90.0, new[] { mask }, cut,
-                protectIndependentChannelExtrema: _decoupleMatrix is null);
+                protectIndependentChannelExtrema: true);
             highlight = highlightEstimate?.Density;
 
             // Fallback: the densest-highlight solve. It answers from the same masked pixels but
@@ -3323,7 +3352,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
                 new[] { val }, tBase, 90.0, new[] { raw }, cut,
-                protectIndependentChannelExtrema: _decoupleMatrix is null);
+                protectIndependentChannelExtrema: true);
         }
         catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
 
