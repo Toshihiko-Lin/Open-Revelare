@@ -58,8 +58,11 @@ Advanced mode calls `IDXGISwapChain3::CheckColorSpaceSupport`, requires
 `SetColorSpace1`. Creation fails with `ORWP_E_COLOR_SPACE` if that contract
 cannot be established. The caller must select Advanced mode only after its
 display environment reports the supported SDR-WCG Advanced Color contract.
-The current phase deliberately routes HDR to the visibly warned emergency
-BGRA8 contract until HDR/reference-white behavior is implemented and verified.
+Advanced Color is also the Windows presentation path for HDR. The managed
+display contract supplies the HDR reference-white scale and extended headroom;
+the shim only uploads the linear FP16 surface and never tone-maps it. If the
+display contract cannot be established, the caller deliberately falls back to
+the visibly warned emergency BGRA8 contract.
 
 Legacy mode deliberately does not call `SetColorSpace1`. Its BGRA values must
 either have received the one allowed shared-CMM monitor transform, or carry the

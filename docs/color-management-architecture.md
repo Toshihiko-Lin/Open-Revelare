@@ -1,12 +1,12 @@
 # OpenRevelare 色彩管理链路修复架构
 
-状态：**Windows PR 候选（M1/M2 与 M3/M4 Windows 切片已通过自动化回归）**。macOS M5 按目标延后；Windows 色度计/跨显示器人工验收仍待完成。
+状态：**Windows PR 候选（M1/M2 与 M3/M4 Windows 切片已通过自动化回归）**。HDR 渲染/导出与 Linux SDR 回退已落地；macOS M5 的原生垫片仍待真机验证，Windows 色度计/跨显示器人工验收仍待完成。
 
 范围：输入表征、工作空间、输出渲染、导出 ICC、软打样预留、屏幕呈现与跨平台边界。
 
-代码基线：`main` @ `b7cd46d61c2861c334e3af043126f8ead4831f5e`，.NET 8、Avalonia 11.2.3、SkiaSharp 2.88.9。
+代码基线：`main` @ `e82ef22edf8dc0bbc3464660fb759ad54ba68faf`（2026-09-28，.NET 8、Avalonia 11.2.3、SkiaSharp 2.88.9）。历史决策仍按下方 Session Log 保留。
 
-最后复核：2026-08-30。
+最后复核：2026-09-28。
 
 规范语言：本文中的“必须 / 不得 / 应 / 可以”分别对应 MUST / MUST NOT / SHOULD / MAY。
 
@@ -109,14 +109,15 @@ RenderedFrame(float32 + exact OutputProfile + OutputRecipe)
 - 不重写为 Electron，也不替换 Avalonia 的非色彩关键 UI。
 - 不恢复已删除的图像处理 GPU backend。原生 D3D/Metal 只作最终 surface/present；Core 的反相、
   Stage 2 和导出仍为共享 CPU 实现，除非以后有独立测量与架构决策。
-- 第一阶段不实现 HDR grading 或 HDR 输出。FP16 extended-linear 是 SDR 广色域的无损载体；HDR/EDR
-  参考白和 tone mapping 是单独决策。
+- HDR grading、HDR 输出和 gain-map JPEG 已在当前 Core/GUI 路径实现；FP16 extended-linear 是
+  Windows/macOS 呈现与 float32 HDR 母版的载体。Linux 屏幕端仍只提供明确标注的 SDR 回退，
+  HDR/EDR 预览等待 Avalonia 合成线程 GPU interop。
 - 不把显示器 ICC 当成输出文件 ICC。显示 profile 描述设备，输出 profile 描述文件，两者职责不同。
 - 不声称未表征的相机 RAW 具有绝对色准。未知必须是显式状态，不能偷偷贴 sRGB 或 ACEScg 标签。
 - soft proof 不与“输出空间”混为一项。它是独立的 proof profile / intent / paper simulation 功能，
   本架构预留接口，但不属于第一轮修复的完成条件。
-- 不在第一阶段给任意外部 LUT 型输出 profile 提供 UI。架构支持它之前，先把内建 RGB 输出和嵌入
-  输入 ICC 做正确；外部 profile 必须经过单独兼容性测试后再开放。
+- 外部 `.cube` 只在声明/解析为 Cineon 输入时进入 UI；输出编码由文件头或卷级合同确定，未知
+  合同必须 fail closed。它不是任意 ICC 输出 profile 的通用入口。
 
 ---
 
@@ -635,7 +636,7 @@ OpenRevelare.ColorManagement   (net8.0, no UI/no platform)
 OpenRevelare.Core              (existing render; no Avalonia)
           ▲
           │
-OpenRevelare.Preview           (shared scene/compositor; Skia allowed, no OS API)
+OpenRevelare.Presentation       (shared scene/compositor; no OS API)
           ▲
           │
 OpenRevelare.Gui               (coordination + Avalonia shell)
@@ -648,7 +649,7 @@ OpenRevelare.Gui               (coordination + Avalonia shell)
 
 - `Core` 和 CLI 不引用 Avalonia、AppKit、Metal、DXGI；
 - `ColorManagement` 不引用 GUI 或 platform assembly；
-- `Preview` 不引用 Win32/macOS presenter；
+- `Presentation` 不引用 Win32/macOS presenter；
 - platform assembly/native shim 不包含色彩数学或 render/look；
 - macOS/Windows shim 可共享同一窄 C ABI：create、resize、present、query/notify、destroy。
 

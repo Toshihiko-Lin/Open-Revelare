@@ -41,7 +41,7 @@ Colour negatives contain an orange base and dye layers. OpenRevelare linearises 
 - **Local-first**: no account or network connection; processing runs in the shared CPU Core.
 - **Cross-platform**: C# / .NET 8 + Avalonia for Windows, Linux and macOS.
 
-The application is intended for whole-roll camera-copy and scanning workflows, archival parameters and reproducible reprocessing. It does not provide per-roll colour-chart calibration; use [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) for heritage, commercial-archive or research work that requires it.
+The application is intended for whole-roll camera-copy and scanning workflows, archival parameters and reproducible reprocessing. HDR editing and export are supported; Linux currently keeps the on-screen preview on an explicitly labelled SDR fallback. It does not provide per-roll colour-chart calibration; use [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) for heritage, commercial-archive or research work that requires it.
 
 ## Model
 
@@ -66,7 +66,7 @@ The separation allows physical parameters to be shared across a roll while frame
 4. **Edit frames** in SceneBase with temperature, exposure, contrast, saturation and curves.
 5. **Export** TIFF, JPEG, linear DNG or scene-linear ACEScg TIFF.
 
-Changes are written automatically. The `.ncproj` stays beside the source image.
+Changes are written automatically. The `.ncproj` is placed beside the source when that directory is writable; read-only media use the per-user `rolls` fallback shown below.
 
 ## Interface and examples
 
@@ -111,13 +111,14 @@ Changes are written automatically. The `.ncproj` stays beside the source image.
 | Category | Capabilities |
 |---|---|
 | Reversal | Cineon density-domain inversion, auto-calibration, narrow-band light decoupling (Path A), black-and-white negatives |
-| Colour | ACEScg workspace; sRGB, Display P3 and Adobe RGB output; ICC management; Stage 2 controls |
+| Colour | ACEScg workspace; sRGB, Display P3 and Adobe RGB output; exact ICC management; Stage 2 controls |
 | Pre-processing | LCC flat-field, lens distortion, vignetting, sprocket masking and geometry crop in linear light |
 | Workflow | Roll management, roll sync, virtual copies, format presets, 80-step undo/redo, histogram and waveform |
-| Output | 16-bit TIFF, JPEG, linear DNG and 32-bit float ACEScg TIFF; templates, scaling and sharpening |
+| Output | 16-bit TIFF, JPEG, linear DNG, 32-bit float scene-linear ACEScg TIFF and HDR gain-map JPEG; templates, scaling and sharpening |
+| Look / HDR | Cineon-input `.cube` print looks, SDR/HDR roll rendering, HDR limit in stops, HDR contact sheets |
 | Reports | Per-frame report of input domain, base source and inversion parameters |
 
-Inputs include DNG, NEF, CR2/CR3, ARW, RAF, RW2, ORF, PEF, IIQ, Hasselblad Flextight `.fff`, TIFF, JPEG and PNG.
+Inputs include DNG, NEF, CR2/CR3, ARW, RAF, RW2, ORF, PEF, IIQ, Hasselblad/Flextight `.fff` and TIFF. JPEG/PNG are export or cache formats, not negative-input formats. RAW file-dialog filters accept upper- and lower-case extensions.
 
 ## How it works
 
@@ -162,7 +163,7 @@ Packages are published on [Releases](https://github.com/Toshihiko-Lin/Open-Revel
   chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
   ```
 
-  Add `--appimage-extract-and-run` if the package cannot start directly. Linux currently previews through SDR; HDR export remains available.
+  Add `--appimage-extract-and-run` if the package cannot start directly. Linux currently previews through SDR; HDR editing and export remain available.
 
 </details>
 
@@ -173,7 +174,8 @@ Packages are published on [Releases](https://github.com/Toshihiko-Lin/Open-Revel
 | Settings and roll index | `%APPDATA%\OpenRevelare` | `$XDG_CONFIG_HOME/OpenRevelare/` (default `~/.config`) |
 | Contact-sheet cache | `%LOCALAPPDATA%\OpenRevelare\sheets` | `$XDG_CACHE_HOME/OpenRevelare/sheets/` (default `~/.cache`) |
 | DNG decode cache | `.revelare-cache/` beside the source | Same |
-| Project file | `.ncproj` beside the source | Same |
+| Print LUT drop-in folder | `%LOCALAPPDATA%\OpenRevelare\luts` | `$XDG_DATA_HOME/OpenRevelare/luts/` (default `~/.local/share`) |
+| Project file | `.ncproj` beside the source when writable; otherwise `%APPDATA%\OpenRevelare\rolls` | Beside the source when writable; otherwise `$XDG_CONFIG_HOME/OpenRevelare/rolls/` |
 
 Cache locations and limits are configurable. Uninstalling does not remove these data.
 
@@ -192,8 +194,12 @@ dotnet run --project src/OpenRevelare.Gui
 CLI example:
 
 ```bash
-dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --d-max 2.0
+dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --color-space sRGB
 ```
+
+`--input-linear` and `--input-srgb` are mutually exclusive input declarations. Legacy `--d-max`,
+`--grade`, `--pivot` and `--scan-exposure-ev` are accepted for old parity scripts but are no-ops;
+the current inversion is controlled by the two calibrated density endpoints and output range.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before development. Calibration experiments are documented in [`docs/calibration/`](docs/calibration/); colour-management decisions are recorded in [`docs/color-management-architecture.md`](docs/color-management-architecture.md).
 
@@ -228,6 +234,7 @@ The project is maintained independently and released under GPL-3.0-only. If it i
 
 - No per-roll colour-chart calibration.
 - 8-bit TIFF may show banding in shadows; 16-bit input is recommended.
-- macOS has no real-device validation yet and uses conservative system defaults.
+- Linux uses an SDR preview fallback; HDR editing and export remain available.
+- macOS native presentation still requires real-device validation; TIFF/CPU rendering remains available.
 
 Report issues through [GitHub Issues](https://github.com/Toshihiko-Lin/Open-Revelare/issues) with the OS version, camera or scanner, input format and error details. Do not upload private originals.

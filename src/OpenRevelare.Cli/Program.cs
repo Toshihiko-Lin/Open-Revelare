@@ -10,7 +10,7 @@ using OpenRevelare.Core;
 // verification: the --print-* flags
 // below are what tools/parity compares against the frozen Python build.
 //
-//   OpenRevelare.Cli -i neg.tiff -o pos.tiff --input-srgb --grade 1.65 --d-max 2.0
+//   OpenRevelare.Cli -i neg.tiff -o pos.tiff --input-srgb --color-space sRGB
 
 return Run(args);
 
@@ -770,12 +770,12 @@ static void PrintUsage()
         "                              colourless physical-carrier detection\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +
-        "  --d-max <v>                 output range (endpoint model) / max density (legacy)\n" +
+        "  --d-max <v>                 accepted for legacy scripts; no-op in the endpoint model\n" +
         "  --d-max-per-channel <r,g,b> per-channel highlight endpoints; selects the endpoint\n" +
         "                              model, where grade/pivot are not consulted\n" +
-        "  --grade <v>                 density-domain contrast (paper grade)\n" +
-        "  --pivot <v>                 mid-tone anchor\n" +
-        "  --scan-exposure-ev <v>      density-domain exposure bias (EV)\n" +
+        "  --grade <v>                 accepted for legacy scripts; no-op\n" +
+        "  --pivot <v>                 accepted for legacy scripts; no-op\n" +
+        "  --scan-exposure-ev <v>      accepted for legacy scripts; no-op\n" +
         "  --color-space <name>        step-4 target / output space (default: sRGB)\n" +
         "  --print-lut <path.cube>     print-film emulation / look; a 3D LUT taking Cineon log in.\n" +
         "  --lut-output <enc>          what the cube emits: Rec709 | DciP3 | Srgb | Rec2020Pq\n" +

@@ -1,7 +1,7 @@
 # OpenRevelare macOS 专项检测报告
 
 范围：`src/OpenRevelare.Gui`（GUI 侧 + 信号/事件连接）、`packaging/macos`、CI。
-基线：`main` @ b11dd63，Avalonia 11.2.3 / .NET 8。`dotnet build -c Release` 通过，0 警告 0 错误。
+基线：`main` @ `e82ef22`（2026-09-28），Avalonia 11.2.3 / .NET 8。托管构建与 macOS CI 装配检查通过；原生 presenter 仍未经真机运行验证。
 
 ---
 
@@ -11,9 +11,9 @@
 `PreviewBitmap` 从 VM 读而非从控件读、csproj 里 RID/dylib 那段长注释），
 说明 macOS 问题不是没人管，而是**发现渠道只有用户报障**。
 
-结构性原因：**CI 只跑 `ubuntu-latest`**（`.github/workflows/ci.yml:20`），
-macOS 只在 release 时构建一次（`release.yml:139`），且只验"能否打出包"，不验行为。
-任何 macOS 专属的行为差异，都必然要等用户报。
+结构性限制：CI 现在包含 Linux、Windows 和 macOS 托管/装配 job（`.github/workflows/ci.yml:104`），
+但 macOS job 仍主要验证编译、ABI、装配和托管测试，不运行真实桌面窗口；原生 presenter 的
+显示行为与 ColorSync 结果仍必须由真机验证。因此 CI 可以提前发现构建和契约回归，但不能替代用户报告的显示差异。
 
 下面按"确定性 × 影响面"排序。
 

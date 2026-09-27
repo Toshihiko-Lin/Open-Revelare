@@ -41,7 +41,7 @@
 - **本地优先**：无需联网或账号；图像处理由共享 CPU Core 完成。
 - **跨平台**：C# / .NET 8 + Avalonia，支持 Windows、Linux 和 macOS。
 
-适用于相机翻拍或扫描的整卷底片处理、参数归档和跨设备重算。不提供逐卷色卡标定；文物翻拍、商业存档和科研用途可使用 [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)。
+适用于相机翻拍或扫描的整卷底片处理、参数归档和跨设备重算。支持 HDR 编辑与导出；Linux 屏幕预览目前明确使用 SDR 回退。不提供逐卷色卡标定；文物翻拍、商业存档和科研用途可使用 [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)。
 
 ## 核心模型
 
@@ -66,7 +66,7 @@
 4. **帧编辑**：在 SceneBase 中逐帧调整色温、曝光、对比度、饱和度和曲线。
 5. **导出**：输出 TIFF、JPEG、线性 DNG 或场景线性 ACEScg TIFF。
 
-修改会自动写入磁盘；`.ncproj` 与源图像位于同一目录。
+修改会自动写入磁盘；源目录可写时 `.ncproj` 与源图像位于同一目录，否则使用下方所列的用户级 `rolls` 回退目录。
 
 ## 界面与示例
 
@@ -111,13 +111,14 @@
 | 类别 | 能力 |
 |---|---|
 | 反转 | Cineon 密度域反转、自动标定、窄带光源解耦（Path A）、黑白负片模式 |
-| 色彩 | ACEScg 工作空间；sRGB、Display P3、Adobe RGB 输出；ICC 管理；Stage 2 调整 |
+| 色彩 | ACEScg 工作空间；sRGB、Display P3、Adobe RGB 输出；精确 ICC 管理；Stage 2 调整 |
 | 预处理 | LCC 平场、镜头畸变、暗角、齿孔遮罩和几何裁切，均在线性光域完成 |
 | 工作流 | 按卷管理、整卷同步、虚拟副本、画幅预设、80 步撤销重做、直方图与波形图 |
-| 输出 | 16-bit TIFF、JPEG、线性 DNG、32-bit 浮点 ACEScg TIFF；文件名模板、缩放和锐化选项 |
+| 输出 | 16-bit TIFF、JPEG、线性 DNG、32-bit 浮点场景线性 ACEScg TIFF、HDR 增益图 JPEG；文件名模板、缩放和锐化选项 |
+| 风格 / HDR | Cineon 输入 `.cube` 印片风格、SDR/HDR 整卷渲染、以档数表示的 HDR 上限、HDR 印样 |
 | 报告 | 本帧技术报告，记录输入域、片基来源和反转参数 |
 
-支持的输入包括 DNG、NEF、CR2/CR3、ARW、RAF、RW2、ORF、PEF、IIQ、哈苏 Flextight `.fff`、TIFF、JPEG 和 PNG。
+支持的输入包括 DNG、NEF、CR2/CR3、ARW、RAF、RW2、ORF、PEF、IIQ、哈苏/Flextight `.fff` 和 TIFF。JPEG/PNG 是导出或界面缓存格式，不是负片导入格式。文件选择器同时接受 RAW 扩展名的大写和小写形式。
 
 ## 工作原理
 
@@ -162,7 +163,7 @@ $$T_{pos} = 10^{\left(\frac{R_{out}}{D_{max}[c]}D[c]-R_{out}\right)}$$
   chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
   ```
 
-  若无法直接启动，可添加 `--appimage-extract-and-run`。Linux 当前使用 SDR 预览；HDR 导出仍可用。
+  若无法直接启动，可添加 `--appimage-extract-and-run`。Linux 当前使用 SDR 预览；HDR 编辑与导出仍可用。
 
 </details>
 
@@ -173,7 +174,8 @@ $$T_{pos} = 10^{\left(\frac{R_{out}}{D_{max}[c]}D[c]-R_{out}\right)}$$
 | 设置与卷索引 | `%APPDATA%\OpenRevelare` | `$XDG_CONFIG_HOME/OpenRevelare/`（默认 `~/.config`） |
 | 印样缓存 | `%LOCALAPPDATA%\OpenRevelare\sheets` | `$XDG_CACHE_HOME/OpenRevelare/sheets/`（默认 `~/.cache`） |
 | DNG 解码缓存 | 源文件旁的 `.revelare-cache/` | 同左 |
-| 工程文件 | 源图像目录中的 `.ncproj` | 同左 |
+| 印片 LUT 放置目录 | `%LOCALAPPDATA%\OpenRevelare\luts` | `$XDG_DATA_HOME/OpenRevelare/luts/`（默认 `~/.local/share`） |
+| 工程文件 | 源目录可写时为其中的 `.ncproj`；否则 `%APPDATA%\OpenRevelare\rolls` | 源目录可写时为其中的 `.ncproj`；否则 `$XDG_CONFIG_HOME/OpenRevelare/rolls/` |
 
 缓存位置与上限可在偏好设置中调整；卸载不会删除上述数据。
 
@@ -192,8 +194,10 @@ dotnet run --project src/OpenRevelare.Gui
 命令行前端：
 
 ```bash
-dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --d-max 2.0
+dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --color-space sRGB
 ```
+
+`--input-linear` 与 `--input-srgb` 互斥。为兼容旧版对拍脚本，CLI 仍接受 `--d-max`、`--grade`、`--pivot` 和 `--scan-exposure-ev`，但这些参数现在是空操作；当前反相由两端密度标定与输出范围控制。
 
 开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。标定实验见 [`docs/calibration/`](docs/calibration/)，色彩管理记录见 [`docs/color-management-architecture.md`](docs/color-management-architecture.md)。
 
@@ -228,7 +232,8 @@ dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-lin
 
 - 不提供逐卷色卡标定。
 - 8-bit TIFF 暗部可能出现色带，建议使用 16-bit 输入。
-- macOS 尚无真机验证，部分系统能力采用保守配置。
+- Linux 使用明确标注的 SDR 屏幕预览回退，但 HDR 编辑和导出仍可用。
+- macOS 原生呈现仍待真机验证；TIFF/CPU 渲染不受影响。
 
 请通过 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues) 报告问题，并附系统版本、相机或扫描仪型号、输入格式与错误信息；不要上传含隐私内容的原片。
 
