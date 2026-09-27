@@ -143,6 +143,7 @@ public partial class MainViewModel
         ArgumentNullException.ThrowIfNull(rendered);
         scene ??= ConvertPreviewScene(rendered);
         fallback ??= BuildFallbackBitmap(rendered, scene);
+        ClippingMasks? masks = clippingEnabled ? DetectClipping(rendered.Pixels) : null;
         return new PreparedPreview(
             rendered,
             scene,
@@ -150,8 +151,10 @@ public partial class MainViewModel
             // The roll's target, read off the picker: HdrPeakNits is roll-level, so every frame
             // this method can be handed was rendered for it.
             HistogramData.FromFrame(rendered, CurrentTargetHeadroom),
-            clippingEnabled ? BuildClippingOverlay(rendered.Pixels) : null,
-            clippingEnabled ? BuildClippingPresentationScene(rendered.Pixels) : null);
+            masks is { } detected ? BuildClippingOverlay(rendered.Pixels, detected) : null,
+            masks is { } sceneMasks
+                ? BuildClippingPresentationScene(rendered.Pixels, sceneMasks)
+                : null);
     }
 
     private void PublishCompletePreview(
@@ -189,7 +192,8 @@ public partial class MainViewModel
             Waveform = ShowWaveform ? WaveformData.FromBuffer(rendered.Pixels) : null;
             ClippingOverlay = clippingOverlay;
             ClippingScene = clippingScene;
-            if (refreshSprocketMask && ShowSprocketMask) UpdateSprocketOverlay();
+            if (refreshSprocketMask && ShowSprocketMask && _sprocketOverlayDirty)
+                UpdateSprocketOverlay();
             PreviewHighlightHeadroom = histogram.TargetHeadroom;
             PreviewScene = scene;
             OnPropertyChanged(nameof(ColorPipelineDiagnostic));
@@ -238,30 +242,24 @@ public partial class MainViewModel
             CanonicalPreviewReferenceWhiteScale);
     }
 
-    private PresentationScene BuildClippingPresentationScene(ImageBuffer image)
+    private PresentationScene BuildClippingPresentationScene(
+        ImageBuffer image,
+        ClippingMasks masks)
     {
-        ClippingDetect.Detect(
-            image.Data,
-            image.PixelCount,
-            ClipShadowLevel,
-            ClipHighlightLevel,
-            out bool[] shadows,
-            out bool[] highlights);
-
         // Keep these constants identical to BitmapConvert.ToClippingOverlay. They are UI sRGB
         // colors and PresentationSceneFactory performs the required linearization/premultiply.
         var rgba = new byte[checked(image.PixelCount * 4)];
         for (int pixel = 0; pixel < image.PixelCount; pixel++)
         {
             int offset = pixel * 4;
-            if (shadows[pixel])
+            if (masks.Shadows[pixel])
             {
                 rgba[offset] = 13;
                 rgba[offset + 1] = 87;
                 rgba[offset + 2] = 255;
                 rgba[offset + 3] = 140;
             }
-            else if (highlights[pixel])
+            else if (masks.Highlights[pixel])
             {
                 rgba[offset] = 255;
                 rgba[offset + 1] = 31;

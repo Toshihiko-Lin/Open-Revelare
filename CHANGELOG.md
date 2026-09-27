@@ -4,6 +4,11 @@
 
 **改进**
 
+- **被新参数取代的预览渲染会提前停止。** 在管线、直方图、裁切提示与缩略图阶段之间检查取消状态，并立即释放已创建但不再展示的原生位图。滑块拖动期间仍会逐次渲染和呈现，仅跳过已经无法显示的工作。
+- **波形图与直方图在拖动期间保持逐帧实时。** 显示波形图时复用不可见的直方图结果，切回直方图后立即根据当前渲染帧重新计算，避免重复处理不可见的诊断项。
+- **裁切提示对每个渲染帧只检测一次。** Avalonia 叠加层与原生呈现场景共享同一份阴影 / 高光遮罩，不再重复扫描。
+- **齿孔遮罩诊断仅在输入变化时重建。** 只调整颜色的滑块拖动会复用现有变换遮罩；源帧、阈值或几何变化仍会立即使缓存失效并刷新叠加层。
+
 - **整卷自动去色罩改为可解释的稳健标定。** 片基明确区分灯板下的物理载体众数、边缘裸片基与画面内容推断，并报告支持帧、对数离散、置信度和量化风险；弱或互相矛盾的物理票不再冒充已确认片基。黑白卷可用同样的边缘拓扑识别无色载体，但灯板 / 扫描仪白边仍会被阈值排除。
 - **高光端点保持场景代理的语义，同时更稳健。** 跨帧颜色共识改用质量加权的对数色度 medoid；原来按 12 帧硬切换的深度策略改为随有效证据连续从 P100 趋近 P95 的稳健上分位。状态与工程会保存候选帧、有效帧、色度离散、自适应分位以及裁切 / 量化风险；靠近 3.0 D 真实密度边界的扫描黑位也不再被误报为无风险。
 - **修复 Path A 自动 Dmax 虚高导致画面过暗。** 窄谱解耦后的高饱和颜色可能让单个分离通道接近零；自动标定不再把这种色度极值误当成整卷亮度余量并统一抬高三通道端点，而是只用共址高光尾部确定 Path A 的曝光位置。白光路径原有的逐通道防裁切逻辑保持不变。
@@ -23,6 +28,19 @@
 - **片基与高光置信度提示面向用户简化。** 主面板只显示“可靠 / 参考 / 需确认”和证据类型，详细统计信息保留在技术报告中。
 
 **Improved**
+
+- **Superseded preview renders now stop earlier.** Cancellation is checked between the pipeline,
+  histogram, clipping overlay and thumbnail stages, and any native bitmaps created by an abandoned
+  render are released immediately. Slider dragging still renders and presents every interaction;
+  only work that can no longer be shown is skipped.
+- **Live diagnostics avoid duplicate work while switching views.** Waveform and histogram updates
+  remain frame-by-frame; while the waveform is visible, the hidden histogram is reused, and
+  switching back recomputes it from the current rendered frame immediately.
+- **Clipping diagnostics now scan each rendered frame once.** The Avalonia overlay and native
+  presentation scene share the same shadow/highlight masks instead of detecting clipping twice.
+- **Sprocket-mask diagnostics now rebuild only when their inputs change.** Colour-only slider
+  drags reuse the existing transformed mask while geometry, threshold and source-frame changes
+  still invalidate it and refresh the overlay immediately.
 
 - **The editing tabs are now shorter and more modern.** Cineon and Display use concise
   negative/look labels with film/layers icons; the top explanations are reduced to one line,

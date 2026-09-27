@@ -146,10 +146,15 @@ public partial class MainViewModel
             long tFallback = trace?.ElapsedMilliseconds ?? 0;
             // Histograms stay live: at a quarter of the pixels the pass is noise next to the
             // render, and a histogram that freezes mid-drag is exactly when it is being read.
-            HistogramData histogram = HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
-            WriteableBitmap? clipping = ShowClipping ? BuildClippingOverlay(outImg) : null;
-            PresentationScene? clippingScene = ShowClipping
-                ? BuildClippingPresentationScene(outImg)
+            HistogramData histogram = ShowWaveform && Histogram is { } cachedHistogram
+                ? cachedHistogram
+                : HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
+            ClippingMasks? masks = ShowClipping ? DetectClipping(outImg) : null;
+            WriteableBitmap? clipping = masks is { } detected
+                ? BuildClippingOverlay(outImg, detected)
+                : null;
+            PresentationScene? clippingScene = masks is { } sceneMasks
+                ? BuildClippingPresentationScene(outImg, sceneMasks)
                 : null;
             long tHist = trace?.ElapsedMilliseconds ?? 0;
             PublishCompletePreview(
@@ -180,38 +185,60 @@ public partial class MainViewModel
         (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip,
          PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(() =>
         {
-            RenderedFrame rendered = Pipeline.Render(source, p, pipelineVersion, ColorManagement);
-            ImageBuffer outImg = rendered.Pixels;
-            PresentationScene scene = ConvertPreviewScene(rendered);
-            ct.ThrowIfCancellationRequested();
-            // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
-            HistogramData h = HistogramData.FromFrame(rendered, p.ResolvedOutputTarget.HighlightHeadroom);
-            WriteableBitmap? c = wantClipping ? BuildClippingOverlay(outImg) : null;
-            PresentationScene? clipScene = wantClipping
-                ? BuildClippingPresentationScene(outImg)
-                : null;
-            // The film strip gets a SCALED COPY of this same finished positive — it does not run
-            // its own pipeline pass. Until now the current frame's thumbnail was only rebuilt when
-            // you LEFT the frame, so the strip showed a stale version of whatever you were
-            // actively adjusting. Reusing the render costs one box pass over an image that is
-            // already in cache, which is why the source does it here too
-            // (main_window.py::_on_process_done → _film_strip.update_thumbnail(result)) rather
-            // than paying for a second inversion. outImg is already cropped and oriented, so the
-            // thumbnail matches the frame as composed.
-            //
-            // Not on an HDR roll, though: the strip is an SDR surface and shows the SDR rendition
-            // (D-031), which is a different shoulder, not a scaled copy of the extended render.
-            // A second pass over a 256 px source is a few milliseconds; the SDR roll keeps the copy.
-            RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
-                ? Pipeline.Render(
-                    source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
-                    p.SdrRendition(),
-                    pipelineVersion,
-                    ColorManagement)
-                : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
-            var t = BuildFallbackBitmap(thumbnailFrame);
-            return (BuildFallbackBitmap(rendered, scene), h, t, c,
-                    scene, clipScene, rendered);
+            Bitmap? bitmap = null;
+            Bitmap? thumbnail = null;
+            WriteableBitmap? clipping = null;
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                RenderedFrame rendered = Pipeline.Render(source, p, pipelineVersion, ColorManagement);
+                ct.ThrowIfCancellationRequested();
+                ImageBuffer outImg = rendered.Pixels;
+                PresentationScene scene = ConvertPreviewScene(rendered);
+                ct.ThrowIfCancellationRequested();
+                // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
+                HistogramData h = HistogramData.FromFrame(rendered, p.ResolvedOutputTarget.HighlightHeadroom);
+                ct.ThrowIfCancellationRequested();
+                ClippingMasks? masks = wantClipping ? DetectClipping(outImg) : null;
+                clipping = masks is { } detected
+                    ? BuildClippingOverlay(outImg, detected)
+                    : null;
+                PresentationScene? clipScene = masks is { } sceneMasks
+                    ? BuildClippingPresentationScene(outImg, sceneMasks)
+                    : null;
+                ct.ThrowIfCancellationRequested();
+                // The film strip gets a SCALED COPY of this same finished positive — it does not run
+                // its own pipeline pass. Until now the current frame's thumbnail was only rebuilt when
+                // you LEFT the frame, so the strip showed a stale version of whatever you were
+                // actively adjusting. Reusing the render costs one box pass over an image that is
+                // already in cache, which is why the source does it here too
+                // (main_window.py::_on_process_done → _film_strip.update_thumbnail(result)) rather
+                // than paying for a second inversion. outImg is already cropped and oriented, so the
+                // thumbnail matches the frame as composed.
+                //
+                // Not on an HDR roll, though: the strip is an SDR surface and shows the SDR rendition
+                // (D-031), which is a different shoulder, not a scaled copy of the extended render.
+                // A second pass over a 256 px source is a few milliseconds; the SDR roll keeps the copy.
+                RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
+                    ? Pipeline.Render(
+                        source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
+                        p.SdrRendition(),
+                        pipelineVersion,
+                        ColorManagement)
+                    : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
+                ct.ThrowIfCancellationRequested();
+                thumbnail = BuildFallbackBitmap(thumbnailFrame);
+                bitmap = BuildFallbackBitmap(rendered, scene);
+                return (bitmap, h, thumbnail, clipping,
+                        scene, clipScene, rendered);
+            }
+            catch
+            {
+                bitmap?.Dispose();
+                thumbnail?.Dispose();
+                clipping?.Dispose();
+                throw;
+            }
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }

@@ -876,10 +876,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _sprocketThreshold = 0.9;  // 绝对亮度切（0.5..1.0）
     [ObservableProperty] private bool _showSprocketMask;          // 预览上叠加红色遮罩（诊断）
     [ObservableProperty] private Bitmap? _sprocketMaskOverlay;
-    partial void OnSprocketEnabledChanged(bool value) => InvalidateOpticalCalibration();
-    partial void OnSprocketThresholdChanged(double value) => InvalidateOpticalCalibration();
+    private bool _sprocketOverlayDirty = true;
+    partial void OnSprocketEnabledChanged(bool value)
+    {
+        _sprocketOverlayDirty = true;
+        InvalidateOpticalCalibration();
+    }
+    partial void OnSprocketThresholdChanged(double value)
+    {
+        _sprocketOverlayDirty = true;
+        InvalidateOpticalCalibration();
+    }
     partial void OnShowSprocketMaskChanged(bool value)
     {
+        _sprocketOverlayDirty = true;
         UpdatePresentation(() =>
         {
             UpdateSprocketOverlay();
@@ -906,6 +916,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             SprocketMaskOverlay = null;
             SprocketMaskScene = null;
+            _sprocketOverlayDirty = false;
             return;
         }
 
@@ -943,6 +954,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             green: 0,
             blue: 0,
             alpha: 140);
+        _sprocketOverlayDirty = false;
     }
 
     // 输出意图不再是胶卷级模式：预览恒为完整渲染，"线性" 是单次导出的属性
@@ -1177,17 +1189,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         set => ShowWaveform = !value;
     }
 
-    partial void OnShowWaveformChanged(bool value) =>
+    partial void OnShowWaveformChanged(bool value)
+    {
+        HistogramData? histogram = !value && _previewRenderedFrame is { } rendered
+            ? HistogramData.FromFrame(rendered, CurrentTargetHeadroom)
+            : Histogram;
         UpdatePresentation(() =>
         {
-            // Built from the retained frame, like the clipping overlay: the pixels it describes are
-            // already on screen, so switching it on must not wait for a render.
-            Waveform = value && _previewRenderedFrame is { } rendered
-                ? WaveformData.FromBuffer(rendered.Pixels)
+            Waveform = value && _previewRenderedFrame is { } current
+                ? WaveformData.FromBuffer(current.Pixels)
                 : null;
+            Histogram = histogram;
             OnPropertyChanged(nameof(ShowHistogram));
             InvalidatePresentation();
         });
+    }
 
     partial void OnClipShadowPercentChanged(double value) => ApplyClipThresholds();
     partial void OnClipHighlightPercentChanged(double value) => ApplyClipThresholds();
@@ -1219,8 +1235,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // Clipping is a diagnostic of the pixels already on screen. Rebuilding it from
                 // the retained typed frame makes the toggle one complete generation; asking the
                 // render queue for identical pixels would briefly publish "enabled, no mask".
-                ClippingOverlay = BuildClippingOverlay(rendered.Pixels);
-                ClippingScene = BuildClippingPresentationScene(rendered.Pixels);
+                ClippingMasks masks = DetectClipping(rendered.Pixels);
+                ClippingOverlay = BuildClippingOverlay(rendered.Pixels, masks);
+                ClippingScene = BuildClippingPresentationScene(rendered.Pixels, masks);
             }
             else
             {
@@ -1238,12 +1255,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (!ReferenceEquals(oldValue, newValue)) Retire(oldValue);
     }
 
-    private WriteableBitmap? BuildClippingOverlay(ImageBuffer outImg)
+    private readonly record struct ClippingMasks(bool[] Shadows, bool[] Highlights);
+
+    private ClippingMasks DetectClipping(ImageBuffer image)
     {
-        ClippingDetect.Detect(outImg.Data, outImg.PixelCount,
+        ClippingDetect.Detect(image.Data, image.PixelCount,
                               ClipShadowLevel, ClipHighlightLevel,
                               out bool[] shadows, out bool[] highlights);
-        return BitmapConvert.ToClippingOverlay(shadows, highlights, outImg.Width, outImg.Height);
+        return new ClippingMasks(shadows, highlights);
+    }
+
+    private WriteableBitmap BuildClippingOverlay(ImageBuffer image, ClippingMasks masks)
+    {
+        return BitmapConvert.ToClippingOverlay(
+            masks.Shadows, masks.Highlights, image.Width, image.Height);
     }
 
     // ══ Geometry (Core applies: orientation → straighten → crop) ════════════════
@@ -1262,7 +1287,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// whichever frame the user had been looking at.</summary>
     private (double X, double Y, double W, double H)? _splitCell;
 
-    partial void OnRotationChanged(double value) => ScheduleRender();
+    partial void OnRotationChanged(double value)
+    {
+        _sprocketOverlayDirty = true;
+        ScheduleRender();
+    }
 
     // ── Orientation, and the crop that has to travel with it ────────────────────
     //
@@ -1316,6 +1345,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void RotateCw()
     {
+        _sprocketOverlayDirty = true;
         _quarterTurns = (_quarterTurns + (Mirrored ? 3 : 1)) & 3;
         if (_cropRect is { } c) _cropRect = RotateCropCw(c);
         StatusText = OrientationStatus(Loc.T("顺时针 90°"));
@@ -1324,6 +1354,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void RotateCcw()
     {
+        _sprocketOverlayDirty = true;
         _quarterTurns = (_quarterTurns + (Mirrored ? 1 : 3)) & 3;
         if (_cropRect is { } c) _cropRect = RotateCropCcw(c);
         StatusText = OrientationStatus(Loc.T("逆时针 90°"));
@@ -1332,6 +1363,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void FlipHorizontal()
     {
+        _sprocketOverlayDirty = true;
         _flipH = !_flipH;
         if (_cropRect is { } c) _cropRect = FlipCropH(c);
         StatusText = OrientationStatus(Loc.T("水平翻转"));
@@ -1340,6 +1372,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void FlipVertical()
     {
+        _sprocketOverlayDirty = true;
         _flipV = !_flipV;
         if (_cropRect is { } c) _cropRect = FlipCropV(c);
         StatusText = OrientationStatus(Loc.T("竖直翻转"));
@@ -1411,6 +1444,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         set
         {
             if (_cropEditing == value) return;
+            _sprocketOverlayDirty = true;
             _cropEditing = value;
             OnPropertyChanged(nameof(CropFrameSize));   // the space the rect is normalised against
             ScheduleRender();
@@ -1472,6 +1506,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void AdoptPreview(RollFrame frame, PreviewCache.Entry entry,
                               (double X, double Y, double W, double H)? margin, string key)
     {
+        _sprocketOverlayDirty = true;
         _previewWorking = entry.Working;
         _previewMargin = margin;
         _previewFrameRect = margin is { } box && SplitRectOf(frame) is { } rect
@@ -1543,6 +1578,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void SetCrop((double X, double Y, double W, double H) rect)
     {
+        _sprocketOverlayDirty = true;
         _cropRect = FromDisplay(rect);
         var s = _cropRect.Value;
         StatusText = Loc.F($"裁切 {s.X:F2},{s.Y:F2},{s.W:F2},{s.H:F2}");
@@ -1552,6 +1588,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
     public void ClearCrop()
     {
+        _sprocketOverlayDirty = true;
         _cropRect = null;
         StatusText = Loc.T("已清除裁切");
         // Clearing a split frame's crop means it now owns the WHOLE scan — back to the strip.
