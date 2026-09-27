@@ -2343,9 +2343,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // actual evidence; the bright-tail fallback is explicitly content inference.
             if (physicalCandidate)
             {
-                FilmBaseText = Monochrome
-                    ? Loc.T("片基：当前帧无色载体候选 · 整卷分析完成后给出置信度")
-                    : Loc.T("片基：当前帧物理片基候选 · 整卷分析完成后给出置信度");
+                // A successful single-frame pick needs no persistent diagnostic line: the status
+                // already reports the action, and one frame cannot support the roll-style
+                // confidence wording. Keep the provisional message only while the roll pass is
+                // actually going to replace this first-frame answer with pooled evidence.
+                FilmBaseText = broadcastToRoll
+                    ? Monochrome
+                        ? Loc.T("片基：当前帧无色载体候选 · 整卷分析完成后给出置信度")
+                        : Loc.T("片基：当前帧物理片基候选 · 整卷分析完成后给出置信度")
+                    : "";
                 StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
             }
             else
@@ -3041,7 +3047,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void UpdateHighlightConfidence(
         HighlightEndpointEstimate? highlightEstimate,
-        bool usedFallback)
+        bool usedFallback,
+        bool rollWide = true)
     {
         _rollHighlightCalibration = highlightEstimate;
         _rollUsedFallbackHighlight = usedFallback;
@@ -3050,14 +3057,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         if (highlightEstimate is { } high)
         {
-            string warning = high.ClippingRisk || high.QuantizationRisk
-                ? Loc.T(" · 建议人工检查")
-                : "";
-            HighlightConfidenceText = Loc.F($"高光：{Confidence(high.Confidence)} · 多帧场景高光{warning}");
+            if (!rollWide)
+            {
+                // A normal single-frame solve has no useful confidence story beyond "it found a
+                // highlight", which the completion status already says. Surface only conditions
+                // the user can act on instead of leaving permanent method/provenance chatter.
+                HighlightConfidenceText = high.ClippingRisk || high.QuantizationRisk
+                    ? Loc.T("⚠ 高光接近裁切或量化边界，建议人工检查")
+                    : "";
+            }
+            else
+            {
+                string warning = high.ClippingRisk || high.QuantizationRisk
+                    ? Loc.T(" · 建议人工检查")
+                    : "";
+                HighlightConfidenceText = Loc.F($"高光：{Confidence(high.Confidence)} · 多帧场景高光{warning}");
+            }
         }
         else if (usedFallback)
         {
-            HighlightConfidenceText = Loc.T("⚠ 高光：需确认 · 使用了备用估计，建议高光采样");
+            HighlightConfidenceText = rollWide
+                ? Loc.T("⚠ 高光：需确认 · 使用了备用估计，建议高光采样")
+                : Loc.T("⚠ 高光依据较弱，建议人工检查或手动采样");
         }
         else
         {
@@ -3196,7 +3217,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _lastHighlightMeasured = highlight is not null;
         UpdateHighlightConfidence(
             highlightEstimate,
-            usedFallback: highlightEstimate is null && highlight is not null);
+            usedFallback: highlightEstimate is null && highlight is not null,
+            rollWide: false);
 
         StatusText = highlight is not null
             ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
@@ -3219,32 +3241,51 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_previewLinear is null) return;
 
-        // broadcastToRoll: false — this button is the single-frame escape hatch; the other frames
-        // must keep whatever the roll-wide solve (or their own per-frame edits) already gave them.
-        double? cut = AutoBoardCut();
-        if (!AutoFilmBaseFromRoll(cut, useMode: true, broadcastToRoll: false)) return;
+        // The base step mutates the live controls before the highlight step can know whether the
+        // frame contains a usable endpoint. Keep the whole operation transactional: a missing
+        // highlight must not leave a new black end paired with an old white end, nor silently
+        // clear the user's black/white offsets.
+        var before = new SingleFrameAutoSnapshot(
+            DMinPerChannel, DMaxPerChannel, Black, White,
+            FilmBaseText, HighlightConfidenceText,
+            _filmBaseSampled, _calibrationDiagnosticsRollWide,
+            _rollBaseCalibration, _rollHighlightCalibration, _rollUsedFallbackHighlight,
+            _lastHighlightMeasured);
 
-        bool highlightMeasured;
+        double? cut = AutoBoardCut();
+        bool baseMeasured = false;
+        bool highlightMeasured = false;
+        bool committed = false;
         _suppressRender = true;
         try
         {
-            // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels would clip
-            // the positive the meter reads. The highlight endpoint needs no reset —
-            // AutoDetectDMax overwrites all three channels of it.
-            Black = 0.0; White = 0.0;
-            // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
-            // highlight endpoint, which IS the highlight balance.
-            // AutoFilmBaseFromRoll and the highlight solve must use the same cut; it was already
-            // measured at full resolution above, so do not repeat those decodes.
-            AutoDetectDMax(cut);
-            // Whether the highlight end was actually measured — see the field's remarks. The
-            // completion line at the end of this method would otherwise overwrite AutoDetectDMax's
-            // warning with "完成" plus the untouched endpoint, so the failure would reach the user
-            // as a success carrying stale numbers.
-            highlightMeasured = _lastHighlightMeasured;
-            // Levels stay neutral here too — see the note in AutoInvertRollAsync's stage 1.
+            committed = SingleFrameAutoTransaction.Run(
+                () => baseMeasured = AutoFilmBaseFromRoll(
+                    cut, useMode: true, broadcastToRoll: false),
+                () =>
+                {
+                    // Neutral start, for the reasons given in AutoInvertRollAsync: stale levels
+                    // would clip the positive the meter reads. These values become real only if
+                    // the highlight endpoint is measured too.
+                    Black = 0.0; White = 0.0;
+                    AutoDetectDMax(cut);
+                    return highlightMeasured = _lastHighlightMeasured;
+                },
+                () => RestoreSingleFrameAutoSnapshot(before));
+        }
+        catch (Exception ex)
+        {
+            StatusText = Loc.T("单张去色罩未应用：") + ex.Message;
+            return;
         }
         finally { _suppressRender = false; }
+
+        if (!committed)
+        {
+            if (baseMeasured && !highlightMeasured)
+                StatusText = Loc.T("⚠ 单张去色罩未应用：这一帧测不到高光，已恢复原参数。请用【高光采样】手动标定或改用【自动（整卷）】");
+            return;
+        }
 
         CommitLiveParams(CurrentFrame);
         MarkRollDirty();
@@ -3252,9 +3293,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ScheduleRender();
         // Only this frame's thumbnail changed — the other frames were untouched.
         if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
-        StatusText = highlightMeasured
-            ? Loc.F($"单张去色罩完成 · 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
-            : Loc.F($"单张去色罩完成（⚠ 这一帧测不到高光，亮端保持原值）· 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
+        StatusText = Loc.F($"单张去色罩完成 · 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
+    }
+
+    private sealed record SingleFrameAutoSnapshot(
+        double[] DMin, double[] DMax, double Black, double White,
+        string FilmBaseText, string HighlightConfidenceText,
+        bool FilmBaseSampled, bool CalibrationDiagnosticsRollWide,
+        FilmBaseEstimate? RollBaseCalibration,
+        HighlightEndpointEstimate? RollHighlightCalibration,
+        bool RollUsedFallbackHighlight, bool LastHighlightMeasured);
+
+    private void RestoreSingleFrameAutoSnapshot(SingleFrameAutoSnapshot snapshot)
+    {
+        DMinPerChannel = snapshot.DMin;
+        DMaxPerChannel = snapshot.DMax;
+        Black = snapshot.Black;
+        White = snapshot.White;
+        _filmBaseSampled = snapshot.FilmBaseSampled;
+        _calibrationDiagnosticsRollWide = snapshot.CalibrationDiagnosticsRollWide;
+        _rollBaseCalibration = snapshot.RollBaseCalibration;
+        _rollHighlightCalibration = snapshot.RollHighlightCalibration;
+        _rollUsedFallbackHighlight = snapshot.RollUsedFallbackHighlight;
+        _lastHighlightMeasured = snapshot.LastHighlightMeasured;
+        FilmBaseText = snapshot.FilmBaseText;
+        HighlightConfidenceText = snapshot.HighlightConfidenceText;
     }
 
     /// <summary>
