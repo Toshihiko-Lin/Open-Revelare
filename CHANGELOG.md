@@ -4,82 +4,21 @@
 
 **改进**
 
-- **被新参数取代的预览渲染会提前停止。** 在管线、直方图、裁切提示与缩略图阶段之间检查取消状态，并立即释放已创建但不再展示的原生位图。滑块拖动期间仍会逐次渲染和呈现，仅跳过已经无法显示的工作。
-- **波形图与直方图在拖动期间保持逐帧实时。** 显示波形图时复用不可见的直方图结果，切回直方图后立即根据当前渲染帧重新计算，避免重复处理不可见的诊断项。
-- **裁切提示对每个渲染帧只检测一次。** Avalonia 叠加层与原生呈现场景共享同一份阴影 / 高光遮罩，不再重复扫描。
-- **齿孔遮罩诊断仅在输入变化时重建。** 只调整颜色的滑块拖动会复用现有变换遮罩；源帧、阈值或几何变化仍会立即使缓存失效并刷新叠加层。
-
-- **整卷自动去色罩改为可解释的稳健标定。** 片基明确区分灯板下的物理载体众数、边缘裸片基与画面内容推断，并报告支持帧、对数离散、置信度和量化风险；弱或互相矛盾的物理票不再冒充已确认片基。黑白卷可用同样的边缘拓扑识别无色载体，但灯板 / 扫描仪白边仍会被阈值排除。
-- **高光端点保持场景代理的语义，同时更稳健。** 跨帧颜色共识改用质量加权的对数色度 medoid；原来按 12 帧硬切换的深度策略改为随有效证据连续从 P100 趋近 P95 的稳健上分位。状态与工程会保存候选帧、有效帧、色度离散、自适应分位以及裁切 / 量化风险；靠近 3.0 D 真实密度边界的扫描黑位也不再被误报为无风险。
-- **修复 Path A 自动 Dmax 虚高导致画面过暗。** 窄谱解耦后的高饱和颜色可能让单个分离通道接近零；自动标定不再把这种色度极值误当成整卷亮度余量并统一抬高三通道端点，而是只用共址高光尾部确定 Path A 的曝光位置。白光路径原有的逐通道防裁切逻辑保持不变。
-- **Path A 分光标定更耐场景差异，且不增加原有采样预算。** 六张内容帧改为均匀覆盖整卷，YB / RG 轴放大按色度信号质量加权，近中性帧不再用噪声主导反压。LCC 先于 Path A 测量并应用；本帧技术报告现在列出解耦矩阵、反压矩阵及其实际 YB / RG 轴放大。
-- **大图 LCC 不再为每个局部补丁构造一整张缩放平场。** 全尺寸和局部渲染改用融合的双线性采样 + 除法，额外内存从 O(图像像素数) 降为 O(宽+高)；互动小图仍保留缓存。整卷 / 单张自动也会复用已测得的全分辨率灯板阈值，不再在高光阶段重复解码同一组样本。
-- **单张自动标定改为完整事务。** 只有片基与高光端点都测量成功才会提交；任一步失败或异常都会恢复原来的端点、色阶与诊断状态，不再留下新黑端配旧亮端的半套参数。成功时不再常驻显示没有操作价值的单帧证据文案，只在片基来自内容推断、高光使用备用估计或接近裁切 / 量化边界时提示。
-
-- **印样信息区改为更完整的实验室记录签章。** 页脚不再显示总帧数；只排入已填写的卷信息，空字段会前移、空行会收起，不保留占位。相机 / ISO / EI / 日期与冲洗信息使用 38% / 24% / 38% 的宽 / 窄 / 宽列网格，各列独立对齐标签与内容；`ISO / EI` 可在同一字段中记录标称感光度和实际曝光指数（如 `400 / 320`），长内容保持单行省略。信息字号与行距加大，中英文及数字统一使用沉稳的 CJK 衬线字体；左侧 `Revelare` Logo 上方新增居中的半窄体 `NEGATIVE CONVERSION BY` 来源签章，明确负片转换由 Revelare 完成。
+- **预览与诊断更流畅。** 拖动参数、切换波形图或直方图时减少重复处理，过期的预览任务会及时停止。
+- **底片与观感调整更直观。** 标签与图标更易区分；高光、阴影和主 D_max 调整更好地保持色彩，旧工程可按提示迁移到新版色彩管理。
+- **自动校准更可靠。** 整卷与单张校准更能适应不同画面和片基，失败或切换胶卷时不会留下不完整、过期的结果；同时修复部分画面校准后过暗的问题。主界面只保留“可靠 / 参考 / 需确认”，详细依据可在技术报告中查看。
+- **RAW、TIFF 与大图处理更稳健。** 异常色彩信息会安全回退，不兼容的校正参考图会提前提示；大图校正占用更少内存。
+- **印样信息区更像完整的实验室记录。** 仅显示已填写内容，支持同时记录 ISO / EI，并改进排版、字体与 Revelare 来源签章。
 
 ---
 
-- **界面标签更简洁，并增加视觉区分。** Cineon / Display 分别显示为底片与观感，并配合胶片 / 图层图标；顶部说明压缩为短句，详细说明保留在提示中。
-
-- **ManagedV2 的 Display 调整现在保留色彩余量。** 提升阴影或高光时，先对整体 RGB 颜色进行限幅，避免单通道溢出后导致偏色；LegacyV1 仍保留以兼容旧设备。
-- **旧工程支持明确的迁移按钮。** 界面会说明迁移可能带来的外观变化，确认后清理色彩缓存并使用 ManagedV2 重新渲染。
-- **Cineon 主 D_max 改为保持色彩比例的亮端映射。** 主滑块按三通道密度跨度共同缩放，改变高光反差和亮端位置而不引入轻微偏色；逐通道 D_max 仍可用于高级高光色偏调整。
-- **片基与高光置信度提示面向用户简化。** 主面板只显示“可靠 / 参考 / 需确认”和证据类型，详细统计信息保留在技术报告中。
-
 **Improved**
 
-- **Superseded preview renders now stop earlier.** Cancellation is checked between the pipeline,
-  histogram, clipping overlay and thumbnail stages, and any native bitmaps created by an abandoned
-  render are released immediately. Slider dragging still renders and presents every interaction;
-  only work that can no longer be shown is skipped.
-- **Live diagnostics avoid duplicate work while switching views.** Waveform and histogram updates
-  remain frame-by-frame; while the waveform is visible, the hidden histogram is reused, and
-  switching back recomputes it from the current rendered frame immediately.
-- **Clipping diagnostics now scan each rendered frame once.** The Avalonia overlay and native
-  presentation scene share the same shadow/highlight masks instead of detecting clipping twice.
-- **Sprocket-mask diagnostics now rebuild only when their inputs change.** Colour-only slider
-  drags reuse the existing transformed mask while geometry, threshold and source-frame changes
-  still invalidate it and refresh the overlay immediately.
-
-- **The editing tabs are now shorter and more modern.** Cineon and Display use concise
-  negative/look labels with film/layers icons; the top explanations are reduced to one line,
-  while detailed guidance remains in tooltips.
-- **The Cineon master D_max now preserves colour ratios.** The main slider scales the three
-  density spans together, changing highlight contrast and endpoint placement without introducing
-  a small cast; per-channel D_max remains available for advanced highlight-colour control.
-- **Film-base and highlight confidence messages are now user-facing.** The main panel shows only
-  “reliable”, “reference” or “needs confirmation” plus the evidence type; detailed statistics
-  remain in the technical report.
-- **Display adjustments now use a RAW-like open intermediate in ManagedV2.** Shadow and highlight
-  lifts run before the final display bound; any overshoot is fitted as one RGB colour, preserving
-  channel ratios instead of clipping one channel. LegacyV1 remains available for compatibility.
-- **Legacy projects now have an explicit migration path.** The in-app banner offers
-  “Migrate to colour-managed rendering…”, explains the expected appearance change, invalidates
-  colour-dependent caches, and re-renders the project in ManagedV2 after confirmation.
-- **Roll-wide automatic inversion is now safe across roll changes.** Cancellation covers the
-  provisional current-frame stage as well as the background pass, so a roll replaced during
-  analysis cannot receive stale endpoints or film-base values from the previous roll.
-- **Path A highlight protection now matches the white-light safety envelope.** Its endpoint lift
-  uses only high-density endpoint candidates and applies one uniform factor, preserving the
-  measured red/green/blue ratios while reducing red/blue highlight clipping without treating
-  low-luminance saturated colours as extra exposure headroom.
-- **RAW and TIFF admission is more explicit and resilient.** RAW preview/flat-field decoding stays
-  bounded to the requested preview size, while TIFF input-space detection now reports usable ICC,
-  baseline chromaticity, Exif, vendor-gamma and known-writer evidence consistently with the actual
-  decoder path; malformed declarations fall back without aborting the import.
-- **LCC and Path A diagnostics now share the same input contract.** Mixed RAW/TIFF flat references
-  are rejected before processing, and roll-wide calibration retains the measured source evidence
-  when a frame cannot be decoded instead of silently changing the result. Loading a flat field no
-  longer mutates a cached preview buffer while smoothing it.
-- **Roll-wide automatic mask removal now produces an explainable, robust calibration.** Film-base evidence distinguishes a light-board-bounded physical carrier mode, a bare edge rebate and picture-content inference, with supporting-frame counts, log dispersion, confidence and quantisation risk. Weak or contradictory physical votes no longer masquerade as a confirmed carrier. Explicit monochrome mode can identify a colourless carrier by the same edge topology while still excluding the light board or scanner surround.
-- **The highlight endpoint remains explicitly a scene proxy, with more robust roll reduction.** Cross-frame colour consensus uses a quality-weighted log-chroma medoid, while the former 12-frame switch is replaced by a continuous robust upper percentile moving from P100 toward P95 as effective evidence grows. Candidate/effective frames, chroma dispersion, percentile, and clipping/quantisation risks persist with the project; scanner blacks near the 3.0 D real-density boundary are no longer reported as risk-free.
-- **Fixed inflated automatic Dmax on Path A making images too dark.** Highly saturated colours can drive one separated channel close to zero after narrow-band decoupling. Automatic calibration no longer treats that chroma extreme as roll-wide luminance headroom and lifts all three endpoints; Path A exposure placement now comes only from co-sited highlight tails. The broad-spectrum path keeps its existing per-channel clipping protection.
-- **Path A calibration is less scene-dependent without a larger sampling budget.** Six content samples are spread across the roll, YB/RG amplification is weighted by measurable chroma signal, and near-neutral frames cannot let noise dominate the restraint. LCC precedes Path A measurement and application. The frame report now records the decouple and restraint matrices plus the actual YB/RG amplification they cancel.
-- **Large-image LCC no longer builds a full resized flat field for every local patch.** A fused bilinear sample-and-divide path reduces extra memory from O(image pixels) to O(width + height), while interactive small frames retain caching. Single-frame and roll auto-calibration also reuse an already measured full-resolution light-board cut instead of decoding the same samples again for highlight detection.
-- **Single-frame auto-calibration is now transactional.** It commits only after both the film base and highlight endpoint have been measured. A failed or exceptional step restores the previous endpoints, levels and diagnostics instead of leaving a new black end paired with a stale white end. Successful single-frame measurements no longer leave non-actionable evidence text on screen; warnings remain for content-inferred film base, fallback highlights and clipping or quantisation risk.
-
-- **The contact-sheet information area is now a fuller lab-record signature.** The footer no longer prints the total frame count and lays out only completed roll fields, moving later values forward and collapsing empty rows instead of reserving placeholders. Camera / ISO / EI / date and processing details use a 38% / 24% / 38% broad / compact / broad grid with independently aligned label and value tracks. The combined `ISO / EI` field can record box speed and actual exposure index together (for example `400 / 320`), while long values remain on one ellipsized line. Larger type and spacing use one restrained CJK serif family across Chinese, Latin text and numerals; a centred, semi-condensed `NEGATIVE CONVERSION BY` provenance line above the `Revelare` wordmark identifies the negative conversion.
+- **Preview and diagnostics feel smoother.** Parameter changes and waveform/histogram switching avoid repeated work, while obsolete preview tasks stop promptly.
+- **Negative and look controls are clearer.** Labels and icons are easier to distinguish; highlight, shadow and master D_max adjustments preserve colour more naturally, and legacy projects can migrate to the new colour-managed rendering with clear guidance.
+- **Automatic calibration is more reliable.** Roll-wide and single-frame calibration handle varied scenes and film bases better, and failed or cancelled analysis cannot leave partial or stale results. This also fixes some images becoming too dark after calibration. The main panel now shows simple confidence labels, with details kept in the technical report.
+- **RAW, TIFF and large-image processing are more robust.** Invalid colour metadata falls back safely, incompatible correction references are caught early, and large-image correction uses less memory.
+- **Contact-sheet details now read like a complete lab record.** Empty fields collapse automatically, ISO and EI can be recorded together, and the typography, spacing and Revelare provenance signature have been refined.
 
 ## v1.8.1（2026-09-25）
 
