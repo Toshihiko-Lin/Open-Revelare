@@ -13,6 +13,46 @@ namespace OpenRevelare.Tests;
 public sealed class TiffInputDetectorTests
 {
     [Fact]
+    public void Embedded_icc_is_conclusive_and_precedes_fallback_tag_inference()
+    {
+        byte[] profile = IccProfiles.Build(ColorSpaces.Srgb);
+        string path = WriteTiff(configure: tif =>
+            tif.SetField(TiffTag.ICCPROFILE, profile.Length, profile));
+        try
+        {
+            TiffInputDetection detection = TiffInputDetector.Detect(path);
+
+            Assert.Equal(TiffInputEvidence.EmbeddedIccProfile, detection.Evidence);
+            Assert.True(detection.IsConclusive);
+            Assert.Null(detection.CharacterizedSpace);
+            Assert.Contains("ICC", detection.Diagnostic, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Malformed_embedded_icc_is_not_reported_as_conclusive()
+    {
+        byte[] malformed = new byte[132];
+        string path = WriteTiff(configure: tif =>
+            tif.SetField(TiffTag.ICCPROFILE, malformed.Length, malformed));
+        try
+        {
+            TiffInputDetection detection = TiffInputDetector.Detect(path);
+
+            Assert.NotEqual(TiffInputEvidence.EmbeddedIccProfile, detection.Evidence);
+            Assert.False(detection.IsConclusive);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Float_samples_are_scene_linear_without_asking()
     {
         string path = WriteTiff(configure: tif =>

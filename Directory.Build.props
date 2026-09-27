@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\*.sync-conflict-*</DefaultItemExcludes>
+  </PropertyGroup>
+  <!-- File-sync conflict copies are recovery artifacts. Preserve them on disk, but do not let
+       SDK/Avalonia wildcard items compile or package duplicate source and resources. -->
+  <ItemGroup>
+    <Compile Remove="**\*.sync-conflict-*" />
+    <AvaloniaResource Remove="**\*.sync-conflict-*" />
+    <AvaloniaXaml Remove="**\*.sync-conflict-*" />
+    <EmbeddedResource Remove="**\*.sync-conflict-*" />
+    <Content Remove="**\*.sync-conflict-*" />
+    <None Remove="**\*.sync-conflict-*" />
+  </ItemGroup>
+</Project>

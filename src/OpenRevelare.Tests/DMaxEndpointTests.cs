@@ -89,6 +89,31 @@ public class DMaxEndpointTests
         Assert.Equal(2.10, hi[2], 4);
     }
 
+    /// <summary>
+    /// PATH A MUST NOT TURN A SEPARATED COLOUR EXTREME INTO EXPOSURE HEADROOM.
+    ///
+    /// Narrow-band decoupling removes the crosstalk floor that broad-spectrum capture leaves in
+    /// every channel. A saturated subject can therefore be almost opaque in one separated channel
+    /// while its total density remains below the neutral highlight. That is chroma, not a deeper
+    /// luminance endpoint; uniformly lifting D-max to clear it makes the whole roll dark.
+    /// </summary>
+    [Fact]
+    public void PathA_channel_extreme_does_not_inflate_the_endpoint()
+    {
+        ImageBuffer decoupled = Frame(
+            (2.00, 2.00, 2.00, 40),
+            (2.90, 0.50, 0.50, 80));
+
+        double[] hi = FilmBase.DetectDMaxPerChannelFromRoll(
+            new[] { decoupled }, new[] { 1.0, 1.0, 1.0 }, 90.0,
+            new[] { decoupled }, null, edgeInset: 0.0,
+            protectIndependentChannelExtrema: false)!;
+
+        Assert.Equal(2.00, hi[0], 3);
+        Assert.Equal(2.00, hi[1], 3);
+        Assert.Equal(2.00, hi[2], 3);
+    }
+
     // ── The no-clip rescale, split out of the detector ──────────────────────────────
     //
     // The lift lives in two public pieces — MaxChannelDensityFromRoll and

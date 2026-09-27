@@ -13,6 +13,12 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
   </ItemGroup>
 
+  <!-- Cloud/file-sync conflict copies are recovery artifacts, not source files. Keep them on
+       disk for inspection, but never let SDK wildcard compilation define every type twice. -->
+  <ItemGroup>
+    <Compile Remove="**\*.sync-conflict-*.cs" />
+  </ItemGroup>
+
   <!--
     随程序发行的 LUT 文件夹：Assets\Luts\*.cube 原样复制到产物的 luts\ 下（Gui / Cli / Tests
     引用 Core 时一并带走），选片器把这个文件夹列在最前面，工程里存的是 :luts/<文件名> 这样的

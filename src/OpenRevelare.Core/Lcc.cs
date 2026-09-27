@@ -76,6 +76,23 @@ public static class Lcc
             ff = Resample.Box(TiffIO.LoadTiff(path, inputIsSrgb: !tiffIsLinear), MaxEdge);
         }
 
+        return FromDecoded(ff);
+    }
+
+    /// <summary>
+    /// Build the mean-normalised field from pixels already decoded through the caller's input
+    /// contract. The GUI uses this for TIFF so the flat and the roll go through the same ICC/TRC
+    /// admission instead of silently treating every flat TIFF as linear. The input may already be
+    /// downsampled to <see cref="MaxEdge"/>; if it is larger, it is boxed here so non-GUI callers
+    /// get the same storage bound.
+    /// </summary>
+    public static ImageBuffer FromDecoded(ImageBuffer decoded)
+    {
+        ArgumentNullException.ThrowIfNull(decoded);
+        ImageBuffer ff = Math.Max(decoded.Width, decoded.Height) > MaxEdge
+            ? Resample.Box(decoded, MaxEdge)
+            : decoded;
+
         int w = ff.Width, h = ff.Height;
 
         // Smooth away noise so the per-pixel divide doesn't amplify grain/read noise.
@@ -125,10 +142,23 @@ public static class Lcc
     public static void Apply(float[] data, int w, int h, ImageBuffer ffNorm, FrameRegion region)
     {
         int fw = (int)region.FrameWidth, fh = (int)region.FrameHeight;
-        // The field is matched to the FRAME, then indexed at this buffer's offset.
-        float[] ff = (ffNorm.Width == fw && ffNorm.Height == fh)
-            ? ffNorm.Data
-            : ResizeCached(ffNorm, fw, fh);
+        bool exactSize = ffNorm.Width == fw && ffNorm.Height == fh;
+
+        // A full-resolution frame is intentionally outside the resize cache (one 60 MP float
+        // field is ~720 MB), but RegionRender usually hands us only a 1-8 MP slice of it. Building
+        // that uncached WHOLE-frame field for every slice was both wasted work and an easy OOM.
+        // Sample the compact field directly at the slice's global coordinates instead. This is
+        // the exact same align-corners bilinear interpolation as ResizeFlatField; it merely
+        // fuses resize + divide and therefore allocates O(w+h), not O(frameW*frameH).
+        if (!exactSize && Math.Max(fw, fh) > MaxCachedEdge)
+        {
+            ApplyResampled(data, w, h, ffNorm, region);
+            return;
+        }
+
+        // Small interactive frames keep the memoised fast path. If dimensions already match,
+        // no interpolation is needed regardless of size.
+        float[] ff = exactSize ? ffNorm.Data : ResizeCached(ffNorm, fw, fh);
 
         if (region.IsWhole(w, h))
         {
@@ -148,6 +178,62 @@ public static class Lcc
             int fb = ((oy + y) * fw + ox) * 3;
             for (int x = 0; x < w * 3; x++)
                 data[b + x] /= ff[fb + x];
+        });
+    }
+
+    /// <summary>
+    /// Fused align-corners bilinear resize and divide for a region of a large frame. Keeping this
+    /// mathematically identical to <see cref="ResizeFlatField"/> matters: switching between fit
+    /// preview and high-resolution patch must not reveal an LCC seam.
+    /// </summary>
+    private static void ApplyResampled(float[] data, int w, int h, ImageBuffer ffNorm,
+                                       FrameRegion region)
+    {
+        int fw = Math.Max(1, (int)region.FrameWidth);
+        int fh = Math.Max(1, (int)region.FrameHeight);
+        int ox = (int)region.OffsetX, oy = (int)region.OffsetY;
+        int sw = ffNorm.Width, sh = ffNorm.Height;
+        float[] src = ffNorm.Data;
+
+        double sx = fw > 1 ? (double)(sw - 1) / (fw - 1) : 0.0;
+        double sy = fh > 1 ? (double)(sh - 1) / (fh - 1) : 0.0;
+
+        // Every row shares the same horizontal taps. Precomputing them turns each pixel into the
+        // same four source reads and lerps ResizeFlatField performs, without repeated floor/clamp.
+        var x0 = new int[w];
+        var x1 = new int[w];
+        var wx = new double[w];
+        for (int x = 0; x < w; x++)
+        {
+            double fx = Math.Clamp(ox + x, 0, fw - 1) * sx;
+            int ix = (int)Math.Floor(fx);
+            x0[x] = Math.Clamp(ix, 0, sw - 1);
+            x1[x] = Math.Clamp(ix + 1, 0, sw - 1);
+            wx[x] = fx - ix;
+        }
+
+        Parallel.For(0, h, y =>
+        {
+            double fy = Math.Clamp(oy + y, 0, fh - 1) * sy;
+            int iy = (int)Math.Floor(fy);
+            int y0 = Math.Clamp(iy, 0, sh - 1);
+            int y1 = Math.Clamp(iy + 1, 0, sh - 1);
+            double wy = fy - iy;
+            int row0 = y0 * sw * 3, row1 = y1 * sw * 3;
+            int dst = y * w * 3;
+            for (int x = 0; x < w; x++)
+            {
+                int i00 = row0 + x0[x] * 3, i10 = row0 + x1[x] * 3;
+                int i01 = row1 + x0[x] * 3, i11 = row1 + x1[x] * 3;
+                double tx = wx[x];
+                for (int c = 0; c < 3; c++)
+                {
+                    double top = src[i00 + c] * (1.0 - tx) + src[i10 + c] * tx;
+                    double bot = src[i01 + c] * (1.0 - tx) + src[i11 + c] * tx;
+                    float divisor = Math.Max((float)(top * (1.0 - wy) + bot * wy), MinFf);
+                    data[dst + x * 3 + c] /= divisor;
+                }
+            }
         });
     }
 

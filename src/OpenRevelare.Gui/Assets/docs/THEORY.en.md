@@ -319,14 +319,28 @@ computed directly.
 
 ### 4.3 Highlight endpoint
 
-The quantity declared at the highlight end is each channel's deepest density $D_{\max,c}$, taken
-as the per-channel mean density over the darkest area of the normalised image — three values. The
-three channels' deepest densities differ, and that difference is the highlight colour balance, so
-retaining all three makes the highlight endpoint and the highlight cast one fact.
+The quantity declared at the highlight end is each channel's deepest density $D_{\max,c}$. Camera
+RAW and ordinary scan TIFF provide no known physical D-max, so the automatic value is a scene-proxy
+endpoint, not a sensitometric D-max. Each frame first ranks pixels by total density and averages RGB
+over the same deepest 0.1% physical samples; channels never take extrema from different pixels. The
+between-channel difference is highlight balance, so the endpoint and highlight cast remain one fact.
 
-In roll mode the 90th percentile across frames is taken per channel. $D_{\max}$ is a property of
-the film and its development rather than of any single scene, so one value is taken for the roll;
-this percentile makes the result correspond to those frames that do contain a deep black region.
+Roll colour consensus is a **quality-weighted medoid** in $(\log R/G,\log B/G)$ space. The selected
+candidate remains one frame's real co-sited triple rather than synthetic RGB; frames with more valid
+pixels, a supported tail and resolved source codes carry more weight. One common RGB scale then adds
+depth from a robust upper percentile of the frame maxima. Quality weights both pull the consensus
+and gate a candidate's own eligibility, so a weak candidate
+cannot win merely by falling at the cluster centre. Effective evidence is bounded by both absolute
+quality-vote mass and Kish effective sample size: P100 for one frame, approaching P95 as independent
+high-quality evidence accumulates. Many equally poor frames therefore cannot impersonate strong evidence.
+Weighted midpoint interpolation is continuous within the ordinary population but never bridges a
+large isolated gap, so one exceptionally deep frame cannot lift the whole roll.
+
+Candidate count, quality, log-chroma dispersion and risk flags produce the reported confidence. If
+the robust percentile is below an absolute extreme, or the endpoint lies against the 3.0-D
+opaque/scanner-black guard, the UI says that extreme frames may clip. The former means those few
+frames may need a single-frame solve; the latter means the input may already be pinned at the
+scanner floor. Neither is presented as a risk-free physical D-max.
 
 Sampling excludes two classes of pixel: light board and sprockets (by a luma cut), and pixels
 whose total density exceeds 3.0 — fully opaque sprockets or frame edges reach the $-\log_{10}$
@@ -407,6 +421,20 @@ above the clamp. The step is folded into the write stage of the inversion.
 
 RGB light-box rolls take the luminance/chroma decomposition here in order to apply the chroma
 compensation matrix or per-channel amp produced by the decouple calibration.
+
+When LCC is enabled, the flat field precedes both the decoupling calibration and chroma-amplification
+measurement. The centre means of the three uniform R/G/B calibration frames are divided by the
+flat's centre mean, and sampled content frames receive the same flat per pixel before amplification
+is measured. This matches the render's `LCC → decouple` order; otherwise vignetting or corner colour
+cast would be incorrectly absorbed into a roll-wide chroma correction.
+
+The content-dependent chroma back-pressure never concatenates pixels across scenes. Up to six
+frames are spaced from the start to the end of the roll; each measures yellow-blue and red-green
+amplification independently, then a saturating signal-quality weighted median reduces the roll.
+Weight reaches its ceiling at 0.01 D of pre-decouple chroma standard deviation, so a strongly
+monochromatic scene cannot dominate. Weak frames are down-weighted, and an axis for which every
+frame stays below 0.003 D falls back to unit amplification rather than fitting noise. This reuses
+the two existing chroma statistics and adds neither decoding nor a pixel pass.
 
 The decomposition acts on the ENDPOINT-NORMALISED density $a_c = S_c D_c + b_c$, not on the raw
 density $D_c$. Raw density chroma $D_c - \bar D$ is not scene colour: it carries the orange mask and

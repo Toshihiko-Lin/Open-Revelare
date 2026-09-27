@@ -138,7 +138,21 @@ public partial class MainViewModel
             OnPropertyChanged(nameof(GreyCardSpan));
 
             foreach (RollFrame f in Frames) f.Params.Monochrome = value;
-            if (Frames.Count > 0) MarkRollDirty();
+            if (Frames.Count > 0)
+            {
+                MarkRollDirty();
+                // Colour and monochrome calibration do not merely render the same endpoints
+                // differently: monochrome folds the three Stage-1 channels before density, and
+                // its carrier detector deliberately waives the orange-mask test. Evidence from
+                // the previous mode therefore cannot describe the current one.
+                _calibrationDiagnosticsRollWide = false;
+                _rollBaseCalibration = null;
+                _rollHighlightCalibration = null;
+                _rollUsedFallbackHighlight = false;
+                FilmBaseText = Loc.T("片基：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
+                HighlightConfidenceText = Loc.T("高光：整卷类型已更改 · 原端点诊断已失效");
+                NeedsRecalibration = true;
+            }
 
             // Every thumbnail is now a different picture, exactly as an output-space change makes
             // them: a strip still showing the colour render of a black-and-white roll would be

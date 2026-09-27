@@ -800,38 +800,84 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _lccAvailable;
     [ObservableProperty] private bool _lccEnabled;
     [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
-    partial void OnLccEnabledChanged(bool value) => ScheduleRender();
+    partial void OnLccEnabledChanged(bool value) => InvalidateOpticalCalibration();
 
     /// <summary>Load a flat-field reference (RAW/TIFF) → mean-normalised LCC field, roll-level.</summary>
     public async Task LoadLccAsync(string path)
     {
         try
         {
-            ImageBuffer ff = await Task.Run(() => Lcc.LoadFlatField(path, tiffIsLinear: true));
+            ImageBuffer ff = await Task.Run(() => LoadLccField(
+                path, _colorPipelineVersion, _tiffInputAssumption, RollIsRaw));
             _lccFlatField = ff;
             _lccSourcePath = path;
             LccAvailable = true;
+            bool wasEnabled = LccEnabled;
             LccEnabled = true;   // triggers render
+            // Replacing an already-enabled field does not change the boolean property, but it
+            // still changes the optical domain the stored endpoints were measured in.
+            if (wasEnabled)
+                InvalidateOpticalCalibration();
             LccStatus = Loc.T("已载入平场：") + Path.GetFileName(path);
         }
         catch (Exception ex) { LccStatus = Loc.T("平场载入失败：") + ex.Message; }
+    }
+
+    /// <summary>Decode an LCC reference through the same typed input contract as its roll.
+    /// RAW remains camera-native UniWB; TIFF follows the roll's exact ICC/fallback decision.</summary>
+    private ImageBuffer LoadLccField(string path, ColorPipelineVersion pipelineVersion,
+                                     TiffInputAssumption tiffInputAssumption,
+                                     bool expectedRaw)
+    {
+        bool lccIsRaw = RawDecode.IsRawExtension(path);
+        if (lccIsRaw != expectedRaw)
+            throw new InvalidOperationException(expectedRaw
+                ? Loc.T("RAW 卷必须使用 RAW 平场参考图；TIFF 平场可能已经过色彩矩阵，不能安全地乘回相机原生通道。")
+                : Loc.T("TIFF 卷必须使用 TIFF 平场参考图；RAW 平场仍在相机原生通道，不能安全地乘到已表征的扫描 RGB。"));
+        var (previews, _, _) = ImageIo.LoadWorkingPreviews(
+            path, pipelineVersion, ColorManagement, tiffInputAssumption, Lcc.MaxEdge);
+        return Lcc.FromDecoded(previews[0].Pixels);
     }
 
     // 镜头校正（预反相线性域，不依赖镜头库）：手动畸变 + 手动暗角
     [ObservableProperty] private double _distortionK1;              // 畸变 k1（-0.5..0.5，负=修桶形）
     [ObservableProperty] private double _vignetteAmount;           // 暗角强度（-1..2，正=提亮四角）
     [ObservableProperty] private double _vignetteFalloff = 2.5;    // 暗角范围（1..6，大=只提最外圈）
-    partial void OnDistortionK1Changed(double value) => ScheduleRender();
-    partial void OnVignetteAmountChanged(double value) => ScheduleRender();
-    partial void OnVignetteFalloffChanged(double value) => ScheduleRender();
+    partial void OnDistortionK1Changed(double value) => InvalidateOpticalCalibration();
+    partial void OnVignetteAmountChanged(double value) => InvalidateOpticalCalibration();
+    partial void OnVignetteFalloffChanged(double value) => InvalidateOpticalCalibration();
+
+    /// <summary>
+    /// LCC and vignette correction run before every film-base/highlight measurement. Changing
+    /// either invalidates the endpoints already measured in the old optical domain; keep showing
+    /// the reversible preview, but say that the roll must be analysed again. Loading/switching a
+    /// project is excluded because its stored endpoints already belong to the stored correction.
+    /// </summary>
+    private void InvalidateOpticalCalibration()
+    {
+        if (_roll is not null && _paramsLoaded && !_configLoad)
+        {
+            NeedsRecalibration = true;
+            if (_calibrationDiagnosticsRollWide)
+            {
+                _calibrationDiagnosticsRollWide = false;
+                _rollBaseCalibration = null;
+                _rollHighlightCalibration = null;
+                _rollUsedFallbackHighlight = false;
+                FilmBaseText = Loc.T("片基：光学校正或遮罩已更改 · 原自动置信度已失效，请重新运行自动标定");
+                HighlightConfidenceText = Loc.T("高光：光学校正或遮罩已更改 · 原端点诊断已失效");
+            }
+        }
+        ScheduleRender();
+    }
 
     // 齿孔遮罩（反相后把遮罩像素填白）
     [ObservableProperty] private bool _sprocketEnabled;
     [ObservableProperty] private double _sprocketThreshold = 0.9;  // 绝对亮度切（0.5..1.0）
     [ObservableProperty] private bool _showSprocketMask;          // 预览上叠加红色遮罩（诊断）
     [ObservableProperty] private Bitmap? _sprocketMaskOverlay;
-    partial void OnSprocketEnabledChanged(bool value) => ScheduleRender();
-    partial void OnSprocketThresholdChanged(double value) => ScheduleRender();
+    partial void OnSprocketEnabledChanged(bool value) => InvalidateOpticalCalibration();
+    partial void OnSprocketThresholdChanged(double value) => InvalidateOpticalCalibration();
     partial void OnShowSprocketMaskChanged(bool value)
     {
         UpdatePresentation(() =>
@@ -923,25 +969,25 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _tBaseR = 0.82;
     [ObservableProperty] private double _tBaseG = 0.51;
     [ObservableProperty] private double _tBaseB = 0.29;
-    partial void OnTBaseRChanged(double value) => ScheduleRender();
-    partial void OnTBaseGChanged(double value) => ScheduleRender();
-    partial void OnTBaseBChanged(double value) => ScheduleRender();
+    partial void OnTBaseRChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
+    partial void OnTBaseGChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
+    partial void OnTBaseBChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
 
     /// <summary>暗端：逐通道黑点密度（对 T=1 的绝对值）。橙色片基必然 R&lt;G&lt;B。</summary>
     [ObservableProperty] private double _dMinR;
     [ObservableProperty] private double _dMinG;
     [ObservableProperty] private double _dMinB;
-    partial void OnDMinRChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMinGChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMinBChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinRChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinGChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinBChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
 
     /// <summary>亮端：逐通道白点密度（典型 1.8–2.4）。高光白平衡就是这三个数。</summary>
     [ObservableProperty] private double _dMaxR = 2.0;
     [ObservableProperty] private double _dMaxG = 2.0;
     [ObservableProperty] private double _dMaxB = 2.0;
-    partial void OnDMaxRChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMaxGChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMaxBChanged(double value) { SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxRChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxGChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxBChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
 
     /// <summary>暗端三个分量的数组视图。同一份数据，不是第二个字段。</summary>
     public double[] DMinPerChannel
@@ -972,8 +1018,40 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>亮端位置（三个亮端密度的均值）。与 D_min 的距离即反差。</summary>
     [ObservableProperty] private double _dMaxLevel = 2.0;
 
-    partial void OnDMinLevelChanged(double value) => PushLevel(shadow: true);
-    partial void OnDMaxLevelChanged(double value) => PushLevel(shadow: false);
+    partial void OnDMinLevelChanged(double value)
+    {
+        if (!_syncingEndpointView) InvalidateBaseEndpointDiagnostics();
+        PushLevel(shadow: true);
+    }
+    partial void OnDMaxLevelChanged(double value)
+    {
+        if (!_syncingEndpointView) InvalidateHighlightEndpointDiagnostics();
+        PushLevel(shadow: false);
+    }
+
+    /// <summary>Automatic confidence describes the exact endpoint it measured. Once a user moves
+    /// that endpoint, retaining the old percentage or clipping verdict would attach evidence to
+    /// numbers the detector never produced. Programmatic loads suppress this; sampling/automatic
+    /// commands replace the temporary message with their own provenance after the assignment.</summary>
+    private void InvalidateBaseEndpointDiagnostics()
+    {
+        if (_suppressRender || !_paramsLoaded) return;
+        _calibrationDiagnosticsRollWide = false;
+        _rollBaseCalibration = null;
+        _rollHighlightCalibration = null;
+        _rollUsedFallbackHighlight = false;
+        FilmBaseText = Loc.T("片基/黑端：已手动调整 · 原自动片基置信度不再适用于当前端点");
+        HighlightConfidenceText = Loc.T("高光：跨度已受手动黑端调整 · 原置信度与裁切风险诊断失效");
+    }
+
+    private void InvalidateHighlightEndpointDiagnostics()
+    {
+        if (_suppressRender || !_paramsLoaded) return;
+        _calibrationDiagnosticsRollWide = false;
+        _rollHighlightCalibration = null;
+        _rollUsedFallbackHighlight = false;
+        HighlightConfidenceText = Loc.T("高光：已手动调整端点 · 当前端点无自动置信度或裁切风险诊断");
+    }
 
     /// <summary>某一端的标量 → 该端三个分量同步平移，保住通道间差。</summary>
     private void PushLevel(bool shadow)
@@ -1549,11 +1627,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private bool _showingBeforeEdits;
     /// <summary>
-    /// 片基告警。**只在测不到裸露片基时非空**——成功时不回显 t_base 数值，那个数已经没有
-    /// 滑块，它的意义由 D_min 承担。空字符串时整行在界面上隐藏，这样黑端分组的形状与亮端
-    /// 一致（标量 → 采样按钮 → 逐通道）。
+    /// Automatic base provenance and confidence. Empty until an automatic measurement exists.
+    /// D_min remains the editable value; this line explains what evidence produced it.
     /// </summary>
     [ObservableProperty] private string _filmBaseText = "";
+
+    /// <summary>Scene-derived highlight proxy confidence and clipping/quantisation diagnostics.</summary>
+    [ObservableProperty] private string _highlightConfidenceText = "";
+
+    /// <summary>True only when the displayed diagnostics describe the shared roll calibration.</summary>
+    private bool _calibrationDiagnosticsRollWide;
+    private FilmBaseEstimate? _rollBaseCalibration;
+    private HighlightEndpointEstimate? _rollHighlightCalibration;
+    private bool _rollUsedFallbackHighlight;
 
     /// <summary>片基是否已经采过样。语言切换时用来决定是否重译告警文案。</summary>
     private bool _filmBaseSampled;
@@ -1933,7 +2019,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
         if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
-        var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
+        var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone())
+            .InheritSourceFrom(neg);
         if (lcc is not null)
             Lcc.Apply(src.Data, src.Width, src.Height, lcc);
         if (VignetteAmount != 0.0)
@@ -1978,6 +2065,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] tb = FilmBase.SampleTBase(src, rect);
+        _calibrationDiagnosticsRollWide = false;
         _filmBaseSampled = true;
         // 亮端不动：它已经是对 T=1 的绝对密度，与这次采样无关。只有黑端被重新定义。
         DMinPerChannel = TBaseToDensity(tb);
@@ -2015,7 +2103,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            FilmBaseText = "";
+            FilmBaseText = Loc.T("片基：手动物理采样 · 用户确认区域");
             StatusText = Loc.F($"片基采样 → 黑端 {DMinR:F3} / {DMinG:F3} / {DMinB:F3}");
         }
     });
@@ -2061,7 +2149,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] hi = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
+        _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
+        HighlightConfidenceText = Loc.T("高光：手动采样端点 · 用户确认区域");
         StatusText = Loc.F($"高光采样 → 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
     });
 
@@ -2088,7 +2178,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         double[] grey = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
         double[] dMin = DMinPerChannel, before = DMaxPerChannel;
         double[] hi = DensityEndpoints.HighlightFromNeutralAtCode(grey, dMin, FrameParams.CineonGreyCode);
+        _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
+        HighlightConfidenceText = Loc.T("高光：灰卡物理锚点 · Cineon 470 · 用户确认区域");
 
         double CardCode(double[] dMax)
         {
@@ -2199,16 +2291,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             double[]? tb = useMode
                 ? FilmBase.EstimateTBaseByMode(_previewLinear, sprocketThreshold, values)
                 : null;
+            bool physicalCandidate = tb is not null;
             // Then the edge sliver: a scan with no board still often keeps a thin strip of bare
             // rebate, which is the real base but far too small for any percentile to find. Tried
             // before the tail estimator because when it answers at all it has identified an
             // actual piece of film base, whereas the tail is a fallback that measures whatever
             // happens to be brightest.
-            tb ??= FilmBase.EstimateTBaseFromEdgeSliver(_previewLinear, values);
-            tb ??= values is null
-                ? FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold)
-                : FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold,
-                                                 valueImages: new[] { values });
+            if (tb is null)
+            {
+                tb = FilmBase.EstimateTBaseFromEdgeSliver(
+                    _previewLinear, values, allowNeutralCarrier: Monochrome,
+                    upperLumaCut: sprocketThreshold);
+                physicalCandidate = tb is not null;
+            }
+            if (tb is null)
+                tb = values is null
+                    ? FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold)
+                    : FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold,
+                                                     valueImages: new[] { values });
             // 片基的绝对密度进黑端；TBase 保持中性 1,1,1（参考点是完全透光）。
             DMinPerChannel = TBaseToDensity(tb);
             // Only broadcast to the whole roll when invoked from the roll-wide chain. Per-frame
@@ -2222,21 +2322,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _filmBaseSampled = true;
             ok = true;
 
-            // Sanity-check the result against what a C-41 base physically IS: an orange dye layer,
-            // so R > G > B, and by a clear margin. A neutral answer means the estimator found no
-            // bare base and fell back to the picture's own highlights — which happens on a scan
-            // already cropped to the image area, where no base is in frame at all. The number it
-            // returns is then not a film base and everything downstream inherits that, so it has
-            // to be said out loud rather than shown as a normal measurement.
-            if (IsPlausibleFilmBase(tb))
+            // Provenance, not channel order, decides whether this was a physical carrier pick.
+            // Camera-native RAW under a non-neutral copy light can legitimately read G > R even
+            // through an orange mask (measured on the ORF sample roll), so R>G>B is not a valid
+            // gate before the light/sensor has been characterised. Mode and edge topology are
+            // actual evidence; the bright-tail fallback is explicitly content inference.
+            if (physicalCandidate)
             {
-                FilmBaseText = "";
+                FilmBaseText = Monochrome
+                    ? Loc.T("片基：当前帧无色载体候选 · 整卷分析完成后给出置信度")
+                    : Loc.T("片基：当前帧物理片基候选 · 整卷分析完成后给出置信度");
                 StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
             }
             else
             {
                 FilmBaseText = Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
-                StatusText = Loc.T("⚠ 未测到橙色片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定");
+                StatusText = Loc.T("⚠ 未测到裸露片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定");
             }
         }
         catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
@@ -2248,25 +2349,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         RestartThumbnails();
         return ok;
     }
-
-    /// <summary>
-    /// Whether a measured t_base looks like a real C-41 film base rather than a fallback.
-    ///
-    /// The mask is an orange dye layer, so its transmittance is ordered R > G > B and the R-to-B
-    /// ratio is large — the hand-sampled references in this project sit around 0.20 / 0.175 /
-    /// 0.06, a ratio above 3. A base measured off picture highlights instead comes back nearly
-    /// neutral (0.716 / 0.729 / 0.725 on the 归档 samples, ratio 0.99, and with G above R, which
-    /// no C-41 base can be). A modest ratio floor separates the two cleanly without rejecting a
-    /// thin or faded base.
-    /// </summary>
-    private static bool IsPlausibleFilmBase(double[] tb)
-        => tb.Length == 3 && tb[0] > tb[1] && tb[1] > tb[2]
-           && tb[0] / Math.Max(tb[2], 1e-6) >= FilmBaseMinRatio;
-
-
-    /// <summary>Least R:B ratio for <see cref="IsPlausibleFilmBase"/>. Set well below a real
-    /// base's ≈3 and well above the ≈1 a neutral fallback returns.</summary>
-    private const double FilmBaseMinRatio = 1.35;
 
     /// <summary>
     /// The light-board cut the auto chain should use, measured from the frame rather than taken
@@ -2456,46 +2538,45 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <c>compute_auto_color_limits</c>) expressed in this pipeline's terms.
     ///
     /// Roll-wide and not per-frame, deliberately. A roll is one strip of one film developed in one
-    /// batch, and the four parameters here describe THAT, not any individual scene — so the frames
+    /// batch, and the two endpoint triples here describe THAT, not any individual scene — so the frames
     /// are repeated measurements of a shared quantity, and pooling them is what makes the estimate
     /// better than any single frame's. It also means the roll stays visually of a piece, which a
     /// per-frame solve cannot promise: it would silently colour-correct away a sunset or a tungsten
     /// interior, because to a single-frame estimator those are indistinguishable from a cast.
     /// Per-frame differences remain the user's to make afterwards, on top of a consistent base.
     ///
-    /// How each parameter is pooled differs, because their semantics differ — see
-    /// <see cref="FilmBase.EstimateTBaseByModeFromRoll"/> (median: one physical material),
-    /// <see cref="FilmBase.AutoWbHighFromRoll"/> (densest frame: the roll's true brightest
-    /// highlight) and <see cref="FilmBase.DetectDMaxFromRoll"/> (upper percentile: only
-    /// well-exposed frames reach the film's ceiling).
+    /// How the two ends are pooled differs, because their semantics differ. The film base is one
+    /// physical material, so its per-frame measurements are reduced by median into DMin. The
+    /// highlight endpoint is one co-sited RGB density triple: the primary detector chooses a frame
+    /// by cross-frame colour consensus and then lifts the whole triple uniformly for roll headroom;
+    /// <see cref="FilmBase.AutoWbHighFromRoll"/> supplies the same quantity as a fallback. There is
+    /// no separate wb_high or scalar D-max left — DMaxPerChannel is both the measured white end and
+    /// the highlight colour balance.
     ///
     /// Runs on import, from <see cref="AutoInvertOnImportRun"/>, and on demand from the 自动（整卷）
     /// button via <see cref="AutoInvertRollCommandAsync"/>. Every step it performs is also its own
     /// button in the 整卷校准 panel, so the chain button IS a second way to do the same thing —
     /// that redundancy is the point: the individual buttons document the physics, while the chain
     /// is the path for someone who just wants the roll inverted. Note that re-running it over a
-    /// half-graded roll discards the user's wb_high and levels, which is why it is only ever
-    /// reached by an explicit press.
+    /// half-graded roll replaces the user's two endpoint triples and resets black/white level
+    /// offsets to neutral, which is why it is only ever reached by an explicit press.
     ///
-    /// The ORDER is the part that is not obvious, and it is wrong in both other directions:
+    /// The ORDER is the part that is not obvious:
     ///
-    ///  1. t_base first — everything downstream is a density measured as −log10(T / t_base), so
-    ///     a later step run against a stale base measures the wrong quantity entirely.
-    ///  2. wb_high second, against the pooled base. wb_offset is deliberately NOT auto-solved:
-    ///     the class remarks on <see cref="FilmBase"/> require the additive shadow term to be
-    ///     sampled BEFORE the multiplicative highlight term, and there is no unsupervised way to
-    ///     find a neutral shadow — a dark scene object is not a grey card. Leaving it at zero
-    ///     makes wb_high's solve reduce to the clean wb_high[c] = max_d / D[c], which is exactly
-    ///     what NexFilm does (its exposure_offset is identically zero).
-    ///  3. D-max third: it is a density percentile of T / t_base, so it needs the base, and it
-    ///     sets the white end the levels then measure against.
-    ///  4. Levels last, on the rendered positive — it is the only step that measures OUTPUT, so
-    ///     it must see the other three already applied.
+    ///  1. Measure the film base first and write its absolute density into DMin. Every highlight
+    ///     candidate downstream is measured as −log10(T / filmBase), so a stale base would make
+    ///     both its depth and its channel ratios wrong.
+    ///  2. Measure one co-sited highlight triple relative to that base, add DMin back, and write the
+    ///     resulting absolute densities into DMax. This one triple sets both white-end placement
+    ///     and highlight balance; applying a second WB solve would double the correction.
+    ///  3. Leave Black and White at zero. The endpoint map and Cineon display rendering already
+    ///     place black, diffuse white and the shoulder; an automatic output-percentile stretch
+    ///     would override that placement and push the rolled highlight back toward clipping.
     ///
     /// Diverges from NexFilm on one point on purpose: it does NOT stretch the three channels to
-    /// independent endpoints. Per-channel stretching is most of why NexFilm's result looks neutral
-    /// out of the box, but it also flattens the scene's own cast. Steps 1–2 here already
-    /// neutralise the mask and the highlight, and 黑场/白场 stay achromatic, so a cast survives.
+    /// independent output percentiles. The measured endpoint triple corrects the film's mask and
+    /// highlight balance, but no per-frame output neutralisation follows it, so a scene's own cast
+    /// survives.
     ///
     /// The current frame is measured and applied FIRST, before the background pass over the rest:
     /// the user gets a usable picture immediately, and the roll-wide refinement lands after. The
@@ -2507,10 +2588,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         // ── Stage 1: the current frame alone, so there is something to look at at once ──────
         //
-        // This must run the WHOLE chain, not just the base. Estimating t_base and stopping leaves
-        // wb_high at 1,1,1 and the levels untouched, so the preview is a mask-removed but
-        // ungraded picture — which reads as "去色罩没做完", because it is not done. The remaining
-        // three steps are cheap here: they measure the already-decoded current frame.
+        // This must measure BOTH endpoint triples, not just the base. Estimating DMin and stopping
+        // leaves DMax at its previous value, so the preview is mask-referenced but its white end and
+        // highlight balance are still uncalibrated. The highlight solve is cheap here because it
+        // measures the already-decoded current frame; output levels deliberately remain neutral.
         //
         // Stage 1's answer is broadcast to the whole roll and is provisional by construction: it
         // is ONE frame's measurement standing in for the roll until stage 2 pools every frame. On
@@ -2539,7 +2620,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // not then be renormalised. The 自动色阶 button stays available for a scan that really
             // does need it.
             Black = 0.0; White = 0.0;
-            AutoDetectDMax();
+            // Reuse the full-resolution board measurement made above. Measuring it again here
+            // decoded the same three roll samples a second time before highlight detection even
+            // began; on a 60 MP roll that was the longest part of the provisional pass and also
+            // doubled its transient decoder pressure.
+            AutoDetectDMax(cut);
         }
         finally { _suppressRender = false; }
 
@@ -2577,20 +2662,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // roll in index order while the warm-up walks outward means constantly asking for the
             // one frame it has not reached yet, which serialises this behind it.
             int start = Math.Max(0, CurrentFrame is { } cur ? frames.IndexOf(cur) : 0);
-            var order = new List<(string Path, (double X, double Y, double W, double H)? Pre, RollFrame Frame)>();
+            var order = new List<(int RollIndex, string Path,
+                (double X, double Y, double W, double H)? Pre, RollFrame Frame)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < frames.Count; i++)
             {
-                RollFrame f = frames[(start + i) % frames.Count];
+                int rollIndex = (start + i) % frames.Count;
+                RollFrame f = frames[rollIndex];
                 var pre = SplitCropOf(f);
-                if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre, f));
+                if (seen.Add(PreviewKey(f.Path, pre))) order.Add((rollIndex, f.Path, pre, f));
             }
 
-            var masks = new List<ImageBuffer>();
-            var values = new List<ImageBuffer>();
-            // Uncropped counterparts of `values`, for the film-base estimators only — see the
-            // note where they are filled.
-            var baseSources = new List<ImageBuffer>();
+            // Decode completion order is deliberately NOT analysis order. The old concurrent
+            // append made the medoid's RepresentativeFrame mean "the Nth task to finish", not
+            // the film-strip frame, and made exact tie breaks depend on scheduling. Collect with
+            // identity, then restore roll order after the parallel pass.
+            var completed = new List<(int RollIndex, ImageBuffer Mask, ImageBuffer Value,
+                ImageBuffer BaseMask, ImageBuffer BaseValue)>();
             var gate = new object();
             int done = 0;
             // Frames whose decode threw, and what the last one said. They do not vote, but they
@@ -2607,7 +2695,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
             }, async (item, token) =>
             {
-                var (path, pre, frame) = item;
+                var (rollIndex, path, pre, frame) = item;
                 ImageBuffer raw;
                 try { raw = (await PreviewAsync(path, pre).WaitAsync(token)).Preview; }
                 catch (OperationCanceledException) { throw; }
@@ -2664,7 +2752,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // re-running it on one frame could not recover: measured on 图像 001a, a 2% crop
                 // cut the sliver's vote count from 7/8 frames to 3/8 and a 5% crop to 0/8, at
                 // which point t_base jumped from (0.397, 0.272, 0.155) to the tail's answer.
-                ImageBuffer baseSrc = val;
+                ImageBuffer baseMask = raw;
+                ImageBuffer baseValue = val;
 
                 if (crop is { } cc)
                 {
@@ -2672,11 +2761,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     raw = Geometry.ApplyCrop(raw, cc);
                     val = shared ? raw : Geometry.ApplyCrop(val, cc);
                 }
-                lock (gate) { masks.Add(raw); values.Add(val); baseSources.Add(baseSrc); }
+                lock (gate)
+                {
+                    completed.Add((rollIndex, raw, val, baseMask, baseValue));
+                }
                 ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
             });
             ReportBackground("");
             ct.ThrowIfCancellationRequested();
+            completed.Sort((a, b) => a.RollIndex.CompareTo(b.RollIndex));
+            var masks = new List<ImageBuffer>(completed.Count);
+            var values = new List<ImageBuffer>(completed.Count);
+            // Uncropped mask/value counterparts for the film-base estimators only. Path A needs
+            // raw luma for board rejection but post-decouple values for the actual base colour.
+            var baseMasks = new List<ImageBuffer>(completed.Count);
+            var baseValues = new List<ImageBuffer>(completed.Count);
+            var sourceRollIndices = new List<int>(completed.Count);
+            foreach (var item in completed)
+            {
+                sourceRollIndices.Add(item.RollIndex);
+                masks.Add(item.Mask); values.Add(item.Value);
+                baseMasks.Add(item.BaseMask); baseValues.Add(item.BaseValue);
+            }
             if (masks.Count == 0)
             {
                 // Nothing voted at all: stage 1's single-frame answer stays, and the user is told
@@ -2697,17 +2803,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // removes, so cropping first is what made this diverge from stage 1. Everything after
             // it (wb_high, D-max, the endpoints) still uses the cropped buffers, because those
             // are measurements of the SCENE and the border would corrupt them.
-            IReadOnlyList<ImageBuffer> baseList =
-                baseSources.Count == masks.Count ? baseSources : masks;
+            IReadOnlyList<ImageBuffer> baseMaskList =
+                baseMasks.Count == masks.Count ? baseMasks : masks;
+            IReadOnlyList<ImageBuffer> baseValueBuffers =
+                baseValues.Count == baseMaskList.Count ? baseValues : baseMaskList;
+            bool sameBaseDomain = baseMaskList.Count == baseValueBuffers.Count
+                               && !baseMaskList.Where((m, i) => !ReferenceEquals(m, baseValueBuffers[i])).Any();
+            IReadOnlyList<ImageBuffer>? baseValueList = sameBaseDomain ? null : baseValueBuffers;
 
-            double[]? rollBase = await Task.Run(
-                () => FilmBase.EstimateTBaseByModeFromRoll(baseList, cut), ct);
-            // Same order as the single-frame chain: an identified sliver of real base beats a
-            // bright-tail percentile, which only measures whatever happens to be brightest.
-            rollBase ??= await Task.Run(
-                () => FilmBase.EstimateTBaseFromEdgeSliverFromRoll(baseList), ct);
-            rollBase ??= await Task.Run(
-                () => FilmBase.EstimateTBaseFromRoll(baseList, cut), ct);
+            FilmBaseEstimate baseEstimate = await Task.Run(
+                () => FilmBase.EstimateTBaseFromRollDetailed(
+                    baseMaskList, cut, baseValueList, allowNeutralCarrier: Monochrome), ct);
+            // A detector can only judge frames it received. If decoding dropped part of the roll,
+            // its internal agreement remains real but is less representative of the requested
+            // roll. Report the attempted denominator and apply a smooth missingness penalty;
+            // otherwise six perfect survivors out of thirty-six failures could still claim high
+            // roll confidence. Square root is deliberately gentler than a linear penalty: a few
+            // corrupt files do not erase strong physical evidence from the rest.
+            double decodeReliability = Math.Sqrt(baseMaskList.Count / (double)order.Count);
+            if (failed > 0)
+                baseEstimate = baseEstimate with
+                {
+                    Confidence = Math.Max(0.05, baseEstimate.Confidence * decodeReliability),
+                    TotalFrames = order.Count,
+                };
+            double[] rollBase = baseEstimate.TBase;
 
             // 估计器传**片基**做参考，让它们在「相对片基」的密度上工作——那正是反相消费的量：
             // 跨度 = D_max − D_min，颜色平衡是三通道跨度之比（DensityEndpoints.FromMeasured）。
@@ -2731,9 +2851,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // Roll-wide highlight endpoints. Masked with the same two cuts the t_base estimator
             // uses: an opaque film-edge line would inflate the channels unequally and show up as
             // a colour cast.
-            double[]? rollDMaxPerCh = await Task.Run(
-                () => FilmBase.DetectDMaxPerChannelFromRoll(values, rollBase, 90.0, masks, cut), ct);
-            if (rollDMaxPerCh is not null) rollDMaxPerCh = AbsoluteFrom(rollDMaxPerCh);
+            HighlightEndpointEstimate? highlightEstimate = await Task.Run(
+                () => FilmBase.DetectDMaxPerChannelFromRollDetailed(
+                    values, rollBase, 90.0, masks, cut,
+                    protectIndependentChannelExtrema: _decoupleMatrix is null), ct);
+            if (highlightEstimate is { } indexedHighlight
+                && indexedHighlight.RepresentativeFrame >= 0
+                && indexedHighlight.RepresentativeFrame < sourceRollIndices.Count)
+                highlightEstimate = indexedHighlight with
+                {
+                    RepresentativeFrame = sourceRollIndices[indexedHighlight.RepresentativeFrame],
+                };
+            if (failed > 0 && highlightEstimate is { } decodedHighlight)
+                highlightEstimate = decodedHighlight with
+                {
+                    Confidence = Math.Max(0.05,
+                        decodedHighlight.Confidence * decodeReliability),
+                    TotalFrames = order.Count,
+                };
+            double[]? rollDMaxPerCh = highlightEstimate is null
+                ? null
+                : AbsoluteFrom(highlightEstimate.Density);
 
             ct.ThrowIfCancellationRequested();
 
@@ -2761,9 +2899,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // Same plausibility check the single-frame path applies — the roll-pooled base is no
             // more guaranteed to be a real film base than a single frame's, and reporting it as a
             // plain measurement here would silently overwrite the warning stage 1 just raised.
-            FilmBaseText = IsPlausibleFilmBase(rollBase)
-                ? ""
-                : Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
+            UpdateCalibrationConfidence(baseEstimate, highlightEstimate, rollDMaxPerCh is null && rollWbHigh is not null);
             ApplyAutoChainToRoll();
             NeedsRecalibration = false;   // 重跑过了，提示可以撤下
             FinishAutoInvert(masks.Count, failed, failReason);
@@ -2843,6 +2979,65 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         MarkRollDirty();
     }
 
+    private void UpdateCalibrationConfidence(
+        FilmBaseEstimate baseEstimate,
+        HighlightEndpointEstimate? highlightEstimate,
+        bool usedFallbackHighlight,
+        bool? monochromeOverride = null)
+    {
+        _calibrationDiagnosticsRollWide = true;
+        _rollBaseCalibration = baseEstimate;
+        bool isMonochrome = monochromeOverride ?? Monochrome;
+        static string Confidence(double value) => value >= 0.75 ? Loc.T("高")
+            : value >= 0.50 ? Loc.T("中") : Loc.T("低");
+        static int Percent(double value) => (int)Math.Round(Math.Clamp(value, 0.0, 1.0) * 100.0);
+
+        string baseRisk = baseEstimate.QuantizationRisk ? Loc.T(" · 存在量化风险") : "";
+        string inferredEvidence = double.IsFinite(baseEstimate.LogDispersion)
+            ? Loc.F($"弱物理共识仅 {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧 · 对数离散 {baseEstimate.LogDispersion:F3}")
+            : Loc.T("未检测到裸露载体");
+        FilmBaseText = baseEstimate.Evidence switch
+        {
+            FilmBaseEvidence.PhysicalMode =>
+                isMonochrome
+                    ? Loc.F($"片基：物理片基（灯板下无色载体峰）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}")
+                    : Loc.F($"片基：物理片基（灯板下色罩峰）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}"),
+            FilmBaseEvidence.PhysicalEdgeSliver =>
+                Loc.F($"片基：物理片基（边缘裸片基）· {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames} 帧支持 · 对数离散 {baseEstimate.LogDispersion:F3}{baseRisk}"),
+            _ =>
+                Loc.F($"⚠ 片基：内容推断片基 · {Confidence(baseEstimate.Confidence)}置信度 {Percent(baseEstimate.Confidence)}% · {inferredEvidence}{baseRisk}；建议手动【片基采样】"),
+        };
+
+        UpdateHighlightConfidence(highlightEstimate, usedFallbackHighlight);
+    }
+
+    private void UpdateHighlightConfidence(
+        HighlightEndpointEstimate? highlightEstimate,
+        bool usedFallback)
+    {
+        _rollHighlightCalibration = highlightEstimate;
+        _rollUsedFallbackHighlight = usedFallback;
+        static string Confidence(double value) => value >= 0.75 ? Loc.T("高")
+            : value >= 0.50 ? Loc.T("中") : Loc.T("低");
+        static int Percent(double value) => (int)Math.Round(Math.Clamp(value, 0.0, 1.0) * 100.0);
+
+        if (highlightEstimate is { } high)
+        {
+            string clipping = high.ClippingRisk ? Loc.T("极端帧可能裁切") : Loc.T("未见裁切风险");
+            string quantization = high.QuantizationRisk ? Loc.T("存在量化风险") : Loc.T("量化风险低");
+            HighlightConfidenceText = Loc.F($"高光：场景代理端点 · {Confidence(high.Confidence)}置信度 {Percent(high.Confidence)}% · {high.CandidateFrames}/{high.TotalFrames} 帧候选 / {high.EffectiveFrames:F1} 有效帧 · 色度代表第 {high.RepresentativeFrame + 1} 帧 · 对数色度离散 {high.LogChromaDispersion:F3} · 自适应 P{high.HeadroomPercentile:F1} · {clipping} · {quantization}");
+        }
+        else if (usedFallback)
+        {
+            HighlightConfidenceText = Loc.T(
+                "⚠ 高光：备用场景代理端点 · 低置信度 · 主检测器没有足够的共址高光候选");
+        }
+        else
+        {
+            HighlightConfidenceText = Loc.T("⚠ 高光：未获得可用代理端点");
+        }
+    }
+
     private void FinishAutoInvert(int voted = 1, int failed = 0, string? failReason = null)
     {
         // The roll-wide numbers are in: what is on screen is no longer provisional.
@@ -2852,7 +3047,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         string voteText = failed > 0
             ? Loc.F($"{voted} 帧参与，{failed} 帧解码失败：{failReason}")
             : Loc.F($"{voted} 帧参与");
-        StatusText = Loc.F($"整卷去色罩完成（{voteText}）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
+        StatusText = Loc.F($"整卷去色罩完成（{voteText}）· 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
+                   + (string.IsNullOrEmpty(FilmBaseText) ? "" : " · " + FilmBaseText)
+                   + (string.IsNullOrEmpty(HighlightConfidenceText) ? "" : " · " + HighlightConfidenceText);
         ScheduleRender();
         // Drop the existing thumbnails before asking for new ones. DecodeThumbnailsAsync skips
         // any frame that already HAS a thumbnail — it exists to fill gaps during import — so
@@ -2901,7 +3098,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _lastHighlightMeasured;
 
     /// <summary>Auto-detect D-max = 99.9th density percentile of the T_norm (T / t_base) frame.</summary>
-    public void AutoDetectDMax()
+    public void AutoDetectDMax() => AutoDetectDMax(AutoBoardCut());
+
+    /// <summary>Highlight solve with an already-resolved board cut. A null value here is a real
+    /// "no board detected" result, not a request to measure again; this distinction lets the
+    /// automatic single-frame and roll chains reuse their full-resolution board pass.</summary>
+    private void AutoDetectDMax(double? cut)
     {
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
@@ -2911,8 +3113,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // light board and — far more damaging — the opaque blocking card sit inside the
         // percentile, and the card, being denser than any exposed area, simply becomes D-max.
         ImageBuffer? mask = AutoRegion();
-        double? cut = AutoBoardCut();
-
         // BOTH ends, not just the scalar.
         //
         // The scalar is the output RANGE — where white lands. The white END is the per-channel
@@ -2937,11 +3137,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // chain's stage 2 for the cast that measuring absolute densities produced.
         double[] dMin = DMinPerChannel;
         double[] tBase = TBaseFromDensity(dMin);
+        _calibrationDiagnosticsRollWide = false;
+        HighlightEndpointEstimate? highlightEstimate = null;
         double[]? highlight = null;
         if (mask is not null)
         {
-            highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { src }, tBase, 90.0, new[] { mask }, cut);
+            highlightEstimate = FilmBase.DetectDMaxPerChannelFromRollDetailed(
+                new[] { src }, tBase, 90.0, new[] { mask }, cut,
+                protectIndependentChannelExtrema: _decoupleMatrix is null);
+            highlight = highlightEstimate?.Density;
 
             // Fallback: the densest-highlight solve. It answers from the same masked pixels but
             // reduces them differently, so it still produces a triplet where the percentile
@@ -2961,6 +3165,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         if (highlight is not null) DMaxPerChannel = AddDMin(highlight, dMin);
         _lastHighlightMeasured = highlight is not null;
+        UpdateHighlightConfidence(
+            highlightEstimate,
+            usedFallback: highlightEstimate is null && highlight is not null);
 
         StatusText = highlight is not null
             ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
@@ -2998,7 +3205,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Black = 0.0; White = 0.0;
             // AutoDetectDMax sets BOTH ends — the scalar output range and the per-channel
             // highlight endpoint, which IS the highlight balance.
-            AutoDetectDMax();
+            // AutoFilmBaseFromRoll and the highlight solve must use the same cut; it was already
+            // measured at full resolution above, so do not repeat those decodes.
+            AutoDetectDMax(cut);
             // Whether the highlight end was actually measured — see the field's remarks. The
             // completion line at the end of this method would otherwise overwrite AutoDetectDMax's
             // warning with "完成" plus the untouched endpoint, so the failure would reach the user
@@ -3015,8 +3224,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // Only this frame's thumbnail changed — the other frames were untouched.
         if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
         StatusText = highlightMeasured
-            ? Loc.F($"单张去色罩完成 · 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3} · 亮端 {DMaxLevel:F3}")
-            : Loc.F($"单张去色罩完成（⚠ 这一帧测不到高光，亮端 {DMaxLevel:F3} 为原值）· 片基 {TBaseR:F3}, {TBaseG:F3}, {TBaseB:F3}");
+            ? Loc.F($"单张去色罩完成 · 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
+            : Loc.F($"单张去色罩完成（⚠ 这一帧测不到高光，亮端保持原值）· 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
     }
 
     /// <summary>
@@ -3113,7 +3322,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             highlight = FilmBase.DetectDMaxPerChannelFromRoll(
-                new[] { val }, tBase, 90.0, new[] { raw }, cut);
+                new[] { val }, tBase, 90.0, new[] { raw }, cut,
+                protectIndependentChannelExtrema: _decoupleMatrix is null);
         }
         catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
 
@@ -3340,6 +3550,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // drives the endpoint sync through the property setters, so the user sees WHAT it
             // decided in the same units they would have dialled by hand, and can carry on from there.
             DMaxPerChannel = wbHigh;
+            _calibrationDiagnosticsRollWide = false;
+            HighlightConfidenceText = Loc.F($"高光：神经网络场景推断 · 非物理 D-max · 残差 {residual:F4}");
             // The residual is reported so the noise floor is visible next to the verdict.
             StatusText = Loc.F($"智能色偏修正{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 亮端 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}（{rounds} 轮 · 残差 {residual:F4}）");
         }
@@ -3671,6 +3883,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // file again, and a cell left behind would claim a negative the frame no longer occupies.
         _splitCell = null;
         FilmBaseText = "";
+        HighlightConfidenceText = "";
+        _calibrationDiagnosticsRollWide = false;
+        _rollBaseCalibration = null;
+        _rollHighlightCalibration = null;
+        _rollUsedFallbackHighlight = false;
         _filmBaseSampled = false;
         ScheduleRender();
     }
@@ -3747,7 +3964,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
-        if (!_filmBaseSampled) FilmBaseText = "";
+        if (_calibrationDiagnosticsRollWide && _rollBaseCalibration is { } baseCalibration)
+            UpdateCalibrationConfidence(
+                baseCalibration, _rollHighlightCalibration, _rollUsedFallbackHighlight);
+        else if (_calibrationDiagnosticsRollWide
+                 && (_rollHighlightCalibration is not null || _rollUsedFallbackHighlight))
+            UpdateHighlightConfidence(_rollHighlightCalibration, _rollUsedFallbackHighlight);
+        else if (!_filmBaseSampled)
+        {
+            FilmBaseText = "";
+            HighlightConfidenceText = "";
+        }
         foreach (RollFrame f in Frames) f.RefreshText();
         NotifyHdrText();
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
@@ -3866,6 +4093,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     ? new Dictionary<string, string> { ["R"] = r[0], ["G"] = r[1], ["B"] = r[2] }
                     : null,
                 LccPath = _lccSourcePath,
+                BaseCalibration = _calibrationDiagnosticsRollWide && _rollBaseCalibration is { } bc
+                    ? bc with { TBase = (double[])bc.TBase.Clone() }
+                    : null,
+                HighlightCalibration = _calibrationDiagnosticsRollWide && _rollHighlightCalibration is { } hc
+                    ? hc with { Density = (double[])hc.Density.Clone() }
+                    : null,
+                UsedFallbackHighlight = _calibrationDiagnosticsRollWide && _rollUsedFallbackHighlight,
                 CameraBody = Notes.CameraBody, FilmStock = Notes.FilmStock, FilmIso = Notes.FilmIso,
                 RollNumber = Notes.RollNumber, DevLab = Notes.DevLab, DevProcess = Notes.DevProcess,
                 DevDate = Notes.DevDate, Location = Notes.Location, RollNote = Notes.RollNote,

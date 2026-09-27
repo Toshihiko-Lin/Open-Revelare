@@ -131,4 +131,72 @@ public class PathAChromaMatrixTests
         Assert.True(np > 1e-3, "the test tone must actually be coloured");
         Assert.Equal(np / 1.6, nc, 4);   // isotropic 1/amp on both axes → chroma shrinks by exactly 1/amp
     }
+
+    [Fact]
+    public void Roll_chroma_compensation_uses_the_per_axis_median()
+    {
+        // The last frame is a strongly coloured outlier. Pixel concatenation could let it own the
+        // variance; one-frame-one-vote median must keep the two ordinary measurements.
+        double[,] actual = DecoupleCalibration.ChromaAxisCompensationMatrixFromAmplifications(
+            new[]
+            {
+                new[] { 1.4, 1.2 },
+                new[] { 1.6, 1.4 },
+                new[] { 4.0, 4.0 },
+            });
+        double[,] expected = Compensation(1.6, 1.4);
+
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+                Assert.Equal(expected[r, c], actual[r, c], 10);
+    }
+
+    [Fact]
+    public void Weak_chroma_frames_cannot_outvote_reliably_coloured_frames()
+    {
+        ChromaAxisAmplificationEstimate[] frames =
+        [
+            new([1.50, 1.30], [0.050, 0.040]),
+            new([1.60, 1.40], [0.045, 0.035]),
+            new([4.00, 4.00], [0.0005, 0.0004]),
+            new([4.00, 4.00], [0.0005, 0.0004]),
+            new([4.00, 4.00], [0.0005, 0.0004]),
+        ];
+
+        double[] reduced =
+            DecoupleCalibration.QualityWeightedChromaAxisAmplification(frames);
+
+        Assert.InRange(reduced[0], 1.49, 1.65);
+        Assert.InRange(reduced[1], 1.29, 1.45);
+    }
+
+    [Fact]
+    public void Entirely_achromatic_roll_does_not_fit_noise_as_chroma_compensation()
+    {
+        ChromaAxisAmplificationEstimate[] frames =
+        [
+            new([4.0, 2.5], [0.0010, 0.0020]),
+            new([2.0, 4.0], [0.0020, 0.0010]),
+        ];
+
+        double[] reduced =
+            DecoupleCalibration.QualityWeightedChromaAxisAmplification(frames);
+
+        Assert.Equal([1.0, 1.0], reduced);
+    }
+
+    [Theory]
+    [InlineData(1.0, 1.0)]
+    [InlineData(1.666677, 1.247937)]
+    [InlineData(4.0, 1.2)]
+    public void Compensation_matrix_reports_the_axis_amplification_it_restrains(
+        double ampYb, double ampRg)
+    {
+        double[] recovered =
+            DecoupleCalibration.ChromaAxisAmplificationFromCompensationMatrix(
+                Compensation(ampYb, ampRg));
+
+        Assert.Equal(ampYb, recovered[0], 10);
+        Assert.Equal(ampRg, recovered[1], 10);
+    }
 }

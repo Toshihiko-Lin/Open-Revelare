@@ -547,12 +547,15 @@ public static class RawDecode
     /// the camera's inset crop when it declares one, else LibRaw's visible width. Recorded before
     /// processing, because a half-size process rewrites the context's size fields to the shrunk
     /// buffer, and callers need the full-resolution size for crop and region geometry.</param>
-    private sealed class RawSession(RawContext context, byte[] bytes, int frameWidth, int frameHeight)
+    private sealed class RawSession(
+        RawContext context, byte[] bytes, int frameWidth, int frameHeight,
+        double sourceQuantisationStep)
         : IDisposable
     {
         public RawContext Context { get; } = context;
         public int FrameWidth { get; } = frameWidth;
         public int FrameHeight { get; } = frameHeight;
+        public double SourceQuantisationStep { get; } = sourceQuantisationStep;
         private byte[]? _bytes = bytes;   // kept alive, and pinned, until the context is gone
 
         public void Dispose()
@@ -596,6 +599,18 @@ public static class RawDecode
         try
         {
             ctx.Unpack();
+
+            // Preserve the SENSOR lattice before dcraw_process scales it into a 16-bit output.
+            // LibRaw exposes this file's actual colour maximum, so 1/maximum describes a raw code
+            // in normalised linear units without guessing 12/14/16 bit from an extension. It is
+            // slightly optimistic when a non-zero black offset narrows the usable range, but far
+            // more truthful than the previous zero ("continuous/unknown") and avoids inventing a
+            // camera-specific black level. Demosaic and box averaging create intermediate float
+            // values but cannot manufacture source information between sensor codes.
+            int rawMaximum = ctx.ColorMaximum;
+            double sourceQuantisationStep = rawMaximum > 0
+                ? 1.0 / rawMaximum
+                : 1.0 / 65535.0;
 
             // The inset crop is applied under half-size too. LibRaw takes params.cropbox in
             // full-resolution sensor coordinates whatever the shrink, and halves it itself:
@@ -641,7 +656,7 @@ public static class RawDecode
                 p.HalfSize = halfSize;                              // 2×2 binning, no demosaic
                 if (cropbox is System.Drawing.Rectangle cb) p.Cropbox = cb;
             });
-            return new RawSession(ctx, bytes, frameW, frameH);
+            return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep);
         }
         catch { ctx.Dispose(); throw; }
     }
@@ -691,11 +706,14 @@ public static class RawDecode
     /// The two differ under half-size, where the image is the frame at half the pixels, and on
     /// the DNG backend's linear sources, where LibRaw ignores the half-size request.
     /// </summary>
-    private readonly struct Decoded(ProcessedImage image, int frameWidth, int frameHeight) : IDisposable
+    private readonly struct Decoded(
+        ProcessedImage image, int frameWidth, int frameHeight, double sourceQuantisationStep)
+        : IDisposable
     {
         public ProcessedImage Image { get; } = image;
         public int FrameWidth { get; } = frameWidth;
         public int FrameHeight { get; } = frameHeight;
+        public double SourceQuantisationStep { get; } = sourceQuantisationStep;
         public void Dispose() => Image.Dispose();
     }
 
@@ -716,10 +734,12 @@ public static class RawDecode
     {
         ProcessedImage img;
         int frameW, frameH;
+        double sourceQuantisationStep;
         using (RawSession session = OpenAndProcess(path, fbdd, halfSize, demosaic, regionInFrame))
         {
             img = session.Context.MakeDcrawMemoryImage();
             frameW = session.FrameWidth; frameH = session.FrameHeight;
+            sourceQuantisationStep = session.SourceQuantisationStep;
         }
         if (img.Bits != 16)
         {
@@ -732,7 +752,7 @@ public static class RawDecode
         // came back (a source LibRaw declined to shrink, such as a linear DNG, is full size).
         bool shrunk = img.Width < frameW && img.Width == (frameW + 1) / 2 && img.Height == (frameH + 1) / 2;
         if (!shrunk) { frameW = img.Width; frameH = img.Height; }
-        return new Decoded(img, frameW, frameH);
+        return new Decoded(img, frameW, frameH, sourceQuantisationStep);
     }
 
     private static ImageBuffer DecodeLibRaw(string path, FbddMode fbdd, bool halfSize)
@@ -767,7 +787,10 @@ public static class RawDecode
             }
         }
 
-        return new ImageBuffer(w, h, data);
+        return new ImageBuffer(w, h, data)
+        {
+            SourceQuantisationStep = decoded.SourceQuantisationStep,
+        };
     }
 
     /// <summary>
@@ -828,7 +851,10 @@ public static class RawDecode
         ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
         ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
-        var buf = new ImageBuffer(w, h);
+        var buf = new ImageBuffer(w, h)
+        {
+            SourceQuantisationStep = decoded.SourceQuantisationStep,
+        };
         float[] d = buf.Data;
         const float Inv = 1.0f / 65535.0f;
         for (int yy = 0; yy < h; yy++)
@@ -875,16 +901,23 @@ public static class RawDecode
 
         var outs = new ImageBuffer[maxEdges.Count];
         for (int e = 0; e < maxEdges.Count; e++)
-            outs[e] = BoxFromRaw(img, w, h, ch, Resample.BoxFactor(w, h, maxEdges[e]));
+            outs[e] = BoxFromRaw(
+                img, w, h, ch, Resample.BoxFactor(w, h, maxEdges[e]),
+                decoded.SourceQuantisationStep);
         return (outs, decoded.FrameWidth, decoded.FrameHeight);
     }
 
     /// <summary>Box-average LibRaw's 16-bit output into a linear float buffer.</summary>
-    private static ImageBuffer BoxFromRaw(ProcessedImage img, int w, int h, int ch, int factor)
+    private static ImageBuffer BoxFromRaw(
+        ProcessedImage img, int w, int h, int ch, int factor,
+        double sourceQuantisationStep)
     {
         const float Inv = 1.0f / 65535.0f;
         int ow = w / factor, oh = h / factor;
-        var dst = new ImageBuffer(ow, oh);
+        var dst = new ImageBuffer(ow, oh)
+        {
+            SourceQuantisationStep = sourceQuantisationStep,
+        };
         float[] d = dst.Data;
         float invN = 1.0f / (factor * factor);
 

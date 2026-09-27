@@ -1,5 +1,9 @@
 namespace OpenRevelare.Core;
 
+/// <summary>One frame's Path-A chroma gain together with the pre-decouple chroma signal that
+/// makes each axis ratio measurable. Arrays are [yellow-blue, red-green].</summary>
+public sealed record ChromaAxisAmplificationEstimate(double[] Amplification, double[] Signal);
+
 /// <summary>
 /// Path-A decouple CALIBRATION — port of negative/decouple.py. Computes the 3×3
 /// matrices and per-channel chroma-amplification that <see cref="Decouple"/> and
@@ -105,7 +109,23 @@ public static class DecoupleCalibration
     /// frames are ~288 MB each and nothing beyond their centre-ROI mean is ever used.
     /// </summary>
     public static double[,] DecoupleMatrixFromRoiMeans(double[] vR, double[] vG, double[] vB)
-        => RowNormalisedInverse(ColumnStack(vR, vG, vB));
+    {
+        ValidateObservation(vR, nameof(vR));
+        ValidateObservation(vG, nameof(vG));
+        ValidateObservation(vB, nameof(vB));
+        return RowNormalisedInverse(ColumnStack(vR, vG, vB));
+
+        static void ValidateObservation(double[] value, string name)
+        {
+            if (value is null || value.Length < 3)
+                throw new ArgumentException(
+                    CoreText.T("Path A 校正观测必须包含 R、G、B 三个通道。"), name);
+            if (value.Take(3).Any(v => !double.IsFinite(v) || v < 0.0)
+                || value.Take(3).All(v => v == 0.0))
+                throw new ArgumentException(
+                    CoreText.T("Path A 校正观测必须是有限、非负且非全零的数值。"), name);
+        }
+    }
 
     /// <summary>
     /// Density-domain decoupling matrix. With calibration images, re-derives from the
@@ -162,14 +182,83 @@ public static class DecoupleCalibration
     /// </summary>
     public static double[,] ChromaAxisCompensationMatrix(ImageBuffer pre, ImageBuffer post, bool[]? mask = null)
     {
+        double[] amp = ChromaAxisAmplification(pre, post, mask);
+        return ChromaAxisCompensationMatrixFromAmplifications(new[] { amp });
+    }
+
+    /// <summary>Measured YB/RG chroma amplification for one content sample. Invalid or nearly
+    /// achromatic samples return NaNs so a roll reducer can omit them instead of turning a lack of
+    /// evidence into an identity vote.</summary>
+    public static double[] ChromaAxisAmplification(ImageBuffer pre, ImageBuffer post, bool[]? mask = null)
+        => ChromaAxisAmplificationDetailed(pre, post, mask).Amplification;
+
+    /// <summary>Detailed form retaining the denominator signal. A ratio from an almost achromatic
+    /// frame can be finite yet dominated by grain/rounding; callers reducing a roll need this
+    /// signal to distinguish that from an actually measured amplification.</summary>
+    public static ChromaAxisAmplificationEstimate ChromaAxisAmplificationDetailed(
+        ImageBuffer pre, ImageBuffer post, bool[]? mask = null)
+    {
         double[] p = AxisChromaStd(pre, mask);
         double[] q = AxisChromaStd(post, mask);
         if (double.IsNaN(p[0]) || double.IsNaN(p[1]) || double.IsNaN(q[0]) || double.IsNaN(q[1])
             || p[0] <= 1e-6 || p[1] <= 1e-6)
-            return Identity3();
+            return new ChromaAxisAmplificationEstimate(
+                [double.NaN, double.NaN], p);
+        return new ChromaAxisAmplificationEstimate(
+            [Math.Clamp(q[0] / p[0], 1.0, 4.0),
+             Math.Clamp(q[1] / p[1], 1.0, 4.0)],
+            p);
+    }
 
-        double ampYb = Math.Clamp(q[0] / p[0], 1.0, 4.0);
-        double ampRg = Math.Clamp(q[1] / p[1], 1.0, 4.0);
+    /// <summary>
+    /// Compatibility reduction for callers that have amplification only. Equal quality recovers
+    /// the former per-axis median semantics; production uses the detailed overload below.
+    /// </summary>
+    public static double[,] ChromaAxisCompensationMatrixFromAmplifications(
+        IReadOnlyList<double[]> perFrame)
+        => ChromaAxisCompensationMatrixFromEstimates(
+            perFrame.Select(amp => new ChromaAxisAmplificationEstimate(
+                amp, [1.0, 1.0])).ToArray());
+
+    /// <summary>Quality-weighted roll reduction. Signal below 0.01 density std contributes
+    /// proportionally less; if no frame reaches 0.003 on an axis, there is not enough colour
+    /// variation to identify a ratio and that axis stays neutral rather than fitting noise.</summary>
+    public static double[] QualityWeightedChromaAxisAmplification(
+        IReadOnlyList<ChromaAxisAmplificationEstimate> perFrame)
+    {
+        const double FullSignal = 0.01;
+        const double MinReliableSignal = 0.003;
+
+        double Reduce(int axis)
+        {
+            var values = new List<double>();
+            var weights = new List<double>();
+            double maxSignal = 0.0;
+            foreach (ChromaAxisAmplificationEstimate estimate in perFrame)
+            {
+                if (estimate.Amplification.Length <= axis || estimate.Signal.Length <= axis)
+                    continue;
+                double amp = estimate.Amplification[axis];
+                double signal = estimate.Signal[axis];
+                if (!double.IsFinite(amp) || !double.IsFinite(signal) || signal <= 0) continue;
+                values.Add(Math.Clamp(amp, 1.0, 4.0));
+                weights.Add(Math.Clamp(signal / FullSignal, 0.01, 1.0));
+                maxSignal = Math.Max(maxSignal, signal);
+            }
+            if (values.Count == 0 || maxSignal < MinReliableSignal) return 1.0;
+            return FilmBase.WeightedPercentile(values, weights, 50.0);
+        }
+
+        return [Reduce(0), Reduce(1)];
+    }
+
+    public static double[,] ChromaAxisCompensationMatrixFromEstimates(
+        IReadOnlyList<ChromaAxisAmplificationEstimate> perFrame)
+    {
+        double[] amplification = QualityWeightedChromaAxisAmplification(perFrame);
+
+        double ampYb = amplification[0];
+        double ampRg = amplification[1];
         double iYb = 1.0 / ampYb, iRg = 1.0 / ampRg;
 
         // C = B · diag(iYb, iRg) · Bᵀ, with B = [yb | rg] (3×2).
@@ -178,6 +267,36 @@ public static class DecoupleCalibration
             for (int j = 0; j < 3; j++)
                 c[i, j] = ChromaYb[i] * iYb * ChromaYb[j] + ChromaRg[i] * iRg * ChromaRg[j];
         return c;
+    }
+
+    /// <summary>
+    /// Recover the YB/RG amplification that a compensation matrix restrains. Because the two
+    /// basis vectors are orthonormal, <c>bᵀ C b = 1/amp</c> exactly. This is primarily an
+    /// explainability helper for reports and diagnostics; rendering continues to consume the
+    /// matrix directly, so no round-trip is introduced into the hot path.
+    /// </summary>
+    public static double[] ChromaAxisAmplificationFromCompensationMatrix(double[,] matrix)
+    {
+        ArgumentNullException.ThrowIfNull(matrix);
+        if (matrix.GetLength(0) < 3 || matrix.GetLength(1) < 3)
+            throw new ArgumentException("Chroma compensation matrix must be at least 3×3.", nameof(matrix));
+
+        static double Project(double[,] m, double[] axis)
+        {
+            double value = 0.0;
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                    value += axis[r] * m[r, c] * axis[c];
+            return value;
+        }
+
+        double yb = Project(matrix, ChromaYb);
+        double rg = Project(matrix, ChromaRg);
+        return
+        [
+            yb > 1e-12 && double.IsFinite(yb) ? 1.0 / yb : double.NaN,
+            rg > 1e-12 && double.IsFinite(rg) ? 1.0 / rg : double.NaN,
+        ];
     }
 
     /// <summary>
@@ -589,13 +708,43 @@ public static class DecoupleCalibration
     private static double[,] RowNormalisedInverse(double[,] mObs)
     {
         double det = Det3(mObs);
-        if (Math.Abs(det) < 1e-12)
-            throw new ArgumentException("decouple observation matrix near-singular — check R/G/B calibration frames");
+        if (!double.IsFinite(det) || det == 0.0)
+            throw new ArgumentException(
+                CoreText.T("解耦观测矩阵接近奇异：请检查 R/G/B 校正图。"));
         double[,] inv = Inv3(mObs, det);
+
+        // Absolute determinant is not a conditioning test: multiplying every exposure by 1e-6
+        // makes det 1e-18 times smaller without changing separability, while a bright but nearly
+        // collinear triplet can keep a large determinant. The 1-norm condition estimate is scale
+        // invariant and directly bounds how much calibration noise the inverse can amplify.
+        static double Norm1(double[,] m)
+        {
+            double max = 0.0;
+            for (int c = 0; c < 3; c++)
+            {
+                double sum = 0.0;
+                for (int r = 0; r < 3; r++) sum += Math.Abs(m[r, c]);
+                max = Math.Max(max, sum);
+            }
+            return max;
+        }
+        double condition = Norm1(mObs) * Norm1(inv);
+        if (!double.IsFinite(condition) || condition > 1_000.0)
+            throw new ArgumentException(
+                CoreText.T("解耦观测矩阵病态：R/G/B 校正光源分离度不足。"));
+
         var outM = new double[3, 3];
         for (int i = 0; i < 3; i++)
         {
             double rs = inv[i, 0] + inv[i, 1] + inv[i, 2];
+            double rowMagnitude = Math.Abs(inv[i, 0]) + Math.Abs(inv[i, 1]) + Math.Abs(inv[i, 2]);
+            // Row normalisation enforces neutral-in -> neutral-out. If the inverse row nearly
+            // cancels on that neutral axis, normalising it would turn a well-defined inverse into
+            // enormous coefficients and amplify sensor noise/crop differences without bound.
+            if (!double.IsFinite(rs) || rowMagnitude == 0.0
+                || Math.Abs(rs) <= rowMagnitude * 1e-4)
+                throw new ArgumentException(
+                    CoreText.T("解耦观测矩阵的中性轴不稳定：请检查 R/G/B 校正图。"));
             for (int j = 0; j < 3; j++) outM[i, j] = inv[i, j] / rs;
         }
         return outM;

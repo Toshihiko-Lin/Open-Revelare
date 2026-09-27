@@ -28,6 +28,7 @@ static int Run(string[] args)
             case "-o": case "--output": opts["output"] = Next(args, ref i, a); break;
             case "--input-srgb": flags.Add("input-srgb"); break;
             case "--input-linear": flags.Add("input-linear"); break;
+            case "--monochrome": flags.Add("monochrome"); break;
             case "--intent": opts["intent"] = Next(args, ref i, a); break;
             case "--compress": opts["compress"] = Next(args, ref i, a); break;
             case "--bench": opts["bench"] = Next(args, ref i, a); break;
@@ -118,7 +119,7 @@ static int Run(string[] args)
         return 2;
     }
 
-    var cal = new FrameParams();
+    var cal = new FrameParams { Monochrome = flags.Contains("monochrome") };
     if (opts.TryGetValue("t-base", out var tb)) cal.TBase = ParseTriple(tb);
     // --grade / --pivot / --d-max / --scan-exposure-ev are accepted and ignored. The inversion
     // is two endpoints and a constant output range now, so none of them names a parameter that
@@ -230,7 +231,18 @@ static int Run(string[] args)
         cal.Validate();
 
         if (opts.TryGetValue("lcc", out var lccPath))
+        {
+            // A RAW flat is camera-native RGB, while a TIFF flat may already have a camera
+            // matrix / ICC transform baked in.  A per-channel divide is meaningful only when
+            // both operands describe the same channels, so fail closed just like the GUI.
+            bool inputIsRaw = RawDecode.IsRawExtension(opts["input"]);
+            bool lccIsRaw = RawDecode.IsRawExtension(lccPath);
+            if (inputIsRaw != lccIsRaw)
+                throw new ArgumentException(inputIsRaw
+                    ? "--lcc: a RAW input requires a RAW flat-field reference; a TIFF flat may already be colour transformed."
+                    : "--lcc: a TIFF input requires a TIFF flat-field reference; a RAW flat is still camera-native RGB.");
             cal.LccFlatField = Lcc.LoadFlatField(lccPath, flags.Contains("lcc-linear"));
+        }
 
         // Path-A decouple calibration diagnostic: compute M_linear / M_density /
         // chroma_amp / chroma_matrix from R/G/B cal frames (+ content = -i) and print.
@@ -240,6 +252,19 @@ static int Run(string[] args)
             ImageBuffer calG = LoadDiagnosticLinear(opts["decouple-cal-g"]);
             ImageBuffer calB = LoadDiagnosticLinear(opts["decouple-cal-b"]);
             ImageBuffer content = LoadDiagnosticLinear(opts["input"]);
+
+            // The production pipeline is LCC -> Path A.  These diagnostics are often used to
+            // generate the matrix that will later be installed in that pipeline, so measuring
+            // uncorrected frames here would calibrate a different optical domain.  Applying the
+            // same smooth field to all four buffers also makes both matrix alternatives and the
+            // content-derived chroma compensation obey the same ordering.
+            if (cal.LccFlatField is not null)
+            {
+                Lcc.Apply(calR.Data, calR.Width, calR.Height, cal.LccFlatField);
+                Lcc.Apply(calG.Data, calG.Width, calG.Height, cal.LccFlatField);
+                Lcc.Apply(calB.Data, calB.Width, calB.Height, cal.LccFlatField);
+                Lcc.Apply(content.Data, content.Width, content.Height, cal.LccFlatField);
+            }
 
             double[,] mLin = DecoupleCalibration.ComputeDecoupleMatrix(calR, calG, calB);
             double[,] mDen = DecoupleCalibration.ComputeDensityMatrix(calR, calG, calB);
@@ -372,29 +397,93 @@ static int Run(string[] args)
         if (flags.Contains("print-film-base-calib"))
         {
             ImageBuffer content = LoadDiagnosticLinear(opts["input"]);
+            ImageBuffer measuredContent = content;
+            if (flags.Contains("monochrome"))
+            {
+                measuredContent = new ImageBuffer(
+                    content.Width, content.Height, (float[])content.Data.Clone())
+                    .InheritSourceFrom(content);
+                OpenRevelare.Core.Monochrome.FoldInPlace(measuredContent.Data);
+            }
             double[]? tBase = null;
 
             if (opts.TryGetValue("fb-base-rect", out var br))
             {
-                tBase = FilmBase.SampleTBase(content, ParseRect(br));
+                tBase = FilmBase.SampleTBase(measuredContent, ParseRect(br));
                 Console.WriteLine("t_base " + Fmt3(tBase));
             }
             if (opts.TryGetValue("fb-roll", out var roll))
             {
                 var frames = roll.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadDiagnosticLinear).ToList();
-                var vals = opts.TryGetValue("fb-roll-values", out var rv)
-                    ? rv.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(LoadDiagnosticLinear).ToList()
-                    : null;
+                bool pathAValues = false;
+                List<ImageBuffer>? vals = null;
+                if (opts.TryGetValue("fb-roll-values", out var rv))
+                {
+                    pathAValues = true;
+                    vals = rv.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(LoadDiagnosticLinear).ToList();
+                }
+                if (flags.Contains("monochrome"))
+                {
+                    // Match the GUI's two-buffer contract: board/dark masks stay in the raw
+                    // input domain, while measured values are folded to the single silver-image
+                    // signal after any caller-supplied linear optical / Path-A correction.
+                    IReadOnlyList<ImageBuffer> sources = vals ?? frames;
+                    vals = sources.Select(source =>
+                    {
+                        var folded = new ImageBuffer(
+                            source.Width, source.Height, (float[])source.Data.Clone())
+                            .InheritSourceFrom(source);
+                        OpenRevelare.Core.Monochrome.FoldInPlace(folded.Data);
+                        return folded;
+                    }).ToList();
+                }
                 double? thr = opts.TryGetValue("fb-sprocket-threshold", out var ft) ? ParseD(ft) : null;
                 // ⚠ Both t_base_roll lines are NO LONGER a Python parity check: the per-frame
                 // pick is now co-sited (one physical patch supplies all three channels), which
                 // the reference's three independent per-channel percentiles are not. Treat them
                 // as regression baselines against a previous OpenRevelare build instead — the
                 // reasoning is on FilmBase.EstimateTBaseFromRoll.
-                Console.WriteLine("t_base_roll " + Fmt3(FilmBase.EstimateTBaseFromRoll(frames, thr, vals)));
-                // No threshold → the pure-brightness branch (p99.99, values from the
-                // frames themselves). Different percentile AND different code path.
-                Console.WriteLine("t_base_roll_nomask " + Fmt3(FilmBase.EstimateTBaseFromRoll(frames)));
+                FilmBaseEstimate baseEstimate =
+                    FilmBase.EstimateTBaseFromRollDetailed(
+                        frames, thr, vals, allowNeutralCarrier: flags.Contains("monochrome"));
+                Console.WriteLine("t_base_roll " + Fmt3(baseEstimate.TBase));
+                Console.WriteLine("t_base_roll_evidence " + FormatEvidence(baseEstimate.Evidence));
+                Console.WriteLine("t_base_roll_confidence " + Fmt1(baseEstimate.Confidence));
+                Console.WriteLine($"t_base_roll_support {baseEstimate.SupportingFrames}/{baseEstimate.TotalFrames}");
+                Console.WriteLine("t_base_roll_log_dispersion " + Fmt1(baseEstimate.LogDispersion));
+                Console.WriteLine("t_base_roll_quantization_risk " + Bool01(baseEstimate.QuantizationRisk));
+
+                // D_max is unavailable in an unattended scan.  Report the scene-derived proxy
+                // explicitly instead of letting a bare triple masquerade as a physical endpoint.
+                // Values stay in the post-decouple domain while luma masks remain co-sited in the
+                // original frames, matching automatic roll analysis in the GUI.
+                IReadOnlyList<ImageBuffer> endpointValues = vals ?? frames;
+                HighlightEndpointEstimate? highlight =
+                    FilmBase.DetectDMaxPerChannelFromRollDetailed(
+                        endpointValues, baseEstimate.TBase, masks: frames,
+                        sprocketThreshold: thr,
+                        protectIndependentChannelExtrema: !pathAValues);
+                if (highlight is not null)
+                {
+                    Console.WriteLine("highlight_proxy_endpoint " + Fmt3(highlight.Density));
+                    Console.WriteLine("highlight_proxy_confidence " + Fmt1(highlight.Confidence));
+                    Console.WriteLine($"highlight_proxy_candidates {highlight.CandidateFrames}/{highlight.TotalFrames}");
+                    Console.WriteLine("highlight_proxy_effective_frames " + Fmt1(highlight.EffectiveFrames));
+                    Console.WriteLine("highlight_proxy_representative_frame " + Fmt1(highlight.RepresentativeFrame));
+                    Console.WriteLine("highlight_proxy_log_chroma_dispersion " + Fmt1(highlight.LogChromaDispersion));
+                    Console.WriteLine("highlight_proxy_headroom_percentile " + Fmt1(highlight.HeadroomPercentile));
+                    Console.WriteLine("highlight_proxy_clipping_risk " + Bool01(highlight.ClippingRisk));
+                    Console.WriteLine("highlight_proxy_quantization_risk " + Bool01(highlight.QuantizationRisk));
+                }
+                else
+                {
+                    Console.WriteLine("highlight_proxy_unavailable 1");
+                }
+                // No threshold → the pure-brightness branch (p99.99). Keep the same value
+                // domain as the evidence-aware result; only the mask decision changes.
+                Console.WriteLine("t_base_roll_nomask " + Fmt3(
+                    FilmBase.EstimateTBaseFromRoll(frames, valueImages: vals)));
 
                 // Per-frame histogram estimators (sprocket.py), then [FB-AUTO] auto-WB.
                 Console.WriteLine("sprocket_threshold " +
@@ -412,20 +501,21 @@ static int Run(string[] args)
                     Console.WriteLine("auto_wb_high " +
                         Fmt3(FilmBase.AutoWbHighFromRoll(frames, tBase, thr, vals)));
                     Console.WriteLine("auto_wb_high_nomask " +
-                        Fmt3(FilmBase.AutoWbHighFromRoll(frames, tBase)));
+                        Fmt3(FilmBase.AutoWbHighFromRoll(
+                            frames, tBase, sprocketThreshold: null, valueImages: vals)));
                 }
             }
             if (tBase != null)
             {
                 double[] tbase = tBase;
-                var tNorm = new ImageBuffer(content.Width, content.Height);
-                for (int p = 0; p < content.PixelCount; p++)
+                var tNorm = new ImageBuffer(measuredContent.Width, measuredContent.Height);
+                for (int p = 0; p < measuredContent.PixelCount; p++)
                     for (int c = 0; c < 3; c++)
-                        tNorm.Data[p * 3 + c] = (float)(content.Data[p * 3 + c] / Math.Max(tbase[c], 1e-10));
+                        tNorm.Data[p * 3 + c] = (float)(measuredContent.Data[p * 3 + c] / Math.Max(tbase[c], 1e-10));
                 Console.WriteLine("d_max_detect " + Fmt1(FilmBase.DetectDMax(tNorm)));
 
                 if (opts.TryGetValue("fb-dmax-rect", out var dr))
-                    Console.WriteLine("d_max_rect " + Fmt1(FilmBase.SampleDMaxFromRect(content, ParseRect(dr), tbase)));
+                    Console.WriteLine("d_max_rect " + Fmt1(FilmBase.SampleDMaxFromRect(measuredContent, ParseRect(dr), tbase)));
                 if (opts.TryGetValue("fb-wb-rect", out var wr))
                 {
                     var rect = ParseRect(wr);
@@ -434,8 +524,8 @@ static int Run(string[] args)
                     // multiplier solved AGAINST wb_offset, so it needed a second offset-free
                     // call to cover the unpaired branch. Two independent measurements have no
                     // such branch — sampling either end alone gives the same numbers.
-                    Console.WriteLine("wb_offset " + Fmt3(FilmBase.SampleWbOffsetFromRect(content, rect, tbase)));
-                    Console.WriteLine("wb_high " + Fmt3(FilmBase.SampleWbHighFromRect(content, rect, tbase)));
+                    Console.WriteLine("wb_offset " + Fmt3(FilmBase.SampleWbOffsetFromRect(measuredContent, rect, tbase)));
+                    Console.WriteLine("wb_high " + Fmt3(FilmBase.SampleWbHighFromRect(measuredContent, rect, tbase)));
                 }
             }
             return 0;
@@ -593,6 +683,15 @@ static string Fmt3(double[] v) => string.Join(",", v.Select(x => x.ToString("R",
 
 static string Fmt1(double v) => v.ToString("R", CultureInfo.InvariantCulture);
 
+static string Bool01(bool value) => value ? "1" : "0";
+
+static string FormatEvidence(FilmBaseEvidence evidence) => evidence switch
+{
+    FilmBaseEvidence.PhysicalMode => "physical_mode",
+    FilmBaseEvidence.PhysicalEdgeSliver => "physical_edge_sliver",
+    _ => "content_inference",
+};
+
 // Row-major 3×3 → "m00,m01,...,m22" round-trippable doubles.
 static string Fmt9(double[,] m)
 {
@@ -667,6 +766,8 @@ static void PrintUsage()
         "                              and a usable embedded ICC always wins outright)\n" +
         "                              --decode-only/--dump-preinv keep the legacy decoder\n" +
         "                              and reject --input-linear\n" +
+        "  --monochrome                fold linear RGB to one silver-image signal and allow\n" +
+        "                              colourless physical-carrier detection\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +
         "  --d-max <v>                 output range (endpoint model) / max density (legacy)\n" +
@@ -680,7 +781,8 @@ static void PrintUsage()
         "  --lut-output <enc>          what the cube emits: Rec709 | DciP3 | Srgb | Rec2020Pq\n" +
         "                              (default: the cube's header; required if it has none).\n" +
         "                              Built in: :kodak-2383, :fujifilm-3513di\n" +
-        "  --lcc <path>                LCC flat-field reference (RAW/TIFF); per-channel divide\n" +
+        "  --lcc <path>                LCC flat-field reference; must match input family\n" +
+        "                              (RAW+RAW or TIFF+TIFF), applied before Path A\n" +
         "  --lcc-linear                treat the LCC TIFF as linear (default: sRGB gamma)\n" +
         "  --decouple-matrix <9 vals>  Path-A decouple 3×3 (row-major m00,m01,...,m22)\n" +
         "  --decouple-mode <linear|density>  decouple domain (default: linear)\n" +
@@ -692,7 +794,7 @@ static void PrintUsage()
         "  --fb-base-rect <x,y,w,h>          T_base rect (normalised); enables d_max/wb output\n" +
         "  --fb-dmax-rect <x,y,w,h>          D_max rect (a fully-exposed / shadow area)\n" +
         "  --fb-wb-rect <x,y,w,h>            neutral rect → wb_offset then wb_high\n" +
-        "  --fb-roll <p1;p2;...>             roll frames → t_base_roll (median consensus)\n" +
+        "  --fb-roll <p1;p2;...>             roll frames → evidence-aware base and highlight proxy\n" +
         "  --fb-roll-values <p1;p2;...>      post-decouple values for the roll (masks stay on --fb-roll)\n" +
         "  --fb-sprocket-threshold <v>       board↔base luma cut for --fb-roll");
 }

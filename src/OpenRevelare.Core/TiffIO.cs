@@ -858,7 +858,9 @@ public static class TiffIO
         RegionRequest? region,
         TransformPrecision precision)
     {
-        TiffInputDetection detection = TiffInputDetector.Detect(path);
+        // This route is reached only after no embedded profile existed or one failed admission.
+        // Do not rediscover the failed profile and report it as conclusive evidence.
+        TiffInputDetection detection = TiffInputDetector.DetectWithoutEmbeddedIcc(path);
         string prefix = fallbackDiagnostic is null
             ? "managed v2 detected input"
             : $"managed v2 embedded ICC unavailable ({fallbackDiagnostic}); detected input";

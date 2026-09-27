@@ -303,10 +303,28 @@ public partial class MainViewModel
 
         // Recompute the roll-level ops (never stored in the file) from their source paths.
         double[,]? dm = null, cm = null; ImageBuffer? lcc = null;
-        try
+        string? calibrationWarning = null, lccWarning = null;
+        var contentPaths = data.Frames.Where(f => !f.IsVirtual).Select(f => f.SourcePath).ToList();
+        await Task.Run(() =>
         {
-            var contentPaths = data.Frames.Where(f => !f.IsVirtual).Select(f => f.SourcePath).ToList();
-            await Task.Run(() =>
+            try
+            {
+                if (!string.IsNullOrEmpty(incomingLccSourcePath)
+                    && File.Exists(incomingLccSourcePath))
+                {
+                    ReportBackground(Loc.T("载入平场校正 …"));
+                    lcc = LoadLccField(
+                        incomingLccSourcePath, incomingPipelineVersion, incomingTiffInputAssumption,
+                        contentPaths.Count > 0 && RawDecode.IsRawExtension(contentPaths[0]));
+                }
+            }
+            catch (Exception ex)
+            {
+                lcc = null;
+                lccWarning = ex.Message;
+            }
+
+            try
             {
                 string[]? rgb = incomingCalRgbPaths is { Length: 3 } p && p.All(File.Exists)
                     ? incomingCalRgbPaths
@@ -325,17 +343,17 @@ public partial class MainViewModel
                         contentPaths,
                         incomingPipelineVersion,
                         incomingTiffInputAssumption,
-                        cachePreviews: false);
-                if (!string.IsNullOrEmpty(incomingLccSourcePath)
-                    && File.Exists(incomingLccSourcePath))
-                {
-                    ReportBackground(Loc.T("载入平场校正 …"));
-                    lcc = Lcc.LoadFlatField(incomingLccSourcePath, tiffIsLinear: true);
-                }
-                ReportBackground("");
-            });
-        }
-        catch (Exception ex) { StatusText = Loc.T("工程标定重算失败（按无解耦打开）：") + ex.Message; }
+                        cachePreviews: false,
+                        lcc);
+            }
+            catch (Exception ex)
+            {
+                dm = null; cm = null;
+                calibrationWarning = ex.Message;
+            }
+
+            finally { ReportBackground(""); }
+        });
 
         // Relink/calibration can leave the dialog up for a long time. Capture any edits made to
         // the outgoing roll during that interval while all of its own state is still installed.
@@ -365,7 +383,13 @@ public partial class MainViewModel
         _lccSourcePath = incomingLccSourcePath;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
         if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = Loc.T("已载入平场（工程）"); }
-        else { _lccFlatField = null; LccAvailable = false; LccStatus = Loc.T("未载入平场校正"); }
+        else
+        {
+            _lccFlatField = null; LccAvailable = false;
+            LccStatus = lccWarning is null
+                ? Loc.T("未载入平场校正")
+                : Loc.T("平场载入失败：") + lccWarning;
+        }
 
         // Roll notes.
         Notes.CameraBody = data.Meta.CameraBody; Notes.FilmStock = data.Meta.FilmStock;
@@ -389,6 +413,24 @@ public partial class MainViewModel
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
         ClearGreyCard();   // and its grey card — a measurement of that roll under that light
+        FilmBaseText = "";
+        HighlightConfidenceText = "";
+        _calibrationDiagnosticsRollWide = false;
+        _rollBaseCalibration = null;
+        _rollHighlightCalibration = null;
+        _rollUsedFallbackHighlight = false;
+        if (data.Meta.BaseCalibration is { } savedBase)
+        {
+            UpdateCalibrationConfidence(
+                savedBase, data.Meta.HighlightCalibration, data.Meta.UsedFallbackHighlight,
+                monochromeOverride: data.Frames.Count > 0 && data.Frames[0].Params.Monochrome);
+        }
+        else if (data.Meta.HighlightCalibration is not null || data.Meta.UsedFallbackHighlight)
+        {
+            _calibrationDiagnosticsRollWide = true;
+            UpdateHighlightConfidence(
+                data.Meta.HighlightCalibration, data.Meta.UsedFallbackHighlight);
+        }
         // Rebuild under the reorder guard, so the strip's binding cannot start a switch MID-build.
         // Frames.Clear() pushes null through SelectedItem and the first Frames.Add makes the
         // ListBox auto-select it and push it straight back — a switch that would decode frame 1
@@ -429,6 +471,10 @@ public partial class MainViewModel
 
         RefreshTiffInputDetection();
         StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
+        if (calibrationWarning is not null)
+            StatusText += Loc.T(" · Path A 标定重算失败，已按无解耦打开：") + calibrationWarning;
+        if (lccWarning is not null)
+            StatusText += Loc.T(" · LCC 未应用：") + lccWarning;
         StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
@@ -460,6 +506,14 @@ public partial class MainViewModel
         {
             await Task.Run(() =>
             {
+                if (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath))
+                {
+                    ReportBackground(Loc.T("载入平场校正 …"));
+                    lccField = LoadLccField(
+                        cfg.LccPath, ColorPipelineVersion.ManagedV2, cfg.TiffInputAssumption,
+                        RawDecode.IsRawExtension(cfg.Paths[0]));
+                    lccName = Path.GetFileName(cfg.LccPath);
+                }
                 if (cfg.PathA && !string.IsNullOrWhiteSpace(cfg.CalDir))
                 {
                     ReportBackground(Loc.T("识别 R/G/B 校正图 …"));
@@ -471,13 +525,8 @@ public partial class MainViewModel
                         cfg.Paths,
                         ColorPipelineVersion.ManagedV2,
                         cfg.TiffInputAssumption,
-                        cachePreviews: false);
-                }
-                if (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath))
-                {
-                    ReportBackground(Loc.T("载入平场校正 …"));
-                    lccField = Lcc.LoadFlatField(cfg.LccPath, tiffIsLinear: true);
-                    lccName = Path.GetFileName(cfg.LccPath);
+                        cachePreviews: false,
+                        lccField);
                 }
                 ReportBackground("");
             });
@@ -509,7 +558,18 @@ public partial class MainViewModel
         // partway through the load.
         _cfgAutoInvert = cfg.AutoInvert;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
-        if (lccField is not null) { _lccFlatField = lccField; LccAvailable = true; LccStatus = Loc.T("已载入平场：") + lccName; }
+        _lccFlatField = lccField;
+        LccAvailable = lccField is not null;
+        // Must be settled BEFORE LoadRollAsync: import-time auto inversion runs inside that call
+        // and Stage1Source follows this switch. Explicitly writing false also prevents the prior
+        // roll's LCC from leaking into an incoming config that has no flat field.
+        bool wasConfigLoad = _configLoad;
+        _configLoad = true;  // adopting incoming optical state is not an edit to the outgoing roll
+        try { LccEnabled = lccField is not null; }
+        finally { _configLoad = wasConfigLoad; }
+        LccStatus = lccField is not null
+            ? Loc.T("已载入平场：") + lccName
+            : Loc.T("未载入平场校正");
         SetTiffInputAssumption(cfg.TiffInputAssumption);
         IsBusy = false;
 
@@ -542,7 +602,6 @@ public partial class MainViewModel
             f.Params.DecoupleChromaMatrix = cm;
             if (lccField is not null) f.Params.LccFlatField = lccField;
         }
-        if (lccField is not null) LccEnabled = true;   // triggers a render
         ScheduleRender();
         RestartThumbnails();
         StatusText = Loc.F($"导入完成（{Frames.Count} 帧") +
@@ -559,8 +618,13 @@ public partial class MainViewModel
     /// roll carrying both would silently ignore the amp. The matrix wins because it compensates
     /// per chroma AXIS (it is built from 1/ampYb and 1/ampRg) rather than per RGB channel.
     ///
+    /// When LCC is present, its correction is applied before both the calibration ROI reduction
+    /// and the content-frame chroma measurement, matching Pipeline's LCC → decouple order. The
+    /// calibration images are uniform fields, so dividing their centre means by the flat field's
+    /// centre mean is the exact reduction of the same spatial correction under that model.
+    ///
     /// This is the longest wait before the first frame can appear, so the two things it needs —
-    /// the 3 calibration frames and the first few content frames — are decoded in ONE parallel
+    /// the 3 calibration frames and six evenly spaced content frames — are decoded in ONE parallel
     /// pass rather than as two sequential stages. Only the chroma MEASUREMENT depends on the
     /// matrix; the decodes it feeds on do not.
     ///
@@ -574,11 +638,14 @@ public partial class MainViewModel
         IReadOnlyList<string> paths,
         ColorPipelineVersion pipelineVersion,
         TiffInputAssumption tiffInputAssumption,
-        bool cachePreviews)
+        bool cachePreviews,
+        ImageBuffer? lccField = null)
     {
         int nF = Math.Min(6, paths.Count);
+        string[] samplePaths = EvenlySpacedPaths(paths, nF);
         var roi = new double[3][];                 // calibration ROI means
         var negs = new ImageBuffer[nF];            // content frames at 720, pre-decouple
+        double[]? lccCentre = lccField is null ? null : DecoupleCalibration.RoiMean(lccField);
         int done = 0, total = 3 + nF;
 
         ReportBackground(Loc.F($"解码校正图与内容帧 0/{total} …"));
@@ -597,15 +664,18 @@ public partial class MainViewModel
                     pipelineVersion,
                     ColorManagement,
                     tiffInputAssumption);
+                if (lccCentre is not null)
+                    for (int c = 0; c < 3; c++)
+                        roi[i][c] /= Math.Max(lccCentre[c], 1e-6);
             }
             else
             {
                 int fi = i - 3;
-                // Both sizes off ONE decode, neither of them via a full-resolution frame. These are
-                // the roll's first frames — exactly what the warm-up would decode next — so their
-                // previews go into the cache and that work is not paid for twice.
+                // Both sizes off ONE decode, neither of them via a full-resolution frame. The
+                // evenly spaced previews go into the cache, so reaching them later costs no second
+                // decode.
                 var (outs, srcW, srcH) = ImageIo.LoadWorkingPreviews(
-                    paths[fi],
+                    samplePaths[fi],
                     pipelineVersion,
                     ColorManagement,
                     tiffInputAssumption,
@@ -614,7 +684,7 @@ public partial class MainViewModel
                 if (cachePreviews)
                 {
                     string previewKey = PreviewKey(
-                        paths[fi],
+                        samplePaths[fi],
                         preCrop: null,
                         pipelineVersion,
                         tiffInputAssumption);
@@ -629,25 +699,64 @@ public partial class MainViewModel
         ReportBackground(Loc.T("计算解耦矩阵与色度补偿 …"));
         double[,] dm = DecoupleCalibration.DecoupleMatrixFromRoiMeans(roi[0], roi[1], roi[2]);
 
-        // Samples are concatenated in FRAME ORDER: ChromaAxisCompensationMatrix reduces these
-        // arrays in float32, so the order they are appended in changes the resulting matrix.
-        var preAll = new List<float>(); var postAll = new List<float>();
+        // Keep the old total sampling budget (~200k pixels), but measure every selected frame on
+        // its own and reduce the axis gains by median. A strongly coloured opening scene can no
+        // longer dominate a pixel-concatenated variance, and selecting frames evenly across the
+        // roll removes the old dependence on its first six pictures without decoding any more.
+        const int TotalSampleBudget = 200_000;
+        int perFrameBudget = Math.Max(1, TotalSampleBudget / Math.Max(nF, 1));
+        var amplifications = new List<ChromaAxisAmplificationEstimate>();
         for (int fi = 0; fi < nF; fi++)
         {
             ImageBuffer neg = negs[fi];
             if (neg is null) continue;
+            if (lccField is not null)
+                Lcc.Apply(neg.Data, neg.Width, neg.Height, lccField);
             var dec = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
             Decouple.Apply(dec.Data, dm, DecoupleMode.Linear);   // SAME (gamut-mapped) decouple the pipeline uses
-            for (int p = 0; p < neg.PixelCount; p += 4)          // stride for speed
-            {
-                int i = p * 3;
-                preAll.Add(neg.Data[i]); preAll.Add(neg.Data[i + 1]); preAll.Add(neg.Data[i + 2]);
-                postAll.Add(dec.Data[i]); postAll.Add(dec.Data[i + 1]); postAll.Add(dec.Data[i + 2]);
-            }
+            var (preSample, postSample) = PairedSamples(neg, dec, perFrameBudget);
+            amplifications.Add(
+                DecoupleCalibration.ChromaAxisAmplificationDetailed(preSample, postSample));
         }
-        var preImg = new ImageBuffer(preAll.Count / 3, 1, preAll.ToArray());
-        var postImg = new ImageBuffer(postAll.Count / 3, 1, postAll.ToArray());
-        return (dm, DecoupleCalibration.ChromaAxisCompensationMatrix(preImg, postImg));
+        return (dm, DecoupleCalibration.ChromaAxisCompensationMatrixFromEstimates(amplifications));
+    }
+
+    /// <summary>At most <paramref name="count"/> paths spanning the whole roll, including both
+    /// ends. Same decode count as the former first-N selection; only representativeness changes.</summary>
+    private static string[] EvenlySpacedPaths(IReadOnlyList<string> paths, int count)
+    {
+        if (count <= 0) return Array.Empty<string>();
+        if (count >= paths.Count) return paths.ToArray();
+        if (count == 1) return new[] { paths[paths.Count / 2] };
+
+        var result = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            int index = (int)Math.Round(i * (paths.Count - 1.0) / (count - 1),
+                                        MidpointRounding.ToEven);
+            result[i] = paths[index];
+        }
+        return result;
+    }
+
+    /// <summary>Index-identical uniform samples from a pre/post pair, capped to a shared budget.
+    /// The old path concatenated then reduced to roughly the same total; this keeps runtime flat.</summary>
+    private static (ImageBuffer Pre, ImageBuffer Post) PairedSamples(
+        ImageBuffer pre, ImageBuffer post, int budget)
+    {
+        int pixels = Math.Min(pre.PixelCount, post.PixelCount);
+        int step = Math.Max(1, (int)Math.Ceiling((double)pixels / Math.Max(budget, 1)));
+        int count = (pixels + step - 1) / step;
+        var a = new float[count * 3];
+        var b = new float[count * 3];
+        int k = 0;
+        for (int p = 0; p < pixels; p += step)
+        {
+            int src = p * 3, dst = k++ * 3;
+            a[dst] = pre.Data[src]; a[dst + 1] = pre.Data[src + 1]; a[dst + 2] = pre.Data[src + 2];
+            b[dst] = post.Data[src]; b[dst + 1] = post.Data[src + 1]; b[dst + 2] = post.Data[src + 2];
+        }
+        return (new ImageBuffer(k, 1, a), new ImageBuffer(k, 1, b));
     }
 
     /// <summary>Open a roll: build a frame per file, show the first, decode thumbnails in the background.</summary>
@@ -694,6 +803,12 @@ public partial class MainViewModel
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
         ClearGreyCard();   // and its grey card — a measurement of that roll under that light
+        FilmBaseText = "";
+        HighlightConfidenceText = "";
+        _calibrationDiagnosticsRollWide = false;
+        _rollBaseCalibration = null;
+        _rollHighlightCalibration = null;
+        _rollUsedFallbackHighlight = false;
         Frames.Clear();
         // File-name order, not the order the paths arrived in. A folder import is already sorted,
         // but a hand-picked selection comes back in whatever order the platform picker chose, and
@@ -902,7 +1017,11 @@ public partial class MainViewModel
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
         _splitCell = p.SplitCell;
-        FilmBaseText = "";
+        if (!_calibrationDiagnosticsRollWide)
+        {
+            FilmBaseText = "";
+            HighlightConfidenceText = "";
+        }
         _filmBaseSampled = true;
         SyncEndpointViews();            // 亮度/色温/色调/黑场 读数跟上刚载入的六个端点
         _suppressRender = false;

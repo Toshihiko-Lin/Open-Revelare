@@ -33,6 +33,7 @@ public sealed partial class MainViewModel
         {
             AppendFrameIdentity(sb);
             AppendInputDomain(sb);
+            AppendOpticalCalibration(sb);
             AppendFilmBase(sb);
             AppendEndpoints(sb);
             AppendOutput(sb);
@@ -43,6 +44,65 @@ public sealed partial class MainViewModel
             sb.AppendLine(Loc.F($"（报告生成中断：{ex.Message}）"));
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The domain immediately upstream of film-base and endpoint measurement. LCC and Path A
+    /// change those numbers before inversion, so omitting them made an otherwise detailed report
+    /// impossible to reproduce: the same RAW plus different flat/separation matrices is not the
+    /// same measurement.
+    /// </summary>
+    private void AppendOpticalCalibration(StringBuilder sb)
+    {
+        sb.AppendLine();
+        sb.AppendLine(Loc.T("【光学与分光校准】"));
+
+        if (LccEnabled && _lccFlatField is { } flat)
+        {
+            string source = string.IsNullOrWhiteSpace(_lccSourcePath)
+                ? Loc.T("（来源路径未记录）")
+                : _lccSourcePath;
+            sb.AppendLine(Loc.F($"  LCC　　 开启 · {flat.Width}×{flat.Height} 平场 · {source}"));
+        }
+        else
+        {
+            sb.AppendLine(Loc.T("  LCC　　 关闭"));
+        }
+
+        if (_decoupleMatrix is { } decouple)
+        {
+            string source = string.IsNullOrWhiteSpace(_calSourceDir)
+                ? Loc.T("（校正图路径未记录）")
+                : _calSourceDir;
+            sb.AppendLine(Loc.F($"  Path A　 开启（线性 RGB 分光）· {source}"));
+            AppendMatrix(sb, Loc.T("  解耦矩阵"), decouple);
+            if (_decoupleChromaMatrix is { } chroma)
+            {
+                double[] amplification = DecoupleCalibration.ChromaAxisAmplificationFromCompensationMatrix(chroma);
+                sb.AppendLine(Loc.F($"  轴向放大　YB ×{amplification[0]:F3} · RG ×{amplification[1]:F3}（色度反压抵消）"));
+                AppendMatrix(sb, Loc.T("  色度反压"), chroma);
+            }
+            else
+                sb.AppendLine(Loc.T("  色度反压　无（旧工程或未完成标定）"));
+        }
+        else
+        {
+            sb.AppendLine(Loc.T("  Path A　 关闭（宽谱 / 扫描仪输入）"));
+        }
+
+        sb.AppendLine(Loc.T("  次序　　 镜头畸变 → LCC → 暗角 → Path A 解耦 → 片基 / 高光测量 → 反相"));
+    }
+
+    private static void AppendMatrix(StringBuilder sb, string label, double[,] matrix)
+    {
+        if (matrix.GetLength(0) < 3 || matrix.GetLength(1) < 3)
+        {
+            sb.AppendLine(label + Loc.T("　格式无效"));
+            return;
+        }
+        for (int r = 0; r < 3; r++)
+            sb.AppendLine(label + (r == 0 ? "　" : "　　　　 ")
+                + $"[{matrix[r, 0],8:F5} {matrix[r, 1],8:F5} {matrix[r, 2],8:F5}]");
     }
 
     private void AppendFrameIdentity(StringBuilder sb)
@@ -80,7 +140,7 @@ public sealed partial class MainViewModel
             sb.AppendLine(Loc.F($"  路径　　相机 RAW（LibRaw，UniWB 线性解码；后端 {Settings.Current.DecodeBackend}）"));
             double[,]? matrix = RawDecode.CameraToSrgbMatrix(path, out string diagnosis);
             sb.AppendLine(matrix is not null
-                ? Loc.T("  相机矩阵　有（LibRaw 数据库），相机原色 → 线性 sRGB")
+                ? Loc.T("  相机矩阵　数据库可用但未应用：负片翻拍保持相机原生通道，等待灯光 / 胶片联合表征")
                 : Loc.F($"  相机矩阵　无 —— {diagnosis}；输入原色按约定处理，色彩为推定而非表征"));
             if (RawDecode.ReadNefCompression(path) is { } nef)
                 sb.AppendLine(Loc.F($"  NEF 压缩　{nef}"));
@@ -95,6 +155,12 @@ public sealed partial class MainViewModel
                     ? Loc.T("  依据　　读自文件自身的声明（可信）")
                     : Loc.T("  依据　　文件未声明，按约定推定（存疑：结果不对时先改这一项）"));
         }
+        // TIFF carries the same decoder-side source lattice as RAW (including the conservative
+        // linear-shadow equivalent after a TRC/ICC transform). Keeping this outside the RAW
+        // branch makes the report agree with the endpoint risk flag instead of hiding the one
+        // fact that explains why an 8-bit scan's dense blue channel is unstable.
+        if (_previewLinear is { SourceQuantisationStep: > 0 } preview)
+            sb.AppendLine(Loc.F($"  源量化　约 {1.0 / preview.SourceQuantisationStep:F0} 级（步长 {preview.SourceQuantisationStep:G4}）"));
         sb.AppendLine(Loc.F($"  管线　　{ColorPipelineDiagnostic}"));
     }
 
@@ -102,7 +168,12 @@ public sealed partial class MainViewModel
     {
         sb.AppendLine();
         sb.AppendLine(Loc.T("【片基】"));
-        double[] tb = TBaseArr();
+        // TBase is deliberately neutral in the live endpoint model; the physical carrier moved
+        // into the absolute black endpoint. Reconstructing transmission from D_min is the exact
+        // inverse migration, so the report shows the measurable film fact instead of the internal
+        // 1/1/1 reference sentinel (which previously made every calibrated roll look unsampled).
+        double[] dmin = DMinPerChannel;
+        double[] tb = TBaseFromDensity(dmin);
         sb.AppendLine(Loc.F($"  T_base　R {tb[0]:F4} · G {tb[1]:F4} · B {tb[2]:F4}"));
         // The orange mask is a physical fact with a direction: a colour negative's base passes
         // red most and blue least. A reading that does not is a reading taken off something that
@@ -114,14 +185,19 @@ public sealed partial class MainViewModel
         // whatever order those happen to fall — and the check would then accuse a perfectly good
         // roll of having sampled the light board. What matters there is which reading is used, so
         // that is what it says instead.
+        bool cameraNative = CurrentFrame is { } frame && RawDecode.IsRawExtension(frame.Path);
         sb.AppendLine(Monochrome
             ? Loc.F($"  形态　　黑白卷，不适用色罩次序；渲染只用 G 的读数 {tb[1]:F4}（三通道已折成一路）")
+            : cameraNative
+                ? Loc.T("  形态　　相机原生 RAW 通道不适用 R ≥ G ≥ B 校验；应以灯板众数 / 边缘拓扑证据判断片基")
             : tb[0] >= tb[1] && tb[1] >= tb[2]
                 ? Loc.T("  形态　　R ≥ G ≥ B，与彩负橙色片基一致")
                 : Loc.T("  形态　　不是 R ≥ G ≥ B —— 彩负片基不该是这个次序，请确认采样取到的是片基而非灯板或画面"));
-        sb.AppendLine(Math.Abs(tb[0] - 1.0) < 1e-9 && Math.Abs(tb[1] - 1.0) < 1e-9 && Math.Abs(tb[2] - 1.0) < 1e-9
+        sb.AppendLine(dmin.All(v => Math.Abs(v) < 1e-9)
             ? Loc.T("  来源　　默认值 1/1/1（未采样：色罩由黑端承载，或这卷尚未标定）")
             : Loc.T("  来源　　本卷标定所得（采样或自动分析）"));
+        if (!string.IsNullOrEmpty(FilmBaseText))
+            sb.AppendLine(Loc.F($"  证据　　{FilmBaseText}"));
     }
 
     private void AppendEndpoints(StringBuilder sb)
@@ -136,21 +212,25 @@ public sealed partial class MainViewModel
             // The stored triples are whatever the roll last measured; the render collapses them
             // onto green. Printing all six here would show numbers the picture does not use.
             sb.AppendLine(Loc.F($"  D_min　 {dmin[1]:F3}　（黑端，片基一侧）"));
-            sb.AppendLine(Loc.F($"  D_max　 {dmax[1]:F3}　（白端，全曝光一侧）"));
+            sb.AppendLine(Loc.F($"  D_max　 {dmax[1]:F3}　（亮端；自动值为场景代理）"));
             sb.AppendLine(Loc.F($"  跨度　　{dmax[1] - dmin[1]:F3}　（两端之差＝反差；黑白卷没有通道间之差可言）"));
             if (dmax[1] - dmin[1] <= 0)
                 sb.AppendLine(Loc.T("  ⚠ 白端不高于黑端，无法反相，请重新标定两端"));
             sb.AppendLine(Loc.T("  折叠　　三通道按 Rec.709 加权折成一路亮度后再进密度域"));
+            if (!string.IsNullOrEmpty(HighlightConfidenceText))
+                sb.AppendLine(Loc.F($"  证据　　{HighlightConfidenceText}"));
             return;
         }
 
         sb.AppendLine(Loc.F($"  D_min　 R {dmin[0]:F3} · G {dmin[1]:F3} · B {dmin[2]:F3}　（黑端，片基一侧）"));
-        sb.AppendLine(Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（白端，全曝光一侧）"));
+        sb.AppendLine(Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（亮端；自动值为场景代理）"));
 
         double[] span = { dmax[0] - dmin[0], dmax[1] - dmin[1], dmax[2] - dmin[2] };
         sb.AppendLine(Loc.F($"  跨度　　R {span[0]:F3} · G {span[1]:F3} · B {span[2]:F3}　（两端之差＝反差；通道间之差＝色彩平衡）"));
         if (span.Any(v => v <= 0))
             sb.AppendLine(Loc.T("  ⚠ 有通道的白端不高于黑端，该通道无法反相，请重新标定两端"));
+        if (!string.IsNullOrEmpty(HighlightConfidenceText))
+            sb.AppendLine(Loc.F($"  证据　　{HighlightConfidenceText}"));
     }
 
     private void AppendOutput(StringBuilder sb)

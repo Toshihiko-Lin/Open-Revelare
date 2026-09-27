@@ -45,6 +45,11 @@ public static class Project
         public string? CalSourcePath;         // Path-A calibration directory
         public Dictionary<string, string>? CalRgbPaths;   // {"R":…,"G":…,"B":…}
         public string? LccPath;
+        /// <summary>Structured, roll-wide provenance for the exact automatic endpoints stored in
+        /// the frames. Optional so old/Python projects remain valid and unknown keys stay benign.</summary>
+        public FilmBaseEstimate? BaseCalibration;
+        public HighlightEndpointEstimate? HighlightCalibration;
+        public bool UsedFallbackHighlight;
         public string CameraBody = "", FilmStock = "", FilmIso = "", RollNumber = "";
         public string DevLab = "", DevProcess = "", DevDate = "", Location = "", RollNote = "";
 
@@ -229,6 +234,8 @@ public static class Project
             d["cal_rgb_paths"] = o;
         }
         if (rm.LccPath is not null) d["lcc_path"] = rm.LccPath;
+        if (SerCalibrationDiagnostics(rm) is { } diagnostics)
+            d["calibration_diagnostics"] = diagnostics;
         // Only emit non-empty annotation fields (tidy file; absent → "" on load).
         void Add(string k, string v) { if (!string.IsNullOrEmpty(v)) d[k] = v; }
         Add("camera_body", rm.CameraBody); Add("film_stock", rm.FilmStock); Add("film_iso", rm.FilmIso);
@@ -247,7 +254,7 @@ public static class Project
             rgb = new Dictionary<string, string>();
             foreach (var (k, v) in o) if (v is not null) rgb[k] = v.GetValue<string>();
         }
-        return new RollMeta
+        var result = new RollMeta
         {
             InputType = Str(d, "input_type", "raw"),
             SourcePath = Str(d, "source_path", "B"),
@@ -261,6 +268,81 @@ public static class Project
             DevDate = Str(d, "dev_date", ""), Location = Str(d, "location", ""),
             RollNote = Str(d, "roll_note", ""), Format = Str(d, "format", ""),
         };
+        DesCalibrationDiagnostics(d["calibration_diagnostics"] as JsonObject, result);
+        return result;
+    }
+
+    private static JsonObject? SerCalibrationDiagnostics(RollMeta meta)
+    {
+        if (meta.BaseCalibration is null && meta.HighlightCalibration is null
+            && !meta.UsedFallbackHighlight) return null;
+
+        var root = new JsonObject { ["used_fallback_highlight"] = meta.UsedFallbackHighlight };
+        if (meta.BaseCalibration is { } b)
+        {
+            root["base"] = new JsonObject
+            {
+                ["t_base"] = Arr(b.TBase),
+                ["evidence"] = b.Evidence.ToString(),
+                ["confidence"] = b.Confidence,
+                ["supporting_frames"] = b.SupportingFrames,
+                ["total_frames"] = b.TotalFrames,
+                ["log_dispersion"] = FiniteNumber(b.LogDispersion),
+                ["quantization_risk"] = b.QuantizationRisk,
+            };
+        }
+        if (meta.HighlightCalibration is { } h)
+        {
+            root["highlight"] = new JsonObject
+            {
+                ["density"] = Arr(h.Density),
+                ["confidence"] = h.Confidence,
+                ["candidate_frames"] = h.CandidateFrames,
+                ["total_frames"] = h.TotalFrames,
+                ["effective_frames"] = h.EffectiveFrames,
+                ["representative_frame"] = h.RepresentativeFrame,
+                ["log_chroma_dispersion"] = FiniteNumber(h.LogChromaDispersion),
+                ["headroom_percentile"] = h.HeadroomPercentile,
+                ["clipping_risk"] = h.ClippingRisk,
+                ["quantization_risk"] = h.QuantizationRisk,
+            };
+        }
+        return root;
+    }
+
+    private static JsonNode? FiniteNumber(double value) =>
+        double.IsFinite(value) ? JsonValue.Create(value) : null;
+
+    private static void DesCalibrationDiagnostics(JsonObject? root, RollMeta meta)
+    {
+        if (root is null) return;
+        meta.UsedFallbackHighlight = Bool(root, "used_fallback_highlight", false);
+        if (root["base"] is JsonObject b
+            && Enum.TryParse(Str(b, "evidence", ""), ignoreCase: true,
+                             out FilmBaseEvidence evidence))
+        {
+            meta.BaseCalibration = new FilmBaseEstimate(
+                Vec3(b, "t_base", 1, 1, 1), evidence,
+                Dbl(b, "confidence", 0.0),
+                (int)Dbl(b, "supporting_frames", 0.0),
+                (int)Dbl(b, "total_frames", 0.0),
+                Dbl(b, "log_dispersion", double.NaN),
+                Bool(b, "quantization_risk", false));
+        }
+        if (root["highlight"] is JsonObject h)
+        {
+            meta.HighlightCalibration = new HighlightEndpointEstimate(
+                Vec3(h, "density", 0, 0, 0),
+                Dbl(h, "confidence", 0.0),
+                (int)Dbl(h, "candidate_frames", 0.0),
+                (int)Dbl(h, "total_frames", Dbl(h, "candidate_frames", 0.0)),
+                Dbl(h, "effective_frames", Dbl(h, "candidate_frames", 0.0)),
+                (int)Dbl(h, "representative_frame", 0.0),
+                Dbl(h, "log_chroma_dispersion", double.NaN),
+                Dbl(h, "headroom_percentile", 100.0),
+                Bool(h, "clipping_risk", false),
+                Bool(h, "quantization_risk", false));
+        }
     }
 
     // ── frame ───────────────────────────────────────────────────────────────────

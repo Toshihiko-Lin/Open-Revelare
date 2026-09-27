@@ -14,6 +14,9 @@ public enum TiffInputEvidence
     /// <summary>Nothing was inspected — the file could not be opened.</summary>
     None = 0,
 
+    /// <summary>A plausible embedded ICC profile; the decoder gives it absolute precedence.</summary>
+    EmbeddedIccProfile,
+
     /// <summary>SampleFormat is IEEE float. Float samples are scene data, not display encoding.</summary>
     FloatSampleFormat,
 
@@ -164,12 +167,36 @@ public static class TiffInputDetector
     }
 
     /// <summary>
+    /// Detection after an embedded profile has already failed strict admission. The fallback must
+    /// inspect the remaining declarations rather than rediscover the same failed profile and call
+    /// it conclusive.
+    /// </summary>
+    internal static TiffInputDetection DetectWithoutEmbeddedIcc(string path)
+    {
+        using Tiff tif = Tiff.Open(path, "r");
+        return tif is null ? ConventionalDefault : Detect(tif, inspectEmbeddedIcc: false);
+    }
+
+    /// <summary>
     /// Inspects an already-open handle. This reads the Exif sub-directory, which moves the handle's
     /// current directory; it is restored to directory 0 before returning.
     /// </summary>
-    internal static TiffInputDetection Detect(Tiff tif)
+    internal static TiffInputDetection Detect(Tiff tif, bool inspectEmbeddedIcc = true)
     {
         ArgumentNullException.ThrowIfNull(tif);
+
+        // Same first choice as TiffIO.LoadManagedWorkingFrame. The detector does not interpret
+        // arbitrary device profiles itself; CharacterizedSpace therefore stays null, while this
+        // evidence tells the UI that no Linear/sRGB guess or warning is involved. The decoder's
+        // strict LittleCMS admission remains the authority on whether the transform can run.
+        if (inspectEmbeddedIcc && HasPlausibleEmbeddedIcc(tif))
+        {
+            return new TiffInputDetection(
+                TiffInputAssumption.Srgb, // unused while the embedded profile is admitted
+                CharacterizedSpace: null,
+                TiffInputEvidence.EmbeddedIccProfile,
+                "文件含嵌入 ICC，按该 profile 精确转换");
+        }
 
         if (IsFloatSampleFormat(tif))
         {
@@ -224,6 +251,27 @@ public static class TiffInputDetector
         }
 
         return ConventionalDefault;
+    }
+
+    private static bool HasPlausibleEmbeddedIcc(Tiff tif)
+    {
+        try
+        {
+            FieldValue[] field = tif.GetField(TiffTag.ICCPROFILE);
+            if (field is not { Length: >= 2 }) return false;
+            int declaredLength = field[0].ToInt();
+            byte[] bytes = field[1].ToByteArray();
+            return declaredLength == bytes.Length
+                && bytes.Length >= 132
+                && bytes[36] == (byte)'a'
+                && bytes[37] == (byte)'c'
+                && bytes[38] == (byte)'s'
+                && bytes[39] == (byte)'p';
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

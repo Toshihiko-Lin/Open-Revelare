@@ -1,5 +1,39 @@
 namespace OpenRevelare.Core;
 
+/// <summary>What physical evidence the automatic roll-base estimate actually used.</summary>
+public enum FilmBaseEvidence
+{
+    /// <summary>A stable dense film-side mode isolated below a measured light-board cut.</summary>
+    PhysicalMode,
+    /// <summary>A separated bare-carrier cluster detected along a frame edge.</summary>
+    PhysicalEdgeSliver,
+    /// <summary>No bare carrier was found; the brightest picture content is only a proxy.</summary>
+    ContentInference,
+}
+
+/// <summary>An automatic film-base value together with auditable evidence and uncertainty.</summary>
+public sealed record FilmBaseEstimate(
+    double[] TBase,
+    FilmBaseEvidence Evidence,
+    double Confidence,
+    int SupportingFrames,
+    int TotalFrames,
+    double LogDispersion,
+    bool QuantizationRisk);
+
+/// <summary>The roll's scene-derived white endpoint and the risks hidden by a bare RGB triple.</summary>
+public sealed record HighlightEndpointEstimate(
+    double[] Density,
+    double Confidence,
+    int CandidateFrames,
+    int TotalFrames,
+    double EffectiveFrames,
+    int RepresentativeFrame,
+    double LogChromaDispersion,
+    double HeadroomPercentile,
+    bool ClippingRisk,
+    bool QuantizationRisk);
+
 /// <summary>
 /// Film-base / D_max / white-balance sampling — port of negative/film_base.py.
 ///
@@ -92,9 +126,13 @@ public static class FilmBase
     /// <param name="image">Frame to measure, in the raw luma domain.</param>
     /// <param name="valueImage">Optional post-decouple buffer supplying the averaged VALUES while
     /// <paramref name="image"/> supplies the luma. Same split as the other estimators.</param>
+    /// <param name="allowNeutralCarrier">Waive only the orange-mask test for an explicitly
+    /// monochrome roll. Spatial separation and edge support remain mandatory.</param>
     /// <returns>The (3,) base, or null when no qualifying sliver was found.</returns>
     public static double[]? EstimateTBaseFromEdgeSliver(ImageBuffer image,
-                                                        ImageBuffer? valueImage = null)
+                                                        ImageBuffer? valueImage = null,
+                                                        bool allowNeutralCarrier = false,
+                                                        double? upperLumaCut = null)
     {
         const int Bins = 256;
         // The sliver is small by definition; anything larger is a region of the picture.
@@ -122,7 +160,11 @@ public static class FilmBase
             int i = p * 3;
             double l = ((double)s[i] + s[i + 1] + s[i + 2]) / 3.0;
             luma[p] = l;
-            hist[Math.Clamp((int)(l * Bins), 0, Bins - 1)]++;
+            // The light board / scanner surround above a known cut is not film. Without this
+            // bound it becomes the brightest edge cluster, especially when monochrome mode has
+            // correctly waived the orange-mask test for a colourless carrier.
+            if (upperLumaCut is not double upper || l <= upper)
+                hist[Math.Clamp((int)(l * Bins), 0, Bins - 1)]++;
         }
 
         // Walk down from the top for the first populated bin, then keep walking while the
@@ -148,7 +190,8 @@ public static class FilmBase
             for (int x = 0; x < w; x++)
             {
                 int p = y * w + x;
-                if (luma[p] <= cutLuma) continue;
+                if (luma[p] <= cutLuma
+                    || (upperLumaCut is double upper && luma[p] > upper)) continue;
                 count++;
                 if (edgeRow || x < bx || x >= w - bx) edge++;
                 int i = p * 3;
@@ -162,8 +205,15 @@ public static class FilmBase
         if ((double)edge / count < MinEdgeShare) return null;
 
         double m0 = a0 / count, m1 = a1 / count, m2 = a2 / count;
-        if (!(m0 > m1 && m1 > m2)) return null;
-        if (m0 / Math.Max(m2, 1e-6) < MinOrangeRatio) return null;
+        // Colour-negative mode needs the orange-mask test to reject a bright scene stripe.
+        // A monochrome carrier has no dye mask and, after Stage1Source folds it, is neutral by
+        // definition. Its physical evidence is the same separated edge topology, so callers may
+        // explicitly waive only the colour test; cluster/share/edge requirements stay intact.
+        if (!allowNeutralCarrier)
+        {
+            if (!(m0 > m1 && m1 > m2)) return null;
+            if (m0 / Math.Max(m2, 1e-6) < MinOrangeRatio) return null;
+        }
 
         var tb = new[] { m0, m1, m2 };
         Quantise(tb);
@@ -274,12 +324,14 @@ public static class FilmBase
     /// enough to base the whole roll correctly.
     /// </summary>
     public static double[]? EstimateTBaseFromEdgeSliverFromRoll(
-        IReadOnlyList<ImageBuffer> images, IReadOnlyList<ImageBuffer>? valueImages = null)
+        IReadOnlyList<ImageBuffer> images, IReadOnlyList<ImageBuffer>? valueImages = null,
+        bool allowNeutralCarrier = false, double? upperLumaCut = null)
     {
         var perFrame = new List<double[]>();
         int frames = valueImages is null ? images.Count : Math.Min(images.Count, valueImages.Count);
         for (int f = 0; f < frames; f++)
-            if (EstimateTBaseFromEdgeSliver(images[f], valueImages?[f]) is { } pick)
+            if (EstimateTBaseFromEdgeSliver(
+                    images[f], valueImages?[f], allowNeutralCarrier, upperLumaCut) is { } pick)
                 perFrame.Add(pick);
 
         if (perFrame.Count == 0) return null;
@@ -287,6 +339,152 @@ public static class FilmBase
         for (int c = 0; c < 3; c++) tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
         Quantise(tBase);
         return tBase.Any(x => x <= 0) ? null : tBase;
+    }
+
+    /// <summary>
+    /// The complete automatic base decision, including which evidence won and how consistently
+    /// the roll supported it. A high-confidence board-bounded mode remains the fast path. When
+    /// that evidence is sparse or inconsistent, a physical edge rebate is also evaluated and the
+    /// more strongly supported physical estimate wins; content remains the last resort.
+    /// <paramref name="allowNeutralCarrier"/> is for an explicitly monochrome roll only; colour
+    /// negatives keep the orange-mask rejection that prevents a bright edge subject qualifying.
+    /// </summary>
+    public static FilmBaseEstimate EstimateTBaseFromRollDetailed(
+        IReadOnlyList<ImageBuffer> images,
+        double? sprocketThreshold = null,
+        IReadOnlyList<ImageBuffer>? valueImages = null,
+        bool allowNeutralCarrier = false)
+    {
+        if (images.Count == 0)
+            throw new ArgumentException("EstimateTBaseFromRollDetailed: empty image list", nameof(images));
+
+        int frames = valueImages is null ? images.Count : Math.Min(images.Count, valueImages.Count);
+        var picks = new List<double[]>();
+        FilmBaseEstimate? modeEstimate = null;
+        if (sprocketThreshold is not null)
+        {
+            for (int f = 0; f < frames; f++)
+                if (EstimateTBaseByMode(images[f], sprocketThreshold, valueImages?[f]) is { } pick)
+                    picks.Add(pick);
+            if (picks.Count > 0)
+                modeEstimate = BaseEstimateFromPicks(
+                    picks, FilmBaseEvidence.PhysicalMode, images, frames, physical: true);
+            // Strong mode evidence already answers the question and keeps the ordinary path at
+            // exactly its former cost. Only an uncertain one pays for the independent edge check.
+            if (modeEstimate is { Confidence: >= 0.75 }) return modeEstimate;
+        }
+
+        picks.Clear();
+        for (int f = 0; f < frames; f++)
+            if (EstimateTBaseFromEdgeSliver(
+                    images[f], valueImages?[f], allowNeutralCarrier, sprocketThreshold) is { } pick)
+                picks.Add(pick);
+        if (picks.Count > 0)
+        {
+            FilmBaseEstimate edgeEstimate = BaseEstimateFromPicks(
+                picks, FilmBaseEvidence.PhysicalEdgeSliver, images, frames, physical: true);
+            // Reaching this branch means the board-bounded mode was NOT high-confidence. A
+            // separated edge cluster carries independent spatial evidence, so it outranks that
+            // uncertain radiometric mode even when seen in fewer frames.
+            return edgeEstimate;
+        }
+
+        if (modeEstimate is not null)
+        {
+            // A mode with weak cross-frame agreement is still a useful robust bright-content
+            // estimate, but it has not established one stable physical carrier. Calling it a
+            // "low-confidence physical base" overstates what was observed (the 44-frame FOMA
+            // scan produced only 2 agreeing votes). Preserve the value and diagnostics while
+            // labelling the evidence honestly as content inference.
+            return modeEstimate with
+            {
+                Evidence = FilmBaseEvidence.ContentInference,
+                Confidence = Math.Min(modeEstimate.Confidence, 0.45),
+            };
+        }
+
+        double[] fallback = EstimateTBaseFromRoll(images, sprocketThreshold, valueImages);
+        bool quantizationRisk = HasBaseQuantizationRisk(images, fallback);
+        // Content is not repeated measurement of the carrier. More frames make its upper tail
+        // stable, but can never promote it into physical evidence, hence the deliberate ceiling.
+        double support = 1.0 - Math.Exp(-frames / 8.0);
+        double confidence = Math.Clamp(0.18 + 0.27 * support - (quantizationRisk ? 0.10 : 0.0), 0.05, 0.45);
+        return new FilmBaseEstimate(
+            fallback, FilmBaseEvidence.ContentInference, confidence, frames, frames,
+            LogDispersion: double.NaN, quantizationRisk);
+    }
+
+    private static FilmBaseEstimate BaseEstimateFromPicks(
+        List<double[]> picks,
+        FilmBaseEvidence evidence,
+        IReadOnlyList<ImageBuffer> images,
+        int totalFrames,
+        bool physical)
+    {
+        var value = new double[3];
+        for (int c = 0; c < 3; c++) value[c] = Median(picks.Select(x => x[c]).ToArray());
+        Quantise(value);
+
+        var distances = new double[picks.Count];
+        for (int i = 0; i < picks.Count; i++)
+        {
+            double sum = 0;
+            for (int c = 0; c < 3; c++)
+            {
+                double delta = Math.Log(Math.Max(picks[i][c], 1e-10))
+                             - Math.Log(Math.Max(value[c], 1e-10));
+                sum += delta * delta;
+            }
+            distances[i] = Math.Sqrt(sum / 3.0);
+        }
+        // "Supporting frames" must mean frames that support the value, not merely frames from
+        // which the detector returned *something*. A content mode can pass the per-frame density
+        // floor, and counting a conflicting pick as support made 6 agreeing + 5 contradictory
+        // frames read as 11/11 evidence. Eight percent RMS in log transmission is deliberately
+        // wider than measured grain/illumination spread (the real no-leader edge roll is 0.021),
+        // while still separating a different scene population from one physical carrier.
+        const double AgreementLogRadius = 0.08;
+        double[] inlierDistances = distances.Where(x => x <= AgreementLogRadius).ToArray();
+        if (inlierDistances.Length == 0)
+            inlierDistances = [distances.Min()]; // a finite estimate always has one nearest vote
+        int supportingFrames = inlierDistances.Length;
+        double dispersion = Median(inlierDistances);
+        bool quantizationRisk = HasBaseQuantizationRisk(images, value);
+
+        // A carrier sliver legitimately appears in only a few frames, so confidence saturates on
+        // the number of mutually consistent observations rather than their fraction of the roll.
+        // Six agreeing rebate sightings are already strong physical evidence even when the
+        // rebate is visible on only part of the roll.  The dispersion scale is deliberately
+        // wider than the old 0.045: real camera grain and small lighting gradients produced
+        // 0.021 on the measured no-leader roll, which is tight agreement (about 2% in log
+        // transmission), not grounds for cutting its confidence almost in half.
+        double support = 1.0 - Math.Exp(-supportingFrames / 2.0);
+        double consistency = Math.Exp(-dispersion / 0.10);
+        // Missing detections are not contradictions — a rebate can legitimately be hidden in
+        // most frames — but a returned pick outside the physical cluster is. Penalise only the
+        // latter, smoothly, so a single false mode cannot erase six real carrier sightings.
+        double contradiction = Math.Sqrt(supportingFrames / (double)picks.Count);
+        double ceiling = physical ? 0.99 : 0.45;
+        double confidence = ceiling * support * consistency * contradiction;
+        if (quantizationRisk) confidence *= 0.75;
+        confidence = Math.Clamp(confidence, 0.05, ceiling);
+
+        return new FilmBaseEstimate(
+            value, evidence, confidence, supportingFrames, totalFrames, dispersion, quantizationRisk);
+    }
+
+    private static bool HasBaseQuantizationRisk(IReadOnlyList<ImageBuffer> images, double[] tBase)
+    {
+        foreach (ImageBuffer image in images)
+        {
+            double step = SourceStep(image);
+            if (step <= 0) continue;
+            for (int c = 0; c < 3; c++)
+                // Fewer than 64 source codes below the measured carrier makes one code worth
+                // enough density to move a roll endpoint visibly.
+                if (tBase[c] / step < 64.0) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -365,8 +563,8 @@ public static class FilmBase
     /// it feeds is applied to every frame of the roll, so a statistic decided by a single frame
     /// lets that frame set the roll's exposure — and the frame a maximum selects is always the
     /// deepest one, which on real film is systematically the most off-colour (depth and cast are
-    /// correlated: an off-neutral highlight reads as denser). That is the same failure
-    /// <see cref="PickRepresentativeFrame"/> already rejects at the triple, arriving through the
+    /// correlated: an off-neutral highlight reads as denser). That is the same failure the
+    /// quality-weighted log-chroma medoid already rejects at the triple, arriving through the
     /// rescale instead.
     ///
     /// 95 rather than 100: high enough that ordinary frame-to-frame spread still lifts the
@@ -375,39 +573,43 @@ public static class FilmBase
     /// frame — every frame at or below it keeps full headroom, and only a lone extreme above it
     /// gives up some highlight detail, recoverable with 单张 on that frame.
     /// </summary>
-    private const double HeadroomPercentile = 95.0;
-
     /// <summary>
-    /// How many frames a roll needs before <see cref="HeadroomPercentile"/> replaces the plain
-    /// maximum — below this the pool stays a maximum.
-    ///
-    /// A percentile earns its keep by having a population to judge an outlier against. On a short
-    /// roll there is none: at eight frames the 95th percentile sits between the top two, so it
-    /// clips the deepest frame while rejecting nothing. That is the worst of both — the guard
-    /// gives up highlight detail and buys no robustness for it.
-    ///
-    /// Twelve is a real roll's shortest ordinary length (a 120 roll at 6×9), which is also about
-    /// where one frame stops being a sixth of the evidence and starts being a twelfth.
+    /// Robust headroom percentile as a continuous function of effective evidence. One reliable
+    /// frame stays at the maximum; additional independent frames smoothly approach P95. There is
+    /// no population-size branch and therefore no discontinuity between 11 and 12 frames.
     /// </summary>
-    private const int MinFramesForHeadroomPercentile = 12;
-
-    /// <summary>
-    /// How many neighbours a frame's highlight colour is judged against in
-    /// <see cref="PickRepresentativeFrame"/>.
-    ///
-    /// Small on purpose. The frames that measured the FILM's highlight agree with each other
-    /// closely, and there are usually several of them; the frames that measured a subject
-    /// disagree with everyone. Three neighbours is enough to tell a cluster from a lone frame
-    /// and few enough that a roll with only four or five usable highlights still has one.
-    /// </summary>
-    private const int ConsensusNeighbours = 3;
+    public static double AdaptiveHeadroomPercentile(double effectiveFrames)
+    {
+        double n = Math.Max(1.0, effectiveFrames);
+        return 95.0 + 5.0 * Math.Exp(-(n - 1.0) / 5.0);
+    }
 
     public static double[]? DetectDMaxPerChannelFromRoll(
         IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
         IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
-        double edgeInset = 0.05)
+        double edgeInset = 0.05, bool protectIndependentChannelExtrema = true)
+        => DetectDMaxPerChannelFromRollDetailed(
+            images, tBase, rollPercentile, masks, sprocketThreshold, edgeInset,
+            protectIndependentChannelExtrema)?.Density;
+
+    /// <summary>
+    /// Detailed form of <see cref="DetectDMaxPerChannelFromRoll"/>. The endpoint remains a
+    /// scene-derived proxy for unavailable physical D-max, but now carries colour-consensus,
+    /// headroom, clipping and source-quantisation diagnostics.
+    /// </summary>
+    /// <param name="protectIndependentChannelExtrema">True for broad-spectrum input, where a
+    /// channel extreme is density headroom that should not clip. False for Path A: decoupling can
+    /// create a near-zero separated channel from ordinary saturated colour, so only co-sited
+    /// highlight tails are allowed to set the roll's exposure placement.</param>
+    public static HighlightEndpointEstimate? DetectDMaxPerChannelFromRollDetailed(
+        IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
+        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
+        double edgeInset = 0.05, bool protectIndependentChannelExtrema = true)
     {
         var perFrame = new List<double[]>();
+        var candidateWeights = new List<double>();
+        var candidateQuantizationRisk = new List<bool>();
+        var sourceFrameIndices = new List<int>();
         // The per-channel MAXIMUM over the same kept pixels, pooled across frames. The co-sited
         // triplet below is measured on pixels ranked by TOTAL density, which is what keeps the
         // three endpoints on one physical highlight and therefore keeps the colour balance
@@ -467,6 +669,8 @@ public static class FilmBase
             var dens = new double[3][];
             for (int c = 0; c < 3; c++) dens[c] = new double[n];
             int k = 0;
+            int unresolved = 0;
+            int resolved = 0;
             for (int p = 0; p < n; p++)
             {
                 if (!keep[p]) continue;
@@ -477,7 +681,12 @@ public static class FilmBase
                 // co-sited off one physical sample, so a pixel is either a usable sample or it is
                 // not — dropping channels independently would bias them against each other.
                 if (step > 0 && !(IsResolved(t0, stepN[0]) && IsResolved(t1, stepN[1])
-                                  && IsResolved(t2, stepN[2]))) continue;
+                                  && IsResolved(t2, stepN[2])))
+                {
+                    unresolved++;
+                    continue;
+                }
+                resolved++;
                 double d0 = FrameParams.DensityOf(t0);
                 double d1 = FrameParams.DensityOf(t1);
                 double d2 = FrameParams.DensityOf(t2);
@@ -520,7 +729,9 @@ public static class FilmBase
 
             // Unguarded retry on total rejection: a plateau-contaminated endpoint still beats
             // dropping the frame.
-            int[] tailIdx = DenseTailIndices(total, order, k, tail, spike, guard)
+            int[]? guardedTail = DenseTailIndices(total, order, k, tail, spike, guard);
+            bool guardFallback = guardedTail is null;
+            int[] tailIdx = guardedTail
                          ?? DenseTailIndices(total, order, k, tail, double.PositiveInfinity, 0.0)!;
 
             var res = new double[3];
@@ -551,7 +762,34 @@ public static class FilmBase
             bool ok = true;
             for (int c = 0; c < 3; c++)
                 if (!double.IsFinite(res[c]) || res[c] <= 0) { ok = false; break; }
-            if (ok) { perFrame.Add(res); perFrameMax.Add(frameMax); }
+            if (ok)
+            {
+                // Quality describes measurement evidence, never scene colour or depth. A large,
+                // well-resolved tail gets one full vote; a quantisation-limited or guard-rejected
+                // candidate remains usable but cannot dominate the roll's chroma medoid.
+                double population = Math.Min(1.0, Math.Sqrt(k / 10_000.0));
+                double tailSupport = Math.Min(1.0, Math.Sqrt(tailIdx.Length / 32.0));
+                // Resolution risk is about source-code precision, so its denominator contains
+                // only resolved vs unresolved samples. `k / maskKept` was subtly wrong: k also
+                // excludes opaque edges, density-ceiling hits and other non-endpoint samples, so
+                // one coarse pixel beside many deliberately excluded pixels could falsely make
+                // an otherwise well-resolved frame look quantisation-limited.
+                double resolvedShare = resolved + unresolved > 0
+                    ? resolved / (double)(resolved + unresolved)
+                    : 0.0;
+                bool candidateQuantRisk = step > 0 && unresolved > 0
+                                       && resolvedShare < 0.98;
+                double quality = population * tailSupport;
+                if (guardFallback) quality *= 0.55;
+                if (candidateQuantRisk) quality *= Math.Max(0.35, resolvedShare);
+                quality = Math.Clamp(quality, 0.05, 1.0);
+
+                perFrame.Add(res);
+                perFrameMax.Add(frameMax);
+                candidateWeights.Add(quality);
+                candidateQuantizationRisk.Add(candidateQuantRisk);
+                sourceFrameIndices.Add(i);
+            }
         }
         if (perFrame.Count == 0) return null;
 
@@ -581,8 +819,8 @@ public static class FilmBase
         // density while its ratios describe that subject rather than the film. Picking it hands
         // its cast to the whole roll, and no Stage-2 control can take it back out.
         //
-        // So the pick is by CONSENSUS between frames — see PickRepresentativeFrame for why
-        // neither depth nor a fitted trend can be allowed to decide.
+        // So the pick is by quality-weighted log-chroma CONSENSUS between frames — neither depth
+        // nor a fitted trend is allowed to decide.
         //
         // NOTE these triples are PRE-RESCALE: the no-clip lift below is applied to the winner
         // only. The lift is one factor on all three channels, so it cannot change any frame's
@@ -604,7 +842,7 @@ public static class FilmBase
         // came out red. The same numbers measured against the base pick a frame in the neutral
         // cluster and the lift leaves its span ratios untouched. Callers therefore pass the roll's
         // t_base here and add dMin back to the result.
-        int bestIdx = PickRepresentativeFrame(perFrame);
+        int bestIdx = PickQualityWeightedLogChromaMedoid(perFrame, candidateWeights);
         double[] best = perFrame[bestIdx];
 
         // ROLL-WIDE headroom, deliberately — not the winner's own.
@@ -620,7 +858,7 @@ public static class FilmBase
         // per-frame tail above already uses, applied one level up, and for the same reason.
         // A plain max is decided by exactly ONE frame — necessarily the deepest on the strip —
         // and depth is correlated with cast, so that frame is systematically the least
-        // representative one. PickRepresentativeFrame exists precisely to keep such a frame from
+        // representative one. The chroma medoid exists precisely to keep such a frame from
         // speaking for the roll; taking a raw max here handed it the roll back through the lift
         // instead of through the triple, which is the same failure wearing a different hat.
         //
@@ -648,27 +886,28 @@ public static class FilmBase
         // correct colour, taken because the invariant was costing the roll its highlight balance:
         // ranking on depth handed an expired Superia 200 roll to its most off-colour frame.
         //
-        // BELOW <see cref="MinFramesForHeadroomPercentile"/> FRAMES THE POOL IS STILL A MAXIMUM,
-        // the same guard and the same reasoning as PickRepresentativeFrame's own three-frame
-        // floor. A percentile rejects an outlier by having a population to judge it against; on a
-        // handful of frames there is none, and the percentile stops being a robust statistic and
-        // becomes merely a slightly shrunken maximum — it would clip the deepest frame without
-        // rejecting anything, which is a pure loss. A short roll's deepest frame is not yet
-        // distinguishable from ordinary spread, so it gets the full protection.
+        // The percentile is a continuous function of EFFECTIVE evidence: one reliable frame is
+        // P100, then the target smoothly approaches P95 as independent quality-weighted evidence
+        // accumulates. Weighted midpoint interpolation below avoids reintroducing a hidden step
+        // through the discrete order statistic.
         var chanMax = new double[3];
-        bool pooled = perFrameMax.Count >= MinFramesForHeadroomPercentile;
+        double effectiveFrames = QualityWeightedEffectiveFrames(candidateWeights);
+        double headroomPercentile = AdaptiveHeadroomPercentile(effectiveFrames);
         for (int c = 0; c < 3; c++)
         {
-            if (pooled)
-            {
-                var col = new double[perFrameMax.Count];
-                for (int i = 0; i < perFrameMax.Count; i++) col[i] = perFrameMax[i][c];
-                chanMax[c] = Percentile(col, HeadroomPercentile);
-            }
-            else
-            {
-                foreach (double[] m in perFrameMax) if (m[c] > chanMax[c]) chanMax[c] = m[c];
-            }
+            // A broad-spectrum input can treat each channel's darkest picture sample as genuine
+            // density headroom. Path A cannot: decoupling deliberately removes sensor crosstalk,
+            // so a saturated colour can drive one separated channel close to zero even though
+            // the pixel is nowhere near the photograph's luminance endpoint. Treating that
+            // chroma extremum as D-max uniformly lifts all three endpoints and darkens the roll.
+            // On that path the co-sited dense-tail triple is the photometric evidence; it still
+            // provides roll-wide headroom, but a lone separated channel no longer sets exposure.
+            IReadOnlyList<double[]> source = protectIndependentChannelExtrema
+                ? perFrameMax
+                : perFrame;
+            var col = new double[source.Count];
+            for (int i = 0; i < source.Count; i++) col[i] = source[i][c];
+            chanMax[c] = WeightedPercentile(col, candidateWeights, headroomPercentile);
         }
 
         // UNIFORM RESCALE SO NO CHANNEL CLIPS.
@@ -690,7 +929,42 @@ public static class FilmBase
         //
         // It returns a fresh array rather than scaling in place — `best` still aliases an entry in
         // perFrame, and mutating it would leave that list holding a value it never measured.
-        return RescaleToClearChannelMax(best, chanMax);
+        double[] endpoint = RescaleToClearChannelMax(best, chanMax);
+        var absoluteMax = new double[3];
+        foreach (double[] maximum in perFrameMax)
+            for (int c = 0; c < 3; c++) absoluteMax[c] = Math.Max(absoluteMax[c], maximum[c]);
+        bool percentileClippingRisk = Enumerable.Range(0, 3)
+            .Any(c => absoluteMax[c] > endpoint[c] * 1.005);
+        // Values at 2.999x are not meaningfully different from the 3.0-D guard that rejects
+        // opaque borders / scanner black. They commonly arise when a scanner has already pinned
+        // its black end (measured on the 44-frame FOMA TIFF roll: four candidates at 2.9994-
+        // 3.0000). The old strict >=3 test admitted them and then reported "no clipping risk".
+        // Mark proximity to the guard as risk; keep the endpoint itself unchanged so this remains
+        // a diagnostic, not an unasked-for exposure adjustment.
+        const double CeilingRiskMargin = 0.02;
+        bool ceilingClippingRisk = endpoint.Any(
+            d => d >= FrameParams.RealDensityCeiling - CeilingRiskMargin);
+        bool clippingRisk = percentileClippingRisk || ceilingClippingRisk;
+
+        double dispersion = WeightedLogChromaDispersion(perFrame, candidateWeights, bestIdx);
+        double agreement = Math.Exp(-dispersion / 0.08);
+        double support = 1.0 - Math.Exp(-effectiveFrames / 4.0);
+        double clippingPenalty = ceilingClippingRisk ? 0.65
+            : percentileClippingRisk ? 0.85 : 1.0;
+        double confidence = Math.Clamp(
+            candidateWeights[bestIdx] * agreement * support * clippingPenalty,
+            0.05, 0.98);
+        double totalWeight = candidateWeights.Sum();
+        double riskyWeight = 0.0;
+        for (int i = 0; i < candidateWeights.Count; i++)
+            if (candidateQuantizationRisk[i]) riskyWeight += candidateWeights[i];
+        bool quantizationRisk = candidateQuantizationRisk[bestIdx]
+                             || (totalWeight > 0 && riskyWeight / totalWeight > 0.25);
+
+        return new HighlightEndpointEstimate(
+            endpoint, confidence, perFrame.Count, images.Count, effectiveFrames,
+            sourceFrameIndices[bestIdx], dispersion,
+            headroomPercentile, clippingRisk, quantizationRisk);
     }
 
     /// <summary>
@@ -742,9 +1016,16 @@ public static class FilmBase
     /// Under three frames there are no neighbours to consult: one odd frame out of two is
     /// indistinguishable from one out of one, and depth is the honest answer.
     /// </summary>
-    private static int PickRepresentativeFrame(List<double[]> perFrame)
+    public static int PickQualityWeightedLogChromaMedoid(
+        IReadOnlyList<double[]> perFrame,
+        IReadOnlyList<double>? qualityWeights = null)
     {
         static double Total(double[] t) => t[0] + t[1] + t[2];
+
+        if (perFrame.Count == 0)
+            throw new ArgumentException("At least one highlight candidate is required.", nameof(perFrame));
+        if (qualityWeights is not null && qualityWeights.Count != perFrame.Count)
+            throw new ArgumentException("Quality weights must align with candidates.", nameof(qualityWeights));
 
         int densest = 0;
         for (int i = 1; i < perFrame.Count; i++)
@@ -753,17 +1034,21 @@ public static class FilmBase
         int n = perFrame.Count;
         if (n < 3) return densest;
 
-        // Ratios against green, the channel a negative's highlight varies least in.
-        var rg = new double[n];
-        var bg = new double[n];
+        // Log ratios are symmetric: doubling and halving a ratio are equally far apart. Raw
+        // relative differences were asymmetric and changed their scale depending on which frame
+        // happened to be under consideration.
+        var logRg = new double[n];
+        var logBg = new double[n];
+        var weights = new double[n];
         for (int i = 0; i < n; i++)
         {
             double g = Math.Max(perFrame[i][1], 1e-9);
-            rg[i] = perFrame[i][0] / g;
-            bg[i] = perFrame[i][2] / g;
+            logRg[i] = Math.Log(Math.Max(perFrame[i][0], 1e-9) / g);
+            logBg[i] = Math.Log(Math.Max(perFrame[i][2], 1e-9) / g);
+            double supplied = qualityWeights?[i] ?? 1.0;
+            weights[i] = double.IsFinite(supplied) ? Math.Clamp(supplied, 0.01, 1.0) : 0.01;
         }
 
-        int k = Math.Min(ConsensusNeighbours, n - 1);
         // Tie-break on depth, toward the roll's MIDDLE. Frames of one cluster can be backed
         // equally well; the one nearest the roll's typical depth is the one least likely to be an
         // outlier in the other property, and the choice does not depend on frame order. Not the
@@ -775,32 +1060,142 @@ public static class FilmBase
 
         int best = 0;
         double bestSupport = double.PositiveInfinity;
-        var dist = new double[n - 1];
         for (int i = 0; i < n; i++)
         {
-            int m = 0;
+            double support = 0.0;
             for (int j = 0; j < n; j++)
             {
                 if (j == i) continue;
-                // Relative offsets, summed: the two axes have different scales, so absolute
-                // differences would silently weight B/G more heavily than R/G. Measured against
-                // the frame being judged, so the distance is not symmetric — that is fine, each
-                // frame is asked the same question of its own neighbours.
-                dist[m++] = Math.Abs(rg[j] - rg[i]) / Math.Max(Math.Abs(rg[i]), 1e-9)
-                          + Math.Abs(bg[j] - bg[i]) / Math.Max(Math.Abs(bg[i]), 1e-9);
+                double dr = logRg[j] - logRg[i];
+                double db = logBg[j] - logBg[i];
+                support += weights[j] * Math.Sqrt(dr * dr + db * db);
             }
-            Array.Sort(dist);
-            double support = 0;
-            for (int q = 0; q < k; q++) support += dist[q];
+            // The weights above say how strongly every observation should pull the consensus.
+            // They do not, on their own, say whether candidate i is trustworthy enough to BE the
+            // representative: a quantised/guard-fallback point sitting exactly between two sound
+            // measurements can have the smallest geometric sum even though its own coordinates
+            // are the least reliable. Dividing by sqrt(quality) adds that missing eligibility
+            // term without making a modest 0.8-vs-1.0 quality difference overwhelm real chroma
+            // agreement. Equal qualities cancel, preserving the ordinary medoid.
+            support /= Math.Sqrt(weights[i]);
             if (support < bestSupport
                 || (support == bestSupport
-                    && Math.Abs(depths[i] - midDepth) < Math.Abs(depths[best] - midDepth)))
+                    && (weights[i] > weights[best]
+                        || (weights[i] == weights[best]
+                            && Math.Abs(depths[i] - midDepth) < Math.Abs(depths[best] - midDepth)))))
             {
                 bestSupport = support;
                 best = i;
             }
         }
         return best;
+    }
+
+    private static double WeightedLogChromaDispersion(
+        IReadOnlyList<double[]> candidates,
+        IReadOnlyList<double> weights,
+        int centre)
+    {
+        double cg = Math.Max(candidates[centre][1], 1e-9);
+        double cr = Math.Log(Math.Max(candidates[centre][0], 1e-9) / cg);
+        double cb = Math.Log(Math.Max(candidates[centre][2], 1e-9) / cg);
+        var distance = new double[candidates.Count];
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            double g = Math.Max(candidates[i][1], 1e-9);
+            double dr = Math.Log(Math.Max(candidates[i][0], 1e-9) / g) - cr;
+            double db = Math.Log(Math.Max(candidates[i][2], 1e-9) / g) - cb;
+            distance[i] = Math.Sqrt(dr * dr + db * db);
+        }
+        return WeightedPercentile(distance, weights, 50.0);
+    }
+
+    /// <summary>
+    /// How many full-quality independent frames a set of quality votes represents.
+    ///
+    /// Kish effective sample size by itself is scale invariant: twenty equally poor 0.05 votes
+    /// look exactly like twenty perfect 1.0 votes.  That is useful for survey weights but wrong
+    /// for measurement quality.  The usable evidence is therefore bounded by BOTH Kish ESS
+    /// (one dominant frame cannot masquerade as a roll) and the sum of the absolute quality votes
+    /// (many equally weak frames cannot masquerade as strong evidence). One candidate remains one
+    /// frame so the adaptive endpoint stays at P100 rather than becoming numerically undefined.
+    /// </summary>
+    public static double QualityWeightedEffectiveFrames(IReadOnlyList<double> weights)
+    {
+        double sum = 0.0, squares = 0.0;
+        foreach (double raw in weights)
+        {
+            double w = double.IsFinite(raw) ? Math.Max(raw, 0.0) : 0.0;
+            sum += w;
+            squares += w * w;
+        }
+        if (!(squares > 0)) return 1.0;
+        double kish = sum * sum / squares;
+        return Math.Max(1.0, Math.Min(sum, kish));
+    }
+
+    /// <summary>
+    /// A linearly interpolated weighted percentile using each observation's weight midpoint.
+    /// Zero/invalid weights do not vote. Midpoint interpolation matters here: changing an adaptive
+    /// target smoothly must not merely move a discrete order-statistic switch to another frame
+    /// count.
+    /// </summary>
+    public static double WeightedPercentile(
+        IReadOnlyList<double> values,
+        IReadOnlyList<double> weights,
+        double percentile)
+    {
+        if (values.Count == 0 || values.Count != weights.Count)
+            throw new ArgumentException("Values and weights must be non-empty and aligned.");
+        var pairs = new List<(double Value, double Weight)>(values.Count);
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (!double.IsFinite(values[i])) continue;
+            double w = double.IsFinite(weights[i]) ? Math.Max(0.0, weights[i]) : 0.0;
+            if (w > 0) pairs.Add((values[i], w));
+        }
+        if (pairs.Count == 0) throw new ArgumentException("No finite positively weighted values.");
+        pairs.Sort((a, b) => a.Value.CompareTo(b.Value));
+        if (pairs.Count == 1) return pairs[0].Value;
+
+        // Interpolation must not bridge a clearly separated extreme into a value no frame ever
+        // supported.  Estimate ordinary spacing robustly, then treat a gap six times larger as a
+        // population boundary. This is what lets twenty tightly grouped frames reject one deep
+        // frame while still making the percentile continuous inside the ordinary population.
+        var positiveGaps = new List<double>(pairs.Count - 1);
+        for (int i = 1; i < pairs.Count; i++)
+        {
+            double gap = pairs[i].Value - pairs[i - 1].Value;
+            if (gap > 0) positiveGaps.Add(gap);
+        }
+        double ordinaryGap = positiveGaps.Count >= 3
+            ? Median(positiveGaps.ToArray())
+            // With four or more observations, one or two distinct jumps amid repeated values are
+            // population boundaries, not enough evidence for a spacing to interpolate across.
+            : pairs.Count >= 4 ? 0.0 : double.PositiveInfinity;
+
+        double total = pairs.Sum(x => x.Weight);
+        double target = Math.Clamp(percentile, 0.0, 100.0) / 100.0;
+        double cumulative = 0.0;
+        double previousPosition = 0.0;
+        double previousValue = pairs[0].Value;
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            double position = (cumulative + 0.5 * pairs[i].Weight) / total;
+            if (target <= position)
+            {
+                if (i == 0) return pairs[i].Value;
+                double valueGap = pairs[i].Value - previousValue;
+                if (valueGap > Math.Max(ordinaryGap * 6.0, 1e-9)) return previousValue;
+                double span = Math.Max(position - previousPosition, 1e-12);
+                double t = Math.Clamp((target - previousPosition) / span, 0.0, 1.0);
+                return previousValue + t * (pairs[i].Value - previousValue);
+            }
+            cumulative += pairs[i].Weight;
+            previousPosition = position;
+            previousValue = pairs[i].Value;
+        }
+        return pairs[^1].Value;
     }
 
     /// <summary>
@@ -1067,7 +1462,8 @@ public static class FilmBase
     /// <summary>
     /// The source file's quantisation step for this buffer, in its own linear units.
     ///
-    /// READ, NOT MEASURED. It is stamped at decode by <see cref="TiffIO"/> and carried through
+    /// READ, NOT MEASURED. It is stamped at decode by <see cref="TiffIO"/> or
+    /// <see cref="RawDecode"/> and carried through
     /// every geometric transform — see <see cref="ImageBuffer.SourceQuantisationStep"/> for why
     /// measuring it off the pixels is wrong (a box-downsampled preview lands on a finer lattice
     /// and reports float noise, silently disabling every test built on it).
@@ -1853,7 +2249,7 @@ public static class FilmBase
         // frame with a strongly coloured highlight set the whole roll's channel ratios. These two
         // estimators answer the same question and feed the same field, so they must not disagree
         // about which frame speaks for the roll.
-        return candidates[PickRepresentativeFrame(candidates)];
+        return candidates[PickQualityWeightedLogChromaMedoid(candidates)];
     }
 
     /// <summary>Per-channel mean of the rows whose total density is &gt;= thresh; null if none.</summary>

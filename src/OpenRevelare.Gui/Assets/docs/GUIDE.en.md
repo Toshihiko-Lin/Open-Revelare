@@ -66,7 +66,7 @@ single leader frame carries every reference the calibration needs:
 
 | Sample | Where on the leader |
 |---|---|
-| Film base T_base | The semi-transparent orange base |
+| Film base T_base | Bare carrier (semi-transparent orange on colour negative; normally colourless on B&W) |
 | D_max | The dark, fully-exposed patch |
 | Shadow end (black level) | The base area (same as T_base) |
 | Highlight end (brightness/temp/tint) | The dark area (same as D_max) |
@@ -128,20 +128,37 @@ retain the historical bit-depth compatibility route.
 
 **Auto-analyse the roll and remove the mask**
 
-Ticked by default. After import the software analyses the whole roll and measures the film base,
-white balance, D_max and the per-channel density endpoints.
+Ticked by default. After import the software analyses the whole roll. Bare carrier supplies the
+shadow endpoint; the deepest co-sited RGB picture samples are a **highlight proxy** for D_max. That
+endpoint also carries highlight balance, so there is no second white-balance parameter. The pass
+does not rewrite scene exposure; anchor a grey card or use the later exposure control for that.
+
+The result reports evidence and confidence for both ends. Film base is labelled either physical
+(a mask mode below the light-board cut, or bare edge rebate) or inferred from content. A board-bounded
+mode is promoted to physical carrier only after high-confidence cross-frame agreement; otherwise its
+robust value is retained but labelled content inference. “Supporting
+frames” count only votes inside one physical-carrier tolerance: a returned but contradictory pick
+reduces confidence, while a frame with no exposed base and therefore no pick is not contrary
+evidence. The highlight is explicitly labelled a scene proxy, never a known physical D-max. Supporting-frame count,
+candidate/total frames, quality-adjusted effective frames, log-chroma dispersion, the adaptive
+upper percentile, and clipping/quantisation risks remain visible. RAW quantisation comes from
+LibRaw's actual code maximum; TIFF quantisation follows its sample format and colour transform,
+rather than guessing bit depth from an extension. Roll diagnostics persist with the project. Moving
+either endpoint manually immediately marks the old confidence and risk verdict as no longer applicable.
 
 > **The auto analysis is not 100% accurate — treat it as a starting point, not a finish line.**
 > Common things that throw it off:
 >
-> - **An under-exposed leader** — the analysis assumes the leader's exposed patch really is fully
->   exposed; if it is not, D_max is underestimated
+> - **No nearly fully exposed picture area anywhere on the roll** — RAW/TIFF input does not itself
+>   provide a known D-max, so the scene proxy will be shallow
 > - **A light blocker** or anything else in shot that should not be part of the statistics
 > - **Too much dust** — this hits the density endpoints in particular
 > - **Lens vignetting** — darkened edges contaminate the base and D_max statistics
 >
 > Vignetting can be partly corrected first with the **LCC flat field** under lens correction (shoot
-> an even light source with no film in the way), then re-run the analysis.
+> an even light source with no film in the way), then re-run the analysis. Keep the same input
+> family: RAW roll with RAW flat, TIFF roll with TIFF flat. A TIFF flat that has passed through an
+> ICC/colour matrix cannot safely be multiplied back into camera-native RAW channels.
 >
 > Either way, check the result by hand afterwards and re-sample where needed.
 
@@ -231,6 +248,11 @@ and a black-and-white roll needs that more than a colour one, having no colour l
 > curves you set stay in the project and come back when you switch to colour. Switching rebuilds
 > the roll's thumbnails.
 
+Black-and-white mode also changes the automatic carrier evidence rule. A colourless bare carrier
+that forms a separated, repeatable edge cluster can count as physical film base instead of being
+rejected by the colour-negative-only orange-mask test. Position, cluster separation and minimum
+area still apply, so a neutral bright edge or dust does not qualify merely for being colourless.
+
 ### 4.1 One-press mask removal
 
 The two buttons at the top of the panel are the shortcut through all of Stage 1. They run, in order:
@@ -253,8 +275,13 @@ The automatic pass only strings them together and runs them once.
 
 ### 4.2 Film base and mask removal (T_base / D_max)
 
-**Sample the film base** — click the button, then drag a rectangle over the **semi-transparent
-orange base**: between the sprocket holes, or the margin. It must contain **no picture at all**.
+**Sample the film base** — click the button, then drag a rectangle over the **bare carrier**: orange
+and semi-transparent on colour negative, normally colourless on black-and-white film. Use the area
+between sprocket holes or the margin; it must contain **no picture at all**.
+
+> Automatic calibration tries, in order: (1) a carrier-mask mode below a detected light-board cut;
+> (2) a narrow bare-carrier rebate along an edge; (3) the bright end of picture content. The third
+> is an inference, not a physical carrier measurement, and the interface warns accordingly.
 
 This is the most important step: it removes the orange mask and the D_min offset at once, and every
 density that follows is measured against it.
@@ -550,9 +577,13 @@ Both dimming approaches work:
 software identifies the three and shows a confirmation with each shot's ROI means; if it got one
 wrong, correct it per channel from the dropdown.
 
-**Calibration then proceeds exactly as for white light**: film base, white balance, D_max. The
-decouple matrix is computed at import, and the decouple strength α is determined adaptively from
-roll-wide samples — nothing to set by hand.
+**Endpoint calibration then proceeds exactly as for white light**: film base and highlight proxy.
+The decouple matrix is computed from the three calibration shots at import. Chroma back-pressure
+uses up to six frames spaced from the start to the end of the roll, measures yellow-blue and
+red-green amplification per frame, then reduces them robustly. Nearly achromatic frames whose ratio
+would mostly be noise are down-weighted; if the whole roll has too little signal on an axis, that
+axis stays neutral instead of fitting noise. With LCC, the fixed order is
+`LCC → decouple → chroma-amplification measurement`; there is nothing to set by hand.
 
 ---
 
@@ -575,10 +606,14 @@ each one came from**:
 
 - how the input domain was settled (read from the file's own declaration, or taken by convention —
   the latter being the thing to change first when a result looks wrong)
-- whether a camera matrix was available, and why not when it was not
-- the three T_base readings, whether they are this roll's calibration or the default, and whether
-  they have the R ≥ G ≥ B shape a colour negative's base must have
-- the inversion's six absolute densities and the three channels' spans
+- whether a camera matrix was available and why not when it was not, plus the RAW/TIFF source
+  quantisation step
+- the LCC source and dimensions, Path A calibration source, and the actual decouple and mandatory
+  chroma-restraint matrices
+- the three T_base readings, physical/content-inferred evidence and confidence, and whether they
+  have the R ≥ G ≥ B shape a colour negative's base must have
+- the inversion's six absolute densities and three spans, plus highlight-proxy confidence and
+  clipping/quantisation risk
 - output space, print film emulation, HDR
 
 There is a "Copy all" button for pasting into an issue. It divides work with **Help → Copy colour

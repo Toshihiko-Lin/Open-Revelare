@@ -4,11 +4,21 @@
 
 **改进**
 
+- **整卷自动去色罩改为可解释的稳健标定。** 片基明确区分灯板下的物理载体众数、边缘裸片基与画面内容推断，并报告支持帧、对数离散、置信度和量化风险；弱或互相矛盾的物理票不再冒充已确认片基。黑白卷可用同样的边缘拓扑识别无色载体，但灯板 / 扫描仪白边仍会被阈值排除。
+- **高光端点保持场景代理的语义，同时更稳健。** 跨帧颜色共识改用质量加权的对数色度 medoid；原来按 12 帧硬切换的深度策略改为随有效证据连续从 P100 趋近 P95 的稳健上分位。状态与工程会保存候选帧、有效帧、色度离散、自适应分位以及裁切 / 量化风险；靠近 3.0 D 真实密度边界的扫描黑位也不再被误报为无风险。
+- **Path A 分光标定更耐场景差异，且不增加原有采样预算。** 六张内容帧改为均匀覆盖整卷，YB / RG 轴放大按色度信号质量加权，近中性帧不再用噪声主导反压。LCC 先于 Path A 测量并应用；本帧技术报告现在列出解耦矩阵、反压矩阵及其实际 YB / RG 轴放大。
+- **大图 LCC 不再为每个局部补丁构造一整张缩放平场。** 全尺寸和局部渲染改用融合的双线性采样 + 除法，额外内存从 O(图像像素数) 降为 O(宽+高)；互动小图仍保留缓存。整卷 / 单张自动也会复用已测得的全分辨率灯板阈值，不再在高光阶段重复解码同一组样本。
+
 - **印样信息区改为更完整的实验室记录签章。** 页脚不再显示总帧数；只排入已填写的卷信息，空字段会前移、空行会收起，不保留占位。相机 / ISO / EI / 日期与冲洗信息使用 38% / 24% / 38% 的宽 / 窄 / 宽列网格，各列独立对齐标签与内容；`ISO / EI` 可在同一字段中记录标称感光度和实际曝光指数（如 `400 / 320`），长内容保持单行省略。信息字号与行距加大，中英文及数字统一使用沉稳的 CJK 衬线字体；左侧 `Revelare` Logo 上方新增居中的半窄体 `NEGATIVE CONVERSION BY` 来源签章，明确负片转换由 Revelare 完成。
 
 ---
 
 **Improved**
+
+- **Roll-wide automatic mask removal now produces an explainable, robust calibration.** Film-base evidence distinguishes a light-board-bounded physical carrier mode, a bare edge rebate and picture-content inference, with supporting-frame counts, log dispersion, confidence and quantisation risk. Weak or contradictory physical votes no longer masquerade as a confirmed carrier. Explicit monochrome mode can identify a colourless carrier by the same edge topology while still excluding the light board or scanner surround.
+- **The highlight endpoint remains explicitly a scene proxy, with more robust roll reduction.** Cross-frame colour consensus uses a quality-weighted log-chroma medoid, while the former 12-frame switch is replaced by a continuous robust upper percentile moving from P100 toward P95 as effective evidence grows. Candidate/effective frames, chroma dispersion, percentile, and clipping/quantisation risks persist with the project; scanner blacks near the 3.0 D real-density boundary are no longer reported as risk-free.
+- **Path A calibration is less scene-dependent without a larger sampling budget.** Six content samples are spread across the roll, YB/RG amplification is weighted by measurable chroma signal, and near-neutral frames cannot let noise dominate the restraint. LCC precedes Path A measurement and application. The frame report now records the decouple and restraint matrices plus the actual YB/RG amplification they cancel.
+- **Large-image LCC no longer builds a full resized flat field for every local patch.** A fused bilinear sample-and-divide path reduces extra memory from O(image pixels) to O(width + height), while interactive small frames retain caching. Single-frame and roll auto-calibration also reuse an already measured full-resolution light-board cut instead of decoding the same samples again for highlight detection.
 
 - **The contact-sheet information area is now a fuller lab-record signature.** The footer no longer prints the total frame count and lays out only completed roll fields, moving later values forward and collapsing empty rows instead of reserving placeholders. Camera / ISO / EI / date and processing details use a 38% / 24% / 38% broad / compact / broad grid with independently aligned label and value tracks. The combined `ISO / EI` field can record box speed and actual exposure index together (for example `400 / 320`), while long values remain on one ellipsized line. Larger type and spacing use one restrained CJK serif family across Chinese, Latin text and numerals; a centred, semi-condensed `NEGATIVE CONVERSION BY` provenance line above the `Revelare` wordmark identifies the negative conversion.
 

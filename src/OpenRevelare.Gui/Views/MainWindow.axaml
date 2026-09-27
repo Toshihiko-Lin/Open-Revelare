@@ -1000,7 +1000,7 @@
                                              那个数已经没有滑块，它的意义由 D_min 承担。-->
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseText}"
                                                    IsVisible="{Binding FilmBaseText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                   TextWrapping="Wrap" Foreground="{DynamicResource WarnBrush}" />
+                                                   TextWrapping="Wrap" />
                                         <!-- 只有这一组 RGB。片基透射率 T_base 不再给滑块：它与
                                              D_min 描述的是同一件事——黑端在哪、暗部偏什么色（实测
                                              改任一个都在动同一个量）。T_base 由【片基采样】写入，
@@ -1039,6 +1039,9 @@
                                                 </StackPanel>
                                             </Button>
                                         </Grid>
+                                        <TextBlock Classes="groupHint" Text="{Binding HighlightConfidenceText}"
+                                                   IsVisible="{Binding HighlightConfidenceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                                   TextWrapping="Wrap" />
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
                                                   IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
