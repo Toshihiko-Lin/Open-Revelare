@@ -26,15 +26,16 @@ namespace OpenRevelare.Tests;
 public sealed class LegacyVersusManagedRenderTests
 {
     /// <summary>
-    /// The ordinary case is BIT-IDENTICAL, and that is the load-bearing fact: migrating a plain
-    /// roll is a no-op for the picture, so the dialog's warning is about the minority of projects.
-    /// Adjustments ride along unchanged because they all run before the output boundary.
+    /// ManagedV2 deliberately differs from LegacyV1 here: display adjustments keep the RGB colour
+    /// together through the final bound instead of clipping each channel independently. The
+    /// migration therefore changes saturated edge cases while preserving the managed display
+    /// contract and its normalized output range.
     /// </summary>
     [Theory]
     [InlineData("sRGB")]
     [InlineData("DisplayP3")]
     [InlineData("AdobeRGB")]
-    public void No_print_lut_and_no_curves_renders_identically(string outputSpace)
+    public void No_print_lut_and_no_curves_uses_managed_colour_headroom(string outputSpace)
     {
         (float[] v1, float[] v2) = RenderBoth(() => new FrameParams
         {
@@ -48,7 +49,11 @@ public sealed class LegacyVersusManagedRenderTests
             Contrast = 0.08,
         });
 
-        Assert.Equal(v1, v2);
+        Assert.True(
+            v1.Zip(v2).Any(pair =>
+                BitConverter.SingleToInt32Bits(pair.First) != BitConverter.SingleToInt32Bits(pair.Second)),
+            $"ManagedV2 unexpectedly retained LegacyV1 output for {outputSpace}");
+        Assert.All(v2, value => Assert.InRange(value, 0.0f, 1.0f));
     }
 
     /// <summary>

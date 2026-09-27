@@ -144,7 +144,7 @@ public sealed class ManagedPrintLutOutputTests
     }
 
     [Fact]
-    public void Managed_v2_non_LUT_orchestration_preserves_the_existing_display_referred_math()
+    public void Managed_v2_non_LUT_orchestration_uses_the_open_colour_headroom_path()
     {
         var parameters = new FrameParams
         {
@@ -169,7 +169,11 @@ public sealed class ManagedPrintLutOutputTests
             ColorPipelineVersion.ManagedV2,
             neverCalled);
 
-        AssertFloatBitsEqual(expected.Data, managed.Pixels.Data, "ManagedV2 non-LUT Stage2");
+        Assert.True(
+            expected.Data.Zip(managed.Pixels.Data).Any(pair =>
+                BitConverter.SingleToInt32Bits(pair.First) != BitConverter.SingleToInt32Bits(pair.Second)),
+            "ManagedV2 must not retain the legacy per-channel-bound display result");
+        Assert.All(managed.Pixels.Data, value => Assert.InRange(value, 0.0f, 1.0f));
         Assert.Equal(
             BuiltInColorProfiles.DisplayP3(ProfileRole.Output).Identity,
             managed.OutputProfile.Identity);
@@ -395,7 +399,7 @@ public sealed class ManagedPrintLutOutputTests
     }
 
     [Fact]
-    public void Managed_v2_top_level_Rec709_LUT_is_bit_exact_to_frozen_non_curve_math()
+    public void Managed_v2_top_level_Rec709_LUT_applies_the_open_colour_headroom_path()
     {
         var parameters = new FrameParams
         {
@@ -415,7 +419,11 @@ public sealed class ManagedPrintLutOutputTests
             ColorPipelineVersion.ManagedV2,
             neverCalled);
 
-        AssertFloatBitsEqual(expected.Data, managed.Pixels.Data, "ManagedV2 Rec709 top-level");
+        Assert.True(
+            expected.Data.Zip(managed.Pixels.Data).Any(pair =>
+                BitConverter.SingleToInt32Bits(pair.First) != BitConverter.SingleToInt32Bits(pair.Second)),
+            "ManagedV2 must not retain the frozen per-channel-bound LUT result");
+        Assert.All(managed.Pixels.Data, value => Assert.InRange(value, 0.0f, 1.0f));
         Assert.Equal(0, neverCalled.LeaseCalls);
         Assert.Equal(ProfileRole.Output, managed.OutputProfile.Role);
         Assert.Equal(
