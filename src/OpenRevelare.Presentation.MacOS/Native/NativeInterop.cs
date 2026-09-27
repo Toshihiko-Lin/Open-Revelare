@@ -242,7 +242,7 @@ internal static class MacOSNativeLibraryResolver
     {
         if (!string.Equals(libraryName, LibraryName, StringComparison.Ordinal)) return nint.Zero;
 
-        string assemblyDirectory = Path.GetDirectoryName(assembly.Location) ?? AppContext.BaseDirectory;
+        string assemblyDirectory = AppContext.BaseDirectory;
         foreach (string candidate in CandidatePaths(AppContext.BaseDirectory, assemblyDirectory))
         {
             if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out nint handle))

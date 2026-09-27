@@ -91,8 +91,7 @@ internal static class Win32NativeLibraryResolver
         if (RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw new PlatformNotSupportedException("The OpenRevelare native presenter requires an x64 process.");
 
-        string? assemblyDirectory = Path.GetDirectoryName(assembly.Location);
-        if (string.IsNullOrEmpty(assemblyDirectory)) assemblyDirectory = AppContext.BaseDirectory;
+        string assemblyDirectory = AppContext.BaseDirectory;
         IReadOnlyList<string> candidates = CandidatePaths(AppContext.BaseDirectory, assemblyDirectory);
         foreach (string candidate in candidates)
         {

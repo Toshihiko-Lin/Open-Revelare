@@ -5,7 +5,7 @@
 #   ./packaging/linux/build-appimage.sh --no-publish   # 复用已有的 publish/linux-x64
 #
 # publish 这一步**可以在 Windows 上跨平台做**（dotnet publish -r linux-x64 不需要 Linux
-# 主机，实测 231 文件 / 138 MB），但 appimagetool 只能在 Linux 上跑。跨机拷来的产物
+# 主机，发布输出采用压缩单文件并保留外置原生库，但 appimagetool 只能在 Linux 上跑。跨机拷来的产物
 # 会丢执行位，本脚本统一补 chmod。
 set -euo pipefail
 
