@@ -438,6 +438,11 @@ static int Run(string[] args)
                         return folded;
                     }).ToList();
                 }
+                if (frames.Count == 0 || vals is { Count: 0 })
+                {
+                    Console.Error.WriteLine("fb-roll requires at least one decodable frame");
+                    return 2;
+                }
                 double? thr = opts.TryGetValue("fb-sprocket-threshold", out var ft) ? ParseD(ft) : null;
                 // ⚠ Both t_base_roll lines are NO LONGER a Python parity check: the per-frame
                 // pick is now co-sited (one physical patch supplies all three channels), which

@@ -48,6 +48,7 @@ namespace OpenRevelare.Gui.ViewModels;
 public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private const int PreviewMaxEdge = 1600;
+    private const int AnalysisMaxEdge = 900;
 
     // The editor keeps the typed admission/profile identity with the pixels. Existing image math
     // can continue to consume the convenience view without reopening an untyped colour boundary.
@@ -2641,6 +2642,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task AutoInvertRollAsync()
     {
+        try
+        {
+            await AutoInvertRollCoreAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            ReportBackground("");
+            RollAnalysisPending = false;
+            StatusText = Loc.T("整卷分析失败：") + ex.Message;
+            RestartThumbnails();
+        }
+        finally
+        {
+            ReleaseBulkBuffers();
+        }
+    }
+
+    private async Task AutoInvertRollCoreAsync()
+    {
         if (_previewLinear is null) return;
 
         // Cancellation must cover stage 1 as well as the roll-wide pass. Creating the token
@@ -2712,7 +2735,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // parameters — so drop them now rather than only at the end of stage 2. Otherwise the
         // strip shows raw negatives for the whole length of the roll analysis.
         foreach (RollFrame f in Frames) SetThumbnail(f, null);
-        RestartThumbnails();
         StatusText = Loc.T("去色罩（当前帧）完成，正在分析整卷 …");
 
         // ── Stage 2: pool the whole roll ───────────────────────────────────────────────────
@@ -2788,6 +2810,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                     return;
                 }
+
+                raw = Resample.Box(raw, AnalysisMaxEdge);
 
                 // Restrict to the KEPT PICTURE before measuring anything — the same rule
                 // AutoRegion states for the single-frame path. What PreviewAsync returns is the
@@ -2865,6 +2889,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 StatusText = failed > 0
                     ? Loc.F($"整卷分析未完成：{failed} 帧解码失败（{failReason}），保留当前帧的结果")
                     : Loc.T("整卷分析未完成：没有可用的帧，保留当前帧的结果");
+                RestartThumbnails();
                 return;
             }
 
@@ -2995,6 +3020,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ReportBackground("");
             RollAnalysisPending = false;
             StatusText = Loc.T("整卷分析去色罩失败：") + ex.Message;
+            RestartThumbnails();
         }
     }
 

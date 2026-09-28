@@ -182,7 +182,9 @@ public partial class MainViewModel
 
         bool wantClipping = ShowClipping;
 
-        (Bitmap bmp, HistogramData hist, Bitmap thumb, WriteableBitmap? clip,
+        bool wantThumbnail = frame is not null && !RollAnalysisPending;
+
+        (Bitmap bmp, HistogramData hist, Bitmap? thumb, WriteableBitmap? clip,
          PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(() =>
         {
             Bitmap? bitmap = null;
@@ -219,15 +221,18 @@ public partial class MainViewModel
                 // Not on an HDR roll, though: the strip is an SDR surface and shows the SDR rendition
                 // (D-031), which is a different shoulder, not a scaled copy of the extended render.
                 // A second pass over a 256 px source is a few milliseconds; the SDR roll keeps the copy.
-                RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
-                    ? Pipeline.Render(
-                        source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
-                        p.SdrRendition(),
-                        pipelineVersion,
-                        ColorManagement)
-                    : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
-                ct.ThrowIfCancellationRequested();
-                thumbnail = BuildFallbackBitmap(thumbnailFrame);
+                if (wantThumbnail)
+                {
+                    RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
+                        ? Pipeline.Render(
+                            source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
+                            p.SdrRendition(),
+                            pipelineVersion,
+                            ColorManagement)
+                        : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
+                    ct.ThrowIfCancellationRequested();
+                    thumbnail = BuildFallbackBitmap(thumbnailFrame);
+                }
                 bitmap = BuildFallbackBitmap(rendered, scene);
                 return (bitmap, h, thumbnail, clipping,
                         scene, clipScene, rendered);
@@ -252,7 +257,8 @@ public partial class MainViewModel
                 clip,
                 clipScene,
                 refreshSprocketMask: true);
-            if (frame is not null) SetThumbnail(frame, thumb); else thumb.Dispose();
+            if (frame is not null && thumb is not null) SetThumbnail(frame, thumb);
+            else thumb?.Dispose();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();
         else await Dispatcher.UIThread.InvokeAsync(Apply);

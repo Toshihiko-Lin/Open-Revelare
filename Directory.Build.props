@@ -3,13 +3,9 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);**\*.sync-conflict-*</DefaultItemExcludes>
   </PropertyGroup>
 
-  <!-- Release artifacts are distributed per RID. Bundle managed assemblies into the apphost and
-       compress them, while leaving app-owned native libraries beside it so the platform loaders
-       and their integrity checks keep working. -->
+  <!-- Release artifacts keep native and managed files separately so platform loaders can resolve
+       app-owned libraries from the publish directory. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <PublishSingleFile Condition="'$(RuntimeIdentifier)' != '' and '$(PublishSingleFile)' == ''">true</PublishSingleFile>
-    <EnableCompressionInSingleFile Condition="'$(PublishSingleFile)' == 'true'">true</EnableCompressionInSingleFile>
-    <IncludeNativeLibrariesForSelfExtract Condition="'$(PublishSingleFile)' == 'true'">false</IncludeNativeLibrariesForSelfExtract>
     <DebugSymbols>false</DebugSymbols>
     <DebugType>None</DebugType>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
