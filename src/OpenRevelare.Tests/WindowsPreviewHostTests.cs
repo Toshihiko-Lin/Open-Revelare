@@ -224,7 +224,16 @@ public sealed class WindowsPreviewHostTests
         state.SetPresenterAvailable(true);
         state.Reapply(containerHwnd, effectivelyVisible: true);
         Assert.True(native.LastVisible);
-        Assert.Equal([true, false, true, false, true], native.VisibilityCalls);
+
+        state.SetManagedOverlayActive(true);
+        state.Reapply(containerHwnd, effectivelyVisible: true);
+        Assert.False(native.LastVisible);
+        Assert.False(state.ShouldExposeNative(effectivelyVisible: true));
+
+        state.SetManagedOverlayActive(false);
+        state.Reapply(containerHwnd, effectivelyVisible: true);
+        Assert.True(native.LastVisible);
+        Assert.Equal([true, false, true, false, true, false, true], native.VisibilityCalls);
     }
 
     private static DisplayContract Contract(long revision) => new(

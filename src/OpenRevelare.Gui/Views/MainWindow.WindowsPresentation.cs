@@ -286,6 +286,8 @@ public partial class MainWindow
         try
         {
             ActivePreview!.PresentNewest(buffer);
+            if (Volatile.Read(ref _restoreNativeAfterCropPresentation))
+                Dispatcher.UIThread.Post(RestoreNativeAfterCropPresentation, DispatcherPriority.Render);
             Dispatcher.UIThread.Post(UpdateWindowsColorStatus, DispatcherPriority.Background);
         }
         catch (PresentationContractException)

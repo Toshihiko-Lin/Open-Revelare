@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.8.3（2026-09-28）
+
+**修复**
+
+- **裁切选框拖动恢复流畅。** 实测卡顿来自原生预览在每次指针移动时重组并打包整幅 FP16 视口，并非裁切触发了解码。Windows 裁切期间现在直接使用已生成的托管预览移动轻量选框，原生宿主会完整让出预览区域以避免切换黑屏；松手并完成最终呈现后再恢复原生色彩表面。
+
+---
+
+**Fixed**
+
+- **Crop-frame dragging is responsive again.** Tracing showed that every pointer move recomposed and packed the entire native FP16 viewport; no decode was involved. On Windows, cropping now moves a lightweight overlay over the already-rendered managed preview. The native host fully yields the viewport during editing to avoid a black transition, then restores the native colour surface after the settled frame is presented.
+
 ## v1.8.2（2026-09-27）
 
 **改进**

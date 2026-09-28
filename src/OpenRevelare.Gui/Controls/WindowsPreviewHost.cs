@@ -180,6 +180,19 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
         private set => SetAndRaise(IsPresenterAvailableProperty, ref _isPresenterAvailable, value);
     }
 
+    /// <summary>Temporarily exposes Avalonia's managed preview and overlay without tearing down
+    /// the native presenter. Used by direct-manipulation tools whose geometry must follow the
+    /// pointer faster than a full viewport-sized FP16 frame can be composed and uploaded.</summary>
+    internal void SetManagedOverlayActive(bool active)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        _airspaceState.SetManagedOverlayActive(active);
+        bool shouldBeVisible = IsPresenterAvailable && !active;
+        if (IsVisible != shouldBeVisible) IsVisible = shouldBeVisible;
+        if (_containerHandle is { } container)
+            _airspaceState.Reapply(container.Handle, IsEffectivelyVisible);
+    }
+
     /// <summary>True only while the container WndProc bridge is successfully installed.</summary>
     public bool CanRoutePointerInputToAvalonia
     {
@@ -770,7 +783,8 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
         // NativeControlHost's attachment chooses HideWithSize/ShowInBounds from IsVisible.
         // Updating it immediately closes the interval before the next AfterRender pass; the
         // direct container HWND call is only a second line of defense.
-        if (IsVisible != presenterAvailable) IsVisible = presenterAvailable;
+        bool shouldBeVisible = presenterAvailable && !_airspaceState.ManagedOverlayActive;
+        if (IsVisible != shouldBeVisible) IsVisible = shouldBeVisible;
         TryUpdateNativeControlPosition();
         _airspaceState.Reapply(containerHwnd, IsEffectivelyVisible);
     }
@@ -780,7 +794,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
         IPlatformHandle? container = _containerHandle;
         if (container is null) return;
 
-        if (!_airspaceState.PresenterAvailable && IsVisible)
+        if ((!_airspaceState.PresenterAvailable || _airspaceState.ManagedOverlayActive) && IsVisible)
         {
             IsVisible = false;
             return;
@@ -857,12 +871,15 @@ internal sealed class WindowsPreviewAirspaceState(IWindowsPreviewNativeVisibilit
         nativeVisibility ?? throw new ArgumentNullException(nameof(nativeVisibility));
 
     internal bool PresenterAvailable { get; private set; }
+    internal bool ManagedOverlayActive { get; private set; }
 
     internal void SetPresenterAvailable(bool presenterAvailable) =>
         PresenterAvailable = presenterAvailable;
 
+    internal void SetManagedOverlayActive(bool active) => ManagedOverlayActive = active;
+
     internal bool ShouldExposeNative(bool effectivelyVisible) =>
-        PresenterAvailable && effectivelyVisible;
+        PresenterAvailable && effectivelyVisible && !ManagedOverlayActive;
 
     internal void Reapply(nint containerHwnd, bool effectivelyVisible) =>
         _nativeVisibility.SetVisible(

@@ -223,6 +223,8 @@ public partial class MainWindow : Window
     private string? _cropHandle;                 // tl t tr r br b bl l | move | new
     private Point _cropDragStartNorm;
     private (double X, double Y, double W, double H) _cropDragStartRect;
+    private bool _managedCropOverlay;
+    private bool _restoreNativeAfterCropPresentation;
     private const double HandleScreenSize = 10.0;
     private const double HandleGrabTol = 12.0;   // screen px, as in the source
     private readonly Rectangle[] _cropHandleShapes = new Rectangle[8];
@@ -639,13 +641,26 @@ public partial class MainWindow : Window
     private void RenderCropFrame()
     {
         bool show = _mode == SampleMode.Crop && _cropDraft is not null && LetterboxRect() is not null;
-        foreach (Control c in new Control[] { CropDimT, CropDimB, CropDimL, CropDimR, CropFrame,
-                                              CropV1, CropV2, CropH1, CropH2 })
-            c.IsVisible = show;
-        foreach (Rectangle r in _cropHandleShapes) if (r is not null) r.IsVisible = show;
-        if (!show)
+        // A native crop frame costs a full viewport-sized FP16 compose + pack for every pointer
+        // move (20–55 ms at only ~0.9 MP in the traced reproduction). While the crop tool is open
+        // on Windows, expose the already-current managed preview underneath the airspace HWND and
+        // let Avalonia move these lightweight shapes directly. The native presenter stays alive
+        // and is revealed again only after the settled frame has actually been presented.
+        bool drawWithAvalonia = _managedCropOverlay || ActivePreview?.IsPresenterAvailable != true;
+        bool showAvalonia = show && drawWithAvalonia;
+        // All overlay parts transition together. Once the native presenter has hidden them, the
+        // hot drag path skips every Avalonia property write (and the temporary Control[] that the
+        // old loop allocated for each pointer event).
+        if (CropFrame.IsVisible != showAvalonia)
         {
-            QueueWindowsPresentation();
+            foreach (Control c in new Control[] { CropDimT, CropDimB, CropDimL, CropDimR, CropFrame,
+                                                  CropV1, CropV2, CropH1, CropH2 })
+                c.IsVisible = showAvalonia;
+            foreach (Rectangle r in _cropHandleShapes) if (r is not null) r.IsVisible = showAvalonia;
+        }
+        if (!show || !drawWithAvalonia)
+        {
+            if (!_managedCropOverlay) QueueWindowsPresentation();
             return;
         }
 
@@ -688,7 +703,29 @@ public partial class MainWindow : Window
             _cropHandleShapes[i].StrokeThickness = 1.0 * inv;
             Put(_cropHandleShapes[i], pos[i].X - half, pos[i].Y - half, hs, hs);
         }
-        QueueWindowsPresentation();
+        if (!_managedCropOverlay) QueueWindowsPresentation();
+    }
+
+    private void BeginManagedCropOverlay()
+    {
+        if (!OperatingSystem.IsWindows() || !WindowsPreview.IsPresenterAvailable) return;
+        _restoreNativeAfterCropPresentation = false;
+        _managedCropOverlay = true;
+        WindowsPreview.SetManagedOverlayActive(true);
+    }
+
+    private void EndManagedCropOverlay()
+    {
+        if (!_managedCropOverlay) return;
+        _restoreNativeAfterCropPresentation = true;
+    }
+
+    private void RestoreNativeAfterCropPresentation()
+    {
+        if (!_restoreNativeAfterCropPresentation || _mode == SampleMode.Crop) return;
+        _restoreNativeAfterCropPresentation = false;
+        _managedCropOverlay = false;
+        WindowsPreview.SetManagedOverlayActive(false);
     }
 
     private void CommitCrop()
@@ -948,6 +985,7 @@ public partial class MainWindow : Window
             // Show the whole frame while the crop is being placed, and start from the crop
             // already applied (so re-entering adjusts it) or a fresh centred draft.
             if (Vm is not null) Vm.CropEditing = true;
+            BeginManagedCropOverlay();
             _cropDraft = Vm?.CurrentCrop;
             if (_cropDraft is null) BeginCropDraft(); else RenderCropFrame();
             // Take focus off whatever armed the mode (the preset combo swallows Enter), so the
@@ -1032,6 +1070,7 @@ public partial class MainWindow : Window
         _cropDraft = null;
         _cropHandle = null;
         if (Vm is not null) Vm.CropEditing = false;
+        EndManagedCropOverlay();
         CropApplyBtn.IsVisible = false;
         CropCancelBtn.IsVisible = false;
         RenderCropFrame();          // gated on _mode, which the caller has already moved on
