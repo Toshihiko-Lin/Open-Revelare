@@ -4,15 +4,15 @@
 
 **修复**
 
-- **裁切选框拖动恢复流畅。** 实测卡顿来自原生预览在每次指针移动时重组并打包整幅 FP16 视口，并非裁切触发了解码。Windows 裁切期间现在直接使用已生成的托管预览移动轻量选框，原生宿主会完整让出预览区域以避免切换黑屏；松手并完成最终呈现后再恢复原生色彩表面。
-- **降低整卷分析闪退风险。** 自动分析使用受控尺寸的采样缓冲，分析期间不并行重建缩略图，异常会回到界面提示并在结束后回收大对象；空输入的诊断命令也会安全退出。Windows 发布恢复为独立文件，避免原生库搜索受 single-file 打包影响。
+- 裁切选框拖动卡顿及 Windows 预览切换黑屏。
+- 整卷自动分析闪退和高内存占用；诊断命令空输入也能安全退出。
 
 ---
 
 **Fixed**
 
-- **Crop-frame dragging is responsive again.** Tracing showed that every pointer move recomposed and packed the entire native FP16 viewport; no decode was involved. On Windows, cropping now moves a lightweight overlay over the already-rendered managed preview. The native host fully yields the viewport during editing to avoid a black transition, then restores the native colour surface after the settled frame is presented.
-- **Reduced crash risk during roll analysis.** Automatic analysis now uses bounded-size sampling buffers, pauses thumbnail rebuilding while pooling frames, reports unexpected failures in the UI and compacts transient large objects afterward; empty diagnostic input exits cleanly. Windows releases use separate files again so native-library lookup is not affected by single-file packaging.
+- Fixed crop-frame dragging lag and the black transition when switching Windows previews.
+- Reduced roll-analysis crashes and memory use; diagnostic commands now handle empty input safely.
 
 ## v1.8.2（2026-09-27）
 
