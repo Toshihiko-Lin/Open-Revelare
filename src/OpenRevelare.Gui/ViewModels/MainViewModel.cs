@@ -48,7 +48,17 @@ namespace OpenRevelare.Gui.ViewModels;
 public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private const int PreviewMaxEdge = 1600;
-    private const int AnalysisMaxEdge = 900;
+    // Roll calibration is statistical: its estimators use regions, quantiles and agreement
+    // across frames, not one-pixel detail.  Keeping 900 px copies made the v1.8.2 background
+    // pass retain as many as four ~9.7 MB float buffers per frame (raw/value, cropped/uncropped).
+    // A 36-frame roll could therefore pin well over a gigabyte after the decoder and preview
+    // cache had taken their share.  macOS unified-memory machines may be jetsam-terminated under
+    // that pressure, which looks like an exception-free intermittent crash.  512 px still gives
+    // every estimator tens of thousands of samples while cutting retained analysis pixels by 68%.
+    private const int AnalysisMaxEdge = 512;
+    // Decode admission is memory-gated, but the Stage-1/crop buffers made after a decode are not.
+    // Bound that unaccounted allocation fan-out independently of the decode worker preference.
+    private const int AnalysisWorkers = 2;
 
     // The editor keeps the typed admission/profile identity with the pixels. Existing image math
     // can continue to consume the convenience view without reopening an untyped colour boundary.
@@ -73,7 +83,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>In-flight decodes, keyed by path. A frame switch and the roll warm-up routinely
     /// want the same file at the same instant (the roll warms from the current frame outward, and
     /// that is exactly the frame being switched to); without this they would each decode it.</summary>
-    private readonly Dictionary<string, Task<PreviewCache.Entry>> _decoding = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (long Generation, Task<PreviewCache.Entry> Task)> _decoding =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// How much slack the region decode leaves around a split frame, as a fraction of the frame's
@@ -420,11 +431,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         TiffInputAssumption tiffInputAssumption)
     {
         string key = PreviewKey(path, preCrop, pipelineVersion, tiffInputAssumption);
+        long generation = _previews.Generation;
 
-        if (_previews.Get(key) is { } hit) { CaptureTile(key, hit.Working); return Task.FromResult(hit); }
+        if (_previews.Get(key) is { } hit)
+        {
+            CaptureTile(key, hit.Working, generation);
+            return Task.FromResult(hit);
+        }
         lock (_decoding)
         {
-            if (_decoding.TryGetValue(key, out Task<PreviewCache.Entry>? running)) return running;
+            if (_decoding.TryGetValue(key, out var running) && running.Generation == generation)
+                return running.Task;
             Task<PreviewCache.Entry> task = Task.Run(() =>
             {
                 // Straight to preview size: the full-resolution float frame this used to decode
@@ -444,12 +461,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         ColorManagement,
                         tiffInputAssumption);
                 var e = new PreviewCache.Entry(preview, srcW, srcH);
-                _previews.Put(key, e.Working, e.SourceWidth, e.SourceHeight);
-                CaptureTile(key, e.Working);
+                if (_previews.PutIfCurrent(key, e.Working, e.SourceWidth, e.SourceHeight, generation))
+                    CaptureTile(key, e.Working, generation);
                 return e;
             });
-            _decoding[key] = task;
-            _ = task.ContinueWith(_ => { lock (_decoding) _decoding.Remove(key); },
+            _decoding[key] = (generation, task);
+            _ = task.ContinueWith(completed =>
+                {
+                    lock (_decoding)
+                    {
+                        if (_decoding.TryGetValue(key, out var current) &&
+                            ReferenceEquals(current.Task, completed))
+                            _decoding.Remove(key);
+                    }
+                },
                                   TaskScheduler.Default);
             return task;
         }
@@ -477,10 +502,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private const int TileMaxEdge = 320;   // ≈ the cell width of a 2048 px sheet at 6 columns
     private readonly Dictionary<string, WorkingFrame> _tiles = new(StringComparer.OrdinalIgnoreCase);
 
-    private void CaptureTile(string key, WorkingFrame preview)
+    private void CaptureTile(string key, WorkingFrame preview, long generation)
     {
         lock (_tiles)
         {
+            if (_previews.Generation != generation) return;
             if (_tiles.ContainsKey(key)) return;
             _tiles[key] = preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge));
         }
@@ -494,6 +520,32 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     private void ClearTiles() { lock (_tiles) _tiles.Clear(); }
+
+    private void ClearPreviewCaches()
+    {
+        // Keep cache invalidation and tile insertion under one gate: a decode from the previous
+        // roll must never repopulate either cache after a switch.
+        lock (_tiles)
+        {
+            _previews.Clear();
+            _tiles.Clear();
+        }
+    }
+
+    private void ProtectNearbyPreviews(RollFrame frame)
+    {
+        int index = Frames.IndexOf(frame);
+        if (index < 0) return;
+        var keys = new List<string>(3);
+        for (int offset = -1; offset <= 1; offset++)
+        {
+            int neighbour = index + offset;
+            if (neighbour < 0 || neighbour >= Frames.Count) continue;
+            RollFrame candidate = Frames[neighbour];
+            keys.Add(PreviewKey(candidate.Path, SplitCropOf(candidate)));
+        }
+        _previews.Protect(keys);
+    }
 
     /// <summary>Single-slot full-resolution buffer, kept ONLY between the decode and the export
     /// that asked for it. Full-res is ~288 MB for 24 MP, so it is decoded lazily (export path
@@ -1490,6 +1542,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             PreviewCache.Entry entry = await PreviewAsync(frame.Path, pre);
             if (tok != _switchToken) return;
             AdoptPreview(frame, entry, pre, key);
+            ProtectNearbyPreviews(frame);
             _dragSmall = null;               // belongs to the buffer we just replaced
             OnPropertyChanged(nameof(CropFrameSize));
             ScheduleRender();
@@ -2784,10 +2837,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await Parallel.ForEachAsync(order, new ParallelOptions
             {
                 CancellationToken = ct,
-                // Same worker count as the warm-up, and for the same reason: the two passes
-                // share decodes through PreviewAsync, and asking in the same width keeps this
-                // one from queueing behind frames the warm-up has not reached.
-                MaxDegreeOfParallelism = ImageIo.PreviewWorkers,
+                // PreviewAsync still shares the warm-up's cache and in-flight decodes.  The
+                // work after each decode is different, though: it allocates Stage-1 and crop
+                // buffers outside the decode memory gate, so keep that fan-out deliberately
+                // narrower than the warm-up.
+                MaxDegreeOfParallelism = Math.Min(ImageIo.PreviewWorkers, AnalysisWorkers),
             }, async (item, token) =>
             {
                 var (rollIndex, path, pre, frame) = item;

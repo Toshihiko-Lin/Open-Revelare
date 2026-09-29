@@ -234,8 +234,7 @@ public partial class MainViewModel
         _switchToken++;
         ClearSharpPatch();
 
-        _previews.Clear();
-        ClearTiles();
+        ClearPreviewCaches();
         _negativeWb.Clear();
         lock (_decoding) _decoding.Clear();
         lock (_fullSlotGate) _fullSlot = null;
@@ -362,7 +361,7 @@ public partial class MainViewModel
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
         CancelRollAnalysis();
-        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
+        ClearPreviewCaches(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
         lock (_decoding) _decoding.Clear();
 
         // Detach from the outgoing roll BEFORE its state is replaced — same reason as in
@@ -544,7 +543,7 @@ public partial class MainViewModel
 
         // Preparation was side-effect free. From this point onward the incoming roll is being
         // adopted, so retire every cache whose pixels were decoded under the outgoing contract.
-        _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
+        ClearPreviewCaches(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;
         lock (_decoding) _decoding.Clear();
 
         // Retain calibration SOURCE paths so a saved .ncproj can recompute matrices on load.
@@ -647,6 +646,7 @@ public partial class MainViewModel
         var negs = new ImageBuffer[nF];            // content frames at 720, pre-decouple
         double[]? lccCentre = lccField is null ? null : DecoupleCalibration.RoiMean(lccField);
         int done = 0, total = 3 + nF;
+        long cacheGeneration = _previews.Generation;
 
         ReportBackground(Loc.F($"解码校正图与内容帧 0/{total} …"));
         // Same worker count as every other roll-wide pass; ImageIo's gate weighs the three
@@ -688,8 +688,8 @@ public partial class MainViewModel
                         preCrop: null,
                         pipelineVersion,
                         tiffInputAssumption);
-                    _previews.Put(previewKey, outs[0], srcW, srcH);
-                    CaptureTile(previewKey, outs[0]);
+                    if (_previews.PutIfCurrent(previewKey, outs[0], srcW, srcH, cacheGeneration))
+                        CaptureTile(previewKey, outs[0], cacheGeneration);
                 }
                 negs[fi] = outs[1].Pixels;
             }
@@ -798,7 +798,7 @@ public partial class MainViewModel
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         if (!_configLoad)   // the config path already cleared, and has since cached real work
         {
-            _previews.Clear(); ClearTiles(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;   // never serve the previous roll's pixels
+            ClearPreviewCaches(); _negativeWb.Clear(); _fullSlot = null; _regionSlot = null;   // never serve the previous roll's pixels
             lock (_decoding) _decoding.Clear();
         }
         foreach (RollFrame f in Frames) Retire(f.Thumbnail);   // the outgoing roll's strip
@@ -925,6 +925,7 @@ public partial class MainViewModel
         // SelectedItem binding, autosave, the auto-invert chain) would otherwise stamp the
         // incoming frame with the outgoing frame's state.
         _paramsLoaded = false;
+        ProtectNearbyPreviews(frame);
         try
         {
             // Cache hit → no decode at all; otherwise join whoever is already decoding this file.
@@ -952,6 +953,7 @@ public partial class MainViewModel
             HasImage = true;
             LoadParams(frame.Params);          // sets UI (suppressed) + renders
             _paramsLoaded = true;              // _cropRect now describes THIS frame
+            ProtectNearbyPreviews(frame);
             int idx = Frames.IndexOf(frame);
             StatusText = $"{FileName} — {entry.SourceWidth}×{entry.SourceHeight}（{idx + 1}/{Frames.Count}）";
             if (!_restoring) SetUndoBaseline();   // new frame's state is the fresh undo baseline

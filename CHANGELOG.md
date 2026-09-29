@@ -5,14 +5,16 @@
 **修复**
 
 - 裁切选框拖动卡顿及 Windows 预览切换黑屏。
-- 整卷自动分析闪退和高内存占用；诊断命令空输入也能安全退出。
+- 降低整卷自动分析的内存峰值和闪退风险；诊断命令空输入也能安全退出。
+- Windows 与 macOS 预览缓存会随内存压力回收远处图片，同时保留当前及相邻帧；后台优先预热两侧邻帧，切换图片更流畅。
 
 ---
 
 **Fixed**
 
 - Fixed crop-frame dragging lag and the black transition when switching Windows previews.
-- Reduced roll-analysis crashes and memory use; diagnostic commands now handle empty input safely.
+- Reduced roll-analysis memory peaks and crash risk; diagnostic commands now handle empty input safely.
+- On Windows and macOS, the preview cache releases distant frames under memory pressure while retaining the current and adjacent frames; background warm-up prioritizes both neighbours for smoother switching.
 
 ## v1.8.2（2026-09-27）
 

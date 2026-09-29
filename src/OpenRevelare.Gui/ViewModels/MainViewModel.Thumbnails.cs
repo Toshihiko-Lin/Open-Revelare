@@ -120,7 +120,8 @@ public partial class MainViewModel
     /// </summary>
     private async Task WarmRollAsync(CancellationToken ct)
     {
-        // Start at the current frame and walk outward: the neighbours get visited next.
+        // Start at the current frame and alternate right/left neighbours. The adjacent frames
+        // become ready first in both directions, matching how people browse a film strip.
         List<RollFrame> frames = Frames.ToList();
         if (frames.Count == 0) return;
         int start = Math.Max(0, CurrentFrame is { } cur ? frames.IndexOf(cur) : 0);
@@ -133,7 +134,8 @@ public partial class MainViewModel
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < frames.Count; i++)
         {
-            RollFrame f = frames[(start + i) % frames.Count];
+            int offset = (i & 1) == 0 ? -(i / 2) : (i + 1) / 2;
+            RollFrame f = frames[(start + offset + frames.Count) % frames.Count];
             var pre = SplitCropOf(f);
             if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre));
         }

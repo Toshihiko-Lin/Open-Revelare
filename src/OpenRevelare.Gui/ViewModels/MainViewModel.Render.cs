@@ -246,7 +246,7 @@ public partial class MainViewModel
             }
         }, ct);
 
-        if (ct.IsCancellationRequested) { bmp.Dispose(); thumb.Dispose(); clip?.Dispose(); return; }
+        if (ct.IsCancellationRequested) { bmp.Dispose(); thumb?.Dispose(); clip?.Dispose(); return; }
         void Apply()
         {
             PublishCompletePreview(
