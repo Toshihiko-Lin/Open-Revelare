@@ -678,6 +678,9 @@
                             <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
                                    IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"
                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                            <Image Source="{Binding DustMaskOverlay}" Stretch="Uniform"
+                                   IsVisible="{Binding ShowDustMask}" IsHitTestVisible="False"
+                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                             <Image Source="{Binding ClippingOverlay}" Stretch="Uniform"
                                    IsVisible="{Binding ShowClipping}" IsHitTestVisible="False"
                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
@@ -685,7 +688,8 @@
                                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                     PointerPressed="OnOverlayPressed"
                                     PointerMoved="OnOverlayMoved"
-                                    PointerReleased="OnOverlayReleased">
+                                    PointerReleased="OnOverlayReleased"
+                                    PointerExited="OnOverlayExited">
                                 <Rectangle Name="SelRect" IsVisible="False"
                                            Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
                                            StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}"
@@ -720,6 +724,19 @@
                                 <Line Name="SelLine" IsVisible="False"
                                       Stroke="{x:Static views:PreviewOverlayStyle.StraightenBrush}"
                                       StrokeThickness="{x:Static views:PreviewOverlayStyle.StraightenStrokeThickness}" />
+                                <Polyline Name="DustStrokePath" IsVisible="False" IsHitTestVisible="False"
+                                          Stroke="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}"
+                                          StrokeLineCap="Round"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}" />
+                                <Ellipse Name="DustStrokeStart" IsVisible="False" IsHitTestVisible="False"
+                                         Fill="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}" />
+                                <!-- Live repair/erase footprint. The Windows native presenter also
+                                     receives this ring as line primitives; this Ellipse is the
+                                     platform-neutral/fallback rendering path. -->
+                                <Ellipse Name="DustBrushRing" IsVisible="False" IsHitTestVisible="False"
+                                         Stroke="{x:Static views:PreviewOverlayStyle.DustBrushBrush}"
+                                         StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}"
+                                         Fill="{x:Static views:PreviewOverlayStyle.DustBrushFillBrush}" />
                             </Canvas>
                         </Grid>
                     </Grid>
@@ -1260,6 +1277,30 @@
                     </Border>
                     <Border Grid.Row="1">
                         <StackPanel Spacing="0" Margin="22,0,14,14">
+                            <!-- Non-destructive source-domain dust repair. -->
+                            <Expander Header="{i18n:T '除尘 / 修复'}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '使用修复笔标记灰尘，邻近纹理会非破坏性补入；预览与导出结果一致。'}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <CheckBox Content="{i18n:T '启用除尘'}" IsChecked="{Binding DustEnabled}" IsEnabled="{Binding HasImage}" />
+                                        <CheckBox Content="{i18n:T '显示修复范围'}" IsChecked="{Binding ShowDustMask}" IsEnabled="{Binding HasImage}" />
+                                    </StackPanel>
+                                    <ctl:SliderRow Label="{i18n:T '笔刷半径'}" Minimum="0.001" Maximum="0.03" Decimals="4" Increment="0.001" DefaultValue="0.006" Value="{Binding DustBrushSize}" />
+                                    <Grid ColumnDefinitions="*,*">
+                                        <ToggleButton Name="DustAddBtn" Grid.Column="0" Classes="sampling"
+                                                      Click="OnDustAddClick" IsEnabled="{Binding HasImage}"
+                                                      Content="{i18n:T '修复笔'}" />
+                                        <ToggleButton Name="DustEraseBtn" Grid.Column="1" Classes="sampling" Margin="6,0,0,0"
+                                                      Click="OnDustEraseClick" IsEnabled="{Binding HasImage}"
+                                                      Content="{i18n:T '擦除笔'}" />
+                                    </Grid>
+                                    <TextBlock Classes="groupHint">
+                                        <Run Text="{i18n:T '修复点：'}" /><Run Text="{Binding DustSpotCount}" />
+                                    </TextBlock>
+                                    <Button Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick" IsEnabled="{Binding HasImage}" />
+                                </StackPanel>
+                            </Expander>
+
                             <!-- 齿孔遮罩 -->
                             <Expander Header="{i18n:T '齿孔遮罩'}">
                                 <StackPanel Spacing="4">

@@ -123,6 +123,7 @@ internal sealed class WindowsPreviewInputBridge : IDisposable
     private readonly IWindowsPreviewInputNative _native;
     private readonly nint _containerHwnd;
     private readonly nint _topLevelHwnd;
+    private readonly Action<WindowsPreviewInputPoint>? _pointerMoved;
     private readonly WindowsPreviewWindowProcedure _windowProcedure;
     private readonly nint _previousProcedure;
     private volatile bool _installed;
@@ -130,11 +131,13 @@ internal sealed class WindowsPreviewInputBridge : IDisposable
     private WindowsPreviewInputBridge(
         IWindowsPreviewInputNative native,
         nint containerHwnd,
-        nint topLevelHwnd)
+        nint topLevelHwnd,
+        Action<WindowsPreviewInputPoint>? pointerMoved)
     {
         _native = native;
         _containerHwnd = containerHwnd;
         _topLevelHwnd = topLevelHwnd;
+        _pointerMoved = pointerMoved;
         _windowProcedure = WindowProcedure;
         _previousProcedure = native.InstallWindowProcedure(containerHwnd, _windowProcedure);
         if (_previousProcedure == nint.Zero)
@@ -147,24 +150,27 @@ internal sealed class WindowsPreviewInputBridge : IDisposable
 
     internal bool IsInstalled => _installed;
 
-    internal static WindowsPreviewInputBridge Install(nint containerHwnd, nint topLevelHwnd)
+    internal static WindowsPreviewInputBridge Install(
+        nint containerHwnd, nint topLevelHwnd,
+        Action<WindowsPreviewInputPoint>? pointerMoved = null)
     {
         if (!OperatingSystem.IsWindows())
             throw new PlatformNotSupportedException("The preview input bridge is Windows-only.");
-        return Install(Win32WindowsPreviewInputNative.Instance, containerHwnd, topLevelHwnd);
+        return Install(Win32WindowsPreviewInputNative.Instance, containerHwnd, topLevelHwnd, pointerMoved);
     }
 
     internal static WindowsPreviewInputBridge Install(
         IWindowsPreviewInputNative native,
         nint containerHwnd,
-        nint topLevelHwnd)
+        nint topLevelHwnd,
+        Action<WindowsPreviewInputPoint>? pointerMoved = null)
     {
         ArgumentNullException.ThrowIfNull(native);
         if (containerHwnd == nint.Zero)
             throw new ArgumentException("Container HWND is null.", nameof(containerHwnd));
         if (topLevelHwnd == nint.Zero)
             throw new ArgumentException("Top-level HWND is null.", nameof(topLevelHwnd));
-        return new WindowsPreviewInputBridge(native, containerHwnd, topLevelHwnd);
+        return new WindowsPreviewInputBridge(native, containerHwnd, topLevelHwnd, pointerMoved);
     }
 
     public void Dispose()
@@ -220,11 +226,14 @@ internal sealed class WindowsPreviewInputBridge : IDisposable
                 // A successfully retargeted message is fully handled by the top-level WndProc.
                 // Calling DefWindowProc for the child as well can synthesize a duplicate
                 // WM_CONTEXTMENU from the same right-button release.
-                return _native.SendMessage(
+                nint result = _native.SendMessage(
                     _topLevelHwnd,
                     message,
                     forwardedWParam,
                     forwardedLParam);
+                if (message == WindowsPreviewInputMessages.WmMouseMove)
+                    _pointerMoved?.Invoke(WindowsPreviewInputMessages.DecodeClientPoint(lParam));
+                return result;
             }
         }
         catch

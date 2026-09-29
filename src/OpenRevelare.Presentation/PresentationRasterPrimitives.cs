@@ -159,3 +159,25 @@ public sealed class PresentationLine : PresentationRasterPrimitive
         StrokeWidth = strokeWidth;
     }
 }
+
+public readonly record struct PresentationStrokeSample(PreviewPoint Centre, double Radius);
+
+public sealed class PresentationStrokeArea : PresentationRasterPrimitive
+{
+    public IReadOnlyList<PresentationStrokeSample> Samples { get; }
+
+    public PresentationStrokeArea(
+        IReadOnlyList<PresentationStrokeSample> samples,
+        PremultipliedLinearRgba color) : base(color)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+        if (samples.Count == 0) throw new ArgumentException("Stroke area needs samples.", nameof(samples));
+        foreach (PresentationStrokeSample sample in samples)
+        {
+            if (!double.IsFinite(sample.Centre.X) || !double.IsFinite(sample.Centre.Y) ||
+                !double.IsFinite(sample.Radius) || sample.Radius <= 0)
+                throw new ArgumentOutOfRangeException(nameof(samples));
+        }
+        Samples = samples.ToArray();
+    }
+}

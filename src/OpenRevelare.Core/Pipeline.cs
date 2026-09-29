@@ -349,6 +349,7 @@ public static class Pipeline
         // caller's buffer on the one configuration that reaches it.
         double[,]? inputMatrix = InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint);
         bool inPlaceOps = cal.LccFlatField != null || cal.VignetteAmount != 0.0
+                          || (cal.DustEnabled && cal.DustSpots.Count > 0)
                           || cal.DecoupleMatrix != null || inputMatrix != null || cal.Monochrome;
         if (inPlaceOps && ReferenceEquals(src, img))
             src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone())
@@ -361,6 +362,8 @@ public static class Pipeline
             if (cal.VignetteAmount != 0.0)
                 LensCorrections.ApplyVignette(src.Data, src.Width, src.Height,
                                               cal.VignetteAmount, cal.VignetteFalloff);
+            if (cal.DustEnabled && cal.DustSpots.Count > 0)
+                DustRemoval.Apply(src, cal.DustSpots);
         }
 
         // Sprocket/light-board mask — detected on the raw negative BEFORE decouple

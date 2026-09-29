@@ -148,7 +148,7 @@ public sealed class ProjectColorPipelineVersionTests
 
     [Theory]
     [InlineData(1)]
-    [InlineData(4)]
+    [InlineData(5)]
     public void Load_rejects_schema_versions_outside_the_supported_range(int version)
     {
         WithTempProject(path =>
@@ -164,7 +164,7 @@ public sealed class ProjectColorPipelineVersionTests
 
             InvalidDataException error = Assert.Throws<InvalidDataException>(() => Project.Load(path));
             Assert.Contains("2", error.Message, StringComparison.Ordinal);
-            Assert.Contains("3", error.Message, StringComparison.Ordinal);
+            Assert.Contains("4", error.Message, StringComparison.Ordinal);
         });
     }
 

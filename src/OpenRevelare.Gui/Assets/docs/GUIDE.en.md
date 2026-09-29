@@ -384,10 +384,31 @@ Distortion, vignetting, **LCC flat field**. Besides fixing the optical faults th
 field improves the accuracy of the auto analysis — vignetting distorts the base and D_max statistics
 at the edges. The flat-field shot is an even light source photographed with no film in the way.
 
-## 5. Sprocket mask and Geometry / cropping
+## 5. Dust repair, sprocket mask, and Geometry / cropping
 
-Neither of these is a colour parameter, so they live outside the Cineon / Display tabs: pinned to
+These are not colour parameters, so they live outside the Cineon / Display tabs: pinned to
 the bottom of the right-hand panel, in reach whichever tab is open.
+
+### Dust / repair
+
+Dust repair is a non-destructive source layer placed after optical correction and before inversion.
+Changing exposure, curves, output gamut, or HDR therefore does not invalidate a repair, and the
+main preview, 100% sharp patch, and export all use the same result.
+
+Automatic single-frame dust analysis is retired: it cannot reliably distinguish real film detail
+from dust. Repairs are therefore explicitly marked with the brush below.
+
+1. Open **Dust / repair** and select the **Repair brush**. The hover circle shows its actual footprint.
+   In Repair or Erase brush mode, press `[` to shrink or `]` to grow the brush by 0.001 per press.
+2. Hold and drag across dust for a continuous repair. Switch to the **Erase brush** and drag across
+   an area to remove repairs.
+3. Enable **Show repair areas** to inspect the red overlay. Brush radius is stored relative to the
+   source frame's short edge.
+4. **Clear all** removes every repair on the frame.
+
+Repairs are saved in source coordinates, so they stay on the same piece of film after rotation,
+straightening, or recropping. Repair selects the nearby texture patch whose boundary best matches
+the damaged area, preserving local grain; inspect important detail at 100% before export.
 
 ### Sprocket mask (optional)
 

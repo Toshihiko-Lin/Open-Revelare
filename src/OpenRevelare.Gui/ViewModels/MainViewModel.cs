@@ -196,8 +196,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private FrameParams ForPreview(FrameParams p)
     {
         if (_previewMargin is null) return p;                  // plain whole-file preview
-        if (p.CropRect is null && _previewFrameRect is null) return p;
         p = p.Clone();
+        p.DustSpots = DustSpotsRelativeTo(p.DustSpots, _previewMargin.Value);
+        if (p.CropRect is null && _previewFrameRect is null) return p;
         // Oriented to match the pixels: ApplyCrop runs AFTER orientation, and _previewFrameRect is
         // measured in the raw file's axes.
         p.CropRect = _cropEditing ? null : OrientRect(_previewFrameRect, p);
@@ -233,12 +234,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private static FrameParams ForRegion(FrameParams p, RollFrame f,
                                          (double X, double Y, double W, double H)? margin)
     {
-        if (margin is not { } box || f.Params.CropRect is not { } rect) return p;
+        if (margin is not { } box) return p;
         p = p.Clone();
+        p.DustSpots = DustSpotsRelativeTo(p.DustSpots, box);
+        if (f.Params.CropRect is not { } rect) return p;
         // Down to file space, in against the box, back out to oriented space — the box itself is a
         // file-space rect, so the middle step cannot happen in the oriented frame.
         p.CropRect = OrientRect(Relative(UnorientRect(rect, f.Params)!.Value, box), p);
         return p;
+    }
+
+    private static List<DustSpot> DustSpotsRelativeTo(
+        IReadOnlyList<DustSpot> spots, (double X, double Y, double W, double H) box)
+    {
+        double scale = Math.Min(box.W, box.H);
+        return spots.Select(s => new DustSpot(
+            (s.X - box.X) / box.W,
+            (s.Y - box.Y) / box.H,
+            s.Radius / Math.Max(scale, 1e-9),
+            s.Automatic,
+            s.Confidence)).ToList();
     }
 
     /// <summary>The inverse of <see cref="OrientRect"/>: an oriented-frame rect back into the raw
@@ -602,6 +617,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (!ReferenceEquals(oldValue, newValue)) Retire(oldValue);
     }
 
+    partial void OnDustMaskOverlayChanging(Bitmap? oldValue, Bitmap? newValue)
+    {
+        if (!ReferenceEquals(oldValue, newValue)) Retire(oldValue);
+    }
+
     /// <summary>Replace a film-strip thumbnail, retiring the one it displaces.</summary>
     private void SetThumbnail(RollFrame f, Bitmap? bmp)
     {
@@ -929,6 +949,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _sprocketThreshold = 0.9;  // 绝对亮度切（0.5..1.0）
     [ObservableProperty] private bool _showSprocketMask;          // 预览上叠加红色遮罩（诊断）
     [ObservableProperty] private Bitmap? _sprocketMaskOverlay;
+    [ObservableProperty] private Bitmap? _dustMaskOverlay;
     private bool _sprocketOverlayDirty = true;
     partial void OnSprocketEnabledChanged(bool value)
     {
@@ -950,6 +971,130 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // part of the canonical presentation generation.
             InvalidatePresentation();
         });
+    }
+
+    // Dust repair is a spatial source-domain layer. The live list is cloned into FrameParams so
+    // undo/autosave never observes a collection being edited underneath it.
+    [ObservableProperty] private bool _dustEnabled;
+    [ObservableProperty] private bool _showDustMask;
+    [ObservableProperty] private double _dustBrushSize = 0.006;
+    private List<DustSpot> _dustSpots = new();
+
+    public int DustSpotCount => _dustSpots.Count;
+
+    partial void OnDustEnabledChanged(bool value) => DustChanged(render: true);
+    partial void OnShowDustMaskChanged(bool value)
+    {
+        UpdateDustOverlay();
+        InvalidatePresentation();
+    }
+
+    private void DustChanged(bool render)
+    {
+        OnPropertyChanged(nameof(DustSpotCount));
+        UpdateDustOverlay();
+        if (render) ScheduleRender();
+    }
+
+    public void AddDustSpot(double displayedX, double displayedY)
+    {
+        if (PaintDustAt(displayedX, displayedY, erase: false)) CommitDustStroke(added: true);
+    }
+
+    public void EraseDustSpot(double displayedX, double displayedY)
+    {
+        if (PaintDustAt(displayedX, displayedY, erase: true)) CommitDustStroke(added: false);
+    }
+
+    /// <summary>Apply one sample of a continuous brush stroke without rendering or creating an
+    /// undo checkpoint. The view interpolates samples; the complete gesture is committed once on
+    /// pointer release so a long stroke remains one edit.</summary>
+    public bool PaintDustAt(double displayedX, double displayedY, bool erase)
+    {
+        if (DisplayPointToDustSource(displayedX, displayedY) is not { } p) return false;
+        if (erase)
+        {
+            int removed = _dustSpots.RemoveAll(s =>
+                PhysicalSourceDistance(p, (s.X, s.Y)) <= DustBrushSize + s.Radius * 0.5);
+            return removed > 0;
+        }
+
+        // Adjacent interpolated discs overlap deliberately, but do not let high-frequency pointer
+        // events create hundreds of effectively identical repairs at the same location.
+        bool covered = _dustSpots.Any(s =>
+            PhysicalSourceDistance(p, (s.X, s.Y)) < Math.Min(DustBrushSize, s.Radius) * 0.45);
+        if (covered) return false;
+        _dustSpots.Add(new DustSpot(p.X, p.Y, DustBrushSize, Automatic: false));
+        return true;
+    }
+
+    public void CommitDustStroke(bool added)
+    {
+        if (added && !DustEnabled) DustEnabled = true;
+        MarkEdit();
+        DustChanged(render: true);
+    }
+
+    /// <summary>Brush radius in local overlay pixels at a displayed point. Mapping two one-pixel
+    /// probes back into the source handles crop, orientation, straightening and split scans, so the
+    /// cursor ring describes the repair disc rather than merely echoing the slider value.</summary>
+    public double DustBrushRadiusOnDisplay(
+        double displayedX, double displayedY, double displayedWidth, double displayedHeight)
+    {
+        if (displayedWidth <= 0 || displayedHeight <= 0 ||
+            DisplayPointToDustSource(displayedX, displayedY) is not { } center)
+            return 0;
+
+        double stepX = 1.0 / displayedWidth, stepY = 1.0 / displayedHeight;
+        double probeX = displayedX <= 0.5 ? displayedX + stepX : displayedX - stepX;
+        double probeY = displayedY <= 0.5 ? displayedY + stepY : displayedY - stepY;
+        var horizontal = DisplayPointToDustSource(Math.Clamp(probeX, 0, 1), displayedY);
+        var vertical = DisplayPointToDustSource(displayedX, Math.Clamp(probeY, 0, 1));
+        if (horizontal is null || vertical is null) return 0;
+        double sourceUnitsPerPixel = (PhysicalSourceDistance(center, horizontal.Value)
+                                    + PhysicalSourceDistance(center, vertical.Value)) * 0.5;
+        return sourceUnitsPerPixel > 1e-9
+            ? Math.Clamp(DustBrushSize / sourceUnitsPerPixel, 1.5, 512.0)
+            : 0;
+    }
+
+    private double PhysicalSourceDistance((double X, double Y) a, (double X, double Y) b)
+    {
+        if (_previewWorking is not { } working) return double.MaxValue;
+        int width = working.Pixels.Width, height = working.Pixels.Height;
+        double min = Math.Max(1, Math.Min(width, height));
+        double dx = (a.X - b.X) * width / min;
+        double dy = (a.Y - b.Y) * height / min;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    public void ClearAllDust()
+    {
+        if (_dustSpots.Count == 0) return;
+        _dustSpots.Clear();
+        MarkEdit();
+        DustChanged(render: true);
+    }
+
+    private (double X, double Y)? DisplayPointToDustSource(double x, double y)
+    {
+        const double Epsilon = 0.0005;
+        var rect = (Math.Clamp(x - Epsilon, 0, 1), Math.Clamp(y - Epsilon, 0, 1),
+                    Epsilon * 2, Epsilon * 2);
+        FrameParams p = ForPreview(BuildParams());
+        if (p.CropRect is { } c)
+            rect = (c.X + rect.Item1 * c.W, c.Y + rect.Item2 * c.H,
+                    rect.Item3 * c.W, rect.Item4 * c.H);
+        if (p.Rotation != 0.0 && CropFrameSize is { } size)
+            rect = UnrotateRect(rect, p.Rotation, size.W, size.H);
+        rect = UnorientRect(rect, p)!.Value;
+        double px = rect.Item1 + rect.Item3 / 2, py = rect.Item2 + rect.Item4 / 2;
+        if (_previewMargin is { } box)
+        {
+            px = box.X + px * box.W;
+            py = box.Y + py * box.H;
+        }
+        return (Math.Clamp(px, 0, 1), Math.Clamp(py, 0, 1));
     }
 
     /// <summary>
@@ -1008,6 +1153,39 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             blue: 0,
             alpha: 140);
         _sprocketOverlayDirty = false;
+    }
+
+    private void UpdateDustOverlay()
+    {
+        if (!ShowDustMask || _previewLinear is null || _dustSpots.Count == 0)
+        {
+            DustMaskOverlay = null;
+            DustMaskScene = null;
+            return;
+        }
+
+        FrameParams p = ForPreview(BuildParams());
+        bool[] raw = DustRemoval.MakeMask(_previewLinear.Width, _previewLinear.Height, p.DustSpots);
+        var flags = new ImageBuffer(_previewLinear.Width, _previewLinear.Height);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            if (!raw[i]) continue;
+            int b = i * 3;
+            flags.Data[b] = flags.Data[b + 1] = flags.Data[b + 2] = 1f;
+        }
+        if (p.QuarterTurns != 0 || p.FlipH || p.FlipV)
+            flags = Geometry.ApplyOrientation(flags, p.QuarterTurns, p.FlipH, p.FlipV);
+        if (p.Rotation != 0.0)
+            flags = Geometry.ApplyRotation(flags, p.Rotation, fill: 0f);
+        if (p.CropRect is { } crop)
+            flags = Geometry.ApplyCrop(flags, crop);
+
+        var shaped = new bool[flags.PixelCount];
+        for (int i = 0; i < shaped.Length; i++) shaped[i] = flags.Data[i * 3] > 0.15f;
+        DustMaskOverlay = BitmapConvert.ToMaskOverlay(
+            shaped, flags.Width, flags.Height, r: 255, g: 64, b: 64, a: 150);
+        DustMaskScene = BuildMaskPresentationScene(
+            shaped, flags.Width, flags.Height, red: 255, green: 64, blue: 64, alpha: 150);
     }
 
     // 输出意图不再是胶卷级模式：预览恒为完整渲染，"线性" 是单次导出的属性
@@ -1818,6 +1996,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DecoupleChromaMatrix = _decoupleChromaMatrix,
         SprocketEnabled = SprocketEnabled,
         SprocketThreshold = SprocketThreshold,
+        DustEnabled = DustEnabled,
+        DustSpots = new List<DustSpot>(_dustSpots),
         Monochrome = Monochrome,
         // Stage 1 — 反相的全部自由度：片基 + 两端各三个绝对密度
         TBase = TBaseArr(),

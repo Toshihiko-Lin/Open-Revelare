@@ -90,7 +90,10 @@ public sealed partial class MainViewModel
             sb.AppendLine(Loc.T("  Path A　 关闭（宽谱 / 扫描仪输入）"));
         }
 
-        sb.AppendLine(Loc.T("  次序　　 镜头畸变 → LCC → 暗角 → Path A 解耦 → 片基 / 高光测量 → 反相"));
+        sb.AppendLine(DustEnabled
+            ? Loc.F($"  除尘　　 开启 · 手工修复 {_dustSpots.Count}")
+            : Loc.T("  除尘　　 关闭"));
+        sb.AppendLine(Loc.T("  次序　　 镜头畸变 → LCC → 暗角 → 除尘 → Path A 解耦 → 片基 / 高光测量 → 反相"));
     }
 
     private static void AppendMatrix(StringBuilder sb, string label, double[,] matrix)

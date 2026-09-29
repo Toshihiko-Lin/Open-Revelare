@@ -32,6 +32,7 @@ public partial class MainViewModel
     /// </summary>
     public float PreviewHighlightHeadroom { get; private set; } = 1f;
     [ObservableProperty] private PresentationScene? _sprocketMaskScene;
+    [ObservableProperty] private PresentationScene? _dustMaskScene;
     [ObservableProperty] private PresentationScene? _clippingScene;
     [ObservableProperty] private long _presentationRevision;
 
@@ -49,6 +50,7 @@ public partial class MainViewModel
 
     partial void OnPreviewSceneChanged(PresentationScene? value) => InvalidatePresentation();
     partial void OnSprocketMaskSceneChanged(PresentationScene? value) => InvalidatePresentation();
+    partial void OnDustMaskSceneChanged(PresentationScene? value) => InvalidatePresentation();
     partial void OnClippingSceneChanged(PresentationScene? value) => InvalidatePresentation();
 
     private void InvalidatePresentation() => _presentationRevisions.Invalidate();
@@ -194,6 +196,8 @@ public partial class MainViewModel
             ClippingScene = clippingScene;
             if (refreshSprocketMask && ShowSprocketMask && _sprocketOverlayDirty)
                 UpdateSprocketOverlay();
+            if (ShowDustMask)
+                UpdateDustOverlay();
             PreviewHighlightHeadroom = histogram.TargetHeadroom;
             PreviewScene = scene;
             OnPropertyChanged(nameof(ColorPipelineDiagnostic));
@@ -209,6 +213,7 @@ public partial class MainViewModel
             PreviewScene = null;
             ClippingScene = null;
             SprocketMaskScene = null;
+            DustMaskScene = null;
         });
     }
 

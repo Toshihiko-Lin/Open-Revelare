@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -109,12 +110,20 @@ public partial class MainWindow : Window
         // A resize changes the letterbox and the fit scale, so the pan clamp and the zoom
         // percentage both go stale unless the transform is recomputed.
         ViewPort.SizeChanged += (_, _) => ApplyTransform();
+        _dustPresentationTimer.Tick += (_, _) =>
+        {
+            _dustPresentationTimer.Stop();
+            QueueWindowsPresentation();
+        };
+        WindowsPreview.NativePointerMoved += OnNativePreviewPointerMoved;
+        _dustHoverTimer.Tick += (_, _) => PollDustCursor();
 
         // If the pointer capture is stolen (another window, a touch cancel), the drag flags would
         // otherwise stay stuck true and the next click would behave as a continued drag.
         Overlay.PointerCaptureLost += (_, _) =>
         {
             _panning = false;
+            EndDustStroke();
             _dragging = false;
             SelRect.IsVisible = false;
             UpdatePanCursor();
@@ -185,7 +194,7 @@ public partial class MainWindow : Window
     // Esc. The tools are mutually exclusive — arming one disarms the others.
     private enum SampleMode
     {
-        None, FilmBase, DMax, NeutralGrey, DisplayNeutral, Black, White, Crop,
+        None, FilmBase, DMax, NeutralGrey, DisplayNeutral, Black, White, Crop, DustAdd, DustErase,
         StraightenH, StraightenV,
     }
 
@@ -195,6 +204,13 @@ public partial class MainWindow : Window
     private bool _negativeShown;
     private Point _dragStart;
     private bool _dragging;
+    private Point? _dustStrokeLast;
+    private bool _dustStrokeChanged;
+    private readonly List<(Point Centre, double Radius)> _dustStrokeTrail = new();
+    private readonly List<Point> _dustStrokeSamples = new();
+    private readonly DispatcherTimer _dustPresentationTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private readonly DispatcherTimer _dustHoverTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private Point? _lastDustCursorPosition;
 
     // Set once the user closes a tool banner. The hint sits pinned at the top of the picture and
     // a tall crop frame (a vertical strip, a 3:4) reaches right up under it, so the text can end
@@ -718,6 +734,7 @@ public partial class MainWindow : Window
     {
         if (!_managedCropOverlay) return;
         _restoreNativeAfterCropPresentation = true;
+        QueueWindowsPresentation();
     }
 
     private void RestoreNativeAfterCropPresentation()
@@ -939,7 +956,7 @@ public partial class MainWindow : Window
 
     private ToggleButton[] AllToggles() => new[]
     {
-        FilmBaseBtn, DMaxBtn, GreyBtn, BlackBtn, WhiteBtn, CropBtn,
+        FilmBaseBtn, DMaxBtn, GreyBtn, BlackBtn, WhiteBtn, CropBtn, DustAddBtn, DustEraseBtn,
         StraightenHBtn, StraightenVBtn,
     };
 
@@ -956,9 +973,16 @@ public partial class MainWindow : Window
         // true and the preview kept hiding the applied crop for the rest of the session, with a
         // draft rectangle left over to be re-shown later over a different picture.
         bool leavingCrop = _mode == SampleMode.Crop && mode != SampleMode.Crop;
+        bool leavingDust = IsDustMode && mode is not SampleMode.DustAdd and not SampleMode.DustErase;
         if (_negativeShown) { Vm?.ShowPositiveView(); _negativeShown = false; }
         _mode = mode;
         if (leavingCrop) DiscardCropDraft();   // after _mode, so the frame actually hides
+        else if (leavingDust)
+        {
+            _dustHoverTimer.Stop();
+            DustBrushRing.IsVisible = false;
+            QueueDustPresentation();
+        }
         Overlay.Cursor = CropCross;
         BannerText.Text = banner;
 
@@ -993,10 +1017,33 @@ public partial class MainWindow : Window
             Overlay.Focusable = true;
             Overlay.Focus();
         }
+        if (IsDustMode && OperatingSystem.IsWindows())
+        {
+            _lastDustCursorPosition = null;
+            _dustHoverTimer.Start();
+            PollDustCursor();
+        }
+        if (IsDustMode)
+        {
+            Overlay.Focusable = true;
+            Overlay.Focus();
+        }
     }
 
     private void OnCropApplyClick(object? sender, RoutedEventArgs e) => CommitCrop();
     private void OnCropCancelClick(object? sender, RoutedEventArgs e) => CancelCropDraft();
+
+    private void OnDustAddClick(object? sender, RoutedEventArgs e) =>
+        ToggleSampling(sender, SampleMode.DustAdd,
+            Loc.T("修复笔：拖动标记修复范围；[ 缩小、] 放大笔刷。"),
+            useNegative: false);
+
+    private void OnDustEraseClick(object? sender, RoutedEventArgs e) =>
+        ToggleSampling(sender, SampleMode.DustErase,
+            Loc.T("擦除笔：拖动擦除红色修复范围；[ 缩小、] 放大笔刷。"),
+            useNegative: false);
+
+    private void OnClearAllDustClick(object? sender, RoutedEventArgs e) => Vm?.ClearAllDust();
 
     /// <summary>
     /// Show the banner for the mode being armed, honouring a dismissal.
@@ -1078,11 +1125,14 @@ public partial class MainWindow : Window
 
     private void ExitMode()
     {
+        EndDustStroke();
+        _dustHoverTimer.Stop();
         _mode = SampleMode.None;
         DiscardCropDraft();
         Banner.IsHitTestVisible = false;
         UpdatePanCursor();          // back to hand/arrow depending on zoom
         SelLine.IsVisible = false;
+        DustBrushRing.IsVisible = false;
         Banner.IsVisible = false;
         BannerCloseBtn.IsVisible = false;   // sibling of the banner, so it needs hiding too
         SetTogglesExcept(null);   // programmatic uncheck does not re-fire Click
@@ -1099,6 +1149,8 @@ public partial class MainWindow : Window
         SampleMode.Black => BlackBtn,
         SampleMode.White => WhiteBtn,
         SampleMode.Crop => CropBtn,
+        SampleMode.DustAdd => DustAddBtn,
+        SampleMode.DustErase => DustEraseBtn,
         SampleMode.StraightenH => StraightenHBtn,
         SampleMode.StraightenV => StraightenVBtn,
         _ => null,
@@ -1183,6 +1235,18 @@ public partial class MainWindow : Window
         else if (bare && !typing && e.Key == Key.K && img) { ToggleCompare(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.N && img) { ToggleNegative(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.J && img) { if (Vm is { } v) v.ShowClipping = !v.ShowClipping; e.Handled = true; }
+        else if (bare && !typing && IsDustMode && Vm is { } dustVm &&
+                 e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets)
+        {
+            int step = e.Key == Key.OemOpenBrackets ? -1 : 1;
+            dustVm.DustBrushSize = Math.Clamp(
+                Math.Round(dustVm.DustBrushSize + step * 0.001, 4), 0.001, 0.03);
+            if (DustBrushRing.IsVisible)
+                UpdateDustBrushRing(new Point(
+                    Canvas.GetLeft(DustBrushRing) + DustBrushRing.Width / 2,
+                    Canvas.GetTop(DustBrushRing) + DustBrushRing.Height / 2));
+            e.Handled = true;
+        }
         // Not while typing: Ctrl+C in a text field still has to copy the text.
         else if (ctrl && !typing && !shift && e.Key == Key.C && img && Vm?.IsLibraryMode == false)
         { OnCopyActiveClick(this, e); e.Handled = true; }
@@ -1692,6 +1756,146 @@ public partial class MainWindow : Window
         ReseedCropDraftFromCurrent();
     }
 
+    private bool IsDustMode => _mode is SampleMode.DustAdd or SampleMode.DustErase;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorPoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetCursorPos", ExactSpelling = true)]
+    private static extern bool GetCursorPos(out CursorPoint point);
+
+    private void PollDustCursor()
+    {
+        if (!IsDustMode || !IsActive || !WindowsPreview.IsPresenterAvailable ||
+            !GetCursorPos(out CursorPoint cursor)) return;
+        PixelPoint origin = Overlay.PointToScreen(new Point(0, 0));
+        double scale = RenderScaling * _zoom;
+        Point position = new((cursor.X - origin.X) / scale, (cursor.Y - origin.Y) / scale);
+        if (_lastDustCursorPosition == position && DustBrushRing.IsVisible) return;
+        _lastDustCursorPosition = position;
+        UpdateDustBrushRing(position);
+        if (_dragging && NormFromOverlay(position) is { } normal &&
+            normal.X is >= 0 and <= 1 && normal.Y is >= 0 and <= 1)
+            PaintDustSegment(normal);
+    }
+
+    private void QueueDustPresentation()
+    {
+        if (ActivePreview?.IsPresenterAvailable == true && !_dustPresentationTimer.IsEnabled)
+            _dustPresentationTimer.Start();
+    }
+
+    private void OnNativePreviewPointerMoved(WindowsPreviewInputPoint point)
+    {
+        if (!IsDustMode) return;
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnNativePreviewPointerMoved(point));
+            return;
+        }
+        double scale = RenderScaling;
+        Point? overlayPoint = WindowsPreview.TranslatePoint(
+            new Point(point.X / scale, point.Y / scale), Overlay);
+        if (overlayPoint is not { } position) return;
+        UpdateDustBrushRing(position);
+        if (_dragging && NormFromOverlay(position) is { } normal &&
+            normal.X is >= 0 and <= 1 && normal.Y is >= 0 and <= 1)
+            PaintDustSegment(normal);
+    }
+
+    private void UpdateDustBrushRing(Point overlayPoint)
+    {
+        Point? normal = IsDustMode ? NormFromOverlay(overlayPoint) : null;
+        if (normal is not { } n || n.X < 0 || n.X > 1 || n.Y < 0 || n.Y > 1 ||
+            LetterboxRect() is not { } box || Vm is not { } vm)
+        {
+            if (DustBrushRing.IsVisible)
+            {
+                DustBrushRing.IsVisible = false;
+                QueueDustPresentation();
+            }
+            return;
+        }
+
+        double radius = vm.DustBrushRadiusOnDisplay(n.X, n.Y, box.Width, box.Height);
+        if (radius <= 0) return;
+        Canvas.SetLeft(DustBrushRing, overlayPoint.X - radius);
+        Canvas.SetTop(DustBrushRing, overlayPoint.Y - radius);
+        DustBrushRing.Width = radius * 2;
+        DustBrushRing.Height = radius * 2;
+        DustBrushRing.StrokeThickness = 1.5 / Math.Max(_zoom, 1e-6);
+        DustBrushRing.IsVisible = true;
+        QueueDustPresentation();
+    }
+
+    private void PaintDustSegment(Point normal)
+    {
+        if (Vm is not { } vm || LetterboxRect() is not { } box) return;
+        Point start = _dustStrokeLast ?? normal;
+        double dx = (normal.X - start.X) * box.Width;
+        double dy = (normal.Y - start.Y) * box.Height;
+        double distance = Math.Sqrt(dx * dx + dy * dy);
+        if (_dustStrokeLast is not null && distance * _zoom < 0.5) return;
+        double radius = vm.DustBrushRadiusOnDisplay(normal.X, normal.Y, box.Width, box.Height);
+        int samples = Math.Max(1, (int)Math.Ceiling(distance / Math.Max(1.0, radius * 0.55)));
+        for (int i = 1; i <= samples; i++)
+        {
+            double t = i / (double)samples;
+            double x = start.X + (normal.X - start.X) * t;
+            double y = start.Y + (normal.Y - start.Y) * t;
+            _dustStrokeSamples.Add(new Point(x, y));
+            Point position = new(box.X + x * box.Width, box.Y + y * box.Height);
+            if (_dustStrokeTrail.Count == 0 ||
+                Point.Distance(_dustStrokeTrail[^1].Centre, position) * _zoom >= 3.0)
+            {
+                _dustStrokeTrail.Add((position, radius));
+                DustStrokePath.Points.Add(position);
+                DustStrokePath.StrokeThickness = radius * 2 / Math.Max(_zoom, 1e-6);
+                DustStrokePath.IsVisible = _dustStrokeTrail.Count > 1;
+                if (_dustStrokeTrail.Count > 1) DustStrokeStart.IsVisible = false;
+                if (_dustStrokeTrail.Count == 1)
+                {
+                    Canvas.SetLeft(DustStrokeStart, position.X - radius);
+                    Canvas.SetTop(DustStrokeStart, position.Y - radius);
+                    DustStrokeStart.Width = radius * 2;
+                    DustStrokeStart.Height = radius * 2;
+                    DustStrokeStart.IsVisible = true;
+                }
+            }
+        }
+        _dustStrokeLast = normal;
+        QueueDustPresentation();
+    }
+
+    private void EndDustStroke()
+    {
+        foreach (Point sample in _dustStrokeSamples)
+            _dustStrokeChanged |= Vm?.PaintDustAt(sample.X, sample.Y, erase: _mode == SampleMode.DustErase) == true;
+        if (_dustStrokeChanged && Vm is { } vm)
+            vm.CommitDustStroke(added: _mode == SampleMode.DustAdd);
+        _dustStrokeChanged = false;
+        _dustStrokeLast = null;
+        _dustStrokeSamples.Clear();
+        _dustStrokeTrail.Clear();
+        DustStrokePath.Points.Clear();
+        DustStrokePath.IsVisible = false;
+        DustStrokeStart.IsVisible = false;
+        QueueDustPresentation();
+    }
+
+    private void OnOverlayExited(object? sender, PointerEventArgs e)
+    {
+        if (!_dragging)
+        {
+            DustBrushRing.IsVisible = false;
+            QueueDustPresentation();
+        }
+    }
+
     // ── Rubber-band drag on the overlay ─────────────────────────────────────────
     private void OnOverlayPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -1730,6 +1934,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_mode is SampleMode.DustAdd or SampleMode.DustErase)
+        {
+            if (NormFromOverlay(_dragStart) is not { } normal ||
+                normal.X < 0 || normal.X > 1 || normal.Y < 0 || normal.Y > 1) return;
+            _dragging = true;
+            _dustStrokeLast = null;
+            _dustStrokeChanged = false;
+            PaintDustSegment(normal);
+            UpdateDustBrushRing(_dragStart);
+            e.Pointer.Capture(Overlay);
+            return;
+        }
+
         _dragging = true;
         if (IsLineMode(_mode))
         {
@@ -1750,12 +1967,26 @@ public partial class MainWindow : Window
 
     private void OnOverlayMoved(object? sender, PointerEventArgs e)
     {
+        Point pointer = e.GetPosition(Overlay);
         if (_panning)
         {
             Point cur = e.GetPosition(ViewPort);
             _pan = new Point(_pan.X + (cur.X - _panLast.X), _pan.Y + (cur.Y - _panLast.Y));
             _panLast = cur;
             ApplyTransform();
+            return;
+        }
+        if (IsDustMode)
+        {
+            UpdateDustBrushRing(pointer);
+            if (_dragging)
+            {
+                if (NormFromOverlay(pointer) is { } dust &&
+                    dust.X >= 0 && dust.X <= 1 && dust.Y >= 0 && dust.Y <= 1)
+                    PaintDustSegment(dust);
+                else
+                    _dustStrokeLast = null;
+            }
             return;
         }
         // Crop mode: hovering shows which handle is under the cursor; dragging edits the frame.
@@ -1801,13 +2032,26 @@ public partial class MainWindow : Window
             return;
         }
         if (!_dragging) return;
+        Point end = e.GetPosition(Overlay);
+        SampleMode mode = _mode;
+
+        // Finish a dust gesture before releasing capture. PointerCaptureLost also finalises an
+        // interrupted stroke; releasing first would make a normal stroke commit there and then
+        // treat the release position as a second edit.
+        if (mode is SampleMode.DustAdd or SampleMode.DustErase)
+        {
+            if (NormFromOverlay(end) is { } point && point.X >= 0 && point.X <= 1 && point.Y >= 0 && point.Y <= 1)
+                PaintDustSegment(point);
+            EndDustStroke();
+            _dragging = false;
+            e.Pointer.Capture(null);
+            return;
+        }
+
         _dragging = false;
         e.Pointer.Capture(null);
         SelRect.IsVisible = false;
         SelLine.IsVisible = false;
-
-        Point end = e.GetPosition(Overlay);
-        SampleMode mode = _mode;
 
         if (mode == SampleMode.Crop)
         {

@@ -361,6 +361,12 @@ public static class CpuPresentationCompositor
             return;
         }
 
+        if (primitive is PresentationStrokeArea strokeArea)
+        {
+            CompositeStrokeArea(output, outputSize, strokeArea, color, left, top, right, bottom);
+            return;
+        }
+
         RunRows(top, bottom, right - left, ParallelPrimitiveThreshold, y =>
         {
             int rowLeft = left;
@@ -452,6 +458,55 @@ public static class CpuPresentationCompositor
                     color.Blue * coverage,
                     color.Alpha * coverage);
                 int componentOffset = (rowOffset + x) * 4;
+                Rgba backdrop = Read(output, componentOffset);
+                Write(output, componentOffset, SourceOver(source, backdrop));
+            }
+        });
+    }
+
+    private static void CompositeStrokeArea(
+        Half[] output,
+        PixelSize outputSize,
+        PresentationStrokeArea stroke,
+        PremultipliedLinearRgba color,
+        int left,
+        int top,
+        int right,
+        int bottom)
+    {
+        int width = right - left;
+        var coverage = new byte[checked(width * (bottom - top))];
+        for (int sampleIndex = 0; sampleIndex < stroke.Samples.Count; sampleIndex++)
+        {
+            PresentationStrokeSample start = stroke.Samples[Math.Max(0, sampleIndex - 1)];
+            PresentationStrokeSample end = stroke.Samples[sampleIndex];
+            double radius = Math.Max(start.Radius, end.Radius);
+            int segmentLeft = Math.Max(left, FloorAndClamp(Math.Min(start.Centre.X, end.Centre.X) - radius - 0.5, outputSize.Width));
+            int segmentTop = Math.Max(top, FloorAndClamp(Math.Min(start.Centre.Y, end.Centre.Y) - radius - 0.5, outputSize.Height));
+            int segmentRight = Math.Min(right, CeilingAndClamp(Math.Max(start.Centre.X, end.Centre.X) + radius + 0.5, outputSize.Width));
+            int segmentBottom = Math.Min(bottom, CeilingAndClamp(Math.Max(start.Centre.Y, end.Centre.Y) + radius + 0.5, outputSize.Height));
+            var line = new PresentationLine(start.Centre, end.Centre, radius * 2, color);
+            for (int y = segmentTop; y < segmentBottom; y++)
+            for (int x = segmentLeft; x < segmentRight; x++)
+            {
+                byte amount = (byte)Math.Round(LineCoverage(line, x, y) * 255);
+                int index = (y - top) * width + x - left;
+                coverage[index] = Math.Max(coverage[index], amount);
+            }
+        }
+
+        RunRows(top, bottom, width, ParallelPrimitiveThreshold, y =>
+        {
+            for (int x = left; x < right; x++)
+            {
+                double amount = coverage[(y - top) * width + x - left] / 255d;
+                if (amount <= 0) continue;
+                Rgba source = new(
+                    color.Red * amount,
+                    color.Green * amount,
+                    color.Blue * amount,
+                    color.Alpha * amount);
+                int componentOffset = ((y * outputSize.Width) + x) * 4;
                 Rgba backdrop = Read(output, componentOffset);
                 Write(output, componentOffset, SourceOver(source, backdrop));
             }
@@ -630,6 +685,13 @@ public static class CpuPresentationCompositor
                     Math.Min(line.Start.Y, line.End.Y) - lineExtent,
                     Math.Max(line.Start.X, line.End.X) + lineExtent,
                     Math.Max(line.Start.Y, line.End.Y) + lineExtent);
+
+            case PresentationStrokeArea stroke:
+                return (
+                    stroke.Samples.Min(sample => sample.Centre.X - sample.Radius - 0.5),
+                    stroke.Samples.Min(sample => sample.Centre.Y - sample.Radius - 0.5),
+                    stroke.Samples.Max(sample => sample.Centre.X + sample.Radius + 0.5),
+                    stroke.Samples.Max(sample => sample.Centre.Y + sample.Radius + 0.5));
 
             default:
                 throw new ArgumentException(

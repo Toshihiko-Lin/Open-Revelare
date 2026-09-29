@@ -44,6 +44,13 @@ public static class PreviewOverlayStyle
     /// </summary>
     public static readonly Color Straighten = Color.Parse("#FF5A50");
 
+    /// <summary>Live dust-brush footprint, matching the red repair mask.</summary>
+    public static readonly Color DustBrush = Color.Parse("#FFFF5050");
+
+    public static readonly Color DustBrushFill = Color.Parse("#18FF5050");
+
+    public static readonly Color DustStrokeFill = Color.Parse("#55FF5050");
+
     /// <summary>Crop handle fill.</summary>
     public static readonly Color HandleFill = Color.Parse("#F2F5F7");
 
@@ -53,6 +60,7 @@ public static class PreviewOverlayStyle
     public const double FrameStrokeThickness = 1.5d;
     public const double GuideStrokeThickness = 1d;
     public const double StraightenStrokeThickness = 2d;
+    public const double DustBrushStrokeThickness = 1.5d;
     public const double HandleOutlineThickness = 1d;
 
     /// <summary>
@@ -66,6 +74,9 @@ public static class PreviewOverlayStyle
     public static readonly IBrush MarqueeFillBrush = new SolidColorBrush(MarqueeFill);
     public static readonly IBrush GuideBrush = new SolidColorBrush(Guide);
     public static readonly IBrush StraightenBrush = new SolidColorBrush(Straighten);
+    public static readonly IBrush DustBrushBrush = new SolidColorBrush(DustBrush);
+    public static readonly IBrush DustBrushFillBrush = new SolidColorBrush(DustBrushFill);
+    public static readonly IBrush DustStrokeFillBrush = new SolidColorBrush(DustStrokeFill);
     public static readonly IBrush HandleFillBrush = new SolidColorBrush(HandleFill);
     public static readonly IBrush HandleOutlineBrush = new SolidColorBrush(HandleOutline);
 }

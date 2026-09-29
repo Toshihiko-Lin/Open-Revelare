@@ -273,6 +273,26 @@ public sealed class PresentationCompositorTests
     }
 
     [Fact]
+    public void Stroke_area_unites_overlapping_brush_footprints()
+    {
+        PresentationScene transparent = SolidScene(12, 8, Pixel(0f, 0f, 0f, 0f));
+        var sample = new PresentationStrokeSample(new PreviewPoint(5.5, 3.5), 2.5);
+        var red = new PremultipliedLinearRgba(0.5f, 0f, 0f, 0.5f);
+
+        PresentationScene single = CpuPresentationCompositor.Compose(
+            transparent, transparent.Size, overlays: null,
+            rasterPrimitives: [new PresentationStrokeArea([sample], red)]);
+        PresentationScene repeated = CpuPresentationCompositor.Compose(
+            transparent, transparent.Size, overlays: null,
+            rasterPrimitives: [new PresentationStrokeArea([sample, sample], red)]);
+
+        for (int index = 0; index < single.LinearExtendedSrgbRgba.Length; index++)
+            Assert.True(single.LinearExtendedSrgbRgba[index] == repeated.LinearExtendedSrgbRgba[index],
+                        $"component {index}: {single.LinearExtendedSrgbRgba[index]} vs {repeated.LinearExtendedSrgbRgba[index]}");
+        AssertClose(0.5f, AlphaAt(repeated, 5, 3));
+    }
+
+    [Fact]
     public void Optimized_line_row_bounds_match_the_full_analytic_rasterizer()
     {
         const int width = 47;

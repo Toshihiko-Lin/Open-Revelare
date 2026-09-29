@@ -281,6 +281,8 @@ public static class RegionRender
             Lcc.Apply(slice.Data, sw, sh, cal.LccFlatField, region);
         if (cal.VignetteAmount != 0.0)
             LensCorrections.ApplyVignette(slice.Data, sw, sh, cal.VignetteAmount, cal.VignetteFalloff, region);
+        if (cal.DustEnabled && cal.DustSpots.Count > 0)
+            DustRemoval.Apply(slice, cal.DustSpots, frameW, frameH, b.X0, b.Y0);
 
         bool[]? mask = null;
         if (cal.SprocketEnabled && cal.SprocketThreshold is double thr)
@@ -543,6 +545,15 @@ public static class RegionRender
             var (px, py) = OrientedToSource(ox, oy, srcW, srcH, cal);
             if (px < sx0) sx0 = px; if (px > sx1) sx1 = px;
             if (py < sy0) sy0 = py; if (py > sy1) sy1 = py;
+        }
+
+        // Dust repair copies a nearby texture patch. Keep that patch inside a regional decode so
+        // the sharp preview makes the same source choice as the whole-frame render.
+        int dustHalo = cal.DustEnabled ? DustRemoval.RequiredHalo(cal.DustSpots, srcW, srcH) : 0;
+        if (dustHalo > 0)
+        {
+            sx0 -= dustHalo; sy0 -= dustHalo;
+            sx1 += dustHalo; sy1 += dustHalo;
         }
 
         // Distortion pulls its samples in from further out; ask it how far.

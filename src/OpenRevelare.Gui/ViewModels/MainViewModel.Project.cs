@@ -975,6 +975,10 @@ public partial class MainViewModel
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
         LccEnabled = p.LccFlatField != null;
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
+        DustEnabled = p.DustEnabled;
+        _dustSpots = new List<DustSpot>(p.DustSpots);
+        OnPropertyChanged(nameof(DustSpotCount));
+        UpdateDustOverlay();
         // Adopted through the field, not the property: the property is the USER's switch and
         // rebuilds every thumbnail, which is not what loading a roll that was always black and
         // white should do.

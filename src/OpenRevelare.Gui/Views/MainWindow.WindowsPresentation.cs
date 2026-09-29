@@ -391,6 +391,12 @@ public partial class MainWindow
                     sprocket.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
             }
 
+            if (vm.ShowDustMask && vm.DustMaskScene is { } dust)
+            {
+                overlays.Add(new PresentationOverlay(
+                    dust.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
+            }
+
             if (vm.ShowClipping && vm.ClippingScene is { } clipping)
             {
                 overlays.Add(new PresentationOverlay(
@@ -505,6 +511,40 @@ public partial class MainWindow
                 TransformOverlayPoint(SelLine.EndPoint, renderScaling),
                 PreviewOverlayStyle.StraightenStrokeThickness * renderScaling,
                 SrgbPremultiplied(PreviewOverlayStyle.Straighten)));
+        }
+
+        if (_dustStrokeTrail.Count > 0)
+        {
+            PresentationStrokeSample[] samples = _dustStrokeTrail.Select(sample =>
+                new PresentationStrokeSample(
+                    TransformOverlayPoint(sample.Centre, renderScaling),
+                    sample.Radius * _zoom * renderScaling)).ToArray();
+            primitives.Add(new PresentationStrokeArea(
+                samples, SrgbPremultiplied(PreviewOverlayStyle.DustStrokeFill)));
+        }
+
+        if (DustBrushRing.IsVisible && DustBrushRing.Width > 0d && DustBrushRing.Height > 0d)
+        {
+            double left = Canvas.GetLeft(DustBrushRing);
+            double top = Canvas.GetTop(DustBrushRing);
+            double cx = left + DustBrushRing.Width / 2d;
+            double cy = top + DustBrushRing.Height / 2d;
+            double rx = DustBrushRing.Width / 2d;
+            double ry = DustBrushRing.Height / 2d;
+            const int Segments = 48;
+            PremultipliedLinearRgba color = SrgbPremultiplied(PreviewOverlayStyle.DustBrush);
+            for (int i = 0; i < Segments; i++)
+            {
+                double a0 = i * Math.PI * 2d / Segments;
+                double a1 = (i + 1) * Math.PI * 2d / Segments;
+                var p0 = new Point(cx + Math.Cos(a0) * rx, cy + Math.Sin(a0) * ry);
+                var p1 = new Point(cx + Math.Cos(a1) * rx, cy + Math.Sin(a1) * ry);
+                primitives.Add(new PresentationLine(
+                    TransformOverlayPoint(p0, renderScaling),
+                    TransformOverlayPoint(p1, renderScaling),
+                    PreviewOverlayStyle.DustBrushStrokeThickness * renderScaling,
+                    color));
+            }
         }
     }
 

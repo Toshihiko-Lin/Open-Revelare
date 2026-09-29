@@ -452,6 +452,11 @@ public sealed class FrameParams
     /// <summary>Absolute luma cut for the sprocket mask; null = disabled.</summary>
     public double? SprocketThreshold { get; set; } = 0.9;
 
+    /// <summary>Enable the non-destructive source-domain dust repair layer.</summary>
+    public bool DustEnabled { get; set; } = false;
+    /// <summary>Editable manual repairs in source-normalised space.</summary>
+    public List<DustSpot> DustSpots { get; set; } = new();
+
     // ── SceneBase adjustments (Stage 2, active only when intent == BASIC) ──────
     /// <summary>Per-channel white-balance gains (linear). Default 1 = pass-through.</summary>
     public double[] WbGains { get; set; } = { 1.0, 1.0, 1.0 };
@@ -554,6 +559,8 @@ public sealed class FrameParams
         DecoupleChromaAmp = DecoupleChromaAmp,
         SprocketEnabled = SprocketEnabled,
         SprocketThreshold = SprocketThreshold,
+        DustEnabled = DustEnabled,
+        DustSpots = new List<DustSpot>(DustSpots),
         WbGains = (double[])WbGains.Clone(),
         ExposureEv = ExposureEv,
         BlackPoint = BlackPoint,

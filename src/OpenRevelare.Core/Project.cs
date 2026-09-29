@@ -15,12 +15,14 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Project
 {
-    // Bumped to 3 by the managed colour pipeline. The schema itself gained only one key, so
+    // Bumped to 3 by the managed colour pipeline and to 4 when a project first stores dust
+    // repairs. A managed project without dust remains v3 so older builds can still open it.
+    // The v3 schema itself gained only one key, so
     // this is not about parsing: a build that predates `color_pipeline_version` reads a v2 file's
     // absent key as "legacy", which is right, but would read a NEW file's key as absent too and
     // render it through the v1 pipeline without a word. Refusing to open is the only honest
     // answer an old build can give, and it can only give it if the version says so.
-    private const int FormatVersion = 3;
+    private const int FormatVersion = 4;
 
     /// <summary>Oldest schema this build still reads. v2 files have no colour-pipeline key.</summary>
     private const int MinimumSupportedFormatVersion = 2;
@@ -31,8 +33,12 @@ public static class Project
     /// v1, which is exactly what the file asks for — so locking it out would cost compatibility
     /// and buy nothing.
     /// </summary>
-    private static int FormatVersionFor(ColorPipelineVersion pipeline) =>
-        pipeline == ColorPipelineVersion.ManagedV2 ? FormatVersion : MinimumSupportedFormatVersion;
+    private static int FormatVersionFor(Data data)
+    {
+        bool hasDust = data.Frames.Any(f => f.Params.DustEnabled || f.Params.DustSpots.Count > 0);
+        if (hasDust) return FormatVersion;
+        return data.ColorPipelineVersion == ColorPipelineVersion.ManagedV2 ? 3 : MinimumSupportedFormatVersion;
+    }
     private const ColorPipelineVersion CurrentColorPipelineVersion = ColorPipelineVersion.ManagedV2;
 
     // ── Public data model ───────────────────────────────────────────────────────
@@ -93,7 +99,7 @@ public static class Project
             d.ColorPipelineVersion);
         var root = new JsonObject
         {
-            ["version"] = FormatVersionFor(colorPipelineVersion),
+            ["version"] = FormatVersionFor(d),
             ["color_pipeline_version"] = (int)colorPipelineVersion,
             ["created"] = DateTime.Now.ToString("yyyy-MM-dd"),
             ["roll_meta"] = SerRollMeta(d.Meta),
@@ -386,6 +392,8 @@ public static class Project
             ["print_lut_output"] = p.PrintLutOutput,
             ["sprocket_enabled"] = p.SprocketEnabled,
             ["sprocket_threshold"] = p.SprocketThreshold,
+            ["dust_enabled"] = p.DustEnabled,
+            ["dust_spots"] = DustSpots(p.DustSpots),
             ["lensfun_override"] = null,                     // C# build has no lensfun
             ["vignette_amount"] = p.VignetteAmount,
             ["vignette_falloff"] = p.VignetteFalloff,
@@ -464,6 +472,8 @@ public static class Project
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             Monochrome = Bool(d, "monochrome", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
+            DustEnabled = Bool(d, "dust_enabled", false),
+            DustSpots = DesDustSpots(d["dust_spots"]),
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),
             VignetteFalloff = Dbl(d, "vignette_falloff", 2.5),
             DistortionK1 = Dbl(d, "distortion_k1", 0.0),
@@ -502,6 +512,34 @@ public static class Project
     private static JsonArray Arr(double[] v) => new(v[0], v[1], v[2]);
     private static JsonArray Pts(List<(double X, double Y)> pts)
         => new(pts.Select(p => (JsonNode)new JsonArray(p.X, p.Y)).ToArray());
+
+    private static JsonArray DustSpots(List<DustSpot> spots) => new(spots.Select(s =>
+        (JsonNode)new JsonArray(s.X, s.Y, s.Radius, s.Automatic, s.Confidence)).ToArray());
+
+    private static List<DustSpot> DesDustSpots(JsonNode? node)
+    {
+        var result = new List<DustSpot>();
+        if (node is not JsonArray array) return result;
+        foreach (JsonNode? item in array)
+        {
+            if (item is not JsonArray a || a.Count < 3) continue;
+            try
+            {
+                var spot = new DustSpot(
+                    a[0]!.GetValue<double>(),
+                    a[1]!.GetValue<double>(),
+                    a[2]!.GetValue<double>(),
+                    a.Count > 3 && a[3]!.GetValue<bool>(),
+                    a.Count > 4 ? a[4]!.GetValue<double>() : 1.0).Clamped();
+                result.Add(spot);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+            {
+                // One malformed candidate must not make the rest of a roll unrecoverable.
+            }
+        }
+        return result;
+    }
 
     private static List<(double X, double Y)> DesPts(JsonNode? n)
     {

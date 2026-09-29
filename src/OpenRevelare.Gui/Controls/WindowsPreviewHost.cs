@@ -205,6 +205,7 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
     public event EventHandler<DisplayContract>? ContractChanged;
     public event EventHandler<PreviewPresentationFailedEventArgs>? PresentationFailed;
     public event EventHandler? PresentationRecoveryRequested;
+    internal event Action<WindowsPreviewInputPoint>? NativePointerMoved;
 
     public void ConfigureColorManagement(IColorManagementEngine colorManagement)
     {
@@ -378,7 +379,9 @@ public sealed class WindowsPreviewHost : NativeControlHost, IPreviewHost
         // Install before creating the presenter child. A bridge failure leaves no active native
         // preview rectangle that could silently consume the viewport's mouse/wheel input.
         WindowsPreviewInputBridge inputBridge =
-            WindowsPreviewInputBridge.Install(containerHwnd, topLevelHwnd);
+            WindowsPreviewInputBridge.Install(
+                containerHwnd, topLevelHwnd,
+                point => NativePointerMoved?.Invoke(point));
         WindowsPreviewDisplayChangeBridge displayChangeBridge;
         IWindowsPreviewHostBackend backend;
         try

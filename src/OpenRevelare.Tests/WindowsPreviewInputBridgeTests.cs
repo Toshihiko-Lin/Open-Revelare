@@ -69,10 +69,12 @@ public sealed class WindowsPreviewInputBridgeTests
         {
             Map = point => new WindowsPreviewInputPoint(point.X + 100, point.Y - 20),
         };
+        var moved = new List<WindowsPreviewInputPoint>();
         WindowsPreviewInputBridge bridge = WindowsPreviewInputBridge.Install(
             native,
             containerHwnd: (nint)0x101,
-            topLevelHwnd: (nint)0x202);
+            topLevelHwnd: (nint)0x202,
+            pointerMoved: moved.Add);
 
         Assert.True(bridge.IsInstalled);
         Assert.Equal(1, native.InstallCalls);
@@ -94,6 +96,7 @@ public sealed class WindowsPreviewInputBridgeTests
         Assert.Equal(
             new WindowsPreviewInputPoint(95, -13),
             WindowsPreviewInputMessages.DecodeClientPoint(move.LParam));
+        Assert.Equal(new WindowsPreviewInputPoint(-5, 7), Assert.Single(moved));
         Assert.Empty(native.PreviousCalls);
 
         native.Forwarded.Clear();
@@ -105,6 +108,7 @@ public sealed class WindowsPreviewInputBridgeTests
         ForwardedMessage wheel = Assert.Single(native.Forwarded);
         Assert.Equal(wheelScreenCoordinates, wheel.LParam);
         Assert.Equal(1, native.MapCalls);
+        Assert.Single(moved);
 
         native.Forwarded.Clear();
         native.Invoke(
@@ -139,6 +143,7 @@ public sealed class WindowsPreviewInputBridgeTests
         Assert.Empty(native.Forwarded);
         Assert.Equal(previousCallCount + 1, native.PreviousCalls.Count);
         Assert.Equal((nint)0x101, native.PreviousCalls[^1].Hwnd);
+        Assert.Single(moved);
     }
 
     [Fact]
