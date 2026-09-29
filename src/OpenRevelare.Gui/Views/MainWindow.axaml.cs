@@ -110,13 +110,13 @@ public partial class MainWindow : Window
         // A resize changes the letterbox and the fit scale, so the pan clamp and the zoom
         // percentage both go stale unless the transform is recomputed.
         ViewPort.SizeChanged += (_, _) => ApplyTransform();
-        _dustPresentationTimer.Tick += (_, _) =>
-        {
-            _dustPresentationTimer.Stop();
-            QueueWindowsPresentation();
-        };
         WindowsPreview.NativePointerMoved += OnNativePreviewPointerMoved;
-        _dustHoverTimer.Tick += (_, _) => PollDustCursor();
+        Activated += (_, _) => RequestDustAnimationFrame();
+        Deactivated += (_, _) =>
+        {
+            DustBrushRing.IsVisible = false;
+            QueueDustPresentation();
+        };
 
         // If the pointer capture is stolen (another window, a touch cancel), the drag flags would
         // otherwise stay stuck true and the next click would behave as a continued drag.
@@ -208,8 +208,8 @@ public partial class MainWindow : Window
     private bool _dustStrokeChanged;
     private readonly List<(Point Centre, double Radius)> _dustStrokeTrail = new();
     private readonly List<Point> _dustStrokeSamples = new();
-    private readonly DispatcherTimer _dustPresentationTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
-    private readonly DispatcherTimer _dustHoverTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private bool _dustAnimationFramePending;
+    private bool _dustPresentationDirty;
     private Point? _lastDustCursorPosition;
 
     // Set once the user closes a tool banner. The hint sits pinned at the top of the picture and
@@ -979,7 +979,6 @@ public partial class MainWindow : Window
         if (leavingCrop) DiscardCropDraft();   // after _mode, so the frame actually hides
         else if (leavingDust)
         {
-            _dustHoverTimer.Stop();
             DustBrushRing.IsVisible = false;
             QueueDustPresentation();
         }
@@ -1020,8 +1019,8 @@ public partial class MainWindow : Window
         if (IsDustMode && OperatingSystem.IsWindows())
         {
             _lastDustCursorPosition = null;
-            _dustHoverTimer.Start();
             PollDustCursor();
+            RequestDustAnimationFrame();
         }
         if (IsDustMode)
         {
@@ -1126,13 +1125,13 @@ public partial class MainWindow : Window
     private void ExitMode()
     {
         EndDustStroke();
-        _dustHoverTimer.Stop();
         _mode = SampleMode.None;
         DiscardCropDraft();
         Banner.IsHitTestVisible = false;
         UpdatePanCursor();          // back to hand/arrow depending on zoom
         SelLine.IsVisible = false;
         DustBrushRing.IsVisible = false;
+        QueueDustPresentation();
         Banner.IsVisible = false;
         BannerCloseBtn.IsVisible = false;   // sibling of the banner, so it needs hiding too
         SetTogglesExcept(null);   // programmatic uncheck does not re-fire Click
@@ -1785,8 +1784,31 @@ public partial class MainWindow : Window
 
     private void QueueDustPresentation()
     {
-        if (ActivePreview?.IsPresenterAvailable == true && !_dustPresentationTimer.IsEnabled)
-            _dustPresentationTimer.Start();
+        if (ActivePreview?.IsPresenterAvailable != true || _windowsPresentationClosed) return;
+        _dustPresentationDirty = true;
+        RequestDustAnimationFrame();
+    }
+
+    private void RequestDustAnimationFrame()
+    {
+        if (_dustAnimationFramePending || _windowsPresentationClosed ||
+            (!_dustPresentationDirty && (!IsDustMode || !IsActive))) return;
+        _dustAnimationFramePending = true;
+        RequestAnimationFrame(OnDustAnimationFrame);
+    }
+
+    private void OnDustAnimationFrame(TimeSpan timestamp)
+    {
+        _dustAnimationFramePending = false;
+        if (_windowsPresentationClosed) return;
+        PollDustCursor();
+        if (_dustPresentationDirty)
+        {
+            _dustPresentationDirty = false;
+            QueueWindowsPresentation();
+        }
+        if (IsDustMode && IsActive && WindowsPreview.IsPresenterAvailable)
+            RequestDustAnimationFrame();
     }
 
     private void OnNativePreviewPointerMoved(WindowsPreviewInputPoint point)
