@@ -47,11 +47,11 @@ jobs:
           test -f /tmp/pub/liblcms2.so            || { echo "缺 Little CMS loader alias"; exit 1; }
           test -f /tmp/pub/lcms2.manifest.json    || { echo "缺 Little CMS manifest"; exit 1; }
           test -f /tmp/pub/models/net_awb.onnx    || { echo "缺 Deep-WB 模型"; exit 1; }
-          if compgen -G "/tmp/pub/*.dll" > /dev/null; then
-            echo "单文件发布不应残留托管 DLL"
-            ls /tmp/pub/*.dll
-            exit 1
-          fi
+          for file in OpenRevelare.dll OpenRevelare.Core.dll Avalonia.Base.dll \
+                      OpenRevelare.deps.json OpenRevelare.runtimeconfig.json \
+                      System.Private.CoreLib.dll libcoreclr.so libhostfxr.so libhostpolicy.so; do
+            test -s "/tmp/pub/$file" || { echo "分文件发布缺少或为空：$file"; exit 1; }
+          done
 
   windows:
     runs-on: windows-2022
@@ -148,11 +148,11 @@ jobs:
           cmp -s native/osx-arm64/liblcms2.2.dylib /tmp/pub/liblcms2.2.dylib
           test -f /tmp/pub/libOpenRevelare.Presentation.MacOS.Native.dylib || { echo "缺 macOS presenter 垫片 —— 没有它 HDR/EDR 预览静默退回 SDR 位图"; exit 1; }
           test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
-          if compgen -G "/tmp/pub/*.dll" > /dev/null; then
-            echo "单文件发布不应残留托管 DLL"
-            ls /tmp/pub/*.dll
-            exit 1
-          fi
+          for file in OpenRevelare.dll OpenRevelare.Core.dll Avalonia.Base.dll \
+                      OpenRevelare.deps.json OpenRevelare.runtimeconfig.json \
+                      System.Private.CoreLib.dll libcoreclr.dylib libhostfxr.dylib libhostpolicy.dylib; do
+            test -s "/tmp/pub/$file" || { echo "分文件发布缺少或为空：$file"; exit 1; }
+          done
       # SystemMemory.TryMacOS 依赖的 sysctl 键是否真的存在、是否真的读得出数。
       # 这些键在 Linux 上无法验证，而写错一个键名不会编译失败也不会崩 —— 只会静默
       # 退回按总内存估算，也就是 P5 原本的毛病，无声无息地回来。
