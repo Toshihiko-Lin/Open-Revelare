@@ -3,9 +3,12 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);**\*.sync-conflict-*</DefaultItemExcludes>
   </PropertyGroup>
 
-  <!-- Release artifacts keep native and managed files separately so platform loaders can resolve
-       app-owned libraries from the publish directory. -->
+  <!-- Release artifacts keep app-owned native libraries beside the executable. The 1.8.2
+       single-file apphost could terminate before Avalonia initialized when dyld/.NET resolved
+       bundled native dependencies; all release RIDs therefore use the separate-file layout. -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishSingleFile Condition="$(RuntimeIdentifier.StartsWith('osx'))">false</PublishSingleFile>
     <DebugSymbols>false</DebugSymbols>
     <DebugType>None</DebugType>
     <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
