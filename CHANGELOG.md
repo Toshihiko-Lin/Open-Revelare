@@ -4,7 +4,7 @@
 
 **改进**
 
-- 新增除尘。
+- 新增非破坏性手动除尘，支持修复 / 擦除笔连续涂抹、红色蒙版范围预览，以及 `[` / `]` 调整笔刷大小；修复结果同步用于预览和导出。
 
 **修复**
 
@@ -16,7 +16,7 @@
 
 **Improved**
 
-- Added dust removal.
+- Added non-destructive manual dust removal with continuous Repair / Erase brush strokes, red mask previews, and `[` / `]` brush-size shortcuts; repairs apply consistently to preview and export.
 
 **Fixed**
 
