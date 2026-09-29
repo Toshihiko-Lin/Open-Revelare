@@ -1,22 +1,10 @@
 # OpenRevelare — 更新日志
 
-## 未发布（2026-09-29）
+## v1.8.3（2026-09-29）
 
 **改进**
 
-- 下线不可靠的自动除尘分析，改为修复笔和擦除笔手动标记，避免把画面细节误判为灰尘。
-- 优化 HDR 预览下的除尘修复显示：红色蒙版覆盖笔刷范围，拖动轨迹合并为整体区域并在释放后统一计算，减少卡顿。
-- 恢复笔刷悬停范围圆圈，并新增 Photoshop 风格快捷键：`[` 缩小、`]` 放大笔刷，每次调整 0.001。
-
----
-
-**Improved**
-
-- Retired unreliable automatic dust analysis in favour of explicit Repair and Erase brushes, avoiding false positives on real image detail.
-- Improved dust-repair feedback in HDR preview: the red mask shows the covered area, strokes are merged into one region and processed on release to reduce stutter.
-- Restored the brush hover footprint and added Photoshop-style shortcuts: `[` shrinks and `]` grows the brush by 0.001 per press.
-
-## v1.8.3（2026-09-28）
+- 新增除尘。
 
 **修复**
 
@@ -25,6 +13,10 @@
 - Windows 与 macOS 预览缓存会随内存压力回收远处图片，同时保留当前及相邻帧；后台优先预热两侧邻帧，切换图片更流畅。
 
 ---
+
+**Improved**
+
+- Added dust removal.
 
 **Fixed**
 
