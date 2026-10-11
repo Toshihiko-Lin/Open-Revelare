@@ -188,6 +188,11 @@ public static class Sprocket
     /// </summary>
     private const double MaxHoleShare = 0.05;
 
+    // Colour is supporting evidence, never a standalone neutrality test. Camera-native lamp
+    // RGB can have a strong green bias, while clipping can erase the orange cast of film.
+    private const double MaxNeutralRedOverBlue = 1.35;
+    private const double MinFilmOverBoardCast = 1.25;
+
     /// <summary>
     /// Least peak luma for a bright cluster to be a light board rather than bare film base, on the
     /// ABSOLUTE scale. Satisfying either this or <see cref="MinBoardOverFilm"/> is enough — see
@@ -328,10 +333,13 @@ public static class Sprocket
         //     or grey, never orange. See <see cref="MaxBoardRedOverBlue"/>.
         if (RedOverBlue(image, luma, valleyLuma) > MaxBoardRedOverBlue) return NoBoard;
 
-        // (d) The cluster is HARDWARE rather than picture. Two shapes qualify, and a frame need
-        //     only match one — see <see cref="LooksLikeHardware"/> for why the edge test alone
-        //     rejected the sprocket case this feature is named after.
-        if (!LooksLikeHardware(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
+        // (d) A bare rebate is also bright, flat and edge-connected. A board needs independent
+        // evidence of film BELOW it, or a regular peripheral row of holes. Ambiguous two-level
+        // neutral scans retain their bright pixels as potential film base. Try the border path
+        // first so ordinary boards do not also require labelling every interior bright blob.
+        bool board = BorderDominant(luma, image.Width, image.Height, valleyLuma)
+                     && HasFilmBelowBoard(image, luma, smooth, filmTop, valleyLuma);
+        if (!board && !RepeatedHoles(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
 
         // (e) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
         //     brightest thing present.
@@ -562,33 +570,97 @@ public static class Sprocket
     }
 
     /// <summary>
-    /// True when the bright cluster above <paramref name="cut"/> is hardware — the light board or
-    /// the sprocket holes lit through it — rather than picture content.
-    ///
-    /// Hardware presents in two shapes and the frame need only match ONE of them:
-    ///
-    ///   • It REACHES THE FRAME'S EDGE (<see cref="BorderDominant"/>). This is the bare panel
-    ///     around the film: a full-width strip, a ring, a corner wedge.
-    ///
-    ///   • It is a row of NEAR-IDENTICAL INTERIOR BLOBS (<see cref="RepeatedHoles"/>) — the
-    ///     sprocket holes, which are windows onto that same panel.
-    ///
-    /// The second test is here because the edge rule alone rejects the very case this class is
-    /// named after. A 135 frame photographed whole on a copy stand shows twenty holes punched by
-    /// the same die, and a hole is by construction an ISLAND: it is surrounded by film on all
-    /// sides and touches no border. On the 21 roll the histogram could not have been cleaner — a
-    /// board cluster at luma 0.69, a valley at 0.40 with a depth of 0.007 — and every frame was
-    /// still thrown out, because only 20% of the lit pixels were edge-connected (the two thin
-    /// strips past the film's long edges) against the 70% the rule demands. The user had to enable
-    /// 齿孔遮罩 by hand and find the cut themselves on all forty frames.
-    ///
-    /// Both rules answer the same question — "is this thing the film, or the machine the film is
-    /// sitting in?" — and a photograph passes neither, which is what keeps the disjunction safe: a
-    /// bright subject is neither edge-connected nor stamped out twenty times to the same
-    /// dimensions.
+    /// Distinguish a bare lamp from a bright rebate using the next material below the candidate.
+    /// Neutrality alone is inconclusive: thin film and clipped film can both appear neutral.
     /// </summary>
-    private static bool LooksLikeHardware(float[] luma, int w, int h, double cut)
-        => BorderDominant(luma, w, h, cut) || RepeatedHoles(luma, w, h, cut);
+    private static bool HasFilmBelowBoard(ImageBuffer image, float[] luma, double[] smooth,
+                                          int filmTop, double boardCut)
+    {
+        // Compare with the brightest surviving material, not the whole picture (whose scene
+        // colours are arbitrary). R:B tolerates the green bias of unbalanced camera RAWs.
+        double boardRatio = RedOverBlue(image, luma, boardCut);
+        double low = Math.Max(0, Centre(filmTop) - 0.06);
+        double r = 0, b = 0;
+        int count = 0, clipped = 0;
+        for (int p = 0; p < luma.Length; p++)
+        {
+            if (!(luma[p] > boardCut)) continue;
+            int i = p * 3;
+            if (image.Data[i] >= 0.98f || image.Data[i + 1] >= 0.98f || image.Data[i + 2] >= 0.98f)
+                clipped++;
+            count++;
+        }
+        for (int p = 0; p < luma.Length; p++)
+        {
+            if (luma[p] < low || luma[p] > boardCut) continue;
+            r += image.Data[p * 3]; b += image.Data[p * 3 + 2];
+        }
+        // Clipping erases the dye mask's cast; a white clipped rebate is not colour evidence.
+        bool colourEvidence = count > 0 && clipped < 0.1 * count && boardRatio <= MaxNeutralRedOverBlue
+                              && b > 0 && r / b >= boardRatio * MinFilmOverBoardCast;
+        if (colourEvidence) return true;
+
+        // Neutral/thin-base and B&W stocks need spatial evidence. Find the next material,
+        // requiring its own gap to picture tone and a long band near a frame edge. This is
+        // the board -> film rebate -> picture topology, rather than board -> picture alone.
+        var filmHistogram = (double[])smooth.Clone();
+        for (int i = filmTop + 1; i < filmHistogram.Length; i++) filmHistogram[i] = 0;
+        int peak = TopCluster(filmHistogram, out int foot);
+        if (peak < 0 || foot < 1) return false;
+        int pictureTop = FilmTop(filmHistogram, foot);
+        if (pictureTop < 0) return false;
+        int valley = ArgMin(filmHistogram, pictureTop, foot + 1);
+        if (Centre(peak) - Centre(valley) < 0.05
+            || filmHistogram[valley] > MaxValleyDepth * filmHistogram[peak]) return false;
+        return HasLongPeripheralBand(luma, image.Width, image.Height, Centre(valley), boardCut);
+    }
+
+    /// <summary>
+    /// A material band must run along most of a frame side. Edge connectivity alone accepts
+    /// clouds, windows and rebates alike. Projecting support along each side additionally asks
+    /// for a long boundary, without assuming that the film is perfectly aligned to the scan.
+    /// </summary>
+    private static bool HasLongPeripheralBand(float[] luma, int w, int h, double low, double high)
+    {
+        int bx = Math.Max(1, w / 4), by = Math.Max(1, h / 4);
+        int left = 0, right = 0, top = 0, bottom = 0;
+        bool Match(int p) => luma[p] > low && luma[p] <= high;
+        long material = 0, peripheral = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                if (!Match(y * w + x)) continue;
+                material++;
+                if (x < bx || x >= w - bx || y < by || y >= h - by) peripheral++;
+            }
+        // A second picture-wide mode is not a narrow physical band. Check where its pixels
+        // lie, in addition to how far its projection reaches along a side.
+        if (material < 0.002 * luma.Length || material > 0.60 * luma.Length
+            || peripheral < 0.80 * material) return false;
+        for (int y = 0; y < h; y++)
+        {
+            bool l = false, r = false;
+            for (int x = 0; x < bx; x++)
+            {
+                l |= Match(y * w + x);
+                r |= Match(y * w + w - 1 - x);
+            }
+            if (l) left++;
+            if (r) right++;
+        }
+        for (int x = 0; x < w; x++)
+        {
+            bool t = false, b = false;
+            for (int y = 0; y < by; y++)
+            {
+                t |= Match(y * w + x);
+                b |= Match((h - 1 - y) * w + x);
+            }
+            if (t) top++;
+            if (b) bottom++;
+        }
+        return left >= 0.70 * h || right >= 0.70 * h || top >= 0.70 * w || bottom >= 0.70 * w;
+    }
 
     /// <summary>
     /// Mean red over mean blue among the pixels above <paramref name="cut"/>: how far the bright
@@ -618,12 +690,10 @@ public static class Sprocket
     /// True when the lit pixels form several interior blobs of the SAME size and shape — a row of
     /// sprocket holes.
     ///
-    /// Identity is the whole test, and it is what a photograph cannot fake. Holes are punched to a
-    /// standard, so their areas and bounding boxes agree to within a fraction of a percent
+    /// Holes are punched to a standard, so their areas and bounding boxes agree
     /// (<see cref="MaxHoleSpread"/>), each one fills its box like the rounded rectangle it is
-    /// (<see cref="MinHoleFill"/>), and each is small (<see cref="MaxHoleShare"/>). Bright picture
-    /// content that survives the photometric tests — a specular row, a line of windows — is never
-    /// uniform to that tolerance.
+    /// (<see cref="MinHoleFill"/>), and each is small (<see cref="MaxHoleShare"/>). Picture content
+    /// can also be uniform, so the centres must form a regular row near a frame edge as well.
     ///
     /// Edge-touching blobs are excluded before the statistics rather than counted: they are the
     /// bare panel past the film's edge and the partial holes the frame cuts through, and both have
@@ -637,6 +707,8 @@ public static class Sprocket
         var widths = new List<double>();
         var heights = new List<double>();
         var fills = new List<double>();
+        var centresX = new List<double>();
+        var centresY = new List<double>();
         var stack = new Stack<int>();
 
         for (int start = 0; start < n; start++)
@@ -680,6 +752,8 @@ public static class Sprocket
             widths.Add(bw);
             heights.Add(bh);
             fills.Add(area / (bw * bh));
+            centresX.Add((minX + maxX) / 2.0);
+            centresY.Add((minY + maxY) / 2.0);
         }
 
         if (areas.Count < MinHoleCount) return false;
@@ -699,6 +773,7 @@ public static class Sprocket
         var kA = new List<double>();
         var kW = new List<double>();
         var kH = new List<double>();
+        var candidates = new List<int>();
         for (int i = 0; i < areas.Count; i++)
         {
             if (Math.Abs(areas[i] - median) > MaxHoleSpread * median) continue;
@@ -706,10 +781,40 @@ public static class Sprocket
             kA.Add(areas[i]);
             kW.Add(widths[i]);
             kH.Add(heights[i]);
+            candidates.Add(i);
         }
 
         if (kA.Count < MinHoleCount) return false;
-        return Cv(kA) <= MaxHoleSpread && Cv(kW) <= MaxHoleSpread && Cv(kH) <= MaxHoleSpread;
+        if (Cv(kA) > MaxHoleSpread || Cv(kW) > MaxHoleSpread || Cv(kH) > MaxHoleSpread) return false;
+
+        // Stamped holes also form a regularly spaced row near a film edge. Uniform objects
+        // in the middle of a photograph (windows, lamps) cannot establish that topology.
+        // Fit each peripheral row, allowing tilt; both portrait and landscape scans qualify.
+        for (int side = 0; side < 4; side++)
+        {
+            bool horizontal = side < 2;
+            double span = horizontal ? h : w;
+            var row = candidates.Where(i =>
+            {
+                double cross = horizontal ? centresY[i] : centresX[i];
+                return side % 2 == 0 ? cross < 0.25 * span : cross > 0.75 * span;
+            }).OrderBy(i => horizontal ? centresX[i] : centresY[i]).ToList();
+            if (row.Count < MinHoleCount) continue;
+            double Along(int i) => horizontal ? centresX[i] : centresY[i];
+            double Across(int i) => horizontal ? centresY[i] : centresX[i];
+            double mx = row.Average(Along), my = row.Average(Across);
+            double xx = 0, xy = 0;
+            foreach (int i in row) { double dx = Along(i) - mx; xx += dx * dx; xy += dx * (Across(i) - my); }
+            if (xx <= 0) continue;
+            double slope = xy / xx;
+            if (Math.Abs(slope) > 0.35) continue;
+            double tolerance = 0.5 * Median(horizontal ? kH : kW);
+            if (row.Any(i => Math.Abs(Across(i) - my - slope * (Along(i) - mx)) > tolerance)) continue;
+            var gaps = new List<double>();
+            for (int i = 1; i < row.Count; i++) gaps.Add(Along(row[i]) - Along(row[i - 1]));
+            if (gaps.Min() > Median(horizontal ? kW : kH) && Cv(gaps) <= 0.20) return true;
+        }
+        return false;
     }
 
     /// <summary>Median of a list, by sorting a copy — the caller's order is meaningful.</summary>

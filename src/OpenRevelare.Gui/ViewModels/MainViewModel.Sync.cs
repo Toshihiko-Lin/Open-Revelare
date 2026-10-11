@@ -27,6 +27,30 @@ public partial class MainViewModel
     /// <summary>Copy Stage-2 scene adjustments (per SyncOptions) from the current frame to every other frame.</summary>
     public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, Loc.T("场景"));
 
+    /// <summary>Explicit mask broadcast; never part of Cineon or Display copy/paste.</summary>
+    public void ApplySprocketToFrames()
+    {
+        if (CurrentFrame is null) return;
+        bool hadSelection = Frames.Any(f => f.IsSelected);
+        CommitUndo();
+        FrameParams source = CurrentParamsForStorage();
+        CurrentFrame.Params = source;
+        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
+                                        && (!hadSelection || f.IsSelected)).ToList();
+        foreach (RollFrame frame in targets)
+        {
+            frame.Params.SprocketEnabled = source.SprocketEnabled;
+            frame.Params.SprocketThreshold = source.SprocketThreshold;
+            SetThumbnail(frame, null);
+        }
+        if (hadSelection) ClearStripSelection();
+        StatusText = hadSelection
+            ? Loc.F($"已把齿孔遮罩应用到勾选的 {targets.Count} 帧")
+            : Loc.F($"已把齿孔遮罩应用到整卷（{targets.Count} 帧）");
+        MarkEdit();
+        RestartThumbnails();
+    }
+
     public void CopyCalibration() { _calClipboard = CurrentParamsForStorage(); HasCalClipboard = true; StatusText = Loc.T("已复制 Cineon 标定"); }
     public void CopyScene() { _sceneClipboard = CurrentParamsForStorage(); HasSceneClipboard = true; StatusText = Loc.T("已复制 Display 参数"); }
 
@@ -183,7 +207,6 @@ public partial class MainViewModel
             }
             if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
             if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
-            if (Sync.CalSprocket) { d.SprocketEnabled = s.SprocketEnabled; d.SprocketThreshold = s.SprocketThreshold; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform
         }
         if (scene)

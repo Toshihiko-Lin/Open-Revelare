@@ -1,5 +1,33 @@
 # OpenRevelare — 更新日志
 
+## v1.8.4（2026-10-11）
+
+**改进**
+
+- **按数字中间片流程整理校准与成片调整。** 输入状态、校正来源、适用条件和镜头 / 平场控件集中在“输入与校正详情”，可直接查看本帧校准依据。LUT 明确为独立外观处理，不参与输入设备标定；省略两页顶部的灰色说明，减少常驻文字。
+- **齿孔遮罩默认关闭，开关保持可见。** 新导入胶卷不再自动启用遮罩；可直接勾选“启用齿孔遮罩”，并在“齿孔设置”中预览遮罩、调整阈值。自动校准仍会独立排除检测到的灯板区域。
+- **齿孔同步独立于 Cineon。** 新增“同步齿孔遮罩”按钮，仅同步启用状态与阈值；优先应用到勾选帧，未勾选时应用到整卷，不改动色彩与裁切。
+- **方向处理集中到负片 / 对比按钮附近。** 左右旋转、水平 / 垂直翻转，以及“同步旋转 / 翻转 / 拉直”放在预览工具栏同一区域；原几何折叠区改为“裁切”，保留裁切相关控件与独立同步入口。
+
+**修复**
+
+- **避免校正来源串卷。** 普通导入会清理上一卷的 RGB 分光与平场参考路径，防止旧来源进入新卷的报告和工程文件。
+- **降低无齿孔画面的片基被误判为灯板、导致大面积扣白的风险。** 齿孔识别结合色彩关系、边缘片基形态及齿孔排列规律，不再仅依赖亮度；对过曝和接近中性的浅色片基采用更保守的判断。
+
+---
+
+**Improved**
+
+- **Calibration and photo adjustments follow the digital-intermediate workflow.** Input status, correction sources, applicability and lens / flat-field controls are grouped under Input and correction details, with direct access to the frame report. LUTs are clearly separate look processing, independent of input-device calibration. Grey introductory text is removed from both tabs to reduce persistent text.
+- **Sprocket masking now defaults to off, with its switch always visible.** Newly imported rolls no longer enable the mask automatically. Enable it directly, then preview the mask and adjust its threshold under Sprocket settings. Automatic calibration still independently excludes detected light-board regions.
+- **Sprocket sync is separate from Cineon sync.** The new Sync sprocket mask button copies only the enabled state and threshold to checked frames, or the whole roll when none are checked, without changing colour or crop settings.
+- **Orientation controls sit beside Negative / Compare.** Counterclockwise / clockwise rotation, horizontal / vertical flips, and Sync rotation / flips / straighten are grouped in the preview toolbar. The former geometry section is now Crop, retaining crop controls and its separate sync action.
+
+**Fixed**
+
+- **Prevented correction provenance leaking between rolls.** Plain imports clear the previous roll's RGB separation and flat-field reference paths so old sources cannot enter the new roll's report or project file.
+- **Reduced the risk of film base being mistaken for the light board and whitening large areas in images without sprocket holes.** Detection now combines colour relationships, peripheral film-base geometry and repeated-hole alignment rather than relying on brightness alone, with more conservative handling of clipped captures and thin, nearly neutral film bases.
+
 ## v1.8.3（2026-09-29）
 
 **改进**

@@ -737,6 +737,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             RefreshThumbnail(_prevFrame);
         }
         _prevFrame = value;
+        NotifyCalibrationInfo();
         if (value is not null) _ = SwitchFrameAsync(value);
     }
 
@@ -1740,6 +1741,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _sprocketOverlayDirty = true;
         _previewWorking = entry.Working;
+        _calibrationInfoFramePath = frame.Path;
+        NotifyCalibrationInfo();
         _previewMargin = margin;
         _previewFrameRect = margin is { } box && SplitRectOf(frame) is { } rect
                                 ? Relative(rect, box)
@@ -2482,45 +2485,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void ClearGreyCard() => GreyCardText = "";
 
     /// <summary>
-    /// Measure the sprocket/light-board threshold from the imported frame, apply it to the whole
-    /// roll, then run the auto chain. The import-time entry point.
-    ///
-    /// The threshold has to be settled BEFORE the chain runs, not after: it is the light-board cut
-    /// that keeps the board out of both the film-base estimate and the highlight pick, and
-    /// re-running the chain later would be the only way to fold in a threshold that arrived
-    /// afterwards. That ordering is why this method — rather than the end of LoadRollAsync — is
-    /// where import-time auto-inversion belongs.
-    ///
-    /// This used to be a modal dialog the user had to clear before the roll would open. It is now
-    /// measured and applied silently: the dialog's own default was
-    /// <see cref="Sprocket.EstimateSprocketThreshold"/>'s answer, which is what runs here, and the
-    /// threshold stays adjustable in 整卷校准 → 齿孔遮罩 with the same live mask overlay.
-    ///
-    /// <see cref="Sprocket.NoBoard"/> is a real answer rather than a failure — a flatbed scan has
-    /// no light board, and forcing a cut onto one would mask off the film's own highlights. It maps
-    /// to SprocketEnabled = false, exactly what the dialog's 跳过 did.
-    ///
-    /// Note this decides only the MASK-FILL toggle (齿孔遮罩, which paints the board white in the
-    /// output). The automatic measurements exclude the board either way — they re-derive the cut
-    /// themselves through <see cref="FilmBase.HighDensityKeepMask"/> — so a roll that lands here
-    /// with no board still gets its statistics taken over film pixels only.
+    /// Seed a suggested threshold on import, but leave mask filling off until the user opts in.
+    /// A bright histogram population alone cannot prove that a scan contains sprocket holes.
+    /// Automatic calibration still derives its own statistics mask independently of this toggle.
     /// </summary>
-    public async Task ApplySprocketAutoAsync()
+    public async Task PrepareImportedRollAsync()
     {
         // Off the UI thread: unlike every other estimator on this path, this one decodes a frame
         // at full resolution (see MeasureBoardCut), which is seconds rather than milliseconds on a
         // 100 MP scan. The chain it hands off to at the end is already async for the same reason.
         double? threshold = await Task.Run(MeasureBoardCut);
 
-        if (threshold is double thr)
+        SprocketEnabled = false;
+        SprocketThreshold = threshold ?? 0.9;
+        foreach (RollFrame f in Frames)
         {
-            SprocketEnabled = true; SprocketThreshold = thr;
-            foreach (RollFrame f in Frames) { f.Params.SprocketEnabled = true; f.Params.SprocketThreshold = thr; }
-        }
-        else
-        {
-            SprocketEnabled = false;
-            foreach (RollFrame f in Frames) f.Params.SprocketEnabled = false;
+            f.Params.SprocketEnabled = false;
+            f.Params.SprocketThreshold = SprocketThreshold;
         }
         AutoInvertOnImportRun();
         UpdateSprocketOverlay();
@@ -2546,7 +2527,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// This import's auto-inversion choice, taken from the import dialog's checkbox.
     ///
     /// Held as a field because the decision is made in <see cref="LoadRollWithConfigAsync"/> but
-    /// acted on later, in <see cref="ApplySprocketAutoAsync"/> — the chain has to wait for the
+    /// acted on later, in <see cref="PrepareImportedRollAsync"/> — the chain has to wait for the
     /// sprocket threshold. Defaults true so a roll opened by any other route (a saved project, the
     /// catalog) still behaves as before.
     /// </summary>
@@ -2800,7 +2781,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // that is allowed to be full resolution, and a 190 MP Flextight strip is 2.3 GB of
             // float — on an 8 GB machine, with the thumbnail warm-up decoding alongside, it is
             // exactly the allocation that fails. Letting it escape does not merely lose the cut:
-            // it escapes through ApplySprocketAutoAsync BEFORE AutoInvertOnImportRun is reached,
+            // it escapes through PrepareImportedRollAsync BEFORE AutoInvertOnImportRun is reached,
             // so the whole auto chain never starts and the roll sits on pipeline defaults
             // (t_base 1, D_min 0, D_max 2 — a blown-white negative) with nothing to say why.
             // The preview answer is second best; no answer at all was the bug.
@@ -4351,6 +4332,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RetranslateText()
     {
+        NotifyCalibrationInfo();
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
         if (_calibrationDiagnosticsRollWide && _rollBaseCalibration is { } baseCalibration)

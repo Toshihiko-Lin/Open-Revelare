@@ -9,7 +9,7 @@
         Title="{i18n:T '选择色彩同步项'}">
     <DockPanel Margin="14">
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8"
-                   Text="{i18n:T '这里控制底片和观感参数的广播范围。构图（旋转、翻转、拉直、裁切）在几何面板中单独同步。'}" />
+                   Text="{i18n:T '这里只同步色彩参数。齿孔遮罩在齿孔设置中同步；旋转、翻转和拉直在预览顶部同步；裁切在裁切面板中同步。'}" />
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
                     Spacing="8" Margin="0,10,0,0">
             <Button Content="{i18n:T '关闭'}" Click="OnCloseClick" />
@@ -20,7 +20,6 @@
                 <CheckBox Content="{i18n:T '片基与两端点（含色偏）'}" IsChecked="{Binding CalFilmBase}" />
                 <CheckBox Content="{i18n:T '色度通道缩放'}" IsChecked="{Binding CalChroma}" />
                 <CheckBox Content="{i18n:T '镜头畸变 / 暗角 / LCC'}" IsChecked="{Binding CalLens}" />
-                <CheckBox Content="{i18n:T '齿孔启用 / 阈值'}" IsChecked="{Binding CalSprocket}" />
                 <TextBlock Text="{i18n:T '观感 · Display（Stage 2）'}" FontWeight="Bold" Margin="0,8,0,4" />
                 <CheckBox Content="{i18n:T '白平衡（色温 / 色调）'}" IsChecked="{Binding SceneWb}" />
                 <CheckBox Content="{i18n:T '曝光'}" IsChecked="{Binding SceneExposure}" />

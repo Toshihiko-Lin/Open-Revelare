@@ -240,6 +240,8 @@ public partial class MainViewModel
         lock (_fullSlotGate) _fullSlot = null;
         _regionSlot = null;
         _previewWorking = null;
+        _calibrationInfoFramePath = null;
+        NotifyCalibrationInfo();
         _previewMargin = null;
         foreach (RollFrame frame in Frames) SetThumbnail(frame, null);
         PreviewImage = null;
@@ -381,6 +383,7 @@ public partial class MainViewModel
         _calRgbPaths = incomingCalRgbPaths;
         _lccSourcePath = incomingLccSourcePath;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
+        NotifyCalibrationInfo();
         if (lcc is not null) { _lccFlatField = lcc; LccAvailable = true; LccStatus = Loc.T("已载入平场（工程）"); }
         else
         {
@@ -553,10 +556,11 @@ public partial class MainViewModel
 
         // Set roll-level ops BEFORE loading so the sprocket estimate + auto film-base (which run
         // during LoadRollAsync) sample t_base in the DECOUPLED domain and the first render decouples.
-        // The auto-inversion choice rides along for the same reason: ApplySprocketAutoAsync acts on it
+        // The auto-inversion choice rides along for the same reason: PrepareImportedRollAsync acts on it
         // partway through the load.
         _cfgAutoInvert = cfg.AutoInvert;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
+        NotifyCalibrationInfo();
         _lccFlatField = lccField;
         LccAvailable = lccField is not null;
         // Must be settled BEFORE LoadRollAsync: import-time auto inversion runs inside that call
@@ -793,7 +797,9 @@ public partial class MainViewModel
         if (!_configLoad)   // config path pre-sets roll-level ops before this call; don't wipe them
         {
             _decoupleMatrix = null; _decoupleChromaMatrix = null;
+            _calSourceDir = null; _calRgbPaths = null; _lccSourcePath = null;
             _lccFlatField = null; LccAvailable = false; LccEnabled = false;
+            NotifyCalibrationInfo();
         }
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
         if (!_configLoad)   // the config path already cleared, and has since cached real work

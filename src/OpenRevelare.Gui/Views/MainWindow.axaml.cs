@@ -1360,6 +1360,7 @@ public partial class MainWindow : Window
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
     private void OnApplyCalToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToRoll();
     private void OnApplySceneToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplySceneToRoll();
+    private void OnApplySprocketClick(object? sender, RoutedEventArgs e) => Vm?.ApplySprocketToFrames();
     private void OnSelectAllFramesClick(object? sender, RoutedEventArgs e) => Vm?.SelectAllFrames();
     private void OnClearFrameSelectionClick(object? sender, RoutedEventArgs e) => Vm?.ClearFrameSelection();
     private void OnCopyCalClick(object? sender, RoutedEventArgs e) => Vm?.CopyCalibration();
@@ -1373,19 +1374,10 @@ public partial class MainWindow : Window
         await new SyncDialog(Vm.Sync).ShowDialog(this);
     }
 
-    /// <summary>
-    /// Import finished. The sprocket threshold used to be confirmed here in a modal dialog before
-    /// anything else could happen; it is now measured from the frame and applied silently, so an
-    /// import goes straight to a picture.
-    ///
-    /// Nothing is lost by not asking. The dialog's own default was
-    /// <see cref="Sprocket.EstimateSprocketThreshold"/>'s answer, which is what runs now, and the
-    /// threshold remains fully adjustable in 整卷校准 → 齿孔遮罩 with a live mask overlay — the
-    /// same control the dialog offered, in the place the rest of the calibration lives.
-    /// </summary>
+    /// <summary>Seed the optional mask threshold and start the requested import calibration.</summary>
     private async void OnRollImported()
     {
-        if (Vm is { } vm) await vm.ApplySprocketAutoAsync();
+        if (Vm is { } vm) await vm.PrepareImportedRollAsync();
     }
 
     private void OnViewNegToggle(object? sender, RoutedEventArgs e)

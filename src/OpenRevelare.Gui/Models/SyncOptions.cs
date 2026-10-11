@@ -4,8 +4,8 @@ namespace OpenRevelare.Gui.Models;
 
 /// <summary>
 /// Colour field groups carried by roll-wide and copy/paste operations.
-/// Composition is intentionally not part of this picker: orientation and framing are explicit
-/// actions in the Geometry / crop panel, so Cineon or Display sync can never erase a crop.
+/// Masking and composition have explicit sync actions in their own panels, so a colour sync
+/// cannot enable a destructive white fill or erase a crop.
 /// </summary>
 public sealed partial class SyncOptions : ObservableObject
 {
@@ -13,7 +13,6 @@ public sealed partial class SyncOptions : ObservableObject
     [ObservableProperty] private bool _calFilmBase = true;
     [ObservableProperty] private bool _calChroma = true;
     [ObservableProperty] private bool _calLens = true;
-    [ObservableProperty] private bool _calSprocket = true;
 
     // Stage-2 scene groups
     [ObservableProperty] private bool _sceneWb = true;

@@ -165,4 +165,107 @@ public class SprocketThresholdTests
 
         Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
     }
+
+    [Theory]
+    [InlineData(1.20f, 1.0f, 0.80f)] // a light orange mask, far below the old R:B=3 limit
+    [InlineData(1.02f, 1.0f, 0.98f)] // thin base under a strong lamp
+    [InlineData(1.0f, 1.0f, 1.0f)]   // monochrome or fully neutral base
+    public void A_bright_boardless_rebate_is_preserved_as_film_base(float r, float g, float b)
+    {
+        ImageBuffer f = Build((x, y, rng) =>
+            (float)((x < 10 || x >= W - 10 || y < 10 || y >= H - 10 ? 0.78 : 0.20)
+                    + 0.004 * rng.Next()), r, g, b);
+
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+        bool[] keep = FilmBase.HighDensityKeepMask(f, null);
+        Assert.True(keep[5 * W + 5], "the rebate was excluded from calibration");
+        double[] tb = FilmBase.EstimateTBaseFromRoll(new[] { f });
+        Assert.InRange(tb[0], 0.76 * r, 0.80 * r);
+        Assert.InRange(tb[1], 0.76 * g, 0.80 * g);
+        Assert.InRange(tb[2], 0.76 * b, 0.80 * b);
+    }
+
+    [Fact]
+    public void A_neutral_lamp_and_an_orange_base_are_separated()
+    {
+        ImageBuffer f = Build((x, y, rng) => (float)(0.18 + 0.005 * rng.Next()), 1.2f, 1, 0.8f);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < 20; x++)
+                for (int c = 0; c < 3; c++) f.Data[(y * W + x) * 3 + c] = 0.78f;
+        Assert.InRange(Sprocket.EstimateSprocketThreshold(f), 0.19, 0.75);
+    }
+
+    [Fact]
+    public void A_neutral_lamp_needs_a_separate_film_band_when_the_base_is_nearly_neutral()
+    {
+        ImageBuffer f = Build((x, y, rng) =>
+        {
+            double v = x < 16 ? 0.85 : x < 32 || y < 14 || y >= H - 14 ? 0.55 : 0.18;
+            return (float)(v + 0.004 * rng.Next());
+        });
+        Assert.InRange(Sprocket.EstimateSprocketThreshold(f), 0.56, 0.83);
+    }
+
+    [Theory]
+    [InlineData(false, false)] // repeated bright windows in the middle of the picture
+    [InlineData(true, false)]  // repeated windows at an edge, but not regularly spaced
+    [InlineData(true, true)]   // a peripheral row of punched holes
+    [InlineData(false, true)]  // even regular windows in the middle are picture content
+    public void Repeated_bright_blobs_need_a_regular_peripheral_row(bool peripheral, bool regular)
+    {
+        ImageBuffer f = Build((x, y, rng) => (float)(0.20 + 0.004 * rng.Next()), 1.02f, 1, 0.98f);
+        int[] xs = regular ? new[] { 32, 64, 96, 128, 160 } : new[] { 24, 44, 82, 134, 170 };
+        int top = peripheral ? 12 : 90;
+        foreach (int left in xs)
+            for (int y = top; y < top + 9; y++)
+                for (int x = left; x < left + 12; x++)
+                    for (int c = 0; c < 3; c++) f.Data[(y * W + x) * 3 + c] = 0.85f;
+        double cut = Sprocket.EstimateSprocketThreshold(f);
+        if (peripheral && regular) Assert.InRange(cut, 0.21, 0.83);
+        else Assert.Equal(Sprocket.NoBoard, cut);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void A_tilted_hole_row_survives_orientation_and_exposure_changes(int turns)
+    {
+        ImageBuffer f = Build((x, y, rng) => (float)(0.08 + 0.002 * rng.Next()));
+        for (int k = 0; k < 5; k++)
+        {
+            int left = 24 + 32 * k, top = 10 + 3 * k;
+            for (int y = top; y < top + 9; y++)
+                for (int x = left; x < left + 12; x++)
+                    for (int c = 0; c < 3; c++) f.Data[(y * W + x) * 3 + c] = 0.32f;
+        }
+        f = Geometry.ApplyOrientation(f, turns, false, false);
+        Assert.InRange(Sprocket.EstimateSprocketThreshold(f), 0.10, 0.31);
+    }
+
+    [Fact]
+    public void A_clipped_boardless_rebate_does_not_gain_colour_evidence_from_clipping()
+    {
+        ImageBuffer f = Build((x, y, rng) => (float)(0.2 + 0.004 * rng.Next()), 1.4f, 1, 0.6f);
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++)
+            {
+                if (x >= 10 && x < W - 10 && y >= 10 && y < H - 10) continue;
+                for (int c = 0; c < 3; c++) f.Data[(y * W + x) * 3 + c] = 1;
+            }
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+    }
+
+    [Fact]
+    public void A_picture_wide_second_mode_is_not_a_film_band()
+    {
+        ImageBuffer f = Build((x, y, rng) =>
+        {
+            double value = x < 10 || x >= W - 10 || y < 10 || y >= H - 10
+                ? 0.8 : x < W / 2 ? 0.5 : 0.2;
+            return (float)(value + 0.004 * rng.Next());
+        });
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+    }
 }

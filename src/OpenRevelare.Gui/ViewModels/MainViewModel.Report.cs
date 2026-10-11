@@ -56,6 +56,11 @@ public sealed partial class MainViewModel
     {
         sb.AppendLine();
         sb.AppendLine(Loc.T("【光学与分光校准】"));
+        sb.AppendLine("  " + CaptureCorrectionText);
+        sb.AppendLine("  " + CaptureCorrectionSourceText);
+        sb.AppendLine("  " + DensityCorrectionText);
+        sb.AppendLine("  " + DensityCorrectionSourceText);
+        sb.AppendLine("  " + CaptureCorrectionScopeText);
 
         if (LccEnabled && _lccFlatField is { } flat)
         {
@@ -87,7 +92,7 @@ public sealed partial class MainViewModel
         }
         else
         {
-            sb.AppendLine(Loc.T("  Path A　 关闭（宽谱 / 扫描仪输入）"));
+            sb.AppendLine(Loc.T("  Path A　 未应用（不据此推断光源或设备类型）"));
         }
 
         sb.AppendLine(DustEnabled
@@ -135,6 +140,7 @@ public sealed partial class MainViewModel
     {
         sb.AppendLine();
         sb.AppendLine(Loc.T("【输入域】"));
+        sb.AppendLine("  " + InputCharacterizationText);
         if (CurrentFrame is not { } frame) { sb.AppendLine(Loc.T("  —")); return; }
 
         string path = frame.Path;

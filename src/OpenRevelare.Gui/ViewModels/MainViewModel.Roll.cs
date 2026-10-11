@@ -136,6 +136,7 @@ public partial class MainViewModel
             OnPropertyChanged(nameof(CastCardHeader));
             OnPropertyChanged(nameof(CastCardHint));
             OnPropertyChanged(nameof(GreyCardSpan));
+            NotifyCalibrationInfo();
 
             foreach (RollFrame f in Frames) f.Params.Monochrome = value;
             if (Frames.Count > 0)
