@@ -1,0 +1,133 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OpenRevelare.Gui.Controls">
+    <!-- Surface hierarchy replaces repeated outlines; focus keeps an explicit edge. -->
+    <Style Selector="Button, ToggleButton">
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="MinHeight" Value="30" />
+    </Style>
+    <Style Selector="ToggleButton.sampling">
+        <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Grid.pairedActions > Button, Grid.pairedActions > ToggleButton">
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Button.workspaceTab">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="Width" Value="108" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.workspaceTab TextBlock">
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="Button.workspaceTab.active">
+        <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.workspaceTab.active:pointerover">
+        <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+    </Style>
+    <Style Selector="Button.quiet">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+    </Style>
+    <Style Selector="Button.primary TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource AccentFgBrush}" />
+    </Style>
+    <Style Selector="Button.primary ctl|Icon">
+        <Setter Property="Foreground" Value="{DynamicResource AccentFgBrush}" />
+    </Style>
+    <Style Selector="Border.surface">
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="CornerRadius" Value="12" />
+    </Style>
+    <Style Selector="TextBlock.eyebrow">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="LetterSpacing" Value="1.5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextMuteBrush}" />
+    </Style>
+    <Style Selector="TabItem">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="10,12,10,0" />
+    </Style>
+    <Style Selector="TextBox, ComboBox, NumericUpDown">
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button TextBlock, ToggleButton TextBlock, CheckBox TextBlock">
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="ComboBox TextBlock">
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+    <Style Selector="TextBlock.fieldLabel">
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="ScrollViewer">
+        <Setter Property="AllowAutoHide" Value="False" />
+        <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+    </Style>
+    <Style Selector="Expander">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="Border.calibrationStage Expander">
+        <Setter Property="Background" Value="{DynamicResource CalibrationTintBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CalibrationAccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="Border.finishingStage Expander">
+        <Setter Property="Background" Value="{DynamicResource FinishingTintBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource FinishingAccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="Grid.repairStage Expander">
+        <Setter Property="Background" Value="{DynamicResource RepairTintBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource RepairAccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="TabItem.calibrationTab:selected">
+        <Setter Property="Background" Value="{DynamicResource CalibrationTintBrush}" />
+    </Style>
+    <Style Selector="TabItem.finishingTab:selected">
+        <Setter Property="Background" Value="{DynamicResource FinishingTintBrush}" />
+    </Style>
+    <Style Selector="TabItem.calibrationTab:selected TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="TabItem.finishingTab:selected TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="TabItem.calibrationTab:selected /template/ Border#PART_SelectedPipe">
+        <Setter Property="Background" Value="{DynamicResource CalibrationAccentBrush}" />
+    </Style>
+    <Style Selector="TabItem.finishingTab:selected /template/ Border#PART_SelectedPipe">
+        <Setter Property="Background" Value="{DynamicResource FinishingAccentBrush}" />
+    </Style>
+    <Style Selector="Border.calibrationStage Button.primary">
+        <Setter Property="Background" Value="{DynamicResource CalibrationAccentBrush}" />
+    </Style>
+    <Style Selector="Border.orientationTools Button.icon">
+        <Setter Property="Width" Value="26" />
+    </Style>
+    <Style Selector="Grid.compactTools TextBlock.toolCaption">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Grid.compactTools ToggleButton.viewMode">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Grid.compactTools ToggleButton.viewMode ctl|Icon">
+        <Setter Property="Margin" Value="0" />
+    </Style>
+</Styles>

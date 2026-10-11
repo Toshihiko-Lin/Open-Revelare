@@ -4,6 +4,7 @@
 
 **改进**
 
+- **GUI 优化。** 统一紧凑控件、灰阶分区与文字对比度，居中图库 / 修片切换，压缩顶部和预览下方工具栏；图库卡片宽度自适应，卷数与介绍移入侧栏，释放浏览空间，并改善窗口缩放时的组件遮挡及对话框布局。
 - **按数字中间片流程整理校准与成片调整。** 输入状态、校正来源、适用条件和镜头 / 平场控件集中在“输入与校正详情”，可直接查看本帧校准依据。LUT 明确为独立外观处理，不参与输入设备标定；省略两页顶部的灰色说明，减少常驻文字。
 - **齿孔遮罩默认关闭，开关保持可见。** 新导入胶卷不再自动启用遮罩；可直接勾选“启用齿孔遮罩”，并在“齿孔设置”中预览遮罩、调整阈值。自动校准仍会独立排除检测到的灯板区域。
 - **齿孔同步独立于 Cineon。** 新增“同步齿孔遮罩”按钮，仅同步启用状态与阈值；优先应用到勾选帧，未勾选时应用到整卷，不改动色彩与裁切。
@@ -18,6 +19,7 @@
 
 **Improved**
 
+- **GUI refinements.** Unified compact controls, neutral surfaces and text contrast; centred the Library / Develop switch and streamlined the top and preview toolbars. Adaptive library cards and a sidebar for roll counts and introductory text free up browsing space, while responsive layouts reduce clipping and overlap when resizing windows and dialogs.
 - **Calibration and photo adjustments follow the digital-intermediate workflow.** Input status, correction sources, applicability and lens / flat-field controls are grouped under Input and correction details, with direct access to the frame report. LUTs are clearly separate look processing, independent of input-device calibration. Grey introductory text is removed from both tabs to reduce persistent text.
 - **Sprocket masking now defaults to off, with its switch always visible.** Newly imported rolls no longer enable the mask automatically. Enable it directly, then preview the mask and adjust its threshold under Sprocket settings. Automatic calibration still independently excludes detected light-board regions.
 - **Sprocket sync is separate from Cineon sync.** The new Sync sprocket mask button copies only the enabled state and threshold to checked frames, or the whole roll when none are checked, without changing colour or crop settings.

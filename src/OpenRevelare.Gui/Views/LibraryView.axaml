@@ -3,6 +3,7 @@
              xmlns:i18n="using:OpenRevelare.Gui.Markup"
              xmlns:ctl="clr-namespace:OpenRevelare.Gui.Controls"
              xmlns:vm="clr-namespace:OpenRevelare.Gui.ViewModels"
+             xmlns:views="using:OpenRevelare.Gui.Views"
              x:DataType="vm:LibraryViewModel"
              x:Class="OpenRevelare.Gui.Views.LibraryView">
 
@@ -12,6 +13,8 @@
              Nothing lifts, scales or shadows on hover either: that is a web gallery's idiom,
              and here it would set a wall of photographs in motion under the cursor. -->
         <Style Selector="Border.tile">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Transitions">
                 <Transitions>
                     <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
@@ -19,9 +22,12 @@
                 </Transitions>
             </Setter>
         </Style>
+        <Style Selector="Border.tile.newTile">
+            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        </Style>
         <Style Selector="Border.tile:pointerover">
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}" />
-            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
         </Style>
         <!-- Selected reads as a filled-in border, not a colour wash: the card is mostly a
              photograph, and tinting it would lie about the print. -->
@@ -35,17 +41,7 @@
 
     <!-- The 图库 module: one card per roll, the card's picture is that roll's contact sheet.
          Nothing here decodes a negative — a card is one JPEG read straight to card width. -->
-    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,*" Background="{DynamicResource BgBrush}">
-
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Padding="18,14,18,10">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="{i18n:T '图库'}" FontSize="{DynamicResource FontLg}" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" />
-                <TextBlock Text="{Binding RollCountText}" Classes="readout"
-                           Foreground="{DynamicResource TextMuteBrush}" VerticalAlignment="Bottom"
-                           Margin="0,0,0,3" />
-            </StackPanel>
-        </Border>
+    <Grid ColumnDefinitions="Auto,*" Background="{DynamicResource BgBrush}">
 
         <!-- ══ 筛选侧栏 ══════════════════════════════════════════════════════
              Facets are built from the catalog index, which is already in memory — the roll
@@ -53,11 +49,21 @@
              entirely on an empty catalog: an empty sidebar next to an empty wall is just two
              ways of saying the same nothing.
              ═══════════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="1" Grid.Column="0" Width="212" Padding="14,0,10,14"
+        <Border Grid.Column="0" Width="232" Padding="16" Margin="12,12,8,12" Classes="surface"
                 IsVisible="{Binding !IsEmpty}"
-                BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,1,0">
+                BorderThickness="0">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{i18n:T '图库'}" FontSize="{DynamicResource FontLg}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Background="{DynamicResource ElevatedBrush}" CornerRadius="12"
+                                Padding="10,3" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding RollCountText}" Classes="readout" Foreground="{DynamicResource TextDimBrush}" />
+                        </Border>
+                    </Grid>
+                    <TextBlock Text="{i18n:T '收藏每一卷，让底片重新发光。'}" Foreground="{DynamicResource TextDimBrush}"
+                               FontSize="13" TextWrapping="Wrap" Margin="0,0,0,12" />
+                    <TextBlock Text="{i18n:T '筛选与排序'}" FontWeight="SemiBold" Margin="0,0,0,4" />
                     <TextBox Text="{Binding SearchText}" Watermark="{i18n:T '搜索卷名 / 卷号 / 胶卷 / 相机'}" />
                     <!-- 排序: the key picker and its direction. Here rather than in the header
                          because this sidebar is already the "how am I looking at this wall"
@@ -119,7 +125,9 @@
             </DockPanel>
         </Border>
 
-        <ScrollViewer Grid.Row="1" Grid.Column="1" Padding="13,0,13,16">
+        <!-- The wall starts directly below navigation; its full height belongs to scrolling previews. -->
+        <ScrollViewer Name="RollWallScroll" Grid.Column="1" Padding="3,7,12,12"
+                      VerticalScrollBarVisibility="Auto" IsVisible="{Binding !IsEmpty}">
             <ItemsControl ItemsSource="{Binding Rolls}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -132,22 +140,19 @@
 
                         <!-- 新建卷 tile: same footprint as a roll card so the wall stays a grid,
                              and it leads the row it is in. One click, not two — it is a button. -->
-                        <Border Classes="tile" IsVisible="{Binding IsNewTile}" Margin="5" Width="272"
-                                Background="Transparent"
-                                BorderBrush="{DynamicResource BorderSoftBrush}"
-                                BorderThickness="1" CornerRadius="{DynamicResource RadiusMd}" Padding="9"
+                        <Border Classes="tile newTile" IsVisible="{Binding IsNewTile}" Margin="5" Width="{Binding $parent[views:LibraryView].RollCardWidth}" Height="240"
+                                BorderThickness="1" CornerRadius="10" Padding="10"
                                 Cursor="Hand" Tapped="OnNewTileTapped">
                             <StackPanel Spacing="9">
                                 <!-- Empty, not filled: this cell is a slot waiting for a roll, and
                                      drawing it as a filled frame with a big ＋ made it compete with
                                      the photographs beside it for the eye. -->
-                                <Border Height="150" CornerRadius="{DynamicResource RadiusSm}"
-                                        Background="Transparent"
-                                        BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
-                                    <ctl:Icon Data="{StaticResource IcoPlus}" Width="22" Height="22"
-                                              StrokeThickness="1.4"
-                                              Foreground="{DynamicResource TextMuteBrush}"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Border Height="150" CornerRadius="8" Background="{DynamicResource GrooveBrush}">
+                                    <Border Width="44" Height="44" CornerRadius="22" Background="{DynamicResource ElevatedBrush}"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <ctl:Icon Data="{StaticResource IcoPlus}" Foreground="{DynamicResource TextDimBrush}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
                                 </Border>
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="{i18n:T '新建卷…'}" FontSize="{DynamicResource FontMd}" FontWeight="SemiBold"
@@ -161,11 +166,9 @@
                         </Border>
 
                         <Border Name="Card" Classes="tile" Classes.selected="{Binding IsSelected}"
-                                Margin="5" Width="272" Cursor="Hand"
+                                Margin="5" Width="{Binding $parent[views:LibraryView].RollCardWidth}" Height="240" Cursor="Hand"
                                 IsVisible="{Binding !IsNewTile}"
-                                Background="{DynamicResource Panel2Brush}"
-                                BorderBrush="{DynamicResource BorderSoftBrush}"
-                                BorderThickness="1" CornerRadius="{DynamicResource RadiusMd}" Padding="9"
+                                BorderThickness="1" CornerRadius="10" Padding="10"
                                 DoubleTapped="OnCardDoubleTapped"
                                 PointerPressed="OnCardPressed">
                             <Border.ContextMenu>
@@ -191,7 +194,7 @@
                                      panel grey: a contact sheet is a print, and the darker the
                                      mount the less the chrome argues with what is on it. -->
                                 <Border Height="150" Background="{DynamicResource GrooveBrush}"
-                                        CornerRadius="{DynamicResource RadiusSm}" ClipToBounds="True">
+                                        CornerRadius="8" ClipToBounds="True">
                                     <Panel>
                                         <TextBlock Text="{i18n:T '（暂无印样）'}" FontSize="{DynamicResource FontXs}"
                                                    IsVisible="{Binding HasNoCover}"
@@ -222,5 +225,31 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
+        <Border Grid.ColumnSpan="2" IsVisible="{Binding IsEmpty}" Margin="12"
+                Classes="surface">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" MaxWidth="460" Margin="24">
+                <Border Width="56" Height="56" CornerRadius="18" Background="{DynamicResource AccentSoftBrush}" HorizontalAlignment="Center">
+                    <Viewbox Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ctl:Icon Data="{StaticResource IcoFilm}" Foreground="{DynamicResource AccentBrush}" />
+                    </Viewbox>
+                </Border>
+                <TextBlock Text="{i18n:T '从第一卷开始'}" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="{i18n:T '导入负片，完成校准，再细调成片。每一卷都会自动保存在这里。'}"
+                           Foreground="{DynamicResource TextDimBrush}" TextWrapping="Wrap" TextAlignment="Center" />
+                <Button Classes="primary" Click="OnNewRollClick" HorizontalAlignment="Center" Padding="22,10">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <ctl:Icon Grid.Column="0" Margin="0,0,8,0" VerticalAlignment="Center" Data="{StaticResource IcoPlus}" />
+                        <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '导入第一卷'}" />
+                    </Grid>
+                </Button>
+                <StackPanel Orientation="Horizontal" Spacing="16" HorizontalAlignment="Center" Margin="0,12,0,0">
+                    <TextBlock Text="{i18n:T '01 导入'}" Classes="eyebrow" />
+                    <ctl:Icon Data="{StaticResource IcoChevron}" Foreground="{DynamicResource TextMuteBrush}" />
+                    <TextBlock Text="{i18n:T '02 校准'}" Classes="eyebrow" />
+                    <ctl:Icon Data="{StaticResource IcoChevron}" Foreground="{DynamicResource TextMuteBrush}" />
+                    <TextBlock Text="{i18n:T '03 成片'}" Classes="eyebrow" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
     </Grid>
 </UserControl>

@@ -2,28 +2,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ExportDialog"
-        Width="560" SizeToContent="Height" MaxHeight="780"
+        Width="560" MinWidth="460" MinHeight="360" SizeToContent="Height" MaxHeight="780"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '导出选项'}">
-    <!--
-      高度跟着内容走，上限 780，再由 OnOpened 按实际开在哪块屏上收紧：内容装在
-      ScrollViewer 里，溢出时滚动而不是把底部的按钮顶到屏幕外。同 InfoDialog。
-
-      ══ 版式 ══════════════════════════════════════════════════════════════════
-      每一节是一张 Panel2 的卡片，节名在卡片左上；卡片内所有控件一律从 62 px 起排，
-      也就是 App.axaml 里 LabelColumn 那一列 —— 主窗口每一行参数用的就是这个数，
-      于是这个窗口和面板共用一条脊。有标签的行标签落在这一列里，没标签的行（勾选框、
-      提示）直接从 62 起，因此无论一节里有几行，控件左缘只有一个。
-
-      之前是每组自己开一个 Grid、标签列各自 Auto：压缩、品质、长边、输出锐化、
-      不超过 五处的控件各从不同的 x 开始，同一个窗口里有五条左缘。
-
-      ══ 不适用就隐藏 ══════════════════════════════════════════════════════════
-      只显示将要写出的那个文件的参数。不适用的行隐藏，不灰着占位 —— 灰掉的控件每次
-      都要用眼睛跳过去，而它说的又是「这里没事可做」。凡被隐藏的事实都在底部「将写出」
-      那一条里报告，所以隐藏不会藏掉信息。
-    -->
+    <!-- Labels share an 86 px column, including English. Body scrolls; actions stay visible. -->
     <Window.Styles>
         <Style Selector="Border.section">
             <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
@@ -47,7 +30,7 @@
         <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,14,0,0">
             <!-- 结论条：这些选项最后写出的是什么文件。也是被隐藏的那些参数的唯一去处。 -->
             <Border Classes="section" Padding="12,8">
-                <Grid ColumnDefinitions="62,*">
+                <Grid ColumnDefinitions="86,*">
                     <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '将写出'}"
                                VerticalAlignment="Top" Margin="0,1,0,0" />
                     <TextBlock Grid.Column="1" Name="SummaryLbl" TextWrapping="Wrap"
@@ -70,7 +53,7 @@
                 <Border Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '格式'}" />
-                        <Grid ColumnDefinitions="62,*">
+                        <Grid ColumnDefinitions="86,*">
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="18">
                                 <RadioButton Name="FmtTiff" GroupName="fmt" Content="TIFF"
                                              IsCheckedChanged="OnFormatChanged" />
@@ -80,12 +63,12 @@
                                              IsCheckedChanged="OnFormatChanged" />
                             </StackPanel>
                         </Grid>
-                        <Grid ColumnDefinitions="62,*">
+                        <Grid ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="1" Classes="groupHint" Name="FormatHint" />
                         </Grid>
 
                         <StackPanel Name="TiffGroup" Spacing="6">
-                            <Grid ColumnDefinitions="62,*">
+                            <Grid ColumnDefinitions="86,*">
                                 <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '压缩'}" />
                                 <ComboBox Grid.Column="1" Name="CompressBox" HorizontalAlignment="Stretch"
                                           SelectionChanged="OnAnyChanged">
@@ -96,7 +79,7 @@
                             </Grid>
                             <!-- 场景线性是 TIFF 的决定 —— 它把文件变成 32-bit float 母版 ——
                                  所以它归在格式里，不在色彩里。 -->
-                            <Grid ColumnDefinitions="62,*">
+                            <Grid ColumnDefinitions="86,*">
                                 <StackPanel Grid.Column="1" Spacing="3">
                                     <CheckBox Name="LinearChk"
                                               Content="{i18n:T '场景线性 ACEScg（32-bit float，不含帧编辑）'}"
@@ -108,7 +91,7 @@
                         </StackPanel>
 
                         <StackPanel Name="JpegGroup" Spacing="6">
-                            <Grid ColumnDefinitions="62,*">
+                            <Grid ColumnDefinitions="86,*">
                                 <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
                                 <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
                                     <Slider Grid.Column="0" Name="QualitySlider" Minimum="40" Maximum="100"
@@ -120,12 +103,12 @@
                                                VerticalAlignment="Center" HorizontalAlignment="Right" />
                                 </Grid>
                             </Grid>
-                            <Grid ColumnDefinitions="62,*">
+                            <Grid ColumnDefinitions="86,*">
                                 <CheckBox Grid.Column="1" Name="SizeLimitChk"
                                           Content="{i18n:T '限制文件大小'}" IsCheckedChanged="OnAnyChanged" />
                             </Grid>
                             <!-- 带提示的行做成两排：标签只跟第一排的控件对齐，不去跟整块居中。 -->
-                            <Grid Name="SizeLimitRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                            <Grid Name="SizeLimitRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel"
                                            Text="{i18n:T '上限'}" />
                                 <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
@@ -145,11 +128,11 @@
                 <Border Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '尺寸'}" />
-                        <Grid ColumnDefinitions="62,*">
+                        <Grid ColumnDefinitions="86,*">
                             <CheckBox Grid.Column="1" Name="DownsampleChk"
                                       Content="{i18n:T '缩放到指定长边'}" IsCheckedChanged="OnDownsampleToggled" />
                         </Grid>
-                        <Grid Name="LongEdgeRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto,Auto">
+                        <Grid Name="LongEdgeRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边'}" />
                             <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6">
                                 <NumericUpDown Name="LongEdgeBox" Width="130"
@@ -164,7 +147,7 @@
                         </Grid>
 
                         <!-- 锐化归在尺寸里，不在格式里：它的量是按成品像素定的，就在缩放之后做。 -->
-                        <Grid Name="SharpenRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                        <Grid Name="SharpenRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '锐化'}" />
                             <ComboBox Grid.Row="0" Grid.Column="1" Name="SharpenBox"
                                       HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged" />
@@ -179,7 +162,7 @@
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '色彩'}" />
                         <!-- 输出空间是报告，不是选择：它是渲染参数，在主窗口选定，文件继承屏上那个。 -->
-                        <Grid Name="SpaceRow" ColumnDefinitions="62,*">
+                        <Grid Name="SpaceRow" ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '空间'}"
                                        VerticalAlignment="Top" />
                             <TextBlock Grid.Column="1" Name="ColorSpaceHint" TextWrapping="Wrap"
@@ -187,7 +170,7 @@
                         </Grid>
 
                         <!-- 只有 HDR 卷的增益图 JPEG 有基底可选；见 ExportOptions.HdrBaseSpace。 -->
-                        <Grid Name="HdrBaseGroup" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                        <Grid Name="HdrBaseGroup" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '基底'}" />
                             <ComboBox Grid.Row="0" Grid.Column="1" Name="HdrBaseBox"
                                       HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged">
@@ -199,7 +182,7 @@
                         </Grid>
 
                         <!-- 只在确实可选时出现：被强制嵌入的那几种文件没有决定可做，结论条会报告。 -->
-                        <Grid Name="IccRow" ColumnDefinitions="62,*">
+                        <Grid Name="IccRow" ColumnDefinitions="86,*">
                             <StackPanel Grid.Column="1" Spacing="3">
                                 <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}"
                                           IsCheckedChanged="OnIccChanged" />
@@ -217,13 +200,13 @@
                 <Border Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '文件名'}" />
-                        <Grid ColumnDefinitions="62,*">
+                        <Grid ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '命名'}" />
                             <ComboBox Grid.Column="1" Name="NamePresetBox" HorizontalAlignment="Stretch"
                                       SelectionChanged="OnNamePresetChanged" />
                         </Grid>
                         <!-- 字段表由 code-behind 填：文本里带花括号，XAML 解析器会把它读成标记扩展。 -->
-                        <Grid Name="CustomNameRow" ColumnDefinitions="62,*" RowDefinitions="Auto,Auto">
+                        <Grid Name="CustomNameRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel"
                                        Text="{i18n:T '模板'}" />
                             <TextBox Grid.Row="0" Grid.Column="1" Name="NameTemplateBox"
@@ -231,7 +214,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
                                        Name="NameTokensLbl" />
                         </Grid>
-                        <Grid Name="PreviewRow" ColumnDefinitions="62,*">
+                        <Grid Name="PreviewRow" ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '实例'}"
                                        VerticalAlignment="Top" />
                             <TextBlock Grid.Column="1" Name="NamePreviewLbl" Classes="readout"
@@ -239,7 +222,7 @@
                         </Grid>
                         <!-- 单张导出：这一节决定的是保存对话框预填的名字，说一句，否则这里的
                              选择看起来像是会直接落盘。 -->
-                        <Grid Name="SingleNameHintRow" ColumnDefinitions="62,*">
+                        <Grid Name="SingleNameHintRow" ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="1" Classes="groupHint"
                                        Text="{i18n:T '保存对话框会预填这个名字，仍可修改。'}" />
                         </Grid>
@@ -250,7 +233,7 @@
                 <Border Name="ConflictGroup" Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '目标已有同名文件时'}" />
-                        <Grid ColumnDefinitions="62,*">
+                        <Grid ColumnDefinitions="86,*">
                             <StackPanel Grid.Column="1" Spacing="3">
                                 <StackPanel Orientation="Horizontal" Spacing="18">
                                     <RadioButton Name="ConflictUnique" GroupName="conflict"

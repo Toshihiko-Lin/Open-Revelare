@@ -942,5 +942,20 @@
   "已把齿孔遮罩应用到勾选的 {0} 帧": "Applied sprocket mask to {0} checked frames",
   "已把齿孔遮罩应用到整卷（{0} 帧）": "Applied sprocket mask to the whole roll ({0} frames)",
   "这里只同步色彩参数。齿孔遮罩在遮罩面板中单独同步；旋转、翻转、拉直和裁切在几何面板中单独同步。": "Only colour parameters are synced here. Sync the sprocket mask in its own panel; sync rotation, flips, straightening and crop in the geometry panel.",
-  "  次序　　 镜头畸变 → LCC → 暗角 → 除尘 → Path A 解耦 → 片基 / 高光测量 → 反相": "  Order     lens distortion → LCC → vignette → dust repair → Path A decouple → base / highlight measurement → inversion"
+  "  次序　　 镜头畸变 → LCC → 暗角 → 除尘 → Path A 解耦 → 片基 / 高光测量 → 反相": "  Order     lens distortion → LCC → vignette → dust repair → Path A decouple → base / highlight measurement → inversion",
+  "当前卷": "CURRENT ROLL",
+  "添加图像": "Add images",
+  "01 底片校准": "01 Calibration",
+  "02 成片调整": "02 Finishing",
+  "构图与修复": "Composition & repair",
+  "胶片工作室": "FILM WORKSPACE",
+  "收藏每一卷，让底片重新发光。": "A home for every roll. Bring your negatives to life.",
+  "筛选与排序": "Filter & sort",
+  "从第一卷开始": "Your first roll starts here",
+  "导入负片，完成校准，再细调成片。每一卷都会自动保存在这里。": "Import negatives, calibrate your roll, then shape the final image. Every roll is saved here automatically.",
+  "导入第一卷": "Import your first roll",
+  "01 导入": "01 IMPORT",
+  "02 校准": "02 CALIBRATE",
+  "03 成片": "03 FINISH",
+  "LUT 输出说明": "LUT output details"
 }

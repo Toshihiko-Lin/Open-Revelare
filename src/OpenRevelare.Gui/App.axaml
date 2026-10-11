@@ -16,62 +16,16 @@
                 <ResourceInclude Source="avares://OpenRevelare/Styles/Icons.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!--
-              ══ Scales ════════════════════════════════════════════════════════════
-              Type, radius and spacing, as five / three / five steps. Before these the
-              window carried nine font sizes (10 … 17), nine corner radii (2 … 12) and
-              spacing typed in at each call site, so nothing lined up except by luck
-              and every new control invented its own measurements.
-
-              12–15 px, which is a whole step above where a control panel lands when
-              density is the only thing optimised. 10–13 reads as a utility: legible,
-              joyless, faintly apologetic about taking up room.
-
-              Raised in ONE move, with the spacing pulled in at the same time. The
-              first attempt went up a single pixel per step and added air around it,
-              and the two cancelled: a pixel is under the threshold of noticing, while
-              white space around text makes the text look SMALLER by comparison, so
-              the panel came out looking the same but emptier. Type carries this
-              design; space is what is left over once it has what it needs.
-
-              A step is chosen by ROLE, never by how big it looks in one place:
-
-                FontXxs  the film strip's caption — the one place a 10 px label is
-                         legible-enough because it is a file name under its own picture
-                FontXs   secondary lines: hints, tallies, field rubrics, readouts
-                FontSm   controls — buttons, inputs, menus, check boxes
-                FontMd   body, card titles, the open tab
-                FontLg   a module's heading (图库)
-
-                RadiusSm inner surfaces that sit inside something else (a cover inside
-                         a card, a chip, a swatch)
-                RadiusMd controls: buttons, inputs, strip items, roll cards
-                RadiusLg only what FLOATS above the window — menus, flyouts, dialogs.
-                         Nothing that is part of a panel gets this: a rounded box
-                         drawn inside another rounded box is the web's card idiom,
-                         and a panel of them reads as a page rather than an
-                         instrument. Panels are flush and divided by hairlines.
-
-              The radii are deliberately SMALL — 2, 3, 6. 10–12 px corners are what a
-              browser puts on a card because a card there is a floating object; here
-              the same number makes a light meter look like a landing page. At 2–3 px
-              a corner stops being a shape and becomes what it is for: taking the
-              sharpness off an edge so it does not read as a cut.
-
-              MOTION is two durations and nothing else: 120 ms for a state that
-              answers the pointer (hover, press, check), 160 ms for something that
-              moves or turns (a chevron, a card lifting). Anything slower reads as
-              lag in a tool you use at slider rate.
-            -->
+            <!-- Shared type, spacing and corner scales. -->
             <x:Double x:Key="FontXxs">12</x:Double>
             <x:Double x:Key="FontXs">13</x:Double>
             <x:Double x:Key="FontSm">14</x:Double>
             <x:Double x:Key="FontMd">15</x:Double>
             <x:Double x:Key="FontLg">22</x:Double>
 
-            <CornerRadius x:Key="RadiusSm">2</CornerRadius>
-            <CornerRadius x:Key="RadiusMd">3</CornerRadius>
-            <CornerRadius x:Key="RadiusLg">6</CornerRadius>
+            <CornerRadius x:Key="RadiusSm">5</CornerRadius>
+            <CornerRadius x:Key="RadiusMd">8</CornerRadius>
+            <CornerRadius x:Key="RadiusLg">12</CornerRadius>
 
             <x:Double x:Key="Space1">4</x:Double>
             <x:Double x:Key="Space2">6</x:Double>
@@ -107,57 +61,33 @@
                  but of how precisely the user can set a number. -->
             <x:Double x:Key="StepGutter">18</x:Double>
 
-            <!--
-              ══ Palette ═══════════════════════════════════════════════════════════
-              NEUTRAL graphite + one restrained blue accent. Both variants are defined,
-              so 偏好设置 → 界面主题 actually repaints the app (it used to only re-tint
-              Fluent's own controls while every custom surface stayed dark).
-
-              The greys are neutral by measurement, not by eye: R=G=B, or within a
-              point of it. They used to carry a blue cast (#1C1E20 is 4 points of blue
-              over red, #DCE0E4 eight), which is the default "cool UI" look and the
-              one thing a colour tool cannot afford — a chrome that leans blue makes
-              every picture in front of it read warm, and the user corrects a cast the
-              screen invented. It is also why the warm, paper-grey palette that would
-              otherwise suit this app's restraint is not on the table: the discipline
-              has to come from proportion, type and what is left out, not from tint.
-
-              One accent, and it is the only chroma in the window that is not a
-              photograph: #6E8CA6, a desaturated slate blue, used for the open tab, an
-              armed tool, a selected card and keyboard focus, and for nothing else.
-
-              The surfaces are spaced on a LADDER, not clustered: ground → panel →
-              chrome → raised → elevated, roughly eight levels apart, dark to light in
-              the order things sit in front of each other. Neutral greys a few levels
-              apart read as one flat sheet — the eye needs the step to see the edge,
-              and with no hue difference to fall back on the step is all there is.
-              Restraint is the size of the palette, not the size of its contrast.
-
-              Every consumer must bind these with {DynamicResource} — a StaticResource
-              is resolved once at load and would freeze the app in one variant.
-
-              ViewerBrush is deliberately NOT a theme colour: it is the backdrop the
-              photo is judged against, so it is a user setting (预览区右键 → 背景色),
-              overwritten at runtime by App.ApplyViewerBackground.
-            -->
+            <!-- Neutral surfaces protect colour judgement; blue marks actions and selection. -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="BgBrush">#151515</SolidColorBrush>
-                    <SolidColorBrush x:Key="ChromeBrush">#232323</SolidColorBrush>
-                    <SolidColorBrush x:Key="PanelBrush">#272727</SolidColorBrush>
+                    <!-- Inspector groups differ in luminance, keeping the photo the visual focus. -->
+                    <SolidColorBrush x:Key="CalibrationAccentBrush">#B8B8B8</SolidColorBrush>
+                    <SolidColorBrush x:Key="CalibrationTintBrush">#2B2B2B</SolidColorBrush>
+                    <SolidColorBrush x:Key="FinishingAccentBrush">#A8A8A8</SolidColorBrush>
+                    <SolidColorBrush x:Key="FinishingTintBrush">#252525</SolidColorBrush>
+                    <SolidColorBrush x:Key="RepairAccentBrush">#989898</SolidColorBrush>
+                    <SolidColorBrush x:Key="RepairTintBrush">#202020</SolidColorBrush>
+
+                    <SolidColorBrush x:Key="BgBrush">#171717</SolidColorBrush>
+                    <SolidColorBrush x:Key="ChromeBrush">#1D1D1D</SolidColorBrush>
+                    <SolidColorBrush x:Key="PanelBrush">#242424</SolidColorBrush>
                     <SolidColorBrush x:Key="Panel2Brush">#1C1C1C</SolidColorBrush>
-                    <SolidColorBrush x:Key="ElevatedBrush">#333333</SolidColorBrush>
+                    <SolidColorBrush x:Key="ElevatedBrush">#343434</SolidColorBrush>
                     <SolidColorBrush x:Key="TextBrush">#ECECEC</SolidColorBrush>
                     <SolidColorBrush x:Key="TextDimBrush">#B2B2B2</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextMuteBrush">#8A8A8A</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#9A9A9A</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderBrush2">#3E3E3E</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderSoftBrush">#313131</SolidColorBrush>
                     <SolidColorBrush x:Key="GrooveBrush">#0E0E0E</SolidColorBrush>
                     <!-- Instrument grey: sliders and meters read as measurement, not decoration. -->
                     <SolidColorBrush x:Key="TrackFillBrush">#808080</SolidColorBrush>
-                    <SolidColorBrush x:Key="AccentBrush">#6E8CA6</SolidColorBrush>
-                    <SolidColorBrush x:Key="AccentHoverBrush">#849FB6</SolidColorBrush>
-                    <SolidColorBrush x:Key="AccentSoftBrush">#246E8CA6</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentBrush">#8AAED1</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentHoverBrush">#A2C2E0</SolidColorBrush>
+                    <SolidColorBrush x:Key="AccentSoftBrush">#248AAED1</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentFgBrush">#121212</SolidColorBrush>
                     <SolidColorBrush x:Key="HoverSoftBrush">#14FFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="PressSoftBrush">#0AFFFFFF</SolidColorBrush>
@@ -207,14 +137,21 @@
                         <GradientStop Offset="0" Color="#6678B4" />
                         <GradientStop Offset="1" Color="#A8915A" />
                     </LinearGradientBrush>
-                    <Color x:Key="SystemAccentColor">#6E8CA6</Color>
-                    <Color x:Key="SystemAccentColorDark1">#6E8CA6</Color>
+                    <Color x:Key="SystemAccentColor">#8AAED1</Color>
+                    <Color x:Key="SystemAccentColorDark1">#8AAED1</Color>
                     <Color x:Key="SystemAccentColorDark2">#5D7890</Color>
                     <Color x:Key="SystemAccentColorDark3">#4D657A</Color>
-                    <Color x:Key="SystemAccentColorLight1">#849FB6</Color>
+                    <Color x:Key="SystemAccentColorLight1">#A2C2E0</Color>
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="CalibrationAccentBrush">#555555</SolidColorBrush>
+                    <SolidColorBrush x:Key="CalibrationTintBrush">#E4E4E4</SolidColorBrush>
+                    <SolidColorBrush x:Key="FinishingAccentBrush">#606060</SolidColorBrush>
+                    <SolidColorBrush x:Key="FinishingTintBrush">#ECECEC</SolidColorBrush>
+                    <SolidColorBrush x:Key="RepairAccentBrush">#686868</SolidColorBrush>
+                    <SolidColorBrush x:Key="RepairTintBrush">#F3F3F3</SolidColorBrush>
+
                     <SolidColorBrush x:Key="BgBrush">#E4E4E4</SolidColorBrush>
                     <SolidColorBrush x:Key="ChromeBrush">#FBFBFB</SolidColorBrush>
                     <SolidColorBrush x:Key="PanelBrush">#F7F7F7</SolidColorBrush>
@@ -222,7 +159,7 @@
                     <SolidColorBrush x:Key="ElevatedBrush">#FFFFFF</SolidColorBrush>
                     <SolidColorBrush x:Key="TextBrush">#1C1C1C</SolidColorBrush>
                     <SolidColorBrush x:Key="TextDimBrush">#525252</SolidColorBrush>
-                    <SolidColorBrush x:Key="TextMuteBrush">#7C7C7C</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextMuteBrush">#646464</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderBrush2">#CACACA</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderSoftBrush">#DADADA</SolidColorBrush>
                     <SolidColorBrush x:Key="GrooveBrush">#D2D2D2</SolidColorBrush>
@@ -364,18 +301,7 @@
                 </Style>
             </ControlTheme>
 
-            <!-- ══ Section ════════════════════════════════════════════════════════
-                 One parameter module = one SECTION of the panel, not a card on it.
-                 Flush to both edges, no border of its own, separated from its
-                 neighbours by a single hairline above the caption — which is how a
-                 panel of fifteen modules stays a panel instead of becoming a page of
-                 stacked boxes. (It was the boxes: outlined, rounded, inset, gapped, a
-                 column of them is the web's card list, and the whole window read as a
-                 site rather than an instrument.)
-
-                 The caption row spans the full width so the module reads as one object
-                 from any edge; the chevron sits at the far right, Lightroom-style, so
-                 captions and their optional step badges line up down the left. -->
+            <!-- Parameter groups use filled surfaces with a clear header and no outline. -->
             <ControlTheme x:Key="SectionHeader" TargetType="ToggleButton">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -391,7 +317,7 @@
                      12,6 padding) onto every section caption. -->
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border x:Name="face" Background="Transparent" Padding="2,0" CornerRadius="0">
+                        <Border x:Name="face" Background="Transparent" Padding="8,3" CornerRadius="8">
                             <Border.Transitions>
                                 <Transitions>
                                     <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -419,8 +345,8 @@
                                 <TextBlock Grid.Column="1" Text="{TemplateBinding Content}"
                                            VerticalAlignment="Center"
                                            FontWeight="SemiBold" FontSize="{DynamicResource FontXs}"
-                                           LetterSpacing="1.4"
-                                           Foreground="{DynamicResource TextBrush}" />
+                                           LetterSpacing="0.3"
+                                           Foreground="{TemplateBinding Foreground}" />
                                 <!-- 16, the Icon authoring grid: the glyph is drawn unscaled, so a
                                      smaller box does not shrink it, it crops it and moves the
                                      rotation centre off the glyph. -->
@@ -461,18 +387,16 @@
             <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <!-- Nothing at all: no fill, no outline, no rule, no corners. The
-                             panel is one surface and the sections are intervals on it. -->
-                        <Border Background="Transparent">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="8" Padding="4">
                             <StackPanel>
                                 <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
                                               IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
-                                              Content="{TemplateBinding Header}"
+                                              Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"
                                               Tag="{TemplateBinding Tag}" />
                                 <ContentPresenter x:Name="PART_ContentPresenter"
                                                   IsVisible="{TemplateBinding IsExpanded}"
                                                   Content="{TemplateBinding Content}"
-                                                  Margin="18,2,0,0" />
+                                                  Margin="18,4,8,6" />
                             </StackPanel>
                         </Border>
                     </ControlTemplate>
@@ -566,7 +490,7 @@
              group at this type size — at 26 the panel was mostly air and the sections
              drifted apart rather than reading as parts of one thing. -->
         <Style Selector="Expander">
-            <Setter Property="Margin" Value="-18,16,0,0" />
+            <Setter Property="Margin" Value="-10,8,0,0" />
         </Style>
 
         <!-- ══ Menu bar ═══════════════════════════════════════════════════════ -->
@@ -1058,5 +982,6 @@
         <Style Selector="Button.tocLink:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
         </Style>
+        <StyleInclude Source="avares://OpenRevelare/Styles/Workspace.axaml" />
     </Application.Styles>
 </Application>

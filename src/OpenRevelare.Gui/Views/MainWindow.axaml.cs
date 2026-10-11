@@ -20,9 +20,19 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private void OnPrintLutOutputClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string tag } && int.TryParse(tag, out var index) && Vm is { } vm)
+            vm.PrintLutOutputIndex = index;
+    }
+
     public MainWindow()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => UpdateWorkspaceLayout();
+        PreviewWorkspace.SizeChanged += (_, _) =>
+            PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
+        UpdateWorkspaceLayout();
         Library.OpenRequested += OnLibraryOpenRequested;
         Library.NewRollRequested += ImportNewRollAsync;
         Curves.CurvesChanged += (_, _) => PushCurves();

@@ -12,6 +12,7 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        Services.WindowLayout.Register();
     }
 
     /// <summary>Apply the persisted light/dark theme preference to the whole app.</summary>

@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ImportDialog"
-        Width="600" Height="600"
+        Width="600" Height="600" MinWidth="480" MinHeight="380"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '新建项目 / 导入'}">
@@ -20,14 +20,14 @@
                     <TextBlock Text="{i18n:T '底片文件'}" FontWeight="SemiBold" />
                     <ListBox Name="FileList" Height="140" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button Content="{i18n:T '添加文件…'}" Click="OnAddFiles" />
-                        <Button Content="{i18n:T '添加文件夹…'}" Click="OnAddFolder" />
-                        <Button Content="{i18n:T '移除选中'}" Click="OnRemoveSelected" />
-                        <Button Content="{i18n:T '清空'}" Click="OnClear" />
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="{i18n:T '添加文件…'}" Click="OnAddFiles" Margin="0,0,6,6" />
+                        <Button Content="{i18n:T '添加文件夹…'}" Click="OnAddFolder" Margin="0,0,6,6" />
+                        <Button Content="{i18n:T '移除选中'}" Click="OnRemoveSelected" Margin="0,0,6,6" />
+                        <Button Content="{i18n:T '清空'}" Click="OnClear" Margin="0,0,6,6" />
                         <TextBlock Name="CountLbl" Text="{i18n:T '0 张'}" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
-                    </StackPanel>
+                    </WrapPanel>
                     <TextBlock Classes="groupHint" Text="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
                 </StackPanel>
 

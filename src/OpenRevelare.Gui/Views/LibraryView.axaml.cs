@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -15,7 +16,26 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public partial class LibraryView : UserControl
 {
-    public LibraryView() => InitializeComponent();
+    public static readonly StyledProperty<double> RollCardWidthProperty =
+        AvaloniaProperty.Register<LibraryView, double>(nameof(RollCardWidth), 268);
+
+    public double RollCardWidth
+    {
+        get => GetValue(RollCardWidthProperty);
+        set => SetValue(RollCardWidthProperty, value);
+    }
+
+    public LibraryView()
+    {
+        InitializeComponent();
+        RollWallScroll.SizeChanged += (_, _) =>
+        {
+            // Reserve the scrollbar and padding so the last card never spills out of its row.
+            double available = Math.Max(0, RollWallScroll.Bounds.Width - 32);
+            int columns = Math.Max(1, (int)(available / 238));
+            RollCardWidth = Math.Clamp(Math.Floor(available / columns) - 10, 228, 268);
+        };
+    }
 
     /// <summary>The user picked a roll to edit.</summary>
     public event Func<RollCard, Task>? OpenRequested;
@@ -40,6 +60,11 @@ public partial class LibraryView : UserControl
     };
 
     private async void OnNewTileTapped(object? sender, TappedEventArgs e)
+    {
+        if (NewRollRequested is { } handler) await handler();
+    }
+
+    private async void OnNewRollClick(object? sender, RoutedEventArgs e)
     {
         if (NewRollRequested is { } handler) await handler();
     }
