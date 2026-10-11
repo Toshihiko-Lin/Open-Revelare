@@ -49,6 +49,9 @@ jobs:
           [ -n "$version" ] || { echo "读不到 csproj 的 <Version>"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "csproj 版本：$version"
+          installer_version=$(sed -n 's/^#define MyAppVersion "\([^"]*\)"/\1/p' open-revelare.iss | tr -d '\r')
+          [ "$installer_version" = "$version" ] || {
+            echo "::error::Windows installer ($installer_version) 与 csproj ($version) 不一致"; exit 1; }
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME#v}"
             [ "$tag" = "$version" ] || {

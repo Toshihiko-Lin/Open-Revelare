@@ -16,7 +16,7 @@
          corrector. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
     <!-- Already a solution dependency (JPEG); reused here for the Lanczos resampler. -->
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
   </ItemGroup>
 
   <!-- Deep-WB 权重。⚠ 这个文件**不在本项目的 GPL-3.0 授权范围内** —— 它按原作者的
