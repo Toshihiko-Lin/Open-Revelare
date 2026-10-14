@@ -261,18 +261,21 @@
         <!-- ── Status bar ──────────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Bottom" Padding="10,4" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
                 <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="80" Height="3" Margin="0,0,10,0"
-                             IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                             IsVisible="{Binding ShowProgress}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{Binding DisplayStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            FontSize="{DynamicResource FontXs}" Foreground="{DynamicResource TextDimBrush}" />
+                <Button Grid.Column="2" Content="{i18n:T '取消'}" Click="OnCancelLongTaskClick"
+                        IsVisible="{Binding HasLongTask}" IsEnabled="{Binding CanCancelLongTask}"
+                        Padding="6,1" MinHeight="0" Margin="8,0,0,0" FontSize="{DynamicResource FontXs}" />
                 <!-- Background stage (解耦矩阵 / 色度补偿 / 后台解码 …). Its own field so roll
                      progress and the current frame name never overwrite each other. -->
-                <Border Grid.Column="2" Classes="chip" Margin="8,0,0,0" MaxWidth="240"
+                <Border Grid.Column="3" Classes="chip" Margin="8,0,0,0" MaxWidth="240"
                         IsVisible="{Binding BackgroundStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                     <TextBlock Text="{Binding BackgroundStatus}" Classes="readout" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </Border>
-                <Border Grid.Column="3" Name="ColorDiagnosticStatus" Classes="chip" IsVisible="False" Margin="8,0,0,0" MaxWidth="280">
+                <Border Grid.Column="4" Name="ColorDiagnosticStatus" Classes="chip" IsVisible="False" Margin="8,0,0,0" MaxWidth="280">
                     <TextBlock Name="ColorDiagnosticText" Classes="readout" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" MaxWidth="560" />
                 </Border>
@@ -831,7 +834,7 @@
                         <TextBlock Grid.Column="0" TextTrimming="CharacterEllipsis" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center"
                                    Text="{i18n:T '不裁色域'}" Foreground="{DynamicResource TextDimBrush}"
                                    ToolTip.Tip="{i18n:T 'HDR 渲染不裁到任何色域三角，P3 与 Adobe RGB 之外的颜色原样保留，float32 TIFF 导出同样保留。容器原色（P3 / BT.2020）在 PQ 导出时选择。屏幕可见范围由显示器决定，见左下角色彩状态。'}" />
-                        <ComboBox VerticalAlignment="Center" HorizontalAlignment="Stretch" Name="LookLutPicker" Grid.Column="2" MinWidth="80" AutomationProperties.Name="{i18n:T '外观 LUT'}"
+                        <ComboBox VerticalAlignment="Center" HorizontalAlignment="Left" Name="LookLutPicker" Grid.Column="2" MinWidth="80" MaxWidth="240" AutomationProperties.Name="{i18n:T '外观 LUT'}"
                                       ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
                                       ToolTip.Tip="{i18n:T '在数字中间片反相之后应用外观 LUT，不改变输入设备标定、片基或密度端点。输入固定为 Cineon Film Log，输出须与制作 LUT 时的编码一致。&#10;&#10;可使用随程序提供的 Film Looks 或自行制作的 .cube；「标准」表示不加外观 LUT。通过帮助菜单打开 LUT 文件夹可批量加入。随工程保存。'}">
                             <ComboBox.ContextMenu>
@@ -1321,16 +1324,17 @@
                                                Text="{i18n:T '默认关闭。仅在输入包含齿孔或灯板时启用；先显示遮罩并确认范围，再调整阈值。超过阈值的区域会填白。'}" />
                                     <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
                                     <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" IsEnabled="{Binding HasImage}" />
-                                    <Button Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
-                                            ToolTip.Tip="{i18n:T '把本帧的齿孔遮罩启用状态和阈值应用到勾选帧，未勾选则整卷；不改动色彩和构图'}">
-                                        <Grid ColumnDefinitions="Auto,*">
-                                            <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoBroadcast}" />
-                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '同步齿孔遮罩'}" VerticalAlignment="Center" />
-                                        </Grid>
-                                    </Button>
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
                                 </StackPanel>
                             </Expander>
+
+                            <Button Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
+                                    ToolTip.Tip="{i18n:T '把本帧的齿孔遮罩启用状态和阈值应用到勾选帧，未勾选则整卷；不改动色彩和构图'}">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoBroadcast}" />
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '同步齿孔遮罩'}" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                            <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
 
                             <!-- Non-destructive source-domain dust repair. -->
                             <Expander Header="{i18n:T '除尘 / 修复'}">

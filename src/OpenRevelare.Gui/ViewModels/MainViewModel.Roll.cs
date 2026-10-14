@@ -1439,8 +1439,10 @@ public partial class MainViewModel
         FrameParams ep,
         string path,
         ExportOptions opt,
-        ColorPipelineVersion pipelineVersion)
+        ColorPipelineVersion pipelineVersion,
+        CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (opt.Format == ExportFormat.Dng)
         {
             // A DNG is a BOUNDED, linear file, so it starts from the SDR rendition in the roll's
@@ -1454,11 +1456,13 @@ public partial class MainViewModel
             ImageBuffer pixels = opt.Downsample
                 ? Resample.ToLongEdge(positive.Pixels, opt.MaxLongEdge, opt.AllowUpscale)
                 : positive.Pixels;
+            ct.ThrowIfCancellationRequested();
             LinearDng.Write(pixels, dngSpace, path);
             return null;
         }
 
         RenderedFrame rendered = Pipeline.Render(working, ep, pipelineVersion, ColorManagement);
+        ct.ThrowIfCancellationRequested();
         // Decided off the frame the render actually produced rather than the params: a LegacyV1
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
         bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
@@ -1468,6 +1472,7 @@ public partial class MainViewModel
         ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
         RenderedFrame sdrBase = Pipeline.Render(
             working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
+        ct.ThrowIfCancellationRequested();
         if (opt.Downsample)
         {
             // Both layers, with the same call: a gain map is only valid against a base of exactly
@@ -1621,11 +1626,16 @@ public partial class MainViewModel
     public async Task ExportRollAsync(string folder, ExportOptions opt)
     {
         if (Frames.Count == 0) return;
+        if (!TryBeginLongTask(Loc.T("正在导出 …"), out var owner)) return;
+        CancellationToken ct = owner.Token;
         CommitLiveParams(CurrentFrame);   // capture live edits
-        IsBusy = true;
         try
         {
-            var frames = Frames.ToList();
+            // Snapshot every input before the first await: edits, removals and roll switches
+            // during export must not change the job that the user already started.
+            var frames = Frames.Select((f, i) => (
+                f.Path, f.FileName, Params: f.Params.Clone(), Box: SplitCropOf(f),
+                Name: ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1)))).ToList();
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1635,13 +1645,14 @@ public partial class MainViewModel
             int renamed = 0, skipped = 0, qualityReduced = 0, shrunk = 0;
             for (int i = 0; i < frames.Count; i++)
             {
-                RollFrame f = frames[i];
-                StatusText = Loc.F($"导出 {i + 1}/{frames.Count}：{f.FileName} …");
+                ct.ThrowIfCancellationRequested();
+                var f = frames[i];
+                ReportLongTask(Loc.F($"导出 {i + 1}/{frames.Count}：{f.FileName} …"));
                 FrameParams p = f.Params;
                 // Virtual copies share the source file name — disambiguate so they don't overwrite.
                 // (They also share every OTHER field a template can name, so this stays necessary
                 // whatever the template is.)
-                string baseName = ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1));
+                string baseName = f.Name;
                 string name = baseName;
                 for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{baseName}_副本{dup - 1}");
                 // A roll export names its files after the SCANS and runs unattended, so the folder
@@ -1653,12 +1664,13 @@ public partial class MainViewModel
                 if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
                     renamed++;
                 FrameParams ep = ForExport(p, opt);
-                var exportBox = SplitCropOf(f);
+                var exportBox = f.Box;
                 JpegIO.JpegFit? fit = await Task.Run(() =>
                 {
+                    ct.ThrowIfCancellationRequested();
                     var (working, boxed) = LoadForExport(
                         f.Path, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: false);
-                    return RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion);
+                    return RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion, ct);
                 });
                 if (fit is { Shrunk: true }) shrunk++;
                 else if (fit is { QualityReduced: true }) qualityReduced++;
@@ -1670,8 +1682,9 @@ public partial class MainViewModel
             if (shrunk > 0) detail += Loc.F($"，{shrunk} 帧为守住大小缩了尺寸");
             StatusText = Loc.F($"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}");
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("导出已取消，已完成的文件已保留"); }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
-        finally { IsBusy = false; ReleaseBulkBuffers(); }
+        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
     }
 
     /// <summary>
@@ -1703,12 +1716,15 @@ public partial class MainViewModel
     public async Task<ContactThumbs?> BuildContactThumbsAsync()
     {
         if (Frames.Count == 0) return null;
+        if (!TryBeginLongTask(Loc.T("正在生成印样 …"), out var owner)) return null;
+        CancellationToken ct = owner.Token;
         CommitLiveParams(CurrentFrame);
-        IsBusy = true;
-        StatusText = Loc.T("正在生成印样 …");
         try
         {
-            var frames = Frames.ToList();
+            var frames = Frames.Select(f => {
+                var box = SplitCropOf(f);
+                return (f.Path, Box: box, Params: ForRegion(f.Params.Clone(), f, box));
+            }).ToList();
             int done = 0, total = frames.Count;
             var sources = new WorkingFrame[total];
             var cellParams = new FrameParams[total];
@@ -1718,17 +1734,18 @@ public partial class MainViewModel
             // roll at full resolution just to shrink each frame to 900 px.
             for (int i = 0; i < total; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 // Each frame's OWN region: on a split scan the bare path would give every cell the
                 // strip's first negative. The region is the frame plus its margin, so the crop
                 // still runs below — against the box rather than the whole scan.
-                var pre = SplitCropOf(frames[i]);
+                var pre = frames[i].Box;
                 sources[i] = (await PreviewAsync(
                     frames[i].Path,
                     pre,
                     pipelineVersion,
-                    tiffInputAssumption)).Working;
-                cellParams[i] = ForRegion(frames[i].Params, frames[i], pre);
-                ReportBackground(Loc.F($"印样 {++done}/{total} …"));
+                    tiffInputAssumption).WaitAsync(ct)).Working;
+                cellParams[i] = frames[i].Params;
+                ReportLongTask(Loc.F($"印样 {++done}/{total} …"));
             }
 
             // The roll's target, off the params the cells are rendered with. A LegacyV1 roll
@@ -1741,6 +1758,7 @@ public partial class MainViewModel
                 var hdr = extended ? new List<ImageBuffer>(total) : null;
                 for (int i = 0; i < total; i++)
                 {
+                    ct.ThrowIfCancellationRequested();
                     WorkingFrame source = sources[i].WithPixels(
                         Resample.Box(sources[i].Pixels, 900));
                     sdr.Add(Pipeline.Render(
@@ -1756,11 +1774,13 @@ public partial class MainViewModel
                 }
                 return new ContactThumbs(sdr, hdr, target);
             });
+            ct.ThrowIfCancellationRequested();
             StatusText = Loc.F($"印样已生成（{total} 帧）");
             return thumbs;
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("印样生成已取消"); return null; }
         catch (Exception ex) { StatusText = Loc.T("印样生成失败：") + ex.Message; return null; }
-        finally { ReportBackground(""); IsBusy = false; ReleaseBulkBuffers(); }
+        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
     }
 
     /// <summary>Compose the finished sheet at export resolution and write it. Must be called from
@@ -1773,17 +1793,19 @@ public partial class MainViewModel
                                               SheetAspect aspect, SheetOrientation orient,
                                               string path)
     {
-        IsBusy = true;
-        StatusText = Loc.T("正在导出印样 …");
+        if (!TryBeginLongTask(Loc.T("正在导出印样 …"), out var owner)) return;
+        CancellationToken ct = owner.Token;
         try
         {
+            var notes = Notes.Clone();
             var opt = new SheetComposer.Options { Style = style, Aspect = aspect, Orientation = orient };
             // Laid out at full width so the header, frame numbers and strip are rendered at
             // export resolution rather than upscaled from the dialog's cheap preview.
             SheetComposer.Grid grid = await Task.Run(
                 () => SheetComposer.BuildGrid(thumbs.Sdr, maxLong: 2048, opt));
 
-            using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
+            ct.ThrowIfCancellationRequested();
+            using RenderTargetBitmap composed = SheetComposer.Compose(grid, notes, opt);
             ImageBuffer outImg = SheetComposer.ToBuffer(composed);
             // The page is composed ONCE, from the SDR cells: the HDR sheet is that page taken
             // back to linear with the frames swapped for their extended renders at the same
@@ -1794,6 +1816,7 @@ public partial class MainViewModel
             if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() =>
             {
+                ct.ThrowIfCancellationRequested();
                 string ext = Path.GetExtension(path).ToLowerInvariant();
                 bool jpeg = ext is ".jpg" or ".jpeg";
                 RenderedFrame rendered = ContactSheetRenderedFrame(outImg);
@@ -1816,8 +1839,9 @@ public partial class MainViewModel
                 ? Loc.F($"印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）")
                 : Loc.F($"HDR 印样已导出：{Path.GetFileName(path)}（{outImg.Width}×{outImg.Height}）");
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("印样导出已取消"); }
         catch (Exception ex) { StatusText = Loc.T("印样导出失败：") + ex.Message; }
-        finally { IsBusy = false; }
+        finally { EndLongTask(owner); }
     }
 
     private static RenderedFrame ContactSheetRenderedFrame(ImageBuffer pixels)

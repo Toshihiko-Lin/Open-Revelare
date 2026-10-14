@@ -20,8 +20,8 @@ public partial class MainViewModel
     public async Task ExportAsync(string path, ExportOptions opt)
     {
         if (CurrentFrame is not { } frame || !HasImage) return;
-        IsBusy = true;
-        StatusText = Loc.T("正在导出 …");
+        if (!TryBeginLongTask(Loc.T("正在导出 …"), out var owner)) return;
+        CancellationToken ct = owner.Token;
         try
         {
             FrameParams p = BuildParams();
@@ -35,17 +35,19 @@ public partial class MainViewModel
             var exportBox = SplitCropOf(frame);
             JpegIO.JpegFit? fit = await Task.Run(() =>
             {
+                ct.ThrowIfCancellationRequested();
                 var (working, boxed) = LoadForExport(
                     srcPath, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: true);
-                return RenderAndWriteExport(working, boxed, path, opt, pipelineVersion);
+                return RenderAndWriteExport(working, boxed, path, opt, pipelineVersion, ct);
             });
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}") + DescribeFit(fit);
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("导出已取消"); }
         catch (Exception ex)
         {
             StatusText = Loc.T("导出失败：") + ex.Message;
         }
-        finally { IsBusy = false; ReleaseBulkBuffers(); }
+        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
     }
 
     // ══ Sharp patch (local full-resolution zoom) ════════════════════════════════

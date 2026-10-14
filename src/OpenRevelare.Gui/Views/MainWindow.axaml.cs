@@ -20,6 +20,8 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private void OnCancelLongTaskClick(object? sender, RoutedEventArgs e) => Vm?.CancelLongTask();
+
     private void OnPrintLutOutputClick(object? sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { Tag: string tag } && int.TryParse(tag, out var index) && Vm is { } vm)

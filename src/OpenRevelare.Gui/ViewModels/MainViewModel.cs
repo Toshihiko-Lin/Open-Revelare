@@ -647,7 +647,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
     }
 
-    [ObservableProperty] private string _statusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayStatus))]
+    private string _statusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
     [ObservableProperty] private string _backgroundStatus = "";
@@ -686,7 +688,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Dismiss the roll-analysis notice. The analysis itself keeps running.</summary>
     public void DismissRollAnalysisNotice() => RollAnalysisNoticeDismissed = true;
 
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowProgress))]
+    private bool _isBusy;
     [ObservableProperty] private bool _hasImage;
     [ObservableProperty] private string _fileName = "";
     [ObservableProperty] private HistogramData? _histogram;   // RGB histogram of the rendered positive
@@ -3800,8 +3804,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public async Task AutoWbAiAsync()
     {
         if (_previewWorking is null) return;
-        IsBusy = true;
-        StatusText = Loc.T("智能色偏修正分析中 …");
+        if (!TryBeginLongTask(Loc.T("智能色偏修正分析中 …"), out var owner)) return;
+        CancellationToken ct = owner.Token;
         try
         {
             // Two thresholds on max |chroma log10 gain|, because stopping and judging are different
@@ -3833,9 +3837,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // touch from the worker below.
             double[] calibratedEp = DMaxPerChannel;
             double? boardCut = AutoBoardCut();
+            var targetFrame = CurrentFrame;
+            FrameParams renderTemplate = BuildDeepWbRenderParams(calibratedEp).Clone();
 
             var (wbHigh, converged, rounds, residual) = await Task.Run(() =>
             {
+                ct.ThrowIfCancellationRequested();
                 OpenRevelare.DeepWb.Onnx.OnnxDeepWbCorrector corr = GetDeepWb();
 
                 // d_highlight: the density of the roll's ONE brightest real picture point — where
@@ -3874,12 +3881,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 int it = 0;
                 for (it = 1; it <= MaxRounds; it++)
                 {
+                    ct.ThrowIfCancellationRequested();
                     var ep = new double[3];
                     for (int c = 0; c < 3; c++) ep[c] = dMin[c] + span[c];
 
+                    FrameParams renderParams = renderTemplate.Clone();
+                    renderParams.DMaxPerChannel = ep;
+
                     ImageBuffer pos = Pipeline.Render(
                         previewWorking.WithPixels(neg),
-                        BuildDeepWbRenderParams(ep),
+                        renderParams,
                         pipelineVersion,
                         ColorManagement).Pixels;
                     var (inp, outp) = corr.CorrectOnce(pos);
@@ -3896,7 +3907,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                                     $"dev={dev:F4} endpoint={ep[0]:F4},{ep[1]:F4},{ep[2]:F4}");
                     int round = it;
                     Dispatcher.UIThread.Post(() =>
-                        StatusText = Loc.F($"智能色偏修正 第 {round}/{MaxRounds} 轮 · 收敛度 {dev:F4}"));
+                    {
+                        if (ReferenceEquals(_longTaskCts, owner))
+                            ReportLongTask(Loc.F($"智能色偏修正 第 {round}/{MaxRounds} 轮 · 收敛度 {dev:F4}"));
+                    });
 
                     if (dev < bestDev) { bestDev = dev; best = (double[])span.Clone(); }
                     if (dev < Tol) break;
@@ -3915,6 +3929,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                                 $"bestDev={bestDev:F4} rounds={Math.Min(it, MaxRounds)}");
                 return (result, bestDev < Accept, Math.Min(it, MaxRounds), bestDev);
             });
+            ct.ThrowIfCancellationRequested();
+
+            // Finish on the frame that was analysed, even when the editor now shows another one.
+            if (targetFrame is not null && (CurrentFrame != targetFrame || !_paramsLoaded))
+            {
+                targetFrame.Params.DMaxPerChannel = wbHigh;
+                if (Frames.Contains(targetFrame))
+                {
+                    SetThumbnail(targetFrame, null);
+                    MarkRollDirty();
+                    RestartThumbnails();
+                }
+                StatusText = Loc.F($"智能色偏修正完成：{targetFrame.FileName}");
+                return;
+            }
 
             // The net's decision, on the field the inversion reads. Writing the three densities
             // drives the endpoint sync through the property setters, so the user sees WHAT it
@@ -3925,8 +3954,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // The residual is reported so the noise floor is visible next to the verdict.
             StatusText = Loc.F($"智能色偏修正{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 亮端 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}（{rounds} 轮 · 残差 {residual:F4}）");
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("智能色偏修正已取消"); }
         catch (Exception ex) { StatusText = Loc.T("智能色偏修正失败：") + ex.Message; }
-        finally { IsBusy = false; }
+        finally { EndLongTask(owner); }
     }
 
     /// <summary>Per-channel mean of the sRGB-decoded LINEAR values of an sRGB positive.</summary>

@@ -957,5 +957,12 @@
   "01 导入": "01 IMPORT",
   "02 校准": "02 CALIBRATE",
   "03 成片": "03 FINISH",
-  "LUT 输出说明": "LUT output details"
+  "LUT 输出说明": "LUT output details",
+  "正在取消，等待当前步骤完成 …": "Cancelling, waiting for the current step …",
+  "导出已取消": "Export cancelled",
+  "导出已取消，已完成的文件已保留": "Export cancelled; completed files have been kept",
+  "印样生成已取消": "Contact sheet generation cancelled",
+  "印样导出已取消": "Contact sheet export cancelled",
+  "智能色偏修正已取消": "AI white balance cancelled",
+  "智能色偏修正完成：{0}": "AI white balance complete: {0}"
 }

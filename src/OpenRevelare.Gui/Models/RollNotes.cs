@@ -21,6 +21,13 @@ public sealed partial class RollNotes : ObservableObject
     [ObservableProperty] private string _rollNote = "";
     [ObservableProperty] private string _format = "";
 
+    public RollNotes Clone() => new()
+    {
+        CameraBody = CameraBody, FilmStock = FilmStock, FilmIso = FilmIso,
+        RollNumber = RollNumber, DevLab = DevLab, DevProcess = DevProcess,
+        DevDate = DevDate, Location = Location, RollNote = RollNote, Format = Format,
+    };
+
     /// <summary>
     /// Blank every field. Called when a NEW roll is imported: these notes are per-roll — they are
     /// written into that roll's .ncproj and shown as its subtitle in the catalog — so carrying the
