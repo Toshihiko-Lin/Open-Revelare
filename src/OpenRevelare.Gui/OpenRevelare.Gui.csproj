@@ -56,6 +56,24 @@
     <PackageReference Include="AvaloniaMath" Version="2.1.0" />
   </ItemGroup>
 
+  <!-- The macOS presenter is independent of the RAW bridge. Select it in the executable
+       project: referenced libraries do not reliably receive the publish RuntimeIdentifier. -->
+  <PropertyGroup>
+    <_MacPresenterRid>$(RuntimeIdentifier)</_MacPresenterRid>
+    <_MacPresenterRid Condition="'$(_MacPresenterRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_MacPresenterRid>
+    <_MacPresenterName>libOpenRevelare.Presentation.MacOS.Native.dylib</_MacPresenterName>
+    <_MacPresenterPath>$(MSBuildThisFileDirectory)../../native/$(_MacPresenterRid)/$(_MacPresenterName)</_MacPresenterPath>
+  </PropertyGroup>
+  <ItemGroup Condition="$(_MacPresenterRid.StartsWith('osx')) And Exists('$(_MacPresenterPath)')">
+    <Content Include="$(_MacPresenterPath)" Link="$(_MacPresenterName)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="RequireMacOSPresenterForPublish" BeforeTargets="PrepareForPublish"
+          Condition="$(_MacPresenterRid.StartsWith('osx'))">
+    <Error Condition="!Exists('$(_MacPresenterPath)')"
+           Text="Cannot publish without the macOS presenter: $(_MacPresenterPath). Run packaging/macos/build-macos-presenter.sh first." />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
     <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />

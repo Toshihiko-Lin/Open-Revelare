@@ -225,6 +225,8 @@ jobs:
           dotnet publish src/OpenRevelare.Gui -c Release -r "$RID" --self-contained true -o "publish/$RID"
           cp "native/$RID/lcms2.manifest.json" "publish/$RID/lcms2.manifest.json"
           cmp -s "native/$RID/liblcms2.2.dylib" "publish/$RID/liblcms2.2.dylib"
+          cmp "native/$RID/libOpenRevelare.Presentation.MacOS.Native.dylib" \
+              "publish/$RID/libOpenRevelare.Presentation.MacOS.Native.dylib"
       - name: 打 .app / .dmg（ad-hoc 签名）
         # ad-hoc 是**定下来的路线**，不是临时凑合：用户 2026-08-04 决定不买 Apple
         # Developer Program（99 美元/年）。代价是用户首次打开要自己绕 Gatekeeper，

@@ -18,7 +18,7 @@
 #   4. 头文件里的 static_assert 与托管测试的 Marshal.SizeOf 互为对方的钉子；改结构体先改两边。
 #
 # 与 build-app.sh 的衔接：publish 之后把 native/$RID 下这个 dylib 与 libraw 一起拷进
-# Contents/MacOS（build-app.sh 已按 native/$RID/*.dylib 处理，无需改动）。
+# Contents/MacOS（Gui.csproj 显式复制 presenter，build-app.sh 再装配 publish 目录）。
 set -euo pipefail
 
 [ "$(uname -s)" = "Darwin" ] || { echo "错误：本脚本只能在 macOS 上跑（要 clang + AppKit/Metal SDK）"; exit 1; }
