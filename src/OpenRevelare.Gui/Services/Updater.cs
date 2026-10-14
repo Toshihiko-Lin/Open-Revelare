@@ -188,8 +188,8 @@ public static class Updater
         return Regex.Replace(s.Trim(), @"\n{3,}", "\n\n");
     }
 
-    /// <summary>Compare dotted versions ("1.2.3") component-wise. &gt;0 when a is newer.</summary>
-    private static int Compare(string a, string b)
+    /// <summary>Compare dotted versions (including four-part hotfixes) component-wise. &gt;0 when a is newer.</summary>
+    internal static int Compare(string a, string b)
     {
         int[] pa = Parse(a), pb = Parse(b);
         int n = Math.Max(pa.Length, pb.Length);

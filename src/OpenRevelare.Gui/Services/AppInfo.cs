@@ -16,5 +16,8 @@ namespace OpenRevelare.Gui.Services;
 public static class AppInfo
 {
     public static string Version =>
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        FormatVersion(Assembly.GetExecutingAssembly().GetName().Version);
+
+    internal static string FormatVersion(Version? version) =>
+        version?.ToString(version.Revision > 0 ? 4 : 3) ?? "0.0.0";
 }

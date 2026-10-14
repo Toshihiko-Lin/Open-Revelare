@@ -19,6 +19,33 @@ public sealed class GainMapJpegTests
 {
     private const double Peak = 1000d;   // +2.3 stops: 1000 / 203
 
+    [Theory]
+    [InlineData(GainMapChannels.PerChannel)]
+    [InlineData(GainMapChannels.Luminance)]
+    public void Parallel_gain_map_matches_small_frame_without_mutating_either_rendition(GainMapChannels channels)
+    {
+        (RenderedFrame sdr, RenderedFrame hdr, OutputTarget target) = RenderPair(ColorSpaces.Srgb);
+        HdrGainMap expected = HdrGainMap.Compute(sdr, hdr, ColorSpaces.Srgb, target, channels);
+        ImageBuffer Tile(ImageBuffer pixels)
+        {
+            var tiled = new ImageBuffer(512, 256);
+            for (int i = 0; i < tiled.Data.Length; i++)
+                tiled.Data[i] = pixels.Data[i % pixels.Data.Length];
+            return tiled;
+        }
+        ImageBuffer largeSdr = Tile(sdr.Pixels), largeHdr = Tile(hdr.Pixels);
+        float[] originalSdr = (float[])largeSdr.Data.Clone();
+        float[] originalHdr = (float[])largeHdr.Data.Clone();
+        HdrGainMap actual = HdrGainMap.Compute(
+            sdr.WithPixels(largeSdr), hdr.WithPixels(largeHdr), ColorSpaces.Srgb, target, channels);
+
+        Assert.Equal(expected.Metadata, actual.Metadata);
+        for (int i = 0; i < actual.Map.Data.Length; i++)
+            Assert.Equal(expected.Map.Data[i % expected.Map.Data.Length], actual.Map.Data[i]);
+        Assert.Equal(originalSdr, largeSdr.Data);
+        Assert.Equal(originalHdr, largeHdr.Data);
+    }
+
     /// <summary>
     /// The per-channel map is the exact inverse: the HDR rendition — as fitted into the base's
     /// gamut — comes back component for component, on the colourful fixture whose every pixel
@@ -221,8 +248,8 @@ public sealed class GainMapJpegTests
             Assert.Equal(sdr.Pixels.Width, mapImage.Width);
             Assert.NotNull(baseImage.Metadata.IccProfile);
             Assert.Null(mapImage.Metadata.IccProfile);
-            // The luminance map is a single-component JPEG, the form every reader knows.
-            Assert.Equal(8, Image.Identify(map).PixelType.BitsPerPixel);
+            // RGB gains retain highlight colour as well as luminance.
+            Assert.Equal(24, Image.Identify(map).PixelType.BitsPerPixel);
 
             string primaryXmp = Encoding.UTF8.GetString(baseImage.Metadata.XmpProfile!.ToByteArray()!);
             Assert.Contains("Item:Semantic=\"GainMap\"", primaryXmp, StringComparison.Ordinal);
@@ -236,7 +263,7 @@ public sealed class GainMapJpegTests
             // The ISO 21496-1 segment says the same thing as the XMP, in the standard's terms; the
             // base carries only the version fields, the map the full structure.
             GainMapMetadata fromXmp = ParseMetadata(mapXmp);
-            Assert.True(fromXmp.IsUniform);
+            Assert.False(fromXmp.IsUniform);
             Assert.Equal(4, IsoPayloadLength(primary));
             GainMapMetadata iso = ReadIsoMetadata(map);
             Assert.Equal(fromXmp.HdrCapacityMin, iso.HdrCapacityMin, 5);
@@ -257,14 +284,24 @@ public sealed class GainMapJpegTests
     /// the 8-bit map, apply the XMP's metadata — and get the HDR rendition back within the two
     /// quantisations' worth of error.
     /// </summary>
-    [Fact]
-    public void A_reader_recovers_the_hdr_rendition_from_the_file()
+    [Theory]
+    [InlineData("sRGB", true, false)]
+    [InlineData("sRGB", false, false)]
+    [InlineData("DisplayP3", false, false)]
+    [InlineData("sRGB", false, true)]
+    [InlineData("DisplayP3", false, true)]
+    public void A_reader_recovers_the_hdr_rendition_from_the_file(string baseName, bool neutral, bool sizeLimited)
     {
-        (RenderedFrame sdr, RenderedFrame hdr, OutputTarget target) = RenderPair(ColorSpaces.Srgb, neutral: true);
+        ColorSpaceDef baseSpace = ColorSpaces.ByName(baseName, ColorSpaces.Srgb);
+        (RenderedFrame sdr, RenderedFrame hdr, OutputTarget target) = RenderPair(baseSpace, neutral: neutral);
+        float[] expectedHdr = HdrGainMap.HdrInBaseGamut(hdr, baseSpace);
         string path = TempPath();
         try
         {
-            JpegIO.ExportGainMapJpeg(sdr, hdr, ColorSpaces.Srgb, target, path, quality: 100);
+            if (sizeLimited)
+                JpegIO.ExportGainMapJpeg(sdr, hdr, baseSpace, target, path, quality: 100, maxBytes: 1_000_000);
+            else
+                JpegIO.ExportGainMapJpeg(sdr, hdr, baseSpace, target, path, quality: 100);
             byte[] file = File.ReadAllBytes(path);
             (int primaryLength, int mapOffset, _) = ReadMpf(file);
             using Image<Rgb24> baseImage = Image.Load<Rgb24>(file[..primaryLength]);
@@ -281,11 +318,11 @@ public sealed class GainMapJpegTests
                     Rgb24 b = baseImage[x, y];
                     Rgb24 m = mapImage[x, y];
                     float[] baseLinear = { b.R / 255f, b.G / 255f, b.B / 255f };
-                    OutputRender.Decode(baseLinear, ColorSpaces.Srgb);
+                    OutputRender.Decode(baseLinear, baseSpace);
                     float[] code = { m.R / 255f, m.G / 255f, m.B / 255f };
                     for (int c = 0; c < 3; c++)
                     {
-                        float expected = Math.Max(hdr.Pixels.Data[(y * w + x) * 3 + c], 0f);
+                        float expected = expectedHdr[(y * w + x) * 3 + c];
                         float actual = HdrGainMap.Reconstruct(baseLinear[c], code[c], c, metadata, weight);
                         // JPEG at quality 100 on a 4×2 fixture is not lossless; the base's 8-bit
                         // step alone is 0.4 % of white, and the map's step is ~0.01 stop.

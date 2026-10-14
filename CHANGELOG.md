@@ -1,5 +1,27 @@
 # OpenRevelare — 更新日志
 
+## v1.8.5.1（2026-10-14）
+
+**修复**
+
+- **修复 HDR 增益图 JPEG 导出的高光颜色偏差。** 增益图改为分别保存 RGB 通道的增益，避免仅恢复亮度时沿用 SDR 基底的高光颜色，使支持逐通道增益图的查看软件能更准确地还原 HDR 预览中的高光颜色。适用于 sRGB 和 Display P3 基底，需要重新导出照片。
+- **正确显示和识别四段修复版本号。** 保留 `1.8.5.1` 的第四段，避免升级后仍将自身识别为 `1.8.5`、反复提示同一更新。
+
+**改进**
+
+- **降低原尺寸 HDR JPEG 导出的计算和内存开销。** 复用增益图计算缓冲区，并行统计通道增益范围；2400 万像素合成图测试中，增益图计算耗时约减少 30%，临时内存分配减少约 288 MB。实际整张导出耗时取决于原图尺寸、解码和渲染设置。
+
+---
+
+**Fixed**
+
+- **Corrected highlight colour differences in HDR gain-map JPEG exports.** Gain maps now store separate RGB gains instead of restoring luminance alone and retaining the SDR base's highlight colour. Viewers supporting per-channel gain maps can reconstruct HDR preview highlights more accurately. Applies to sRGB and Display P3 bases; photos must be exported again.
+- **Preserved four-part hotfix version numbers.** The app now identifies itself as `1.8.5.1` rather than truncating it to `1.8.5`, preventing repeated notices for the same update after upgrading.
+
+**Improved**
+
+- **Reduced computation and memory overhead for full-resolution HDR JPEG exports.** Gain-map computation reuses its buffer and determines channel gain ranges in parallel. A 24-megapixel synthetic benchmark showed approximately 30% less gain-map computation time and 288 MB less temporary allocation. Total export time depends on source dimensions, decoding and render settings.
+
 ## v1.8.5（2026-10-14）
 
 **改进**

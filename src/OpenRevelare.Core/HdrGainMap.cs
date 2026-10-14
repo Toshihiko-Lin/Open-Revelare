@@ -46,7 +46,7 @@ public enum GainMapChannels
     /// <summary>
     /// One gain per channel — the HDR rendition reconstructed exactly, including the hue of a
     /// highlight whose components were rolled off separately. Rarer in the wild and rarer in
-    /// readers; kept for callers that want the exact reconstruction and control the reader.
+    /// readers; used by JPEG export so reconstructed highlights match the HDR preview.
     /// </summary>
     PerChannel,
 }
@@ -175,7 +175,9 @@ public sealed class HdrGainMap
         float[] d = HdrInBaseGamut(hdr, baseSpace);
 
         const float offset = DefaultOffset;
-        float[] gain = new float[d.Length];
+        // The gamut-fitted HDR copy is private to this computation. Replace each sample with
+        // its gain instead of keeping another full-resolution RGB float buffer alive.
+        float[] gain = d;
         if (channels == GainMapChannels.PerChannel)
         {
             ParallelSweep.Over(gain.Length, (from, to) =>
@@ -212,19 +214,29 @@ public sealed class HdrGainMap
         // The declared range per channel is what the content needs and no wider — a wider range
         // spends the map's eight bits on gains nobody has. It always includes zero, so that a
         // pixel where the renditions agree encodes as exactly "no gain" whatever its neighbours do.
-        Span<float> min = stackalloc float[3];
-        Span<float> max = stackalloc float[3];
-        min.Fill(0f);
-        max.Fill(0f);
-        for (int i = 0; i < gain.Length; i += 3)
+        float[] min = new float[3], max = new float[3];
+        var rangeGate = new object();
+        ParallelSweep.OverPixels(w * h, (from, to) =>
         {
-            for (int c = 0; c < 3; c++)
+            float loR = 0f, loG = 0f, loB = 0f;
+            float hiR = 0f, hiG = 0f, hiB = 0f;
+            for (int i = from; i < to; i += 3)
             {
-                float g = gain[i + c];
-                if (g < min[c]) min[c] = g;
-                if (g > max[c]) max[c] = g;
+                float r = gain[i], g = gain[i + 1], b = gain[i + 2];
+                if (r < loR) loR = r;
+                if (g < loG) loG = g;
+                if (b < loB) loB = b;
+                if (r > hiR) hiR = r;
+                if (g > hiG) hiG = g;
+                if (b > hiB) hiB = b;
             }
-        }
+            // One merge per partition; min/max are exact and independent of merge order.
+            lock (rangeGate)
+            {
+                min[0] = Math.Min(min[0], loR); min[1] = Math.Min(min[1], loG); min[2] = Math.Min(min[2], loB);
+                max[0] = Math.Max(max[0], hiR); max[1] = Math.Max(max[1], hiG); max[2] = Math.Max(max[2], hiB);
+            }
+        });
         for (int c = 0; c < 3; c++)
         {
             if (max[c] - min[c] < MinimumSpan) max[c] = min[c] + MinimumSpan;

@@ -197,9 +197,10 @@ public static class JpegIO
     /// would encode it on its own — same quantisation, same EXIF, same ICC policy — so a reader
     /// that ignores the map sees the SDR export, not an approximation of it. The map's metadata
     /// is written both as <c>hdrgm</c> XMP and as the ISO 21496-1 segment. The map is a
-    /// luminance map (<see cref="GainMapChannels.Luminance"/>), encoded as a grayscale JPEG at
-    /// the same quality and full resolution: it is zero almost everywhere and costs little, and a
-    /// downsampled map would soften exactly the highlight edges it exists to restore.
+    /// per-channel map (<see cref="GainMapChannels.PerChannel"/>), encoded as a full-resolution
+    /// RGB JPEG without chroma subsampling. Each channel must recover the HDR rendition's own
+    /// value: a luminance-only map retains the SDR base's highlight colour instead, which can
+    /// differ from the HDR preview after the two renditions' shoulders and gamut mapping.
     /// </para>
     /// </summary>
     public static void ExportGainMapJpeg(
@@ -268,7 +269,7 @@ public static class JpegIO
         string? description,
         byte[]? profileBytes)
     {
-        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target);
+        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target, GainMapChannels.PerChannel);
 
         // The map first, finished: the base's XMP has to state the map's final byte length.
         byte[] gainMapJpeg = GainMapJpegContainer.WithIsoMetadata(
