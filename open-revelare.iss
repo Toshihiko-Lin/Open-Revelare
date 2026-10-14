@@ -22,7 +22,8 @@
 #define Dash Pos("-", MyAppVersion)
 #define MyAppNumericVersion Dash > 0 ? Copy(MyAppVersion, 1, Dash - 1) : MyAppVersion
 #define ExeVersion GetVersionNumbersString(MyAppSourceDir + "\" + MyAppExeName)
-#if ExeVersion != MyAppNumericVersion + ".0"
+; 三段版本在 PE 中补零（1.8.5 -> 1.8.5.0），四段修复版本已完整，不能再追加 .0。
+#if (ExeVersion != MyAppNumericVersion) && (ExeVersion != MyAppNumericVersion + ".0")
   ; ISPP 的 #error 不做宏展开，所以这里只能写死一句话，不带具体版本号。
   #error 版本号不一致：本文件的 MyAppVersion 与 publish\win-x64\OpenRevelare.exe 的文件版本对不上。先跑 dotnet publish，再核对 csproj 的 <Version> 和上面的 MyAppVersion。
 #endif
