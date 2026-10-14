@@ -1315,26 +1315,26 @@
                     <Border Grid.Row="1">
                         <StackPanel Spacing="0" Margin="22,0,14,14">
                             <!-- 齿孔遮罩 -->
-                            <CheckBox Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
-                                      IsEnabled="{Binding HasImage}" Margin="0,4,0,0"
-                                      ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
+                            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                                <CheckBox Grid.Column="0" Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
+                                          IsEnabled="{Binding HasImage}" VerticalAlignment="Center"
+                                          ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
+                                <Button Grid.Column="1" Classes="icon" Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}"
+                                        Width="26" Height="26" MinHeight="26" Padding="4" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        AutomationProperties.Name="{i18n:T '同步齿孔遮罩'}"
+                                        ToolTip.Tip="{i18n:T '把本帧的齿孔遮罩启用状态和阈值应用到勾选帧，未勾选则整卷；不改动色彩和构图'}">
+                                    <ctl:Icon Width="16" Height="16" Data="{StaticResource IcoBroadcast}" />
+                                </Button>
+                            </Grid>
                             <Expander Header="{i18n:T '齿孔设置'}">
                                 <StackPanel Spacing="4">
                                     <TextBlock Classes="groupHint"
                                                Text="{i18n:T '默认关闭。仅在输入包含齿孔或灯板时启用；先显示遮罩并确认范围，再调整阈值。超过阈值的区域会填白。'}" />
                                     <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
                                     <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" IsEnabled="{Binding HasImage}" />
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
                                 </StackPanel>
                             </Expander>
-
-                            <Button Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
-                                    ToolTip.Tip="{i18n:T '把本帧的齿孔遮罩启用状态和阈值应用到勾选帧，未勾选则整卷；不改动色彩和构图'}">
-                                <Grid ColumnDefinitions="Auto,*">
-                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoBroadcast}" />
-                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '同步齿孔遮罩'}" VerticalAlignment="Center" />
-                                </Grid>
-                            </Button>
-                            <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
 
                             <!-- Non-destructive source-domain dust repair. -->
                             <Expander Header="{i18n:T '除尘 / 修复'}">
