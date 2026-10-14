@@ -7,7 +7,7 @@
 - **齿孔同步更顺手，底栏更紧凑。** 无需展开设置即可同步齿孔遮罩；风格选择框不再横跨底栏，给其他操作留出更多空间。
 - **耗时操作可以随时取消。** 导出照片、生成或导出印样、智能色偏修正时，可直接点击状态旁的“取消”。当前步骤结束后任务停止，已导出的文件会保留。
 - **等待任务时可以继续切换照片。** 任务进度持续显示；整卷导出与印样按开始时的照片和调整完成，不受后续编辑影响。智能色偏修正完成后应用到原来的照片，不会误改刚切换到的照片。
-- **扩展 Panasonic RAW 支持。** 更新 RAW 解码组件，加入新版 Panasonic RAW 编码支持，Windows、Linux 与 macOS 使用相同版本。具体机型与拍摄模式仍需实拍验证。
+- **扩展更多相机的 RAW 支持。** 更新 RAW 解码组件，扩展对佳能 EOS R1 / R5 Mark II、富士 X-T50 / GFX 100S II、索尼 A9 III / A7CR、尼康 Z6 III / Z8（标准压缩）及松下 GH7 / S9 等相机的支持，并加入新版松下 RAW 编码支持。Windows、Linux 与 macOS 使用相同版本，具体机型与拍摄模式仍需实拍验证。
 - **Windows 安装更省事。** RAW 解码无需额外安装 VC++ 运行库；Linux 继续兼容 Ubuntu 22.04 及更新系统。
 
 ---
@@ -17,7 +17,7 @@
 - **Easier sprocket sync and a more compact toolbar.** Sync the sprocket mask without expanding its settings. The film-look picker leaves more room for other controls on the bottom toolbar.
 - **Cancel time-consuming operations whenever you need to.** Photo exports, contact-sheet generation / export and AI white balance now offer a Cancel button beside their status. The task stops after its current step finishes, keeping files already exported.
 - **Keep browsing photos while a task runs.** Progress stays visible. Roll exports and contact sheets use the photos and adjustments chosen at the start, unaffected by later edits. AI white balance applies to the original photo when it finishes, without changing the photo you have switched to.
-- **Broader Panasonic RAW support.** Updated RAW decoding adds support for newer Panasonic RAW encoding, with the same version on Windows, Linux and macOS. Individual cameras and recording modes still need testing with original files.
+- **Broader RAW camera support.** Updated RAW decoding expands support for cameras including the Canon EOS R1 / R5 Mark II, Fujifilm X-T50 / GFX 100S II, Sony A9 III / A7CR, Nikon Z6 III / Z8 (standard compression), and Panasonic GH7 / S9, and adds support for newer Panasonic RAW encoding. Windows, Linux and macOS use the same version; individual cameras and recording modes still need testing with original files.
 - **Simpler Windows setup.** RAW decoding requires no extra VC++ redistributable installation. Linux continues to support Ubuntu 22.04 and newer systems.
 
 ## v1.8.4（2026-10-11）
