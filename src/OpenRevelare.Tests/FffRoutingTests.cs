@@ -8,7 +8,7 @@ namespace OpenRevelare.Tests;
 ///
 /// Hasselblad spends <c>.fff</c> twice: on Imacon digital-back RAW (Bayer, needs LibRaw) and on
 /// Flextight SCANNER exports, which are uncompressed 16-bit RGB TIFFs with no CFA at all. LibRaw
-/// rejects the latter outright — verified against 0.21.5, the version shipped here, which answers
+/// rejects the latter outright — verified against 0.21.5, which answers
 /// <c>-2 Unsupported file format or not RAW file</c> — so routing by extension alone turned a
 /// file TiffIO reads perfectly into a failed import.
 ///

@@ -16,7 +16,7 @@ env:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -24,13 +24,15 @@ jobs:
           dotnet-version: '8.0.x'
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - name: 构建固定 LibRaw 0.22.2
+        run: bash packaging/libraw/build-unix.sh
       # -warnaserror：本仓库长期保持 0 警告，退化了应当在这里就红
       - run: dotnet build -c Release -warnaserror
       # 回归测试。整套约 10 秒，而它守的是这个项目的核心承诺 ——「同一卷底片任何时候、
       # 任何机器上处理，结果都一样」。测试里每一条都对应一个已经踩过一次的坑（有色高光
       # 单通道截断、裁切没跟着方向走、片基透的卷齿孔漏检……），不在 CI 跑就等于没有。
       - run: dotnet test -c Release --no-build --nologo
-      # 跨平台 publish 能力本身也要守住：Core 的 runtime 包是按 RID 条件挑的，
+      # 跨平台 publish 能力本身也要守住：LibRaw 原生库是按 RID 条件挑的，
       # 挑错了在这一步就会缺原生库。
       - run: dotnet publish src/OpenRevelare.Gui -c Release -r linux-x64 --self-contained true -o /tmp/pub
       - name: 装配 app-owned Little CMS
@@ -42,7 +44,7 @@ jobs:
       - name: 产物自检
         run: |
           test -f /tmp/pub/OpenRevelare          || { echo "缺主程序"; exit 1; }
-          test -f /tmp/pub/libraw_r.so.23         || { echo "缺 LibRaw 原生库"; exit 1; }
+          test -f /tmp/pub/libOpenRevelare.Raw.Native.so         || { echo "缺 LibRaw 原生库"; exit 1; }
           test -f /tmp/pub/liblcms2.so.2          || { echo "缺 app-owned Little CMS"; exit 1; }
           test -f /tmp/pub/liblcms2.so            || { echo "缺 Little CMS loader alias"; exit 1; }
           test -f /tmp/pub/lcms2.manifest.json    || { echo "缺 Little CMS manifest"; exit 1; }
@@ -63,6 +65,9 @@ jobs:
       - name: 构建固定 Little CMS 2.19.1
         shell: pwsh
         run: ./packaging/lcms/build-windows.ps1
+      - name: 构建固定 LibRaw 0.22.2
+        shell: pwsh
+        run: ./packaging/libraw/build-windows.ps1
       - name: 构建可重复 Win32 presenter
         shell: pwsh
         run: ./packaging/windows/build-win32-presenter.ps1
@@ -83,7 +88,7 @@ jobs:
           ./packaging/windows/verify-win32-presenter.ps1 -Directory $pub -RepositoryRoot $PWD
           ./packaging/windows/smoke-win32-presenter.ps1 -Directory $pub
           if (-not (Test-Path -LiteralPath (Join-Path $pub "OpenRevelare.exe"))) { throw "缺主程序" }
-          if (-not (Test-Path -LiteralPath (Join-Path $pub "raw_r.dll"))) { throw "缺 LibRaw 原生库" }
+          if (-not (Test-Path -LiteralPath (Join-Path $pub "OpenRevelare.Raw.Native.dll"))) { throw "缺 LibRaw 原生库" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.dll"))) { throw "缺 app-owned Little CMS" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.manifest.json"))) { throw "缺 Little CMS manifest" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub $presenterDll))) { throw "缺 Win32 presenter" }
@@ -99,12 +104,7 @@ jobs:
   # 发版之后才现形。ad-hoc 签名、bash 3.2 的多字节坑、RID 条件没传给类库导致 dylib
   # 不进产物 —— 这些都是已经栽过的跟头（见 build-app.sh 与 Gui.csproj 里的注释）。
   #
-  # **不编 LibRaw**：bundle-libraw.sh 要 brew 装依赖再从源码编 0.21.4，几分钟起步，
-  # 而它守的是「原生库编得对不对」，那是 release 的事。这一格守的是**托管代码在 osx RID
-  # 下编不编得过、publish 的产物齐不齐**，用一个假 dylib 就能验，秒级完成。
-  #
-  # 假 dylib 不能省：Gui.csproj 的 WarnMissingMacLibRaw 在文件缺失时发 Warning，
-  # 而下面带 -warnaserror，缺了它这一格会以一条与本次改动无关的错误常红。
+  # macOS 也编译并运行真实 LibRaw 0.22.2，验证原生 ABI 与解码。
   macos:
     runs-on: macos-latest      # Apple Silicon。Intel 不在 CI 里：托管代码与垫片源码两边一样，
                                # Intel 独有的只是 RID 选择（LittleCmsBundle / ColorManagement.csproj），
@@ -116,17 +116,12 @@ jobs:
           dotnet-version: '8.0.x'
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - name: 构建固定 LibRaw 0.22.2
+        run: bash packaging/libraw/build-unix.sh
       - run: dotnet build -c Release -warnaserror
       # 同一套回归测试也在 macOS 上跑一遍：这里的测试有相当一部分在验数值结果，
       # 而浮点行为、文化相关的数字解析、路径大小写都是跨平台会分岔的地方。
       - run: dotnet test -c Release --no-build --nologo
-      # 占位 dylib：只为让按 RID 条件的 Content 项有东西可复制，内容无所谓 —— 这一步
-      # 不运行程序，只看装配结果。真库由 release.yml 的 macos job 编。
-      - name: 放一个占位 libraw.23.dylib
-        run: |
-          mkdir -p native/osx-arm64
-          echo "placeholder — real dylib is built by packaging/macos/bundle-libraw.sh" \
-            > native/osx-arm64/libraw.23.dylib
       # 原生 presenter 垫片（Obj-C++，src/OpenRevelare.Presentation.MacOS.Native）在这里真编，
       # 不放占位：只要 clang + SDK，几秒钟，而它是整个 mac HDR 预览唯一没有第二条发现
       # 渠道的部件 —— 2026-09-13 之前它从没在任何 Mac 上编过一次（见目录 README）。
@@ -141,7 +136,7 @@ jobs:
         # 不复制，包照打，直到 mac 上导入 RAW 才 DllNotFoundException。
         run: |
           test -f /tmp/pub/OpenRevelare         || { echo "缺主程序"; exit 1; }
-          test -f /tmp/pub/libraw.23.dylib      || { echo "dylib 没进产物 —— 检查 Gui.csproj 里按 RID 条件的 Content 项"; exit 1; }
+          test -f /tmp/pub/libOpenRevelare.Raw.Native.dylib      || { echo "dylib 没进产物 —— 检查 Directory.Build.targets 的 RID 装配"; exit 1; }
           test -f /tmp/pub/liblcms2.2.dylib     || { echo "缺 app-owned Little CMS"; exit 1; }
           test -f /tmp/pub/liblcms2.dylib       || { echo "缺 Little CMS loader alias"; exit 1; }
           test -f /tmp/pub/lcms2.manifest.json  || { echo "缺 Little CMS manifest"; exit 1; }

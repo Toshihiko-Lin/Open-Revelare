@@ -10,6 +10,12 @@ English speakers: contributions are welcome in English. Code comments in this re
 
 需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
+RAW 解码改为随项目构建的 **LibRaw 0.22.2**，不再使用 Sdcb NuGet 原生包。
+首次运行测试或处理 RAW 前，先安装 CMake 和 C/C++ 编译器，并执行
+Windows 的 `./packaging/libraw/build-windows.ps1`，或 Linux/macOS 的
+`bash packaging/libraw/build-unix.sh`。构建输入、校验和及平台要求见
+[LibRaw 构建说明](packaging/libraw/README.md)。CI 会在每个平台执行这一步。
+
 ```bash
 git clone https://github.com/Toshihiko-Lin/Open-Revelare.git
 cd Open-Revelare

@@ -29,7 +29,7 @@ jobs:
   # 回归测试同理，而且更要紧：三个平台的打包 job 都 needs: guard，所以测试一红，
   # 三个包一个都不会打出来。一次发版把回归 bug 带给全部用户的代价，远高于这十秒。
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -39,6 +39,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - name: 构建固定 LibRaw 0.22.2
+        run: bash packaging/libraw/build-unix.sh
       - name: 回归测试
         run: dotnet test -c Release --nologo
       - id: v
@@ -69,6 +71,9 @@ jobs:
       - name: 构建固定 Little CMS 2.19.1
         shell: pwsh
         run: ./packaging/lcms/build-windows.ps1
+      - name: 构建固定 LibRaw 0.22.2
+        shell: pwsh
+        run: ./packaging/libraw/build-windows.ps1
       - name: 构建可重复 Win32 presenter
         shell: pwsh
         run: ./packaging/windows/build-win32-presenter.ps1
@@ -134,7 +139,7 @@ jobs:
 
   linux:
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -142,6 +147,8 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - name: 构建固定 LibRaw 0.22.2
+        run: bash packaging/libraw/build-unix.sh
       - name: 取 appimagetool 与静态 runtime
         run: |
           mkdir -p tools
@@ -195,22 +202,23 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: LibRaw 编译依赖 + 图标矢量渲染
+      - name: 图标矢量渲染依赖
         # librsvg 只为把 app.svg 渲成 1024 母版；没有它脚本会拿 512 的 png 放大，
         # @2x 那两档会糊一点。装它约 30 秒，值。
-        run: brew install jpeg-turbo little-cms2 librsvg
-      - name: 编 + 装配 libraw.23.dylib
-        run: ./packaging/macos/bundle-libraw.sh
+        run: brew install librsvg
       # HDR/EDR 预览的原生半边。产物与 libraw 同路：native/osx-<arch>/*.dylib → publish →
       # Contents/MacOS。缺了它程序照跑，只是预览退回 Avalonia 的 SDR 位图，徽章报 emergency ——
       # 正是 2026-09-13 之前每个 mac 发布件的实际状态。运行时行为（D-012 / D-026 四项）
       # 未经真机验证，用户 2026-09-13 决定按可用发布。
       - name: 编 macOS 原生 presenter
         run: ./packaging/macos/build-macos-presenter.sh
-      # bundle-libraw 会把 Homebrew 的 lcms 依赖一并复制；固定版本必须在它之后写入，
-      # 这样最终 app-owned 文件确定来自上面校验过 SHA-256 的官方 2.19.1 源码。
+      # 显示/导出色彩管理继续使用独立的固定 Little CMS 共享库。
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - name: 构建固定 LibRaw 0.22.2
+        run: bash packaging/libraw/build-unix.sh
+      - name: LibRaw runtime and decode smoke tests
+        run: dotnet test src/OpenRevelare.Tests -c Release --nologo --filter "FullyQualifiedName~LibRawRuntimeTests|FullyQualifiedName~LinearDngTests"
       - name: publish + 装配 Little CMS manifest
         run: |
           RID=${{ matrix.rid }}
@@ -239,7 +247,7 @@ jobs:
           # 架构闸门：进包的每个 Mach-O 都得是本格的架构，dmg 名字也得带对（客户端更新器按
           # 文件名里的 arm64 / x86_64 挑包，见 Updater.PlatformAssetUrl）。
           for f in publish/OpenRevelare.app/Contents/MacOS/OpenRevelare \
-                   publish/OpenRevelare.app/Contents/MacOS/libraw.23.dylib \
+                   publish/OpenRevelare.app/Contents/MacOS/libOpenRevelare.Raw.Native.dylib \
                    publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib "$P"; do
             lipo -archs "$f" | tr ' ' '\n' | grep -qx '${{ matrix.arch }}' \
               || { echo "$f 的架构是 [$(lipo -archs "$f")]，不是 ${{ matrix.arch }}"; exit 1; }
@@ -254,7 +262,7 @@ jobs:
   release:
     needs: [guard, windows, linux, macos]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
         with:

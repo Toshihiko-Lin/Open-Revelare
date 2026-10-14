@@ -1,10 +1,10 @@
-using Sdcb.LibRaw;
+using OpenRevelare.Core.NativeRaw;
 using OpenRevelare.ColorManagement;
 
 namespace OpenRevelare.Core;
 
 /// <summary>
-/// Camera RAW decoder via LibRaw (Sdcb.LibRaw binding). Port of the core
+/// Camera RAW decoder via the application-owned LibRaw 0.22.2 binding. Port of the core
 /// <c>negative/raw_decode.py::_decode_rawpy</c> path.
 ///
 /// Returns a linear-light float32 (H,W,3) array in CAMERA-NATIVE colour — the
@@ -55,8 +55,7 @@ public static class RawDecode
     /// <summary>Extensions where the name alone does NOT settle the routing, because one vendor
     /// spends it on two unrelated things. <c>.fff</c> is both an Imacon/Hasselblad digital-back
     /// RAW and a Flextight SCANNER export — and the scanner's is an ordinary uncompressed 16-bit
-    /// RGB TIFF with no CFA to demosaic. LibRaw rejects that outright (verified against 0.21.5,
-    /// the version shipped here: <c>-2 Unsupported file format or not RAW file</c>), so routing
+    /// RGB TIFF with no CFA to demosaic. LibRaw rejects that outright (verified against 0.21.5: <c>-2 Unsupported file format or not RAW file</c>), so routing
     /// it by extension made a perfectly readable file fail to import. These get
     /// <see cref="LooksLikeFullColorTiff"/> asked of them instead.</summary>
     private static readonly HashSet<string> ContentSniffExts = new(StringComparer.OrdinalIgnoreCase)
@@ -329,59 +328,12 @@ public static class RawDecode
     public enum Demosaic { Full, Preview }
 
 
-    /// <summary>
-    /// The camera-declared image area (libraw sizes.raw_inset_crops[0]), to hand to
-    /// LibRaw's own params.cropbox. Null when it cannot be read or does not look sane —
-    /// in which case we decode the full frame, as before.
-    ///
-    /// WHY THIS EXISTS: Sdcb bundles LibRaw 0.21, which does not crop the visible frame
-    /// for (at least) Sony A7R IV — it reports sizes.width == iwidth == raw_width with all
-    /// margins 0 and fills only part of a raw_width x raw_height buffer, leaving pure-zero
-    /// padding. rawpy's LibRaw 0.22 does crop. Zero padding is not cosmetic: on a negative
-    /// T=0 hits the -log10 1e-10 clamp -> density 10 (real highlights are ~1.0-1.5), which
-    /// blows out to white in the positive and poisons DetectDMax / EstimateDarkValley.
-    /// LibRaw 0.22.x would be the clean fix but no such NuGet package exists (Sdcb.LibRaw
-    /// tops out at 0.21.1.7 and is the only maintained .NET binding), so we drive LibRaw's
-    /// own crop with the file's own metadata instead of cutting pixels ourselves.
-    ///
-    /// WHY THE REFLECTION: Sdcb 0.21 exposes no accessor for libraw_image_sizes_t, so we
-    /// marshal it off the native libraw_data_t handle, where it sits at offset 8 (right
-    /// after the leading `ushort (*image)[4]` pointer on x64). That offset is an assumption
-    /// about a struct layout we do not own, so it is VALIDATED against values we can read
-    /// through the supported API before any of it is trusted; a mismatch returns null
-    /// rather than cropping to garbage.
-    /// </summary>
-    private static System.Drawing.Rectangle? CameraInsetCrop(RawContext ctx)
-    {
-        try
-        {
-            var handleField = typeof(RawContext).GetField("_r",
-                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (handleField?.GetValue(ctx) is not IntPtr h || h == IntPtr.Zero) return null;
+    /// <summary>Read the vendor inset through the native bridge compiled against LibRaw's
+    /// headers. No reflection or assumptions about libraw_data_t offsets are needed.</summary>
+    private static System.Drawing.Rectangle? CameraInsetCrop(RawContext ctx) => ctx.InsetCrop;
 
-            var sizes = System.Runtime.InteropServices.Marshal
-                .PtrToStructure<Sdcb.LibRaw.Natives.LibRawImageSizes>(h + 8);
-
-            // Layout check: if these disagree, offset 8 is not sizes and nothing below means
-            // anything.
-            if (sizes.RawWidth != ctx.RawWidth || sizes.RawHeight != ctx.RawHeight) return null;
-            if (sizes.RawInsetCrops is null || sizes.RawInsetCrops.Length == 0) return null;
-
-            var c = sizes.RawInsetCrops[0];
-            // 65535 / 0 are LibRaw's "unset" sentinels; also require the box to sit inside
-            // the raw frame and to actually be a crop.
-            if (c.CWidth == 0 || c.CHeight == 0 || c.CLeft == 65535 || c.CTop == 65535) return null;
-            if (c.CLeft + c.CWidth > sizes.RawWidth || c.CTop + c.CHeight > sizes.RawHeight) return null;
-            if (c.CLeft + c.CWidth == sizes.RawWidth && c.CTop + c.CHeight == sizes.RawHeight
-                && c.CLeft == 0 && c.CTop == 0) return null;   // full frame — nothing to do
-
-            return new System.Drawing.Rectangle(c.CLeft, c.CTop, c.CWidth, c.CHeight);
-        }
-        catch
-        {
-            return null;   // never let a metadata probe break decoding
-        }
-    }
+    /// <summary>The actual runtime decoder version, including the upstream release suffix.</summary>
+    public static string LibRawVersion => Native.Version;
 
     /// <summary>Decode a RAW file to a linear-light, camera-native, UniWB float32 image.
     /// <paramref name="fbdd"/> = pre-demosaic chroma noise reduction (default off, as before).</summary>
@@ -634,28 +586,7 @@ public static class RawDecode
 
             // Mirror rawpy.postprocess(..) from _decode_rawpy: UniWB, raw colour,
             // linear gamma, 16-bit, no auto-bright, AHD demosaic, FBDD per preference.
-            ctx.DcrawProcess(p =>
-            {
-                // True UniWB baseline: unit gain on every channel (user_mul = 1,1,1,1).
-                // This is what _decode_rawpy's DOCSTRING intends — no white balance baked
-                // in at decode time, so both the white-light and RGB-decouple paths enter
-                // Stage 1 on the same line and the decouple matrix maps cleanly. (The
-                // shipping Python omits user_wb and so silently falls back to LibRaw's
-                // pre_mul daylight coefficients; the rewrite fixes that to match intent.
-                // t_base normalisation absorbs the per-channel gain either way, so final
-                // frames are equivalent.)
-                p.UseCameraWb = false;
-                p.UseAutoWb = false;
-                p.UserMultipliers = new[] { 1f, 1f, 1f, 1f };       // UniWB (R,G,B,G2)
-                p.OutputColor = (LibRawColorSpace)0;                // 0 = raw / camera-native, no matrix
-                p.OutputBps = 16;
-                p.NoAutoBright = true;                              // no histogram stretch
-                p.UserQual = DemosaicAlgorithm.AdaptiveHomogeneityDirected;   // moot under half_size
-                p.Gamma = new[] { 1.0, 1.0, 0.0, 0.0, 0.0, 0.0 };   // linear (gamm[0]=gamm[1]=1)
-                p.FbddNoiserd = (int)fbdd;                          // FBDD off / light / full
-                p.HalfSize = halfSize;                              // 2×2 binning, no demosaic
-                if (cropbox is System.Drawing.Rectangle cb) p.Cropbox = cb;
-            });
+            ctx.Process((int)fbdd, halfSize, cropbox);
             return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep);
         }
         catch { ctx.Dispose(); throw; }

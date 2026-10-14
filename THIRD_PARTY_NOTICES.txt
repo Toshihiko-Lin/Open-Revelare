@@ -12,12 +12,13 @@ Where a component is licensed under the LGPL, users may replace it with a
 compatible (including modified) version by substituting the corresponding
 file in the installation directory.
 
-Platform note: the exact set of native libraries differs per platform —
-Windows ships raw_r.dll and lcms2.dll; Linux ships libraw_r.so.23 and the
-app-owned liblcms2.so.2; macOS ships libraw.23.dylib and the app-owned
-liblcms2.2.dylib (LibRaw is built from 0.21.4 source; Little CMS from 2.19.1,
-see packaging/macos/bundle-libraw.sh and packaging/lcms/).
-The licenses below apply to all of them.
+All platforms ship the application-owned OpenRevelare.Raw.Native shared library
+containing unmodified LibRaw 0.22.2 sources, libjpeg-turbo 3.1.2, Little CMS 2.19.1,
+and the OpenRevelare C ABI bridge. Windows uses a .dll, Linux a lib*.so, and
+macOS a lib*.dylib. The separate application-owned Little CMS shared library
+continues to serve the color-management pipeline.
+See packaging/libraw/ for pinned source URLs, SHA-256 checksums, build commands,
+and bridge sources; see licenses/raw/ in the distribution for license texts.
 
 -------------------------------------------------------------------------------
 1. LibRaw
@@ -29,20 +30,14 @@ The licenses below apply to all of them.
    library and is not modified. Users may replace it with a modified version
    subject to LGPL-2.1 terms.
 
-   On Windows and Linux the binary comes from the Sdcb.LibRaw runtime
-   packages; on macOS it is compiled from unmodified LibRaw 0.21.4 sources.
+   All platforms compile LibRaw 0.22.2 from the official source archive.
+   The application ABI bridge is linked into the same replaceable shared library.
 
    Full LGPL-2.1 text: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
    Full CDDL-1.0 text: https://opensource.org/license/cddl-1-0
 
 -------------------------------------------------------------------------------
-2. Sdcb.LibRaw (managed .NET bindings for LibRaw)
-   License  : MIT License
-   Author   : sdcb (Zhou Jie)
-   Source   : https://github.com/sdcb/Sdcb.LibRaw
-
--------------------------------------------------------------------------------
-3. libjpeg-turbo  (bundled with LibRaw)
+3. libjpeg-turbo 3.1.2 (statically linked into the LibRaw shared library)
    License  : IJG License AND BSD 3-Clause AND zlib License
    Source   : https://libjpeg-turbo.org/
 
@@ -57,16 +52,6 @@ The licenses below apply to all of them.
    the unmodified official 2.19.1 release archive. The source URL and SHA-256
    are pinned in packaging/lcms/, and each platform build produces an
    lcms2.manifest.json containing the exact source and binary hashes.
-
--------------------------------------------------------------------------------
-5. GNU OpenMP runtime (libgomp, Linux build only)
-   License  : GNU General Public License v3.0 WITH GCC Runtime Library
-              Exception 3.1
-   Source   : https://gcc.gnu.org/
-
-   Shipped as a dependency of the Linux LibRaw binary. The GCC Runtime
-   Library Exception permits distribution of programs linked against it
-   without imposing GPL terms on those programs.
 
 -------------------------------------------------------------------------------
 6. Avalonia UI

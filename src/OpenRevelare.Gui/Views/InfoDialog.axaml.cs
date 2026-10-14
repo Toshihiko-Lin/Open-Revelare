@@ -131,7 +131,7 @@ public partial class InfoDialog : Window
         "· Avalonia UI（MIT）\n" +
         "· BitMiracle.LibTiff.NET（BSD）— 16-bit TIFF\n" +
         "· SixLabors.ImageSharp（Six Labors Split License）— JPEG\n" +
-        "· Sdcb.LibRaw / LibRaw（LGPL/CDDL）— RAW 解码\n" +
+        "· LibRaw 0.22.2（LGPL/CDDL）— RAW 解码\n" +
         "· Microsoft.ML.OnnxRuntime（MIT）— 智能色偏修正\n" +
         "· CommunityToolkit.Mvvm（MIT）\n\n" +
         // LGPL-2.1 的 LibRaw 要求随二进制给出许可声明，光在这里列个名字不够，

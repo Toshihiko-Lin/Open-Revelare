@@ -38,7 +38,7 @@ fi
 [ -f "$PUB/OpenRevelare" ] || { echo "错误：未找到 $PUB/OpenRevelare"; exit 1; }
 
 # RAW 解码的原生库。缺了照样能打包，但一导入 RAW 就炸，所以这里明说。
-[ -f "$PUB/libraw_r.so.23" ] || echo "警告：产物里没有 libraw_r.so.23 —— RAW 解码会失败。"
+[ -f "$PUB/libOpenRevelare.Raw.Native.so" ] || { echo "错误：缺 LibRaw 0.22.2 原生库"; exit 1; }
 
 # ── 前置检查 ───────────────────────────────────────────────────────────────
 for t in "$TOOL" "$RUNTIME"; do
@@ -88,9 +88,8 @@ Terminal=false
 DESKTOP
 
 # AppRun：AppImage 的启动入口，转发到真正的可执行文件。
-# LD_LIBRARY_PATH 不用设 —— Sdcb 的加载器会先按程序目录 NativeLibrary.TryLoad
-# libjpeg.so.8 / liblcms2.so / libgomp.so.1，再加载 libraw_r.so.23，届时
-# 这几个 soname 已在进程里，动态链接器直接复用。
+# LibRaw bridge statically includes JPEG and Little CMS and loads beside the executable.
+
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/usr/bin/env bash
 HERE="$(dirname "$(readlink -f "${0}")")"

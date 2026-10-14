@@ -45,8 +45,8 @@ VERSION="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' \
 echo "==> 版本 ${VERSION}，目标 ${RID}"
 
 # ── RAW 原生库 ─────────────────────────────────────────────────────────────
-if [ ! -f "$ROOT/native/$RID/libraw.23.dylib" ]; then
-  echo "错误：native/$RID/libraw.23.dylib 不存在 —— 先跑 packaging/macos/bundle-libraw.sh。"
+if [ ! -f "$ROOT/native/$RID/libOpenRevelare.Raw.Native.dylib" ]; then
+  echo "错误：native/$RID/libOpenRevelare.Raw.Native.dylib 不存在 —— 先跑 packaging/macos/bundle-libraw.sh。"
   echo "（硬要出一个只能开 TIFF 的包，把这个检查注释掉即可。）"
   exit 1
 fi
@@ -60,8 +60,8 @@ fi
 [ -f "$PUB/OpenRevelare" ] || { echo "错误：未找到 $PUB/OpenRevelare"; exit 1; }
 # native/ 里有 dylib 不等于它进了产物——中间隔着一条 MSBuild 的坑（见 OpenRevelare.Gui.csproj
 # 里那段注释）。在这里拦一道，比等到签名或用户导入 RAW 时才发现便宜得多。
-[ -f "$PUB/libraw.23.dylib" ] || {
-  echo "错误：$PUB/libraw.23.dylib 不在产物里。"
+[ -f "$PUB/libOpenRevelare.Raw.Native.dylib" ] || {
+  echo "错误：$PUB/libOpenRevelare.Raw.Native.dylib 不在产物里。"
   echo "      native/$RID/ 里有文件不代表它被复制进 publish —— 检查 OpenRevelare.Gui.csproj"
   echo "      里那个按 RID 条件的 Content 项（放错项目会静默失效）。"
   exit 1
@@ -117,8 +117,8 @@ MAIN="$APP/Contents/MacOS/OpenRevelare"
 #   出 .app、chmod +x、ditto 打包，全程没有 codesign，实测可分发。
 # · bundle 签名只有公证才需要，而我们不做公证（用户 2026-08-04 决定）。
 #
-# 所以这里只补签**我们自己改动过**的原生库（libraw 及其依赖被 install_name_tool 改过，
-# bundle-libraw.sh 已重签；这里再兜一次），主可执行文件一个字都不碰。
+# 所以这里只补签随应用分发的原生库（LibRaw bridge 在构建时已 ad-hoc 签名，
+# 这里再兜一次），主可执行文件一个字都不碰。
 echo "==> 签名（$( [ "$SIGN" = "-" ] && echo "ad-hoc：只补签原生库，不签 bundle" || echo "$SIGN" )）"
 OPTS=(--force --sign "$SIGN")
 if [ "$SIGN" != "-" ]; then
@@ -143,7 +143,7 @@ fi
 
 # 自检：只验能验的东西。主可执行文件走 -dv（只显示不校验）——校验同样会升级成 bundle
 # 校验，而我们本来就没签 bundle。libraw 是我们自己塞进去的，它必须有有效签名。
-codesign -v "$APP/Contents/MacOS/libraw.23.dylib"
+codesign -v "$APP/Contents/MacOS/libOpenRevelare.Raw.Native.dylib"
 # `| head` 在 set -o pipefail 下会因 SIGPIPE 把整条流水线判成失败（141），加 || true
 codesign -dv "$MAIN" 2>&1 | head -3 || true
 

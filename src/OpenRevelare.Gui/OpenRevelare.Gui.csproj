@@ -56,31 +56,6 @@
     <PackageReference Include="AvaloniaMath" Version="2.1.0" />
   </ItemGroup>
 
-  <!--
-    macOS 的 LibRaw 原生库（packaging/macos/bundle-libraw.sh 生成）。
-    Sdcb 的加载器在 mac 上按 libraw.23.dylib 这个确切文件名 NativeLibrary.Load，走 assembly
-    重载 → 搜程序目录，所以复制到输出根目录即可。
-
-    **必须放在这个项目里，不能放 OpenRevelare.Core**：.NET 8 不把 RuntimeIdentifier 传给被引用
-    的类库（publish 日志里 Core 输出到 bin/Release/net8.0/ 而不是 .../osx-arm64/ 就是证据），
-    Core 里的 $(RuntimeIdentifier) 是空的，按 RID 挑文件的条件永远不成立 —— 编译不报错、
-    包照打，直到 mac 上导入 RAW 才抛 DllNotFoundException。v1.0.0 第 4、5 次 CI 栽在这儿。
-    本机 `dotnet publish src/OpenRevelare.Gui -r osx-arm64` + 一个假 dylib 就能复现，别靠 CI 试。
-
-    Content 而不是 None：None 的 CopyToOutputDirectory 不跨项目引用传递，与
-    models/net_awb.onnx 保持同一种写法。
-  -->
-  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
-    <Content Include="$(MSBuildThisFileDirectory)../../native/$(RuntimeIdentifier)/*.dylib"
-             Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <Target Name="WarnMissingMacLibRaw" BeforeTargets="Build"
-          Condition="$(RuntimeIdentifier.StartsWith('osx'))">
-    <Warning Condition="!Exists('$(MSBuildThisFileDirectory)../../native/$(RuntimeIdentifier)/libraw.23.dylib')"
-             Text="native/$(RuntimeIdentifier)/libraw.23.dylib 不存在 —— 包能打出来，但 RAW 解码会在运行时抛 DllNotFoundException（TIFF 不受影响）。先跑 packaging/macos/bundle-libraw.sh。" />
-  </Target>
-
   <ItemGroup>
     <ProjectReference Include="..\OpenRevelare.Core\OpenRevelare.Core.csproj" />
     <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />

@@ -5,7 +5,7 @@
   runtime 默认禁掉的三件事恰好是 .NET 必需的：
     · allow-jit / allow-unsigned-executable-memory —— CoreCLR 的 JIT 要可写可执行内存；
       缺了应用一启动就被内核干掉。
-    · disable-library-validation —— 我们加载的 libraw.23.dylib 与 onnxruntime 不是
+    · disable-library-validation —— 我们加载的 libOpenRevelare.Raw.Native.dylib 与 onnxruntime 不是
       同一个 Team ID 签的（前者是 bundle-libraw.sh 就地 ad-hoc 签的）。
   ad-hoc 签名（默认路径）不开 hardened runtime，用不到本文件。
 -->

@@ -1,5 +1,21 @@
 # OpenRevelare — 更新日志
 
+## 未发布 / Unreleased（2026-10-14）
+
+**改进**
+
+- **RAW 解码升级至 LibRaw 0.22.2。** Windows、Linux 与 macOS 统一使用固定版本源码构建，包含新版 Panasonic encoding 8 解码支持。具体相机与拍摄模式的兼容性仍需原始文件验证；松下 S1M2E 的 RW2 杂色反馈尚未用实拍文件复测。
+- **更新 RAW 绑定与打包。** 移除旧 Sdcb 依赖及直接读取 LibRaw 内部结构体偏移的代码，由原生桥接层读取相机矩阵、白平衡与裁切信息。Windows RAW 库无需额外安装 VC++ 运行库；Linux 构建保持 Ubuntu 22.04 兼容基线。
+- **加强解码回归检查。** CI 在各平台编译真实原生库并校验运行时版本，新增 Bayer 解码、单位白平衡、相机裁切、半尺寸预览、区域解码、中文路径及异常输入后的并发解码测试；发布时缺少原生库会直接报错。
+
+---
+
+**Improved**
+
+- **Upgraded RAW decoding to LibRaw 0.22.2.** Windows, Linux and macOS now build the same pinned upstream release, including Panasonic encoding 8 support. Compatibility with individual cameras and recording modes still requires original-file testing; the reported S1M2E RW2 corruption has not yet been retested with a camera sample.
+- **Updated RAW bindings and packaging.** Replaced the old Sdcb dependency and direct LibRaw structure-offset access with a native bridge for camera matrices, white balance and crop metadata. The Windows RAW library requires no additional VC++ redistributable, while Linux builds retain the Ubuntu 22.04 compatibility baseline.
+- **Expanded decode regression checks.** CI builds the real native library on each platform and verifies its runtime version. New tests cover Bayer decoding, unit white balance, vendor crops, half-size previews, region decoding, Unicode paths and concurrent decoding after invalid input. Publishing fails if the native library is missing.
+
 ## v1.8.4（2026-10-11）
 
 **改进**

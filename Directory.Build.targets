@@ -1,0 +1,26 @@
+<Project>
+  <!-- Only executable/test projects own runtime assets. Referenced libraries can be built
+       without the publish RID, so selecting native assets inside Core is insufficient. -->
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
+    <_RawRid>$(RuntimeIdentifier)</_RawRid>
+    <_RawRid Condition="'$(_RawRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_RawRid>
+    <_RawName Condition="$(_RawRid.StartsWith('win'))">OpenRevelare.Raw.Native.dll</_RawName>
+    <_RawName Condition="$(_RawRid.StartsWith('linux'))">libOpenRevelare.Raw.Native.so</_RawName>
+    <_RawName Condition="$(_RawRid.StartsWith('osx'))">libOpenRevelare.Raw.Native.dylib</_RawName>
+    <_RawPath>$(MSBuildThisFileDirectory)native/$(_RawRid)/$(_RawName)</_RawPath>
+    <_NeedsRaw Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe' Or '$(IsTestProject)' == 'true'">true</_NeedsRaw>
+    <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);ORRAW001</MSBuildWarningsNotAsErrors>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_NeedsRaw)' == 'true' And Exists('$(_RawPath)')">
+    <Content Include="$(_RawPath)" Link="$(_RawName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)packaging/libraw/licenses/*"
+             Link="licenses/raw/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CheckPinnedLibRaw" BeforeTargets="Build" Condition="'$(_NeedsRaw)' == 'true'">
+    <Warning Code="ORRAW001" Condition="!Exists('$(_RawPath)')"
+             Text="LibRaw 0.22.2 is missing for $(_RawRid). Run packaging/libraw/build-windows.ps1 or packaging/libraw/build-unix.sh before decoding RAW." />
+  </Target>
+  <Target Name="RequirePinnedLibRawForPublish" BeforeTargets="PrepareForPublish" Condition="'$(_NeedsRaw)' == 'true'">
+    <Error Condition="!Exists('$(_RawPath)')" Text="Cannot publish without LibRaw 0.22.2: $(_RawPath)" />
+  </Target>
+</Project>
