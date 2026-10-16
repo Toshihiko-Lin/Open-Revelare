@@ -8,9 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MetadataExtractor" Version="2.9.3" />
     <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
     <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.660" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\packaging\metadata\licenses\*.txt" Link="licenses\metadata\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Cloud/file-sync conflict copies are recovery artifacts, not source files. Keep them on

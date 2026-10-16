@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ExportDialog"
-        Width="560" MinWidth="460" MinHeight="360" SizeToContent="Height" MaxHeight="780"
+        Width="600" MinWidth="460" MinHeight="360" SizeToContent="Height" MaxHeight="780"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '导出选项'}">
@@ -23,6 +23,46 @@
              去掉：两者叠加会让「最后一行是提示」的节比别的节多出 6 px。 -->
         <Style Selector="TextBlock.groupHint">
             <Setter Property="Margin" Value="0" />
+        </Style>
+        <!-- Keep RadioButton group/keyboard semantics while making each entire card selectable. -->
+        <Style Selector="RadioButton.exportFormat">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="MinHeight" Value="76" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Name="FormatCard" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusMd}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}"
+                                          HorizontalContentAlignment="Stretch"
+                                          VerticalContentAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="RadioButton.exportFormat:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+        </Style>
+        <Style Selector="RadioButton.exportFormat:checked">
+            <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        </Style>
+        <Style Selector="RadioButton.exportFormat:focus-visible /template/ Border#FormatCard">
+            <Setter Property="BorderThickness" Value="2" />
+        </Style>
+        <Style Selector="TextBlock.formatTitle">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="{DynamicResource FontSm}" />
+        </Style>
+        <Style Selector="TextBlock.formatDetail">
+            <Setter Property="FontSize" Value="{DynamicResource FontXxs}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
     </Window.Styles>
 
@@ -45,27 +85,49 @@
             </StackPanel>
         </StackPanel>
 
-        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Name="OptionsScroll" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="10" Margin="0,0,6,0">
-                <!-- ── 格式 ─────────────────────────────────────────────
-                     每个格式自己的参数缩在同一节里，跟在格式后面，只显示选中那个格式的
-                     那一块：它们是这个格式的参数，不是另外两个要做的决定。 -->
+                <!-- The roll owns SDR/HDR. Cards describe its current delivery; they select
+                     only the container. Encoding and colour stay together below that choice. -->
                 <Border Classes="section">
                     <StackPanel Spacing="6">
                         <TextBlock Classes="sectionHead" Text="{i18n:T '格式'}" />
-                        <Grid ColumnDefinitions="86,*">
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="18">
-                                <RadioButton Name="FmtTiff" GroupName="fmt" Content="TIFF"
-                                             IsCheckedChanged="OnFormatChanged" />
-                                <RadioButton Name="FmtJpeg" GroupName="fmt" Content="JPEG"
-                                             IsCheckedChanged="OnFormatChanged" />
-                                <RadioButton Name="FmtDng" GroupName="fmt" Content="{i18n:T 'DNG（线性）'}"
-                                             IsCheckedChanged="OnFormatChanged" />
-                            </StackPanel>
+                        <Grid ColumnDefinitions="*,8,*" RowDefinitions="Auto,8,Auto"
+                              Margin="0,2,0,4">
+                            <RadioButton Grid.Row="0" Grid.Column="0" Name="FmtJpeg" Classes="exportFormat"
+                                         AutomationProperties.Name="JPEG"
+                                         GroupName="fmt" IsCheckedChanged="OnFormatChanged">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="formatTitle" Text="JPEG" />
+                                    <TextBlock Classes="formatDetail" Name="JpegFormatDetail" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Row="0" Grid.Column="2" Name="FmtHeic" Classes="exportFormat"
+                                         AutomationProperties.Name="HEIC"
+                                         GroupName="fmt" IsCheckedChanged="OnFormatChanged">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="formatTitle" Text="HEIC" />
+                                    <TextBlock Classes="formatDetail" Name="HeicFormatDetail" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Row="2" Grid.Column="0" Name="FmtTiff" Classes="exportFormat"
+                                         AutomationProperties.Name="TIFF"
+                                         GroupName="fmt" IsCheckedChanged="OnFormatChanged">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="formatTitle" Text="TIFF" />
+                                    <TextBlock Classes="formatDetail" Name="TiffFormatDetail" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Row="2" Grid.Column="2" Name="FmtDng" Classes="exportFormat"
+                                         AutomationProperties.Name="{i18n:T '线性 DNG'}"
+                                         GroupName="fmt" IsCheckedChanged="OnFormatChanged">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Classes="formatTitle" Text="{i18n:T '线性 DNG'}" />
+                                    <TextBlock Classes="formatDetail" Text="{i18n:T '16-bit · 外部调色'}" />
+                                </StackPanel>
+                            </RadioButton>
                         </Grid>
-                        <Grid ColumnDefinitions="86,*">
-                            <TextBlock Grid.Column="1" Classes="groupHint" Name="FormatHint" />
-                        </Grid>
+                        <TextBlock Classes="groupHint" Name="FormatHint" TextWrapping="Wrap" Margin="0,0,0,6" />
 
                         <StackPanel Name="TiffGroup" Spacing="6">
                             <Grid ColumnDefinitions="86,*">
@@ -85,13 +147,13 @@
                                               Content="{i18n:T '场景线性 ACEScg（32-bit float，不含帧编辑）'}"
                                               IsCheckedChanged="OnAnyChanged" />
                                     <TextBlock Classes="groupHint"
-                                               Text="{i18n:T '外部调色用的中间文件，不做输出锐化；在普通看图软件中偏暗偏平。'}" />
+                                               Text="{i18n:T '用于外部调色，不做输出锐化；普通查看器中可能偏暗。'}" />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
 
                         <StackPanel Name="JpegGroup" Spacing="6">
-                            <Grid ColumnDefinitions="86,*">
+                            <Grid Name="JpegQualityRow" ColumnDefinitions="86,*">
                                 <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
                                 <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
                                     <Slider Grid.Column="0" Name="QualitySlider" Minimum="40" Maximum="100"
@@ -99,6 +161,17 @@
                                             ValueChanged="OnQualityChanged" />
                                     <!-- readout：滑块在动时读数不能跟着抖，见 App.axaml 的说明。 -->
                                     <TextBlock Grid.Column="1" Name="QualityLbl" Classes="readout"
+                                               MinWidth="26" Margin="10,0,0,0"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                            </Grid>
+                            <Grid Name="HeicQualityRow" ColumnDefinitions="86,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
+                                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                                    <Slider Grid.Column="0" Name="HeicQualitySlider" Minimum="40" Maximum="100"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            ValueChanged="OnQualityChanged" />
+                                    <TextBlock Grid.Column="1" Name="HeicQualityLbl" Classes="readout"
                                                MinWidth="26" Margin="10,0,0,0"
                                                VerticalAlignment="Center" HorizontalAlignment="Right" />
                                 </Grid>
@@ -121,6 +194,37 @@
                                            Text="{i18n:T '先降品质（下限 40），仍超限再缩尺寸；结果在状态栏报告。'}" />
                             </Grid>
                         </StackPanel>
+                        <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,6" />
+                        <!-- 输出空间是报告，不是选择：它是渲染参数，在主窗口选定，文件继承屏上那个。 -->
+                        <Grid Name="SpaceRow" ColumnDefinitions="86,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '空间'}"
+                                       VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Name="ColorSpaceHint" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource FontXs}" VerticalAlignment="Top" />
+                        </Grid>
+
+                        <!-- 只有 HDR 卷的增益图 JPEG 有基底可选；见 ExportOptions.HdrBaseSpace。 -->
+                        <Grid Name="HdrBaseGroup" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '基底'}" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" Name="HdrBaseBox"
+                                      HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged">
+                                    <ComboBoxItem Content="{i18n:T 'sRGB（通用）'}" />
+                                    <ComboBoxItem Content="{i18n:T 'Display P3（宽色域）'}" />
+                            </ComboBox>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                       Text="{i18n:T '基底决定文件色域；完整母版用 TIFF。'}" />
+                        </Grid>
+
+                        <!-- 只在确实可选时出现：被强制嵌入的那几种文件没有决定可做，结论条会报告。 -->
+                        <Grid Name="IccRow" ColumnDefinitions="86,*">
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}"
+                                          IsCheckedChanged="OnIccChanged" />
+                                <TextBlock Classes="groupHint"
+                                           Text="{i18n:T 'sRGB 可不嵌入：看图软件默认按 sRGB 处理。'}" />
+                            </StackPanel>
+                        </Grid>
+
                     </StackPanel>
                 </Border>
 
@@ -143,7 +247,7 @@
                             <CheckBox Grid.Row="1" Grid.Column="1" Name="UpscaleChk" Margin="0,6,0,0"
                                       Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                       Text="{i18n:T '长边精确落位，短边按比例；缩小为面积平均，放大为 Catmull-Rom。'}" />
+                                       Text="{i18n:T '保持比例；默认只缩小，勾选后允许放大。'}" />
                         </Grid>
 
                         <!-- 锐化归在尺寸里，不在格式里：它的量是按成品像素定的，就在缩放之后做。 -->
@@ -152,44 +256,113 @@
                             <ComboBox Grid.Row="0" Grid.Column="1" Name="SharpenBox"
                                       HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged" />
                             <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                       Text="{i18n:T '缩放之后施加，只作用于亮度；颗粒同样被锐化。'}" />
+                                       Text="{i18n:T '按导出尺寸锐化；颗粒也会增强。'}" />
                         </Grid>
                     </StackPanel>
                 </Border>
 
-                <!-- ── 色彩 ───────────────────────────────────────────── -->
+                <!-- Capture and digitization are separate identities; choosing a film body
+                     never borrows the copying camera's exposure or location. -->
                 <Border Classes="section">
                     <StackPanel Spacing="6">
-                        <TextBlock Classes="sectionHead" Text="{i18n:T '色彩'}" />
-                        <!-- 输出空间是报告，不是选择：它是渲染参数，在主窗口选定，文件继承屏上那个。 -->
-                        <Grid Name="SpaceRow" ColumnDefinitions="86,*">
-                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '空间'}"
-                                       VerticalAlignment="Top" />
-                            <TextBlock Grid.Column="1" Name="ColorSpaceHint" TextWrapping="Wrap"
-                                       FontSize="{DynamicResource FontXs}" VerticalAlignment="Top" />
-                        </Grid>
-
-                        <!-- 只有 HDR 卷的增益图 JPEG 有基底可选；见 ExportOptions.HdrBaseSpace。 -->
-                        <Grid Name="HdrBaseGroup" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
-                            <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '基底'}" />
-                            <ComboBox Grid.Row="0" Grid.Column="1" Name="HdrBaseBox"
-                                      HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged">
-                                <ComboBoxItem Content="{i18n:T 'sRGB（通用，所有看图软件都按它假定）'}" />
-                                <ComboBoxItem Content="{i18n:T 'Display P3（手机相册的选择，保留更多宽色域高光）'}" />
-                            </ComboBox>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                       Text="{i18n:T '超出基底色域的颜色会被裁掉；完整母版用 TIFF。'}" />
-                        </Grid>
-
-                        <!-- 只在确实可选时出现：被强制嵌入的那几种文件没有决定可做，结论条会报告。 -->
-                        <Grid Name="IccRow" ColumnDefinitions="86,*">
-                            <StackPanel Grid.Column="1" Spacing="3">
-                                <CheckBox Name="IccChk" Content="{i18n:T '嵌入 ICC 配置文件'}"
-                                          IsCheckedChanged="OnIccChanged" />
-                                <TextBlock Classes="groupHint"
-                                           Text="{i18n:T 'sRGB 可不嵌入：看图软件默认按 sRGB 处理。'}" />
+                        <TextBlock Classes="sectionHead" Text="{i18n:T 'EXIF 与设备'}"/>
+                        <CheckBox Name="KeepExifChk" Content="{i18n:T '保留源文件 EXIF／数字化来源'}" IsCheckedChanged="OnAnyChanged" ToolTip.Tip="{i18n:T '未填写胶片信息时沿用源 EXIF；填写后，源翻拍／扫描信息单独保存在 XMP 中。'}"/>
+                        <Expander Name="ExifEditor" Header="{i18n:T '胶片拍摄信息与设备库'}" HorizontalAlignment="Stretch">
+                            <StackPanel Spacing="10" Margin="10,4,10,10">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
+                                    <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox Name="FilmInfoChk" Content="{i18n:T '填写胶片拍摄信息，替换成片拍摄 EXIF'}" IsCheckedChanged="OnAnyChanged"/>
+                                <StackPanel Name="FilmEditorGroup" Spacing="10">
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
+                                    <Grid ColumnDefinitions="*,12,*">
+                                        <StackPanel Grid.Column="0">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片机身'}"/>
+                                                <ComboBox Name="CameraLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnCameraSelected"/>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
+                                                    <TextBox Name="CameraMakeBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
+                                                    <TextBox Name="CameraModelBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
+                                                    <TextBox Name="CameraSerialBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片镜头'}"/>
+                                                <ComboBox Name="LensLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnLensSelected"/>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
+                                                    <TextBox Name="LensMakeBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
+                                                    <TextBox Name="LensModelBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
+                                                    <TextBox Name="LensSerialBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '确认导出后记住机身和镜头；曝光与日期不记忆。'}"/>
+                                    <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto">
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '胶片 ISO'}"/>
+                                                <TextBox Name="FilmIsoBox" Watermark="400" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '光圈'}"/>
+                                                <TextBox Name="FilmApertureBox" Watermark="2.8" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '快门（秒）'}"/>
+                                                <TextBox Name="FilmShutterBox" Watermark="1/125" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '焦距（mm）'}"/>
+                                                <TextBox Name="FilmFocalBox" Watermark="50" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Classes="formatDetail" Text="{i18n:T '胶片拍摄时间（可选）'}"/>
+                                        <TextBox Name="FilmDateBox" Watermark="YYYY-MM-DD HH:mm:ss" TextChanged="OnFilmFieldChanged"/>
+                                    </StackPanel>
+                                    <Grid ColumnDefinitions="*,12,*">
+                                        <StackPanel Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '作者'}"/>
+                                                <TextBox Name="FilmArtistBox" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '版权'}"/>
+                                                <TextBox Name="FilmCopyrightBox" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                                <TextBlock Name="ExifErrorLbl" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="False"/>
                             </StackPanel>
-                        </Grid>
+                        </Expander>
                     </StackPanel>
                 </Border>
 
@@ -226,29 +399,27 @@
                             <TextBlock Grid.Column="1" Classes="groupHint"
                                        Text="{i18n:T '保存对话框会预填这个名字，仍可修改。'}" />
                         </Grid>
+                        <StackPanel Name="ConflictGroup" Spacing="6" Margin="0,6,0,0">
+                            <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,0,0,6" />
+                            <Grid ColumnDefinitions="86,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '重名时'}" VerticalAlignment="Top" />
+                                <StackPanel Grid.Column="1" Spacing="3">
+                                    <WrapPanel Orientation="Horizontal">
+                                        <RadioButton Name="ConflictUnique" GroupName="conflict"
+                                                     Margin="0,0,16,4" Content="{i18n:T '另存为新名'}" IsCheckedChanged="OnAnyChanged" />
+                                        <RadioButton Name="ConflictOverwrite" GroupName="conflict"
+                                                     Margin="0,0,16,4" Content="{i18n:T '覆盖'}" IsCheckedChanged="OnAnyChanged" />
+                                        <RadioButton Name="ConflictSkip" GroupName="conflict"
+                                                     Margin="0,0,0,4" Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
+                                    </WrapPanel>
+                                    <TextBlock Classes="groupHint"
+                                               Text="{i18n:T '整卷批量写入，不逐个询问；同批次内重名一律另存。'}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- ── 重名 ───────────────────────────────────────────── -->
-                <Border Name="ConflictGroup" Classes="section">
-                    <StackPanel Spacing="6">
-                        <TextBlock Classes="sectionHead" Text="{i18n:T '目标已有同名文件时'}" />
-                        <Grid ColumnDefinitions="86,*">
-                            <StackPanel Grid.Column="1" Spacing="3">
-                                <StackPanel Orientation="Horizontal" Spacing="18">
-                                    <RadioButton Name="ConflictUnique" GroupName="conflict"
-                                                 Content="{i18n:T '另存为新名'}" IsCheckedChanged="OnAnyChanged" />
-                                    <RadioButton Name="ConflictOverwrite" GroupName="conflict"
-                                                 Content="{i18n:T '覆盖'}" IsCheckedChanged="OnAnyChanged" />
-                                    <RadioButton Name="ConflictSkip" GroupName="conflict"
-                                                 Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
-                                </StackPanel>
-                                <TextBlock Classes="groupHint"
-                                           Text="{i18n:T '整卷批量写入，不逐个询问；同批次内重名一律另存。'}" />
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </Border>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

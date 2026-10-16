@@ -511,8 +511,32 @@ is remembered between sessions.
 
 **File → Export this frame…** (Ctrl+E) / **Export roll…** / **Export contact sheet…**
 
-**Format**: 16-bit TIFF (best quality, for further grading or archiving), JPEG (smaller, for
-sharing), or **linear DNG**.
+**EXIF & equipment**: all four image formats preserve portable source EXIF by default.
+Expand **Film capture details & equipment library** to enter film equipment, ISO, aperture,
+shutter speed, focal length, capture time, artist and copyright. Bodies and lenses have
+independent dropdown catalogs. Confirming export settings remembers make, model and optional
+serial number; different serial numbers remain separate. Selecting equipment does not change
+exposure or date, and neither is saved as a default for future exports.
+
+With film capture details enabled, photo libraries display the film camera and lens. Blank
+fields remain unknown instead of borrowing the copy camera's exposure, date or GPS. With
+source retention enabled, portable copy/scan EXIF is archived separately as XMP digitization
+provenance, including readable equipment and exposure fields. Roll exports apply entered film
+details to every frame while retaining each frame's own digitization source.
+
+Source thumbnails, vendor MakerNotes and RAW storage pointers are excluded. Output orientation,
+dimensions and color tags reflect the rendered image; DNG retains its output calibration.
+The CLI also retains source EXIF by default; `--no-source-exif` disables it.
+
+**Format**: 16-bit TIFF (best quality, for further grading or archiving), JPEG (for sharing),
+HEIC (efficient compression), or **linear DNG**.
+
+**HEIC**: available for single frames and whole rolls, using 10-bit HEVC for both SDR and HDR.
+SDR embeds the current output space's exact ICC. HDR converts to BT.2020 PQ with a 203-nit
+reference white and retains highlight headroom. HDR HEIC is a direct PQ image without an SDR
+base or gain map; it requires an HDR HEIC viewer. Gain-map JPEG remains available for sharing.
+HEIC and JPEG remember separate quality settings and both support file-size limits, reducing
+quality first and resolution second.
 
 > **A linear DNG** carries the finished positive with the display curve removed: the inversion, the
 > lens corrections and the frame edits are all baked in, but the output space's encoding curve is

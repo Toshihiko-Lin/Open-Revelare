@@ -32,7 +32,7 @@
 - [GHSA-wmxv-xphr-5c9g](https://github.com/advisories/GHSA-wmxv-xphr-5c9g)：本项目不使用 ImageSharp 解析输入图像或 BigTIFF；测试中的 JPEG 解码仅处理本项目生成的数据。
 - [GHSA-gwg2-r3hj-4w44](https://github.com/advisories/GHSA-gwg2-r3hj-4w44)：`JpegIO` 仅将 ICC 字节附加到输出 JPEG，不访问 ImageSharp 的 `IccProfile.Entries` 或 CLUT 解析 / 转换路径。
 
-生产代码的 ImageSharp 用途为 `JpegIO` 的 JPEG 编码及 `OnnxDeepWbCorrector.ResizeForInference` 对内存中 `Rgb24` 数据的 Lanczos3 缩放。
+生产代码的 ImageSharp 用途为 `JpegIO` 的 JPEG 编码（包括本程序重建的标准 EXIF profile）及 `OnnxDeepWbCorrector.ResizeForInference` 对内存中 `Rgb24` 数据的 Lanczos3 缩放。源文件的 EXIF 由 MetadataExtractor 2.9.3 读取；仅重建可移植字段，不将源缩略图、RAW 存储指针或 MakerNote 交给 ImageSharp，也不增加 ImageSharp 输入图像／TIFF 解码路径。
 新增解码、ICC 解析、TIFF 编码或直方图均衡化调用时，必须重新审查并移除相应例外；获得许可证或替换依赖后应移除这些例外。
 
 ## 不算漏洞的情况

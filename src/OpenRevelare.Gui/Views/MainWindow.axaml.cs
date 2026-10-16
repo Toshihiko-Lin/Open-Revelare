@@ -2509,11 +2509,13 @@ public partial class MainWindow : Window
         // namePreview: the naming scheme decides the name this export is OFFERED below, so the
         // dialog shows what the scheme makes of this frame.
         var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
-                                    namePreview: Vm.ExportNamePreview);
+                                    namePreview: Vm.ExportNamePreview,
+                                    sourceExifSummary: await ReadExportSourceSummaryAsync());
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
+        bool heic = opt.Format == Models.ExportFormat.Heic;
         bool dng = opt.Format == Models.ExportFormat.Dng;
         bool floatTiff = opt.ExportLinear || opt.IsHdr;
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -2527,6 +2529,9 @@ public partial class MainWindow : Window
             {
                 dng
                     ? new FilePickerFileType(Loc.T("线性 DNG")) { Patterns = new[] { "*.dng" } }
+                    : heic
+                    ? new FilePickerFileType(opt.IsHdr ? "HDR HEIC (10-bit PQ)" : "HEIC")
+                        { Patterns = new[] { "*.heic", "*.heif" } }
                     : jpeg
                     ? new FilePickerFileType(opt.WritesGainMap ? Loc.T("HDR JPEG（增益图）") : "JPEG")
                         { Patterns = new[] { "*.jpg", "*.jpeg" } }
@@ -2574,11 +2579,23 @@ public partial class MainWindow : Window
         return files.FirstOrDefault()?.TryGetLocalPath();
     }
 
+    private async Task<string?> ReadExportSourceSummaryAsync()
+    {
+        string? path = Vm?.CurrentFrame?.Path;
+        if (path is null) return null;
+        try { return await Task.Run(() => SourceExif.Read(path)?.CaptureSummary); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return Loc.T("源 EXIF 暂无法读取；关闭来源保留后仍可导出。");
+        }
+    }
+
     private async void OnExportRollClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null) return;
         var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
-                                    namePreview: Vm.ExportNamePreview);
+                                    namePreview: Vm.ExportNamePreview,
+                                    sourceExifSummary: await ReadExportSourceSummaryAsync());
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 

@@ -1,5 +1,15 @@
 # OpenRevelare — 更新日志
 
+## 未发布 / Unreleased
+
+- **导出保留 EXIF，并支持胶片设备库。** JPEG、HEIC、TIFF 和 DNG 默认保留源文件的标准 EXIF。导出弹窗可展开填写胶片拍摄信息，机身与镜头分别保存为本地下拉设备库；曝光和日期不保存为默认值。填写胶片信息后，照片管理软件显示胶片设备，原翻拍／扫描信息另存为 XMP 数字化来源，未填参数不混用翻拍数据。
+- **Preserve EXIF and remember film equipment.** JPEG, HEIC, TIFF and DNG keep portable source EXIF by default. An expandable film editor provides independent local camera/lens catalogs without reusing exposure or date defaults. Film details replace capture EXIF, while copy/scan metadata is archived separately in XMP.
+
+- **整理导出弹窗。** 格式改为两列选择卡片，按主窗口的 SDR/HDR 状态说明实际编码；色彩信息归入格式设置，文件名与重名策略合并，底部摘要和按钮始终可见。中英文与窄窗口布局同步调整。
+
+- **新增 HEIC 导出。** 单帧与整卷均支持 10-bit SDR（精确 ICC）及 HDR（BT.2020 PQ、参考白 203 nits）。可独立设置品质、缩放及文件大小上限。HDR HEIC 为直接 PQ 图像，需要支持 HDR HEIC 的查看器。随程序发行固定版本的 libheif / x265 编码器。
+- **Added HEIC export.** Single-frame and roll exports support 10-bit SDR with exact ICC and HDR in BT.2020 PQ (203-nit reference white), with separate quality, resizing and file-size limits. HDR HEIC is a direct PQ image requiring a compatible viewer. Pinned libheif / x265 encoders are bundled with the app.
+
 ## v1.8.5.1（2026-10-14）
 
 **修复**

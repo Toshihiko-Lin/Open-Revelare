@@ -16,6 +16,9 @@ Windows 的 `./packaging/libraw/build-windows.ps1`，或 Linux/macOS 的
 `bash packaging/libraw/build-unix.sh`。构建输入、校验和及平台要求见
 [LibRaw 构建说明](packaging/libraw/README.md)。CI 会在每个平台执行这一步。
 
+HEIC 导出还需先运行 `python packaging/heif/build.py`（Python 3.12+、CMake 与 C/C++ 编译器），
+构建随程序发行的 libheif / x265 Main10 编码器。见 [HEIC 构建说明](packaging/heif/README.md)。
+
 ```bash
 git clone https://github.com/Toshihiko-Lin/Open-Revelare.git
 cd Open-Revelare

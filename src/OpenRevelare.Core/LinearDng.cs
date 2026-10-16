@@ -56,7 +56,7 @@ public static class LinearDng
     /// program and the space, which is the honest answer and also what makes a host's per-camera
     /// defaults land on the right bucket.</param>
     public static void Write(ImageBuffer displayReferred, ColorSpaceDef space, string path,
-                             string? cameraModel = null)
+                             string? cameraModel = null, SourceExif? sourceExif = null)
     {
         var linear = new ImageBuffer(displayReferred.Width, displayReferred.Height,
                                      (float[])displayReferred.Data.Clone());
@@ -116,7 +116,11 @@ public static class LinearDng
         ifd0.Sort(static (a, b) => a.Tag.CompareTo(b.Tag));        // TIFF requires ascending tags
         subIfd.Sort(static (a, b) => a.Tag.CompareTo(b.Tag));
 
-        ExportFile.Write(path, staging => WriteFile(staging, ifd0, subIfd, thumb, raw));
+        ExportFile.Write(path, staging =>
+        {
+            WriteFile(staging, ifd0, subIfd, thumb, raw);
+            sourceExif?.ApplyToTiff(staging, linear.Width, linear.Height, exactSrgb: false);
+        });
     }
 
     /// <summary>

@@ -19,6 +19,8 @@ public enum ExportFormat
     /// not include.
     /// </summary>
     Dng,
+    /// <summary>HEVC Main10: SDR with exact ICC, or BT.2020/PQ HDR.</summary>
+    Heic,
 }
 
 /// <summary>
@@ -81,6 +83,15 @@ public sealed class ExportOptions
     public TiffIO.CompressionMode TiffCompression { get; set; } = TiffIO.CompressionMode.Lzw;
 
     public int JpegQuality { get; set; } = 95;
+
+    public int HeicQuality { get; set; } = 90;
+
+    /// <summary>Copy portable source capture EXIF; rendering/geometry tags are regenerated.</summary>
+    public bool KeepSourceExif { get; set; } = true;
+
+    /// <summary>One export's film exposure; never silently reused on the next roll.</summary>
+    [JsonIgnore]
+    public FilmCaptureMetadata? FilmCapture { get; set; }
 
     /// <summary>
     /// Embed the profile describing what was written. This is a user preference only for exact
@@ -213,20 +224,18 @@ public sealed class ExportOptions
     public string NameTemplate { get; set; } = ExportNaming.Default;
 
     /// <summary>
-    /// Keep a JPEG under <see cref="MaxFileSizeMb"/>. JPEG only: it is the one container with a
-    /// quality knob, so a ceiling can be met by re-encoding rather than by changing what the file
-    /// is. A 16-bit TIFF's size is its pixel count and the option is greyed out for it.
+    /// Keep a JPEG or HEIC under <see cref="MaxFileSizeMb"/> by reducing quality before size.
+    /// Lossless TIFF and linear DNG have no lossy quality setting to search.
     /// </summary>
     public bool LimitFileSize { get; set; }
 
     /// <summary>The ceiling, in MiB (1 MB = 1024 × 1024 bytes — what Windows Explorer shows).</summary>
     public double MaxFileSizeMb { get; set; } = 10d;
 
-    /// <summary>The byte ceiling the JPEG encoder is held to, null when none applies: the option
-    /// is off, or the file is not a JPEG.</summary>
+    /// <summary>The complete-file byte ceiling for JPEG/HEIC, null when none applies.</summary>
     [JsonIgnore]
     public long? MaxFileBytes =>
-        LimitFileSize && Format == ExportFormat.Jpeg && !ExportLinear && MaxFileSizeMb > 0d
+        LimitFileSize && Format is (ExportFormat.Jpeg or ExportFormat.Heic) && !ExportLinear && MaxFileSizeMb > 0d
             ? (long)Math.Round(MaxFileSizeMb * 1024d * 1024d)
             : null;
 
@@ -239,6 +248,7 @@ public sealed class ExportOptions
     {
         ExportFormat.Jpeg => "jpg",
         ExportFormat.Dng => "dng",
+        ExportFormat.Heic => "heic",
         _ => "tiff",
     };
 
@@ -308,7 +318,12 @@ public sealed class ExportOptions
 
     /// <summary>One line naming the decisions that change the file, for the dialog footer and the
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
-    public string Summary()
+    public string Summary() => SummaryCore() + " · "
+        + (FilmCapture is not null
+            ? (KeepSourceExif ? Loc.T("胶片 EXIF + 数字化来源") : Loc.T("胶片 EXIF"))
+            : KeepSourceExif ? Loc.T("保留源 EXIF") : Loc.T("不保留源 EXIF"));
+
+    private string SummaryCore()
     {
         string size = Downsample
             ? Loc.F($"长边 {MaxLongEdge}px") + (AllowUpscale ? Loc.T("（含放大）") : "")
@@ -323,6 +338,14 @@ public sealed class ExportOptions
         };
         if (IsDng)
             return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色 · 不含显示曲线");
+        if (Format == ExportFormat.Heic)
+        {
+            if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");
+            string encoding = IsHdr
+                ? Loc.F($"HDR +{HdrLimitStops:0.0} 档 · BT.2020 PQ")
+                : ResolvedColorSpace.Name + " · " + Loc.T("嵌入 ICC");
+            return Loc.F($"10-bit HEIC 品质 {HeicQuality}") + $" · {size} · {encoding}";
+        }
         string format = ExportLinear
             ? Loc.F($"32-bit float TIFF · {compression}")
             : Format == ExportFormat.Jpeg

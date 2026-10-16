@@ -1549,16 +1549,17 @@ public static class TiffIO
         string path,
         CompressionMode mode = CompressionMode.Lzw,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (frame.Encoding.Range == NumericRange.Extended)
         {
-            ExportTiffFloat32(frame, path, mode, description, profilePolicy);
+            ExportTiffFloat32(frame, path, mode, description, profilePolicy, sourceExif);
             return;
         }
 
-        ExportTiff16(frame, path, mode, description, profilePolicy);
+        ExportTiff16(frame, path, mode, description, profilePolicy, sourceExif);
     }
 
     /// <summary>
@@ -1570,7 +1571,8 @@ public static class TiffIO
         string path,
         CompressionMode mode = CompressionMode.Lzw,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (frame.Encoding.Range != NumericRange.Normalized)
@@ -1579,8 +1581,12 @@ public static class TiffIO
                 "TIFF16 requires normalized pixels; use typed ExportTiff for extended float32 output.");
         }
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
-        ExportFile.Write(path, target => WriteTiff16(
-            frame.Pixels, target, mode, profileBytes, description));
+        ExportFile.Write(path, target =>
+        {
+            WriteTiff16(frame.Pixels, target, mode, profileBytes, description);
+            sourceExif?.ApplyToTiff(target, frame.Pixels.Width, frame.Pixels.Height,
+                frame.OutputProfile.Identity == BuiltInColorProfiles.For(ColorSpaces.Srgb, ProfileRole.Output).Identity);
+        });
     }
 
     /// <summary>Typed IEEE-float32 TIFF exporter for extended-range pixels.</summary>
@@ -1589,7 +1595,8 @@ public static class TiffIO
         string path,
         CompressionMode mode = CompressionMode.Lzw,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (frame.Encoding.Range != NumericRange.Extended)
@@ -1598,8 +1605,11 @@ public static class TiffIO
                 "Float32 TIFF is reserved for frames whose typed numeric range is Extended.");
         }
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
-        ExportFile.Write(path, target => WriteTiffFloat32(
-            frame.Pixels, target, mode, profileBytes, description));
+        ExportFile.Write(path, target =>
+        {
+            WriteTiffFloat32(frame.Pixels, target, mode, profileBytes, description);
+            sourceExif?.ApplyToTiff(target, frame.Pixels.Width, frame.Pixels.Height, exactSrgb: false);
+        });
     }
 
     /// <summary>Bridges the two-value legacy enum onto the registry.</summary>

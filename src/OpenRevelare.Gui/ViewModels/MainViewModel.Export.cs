@@ -38,7 +38,7 @@ public partial class MainViewModel
                 ct.ThrowIfCancellationRequested();
                 var (working, boxed) = LoadForExport(
                     srcPath, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: true);
-                return RenderAndWriteExport(working, boxed, path, opt, pipelineVersion, ct);
+                return RenderAndWriteExport(working, boxed, srcPath, path, opt, pipelineVersion, ct);
             });
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}") + DescribeFit(fit);
         }

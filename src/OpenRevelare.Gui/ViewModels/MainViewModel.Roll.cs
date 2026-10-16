@@ -1432,17 +1432,20 @@ public partial class MainViewModel
     /// <summary>
     /// Renders and writes one export. A JPEG of an extended render is a gain-map JPEG and needs a
     /// second, SDR render of the same frame; everything else is one render and one write.
-    /// Returns what a size-limited JPEG actually settled on, null for every other export.
+    /// Returns what a size-limited JPEG/HEIC actually settled on, null for other exports.
     /// </summary>
     private JpegIO.JpegFit? RenderAndWriteExport(
         WorkingFrame working,
         FrameParams ep,
+        string sourcePath,
         string path,
         ExportOptions opt,
         ColorPipelineVersion pipelineVersion,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        SourceExif? sourceExif = SourceExif.ForExport(
+            opt.KeepSourceExif ? SourceExif.Read(sourcePath) : null, opt.KeepSourceExif, opt.FilmCapture);
         if (opt.Format == ExportFormat.Dng)
         {
             // A DNG is a BOUNDED, linear file, so it starts from the SDR rendition in the roll's
@@ -1457,7 +1460,7 @@ public partial class MainViewModel
                 ? Resample.ToLongEdge(positive.Pixels, opt.MaxLongEdge, opt.AllowUpscale)
                 : positive.Pixels;
             ct.ThrowIfCancellationRequested();
-            LinearDng.Write(pixels, dngSpace, path);
+            LinearDng.Write(pixels, dngSpace, path, sourceExif: sourceExif);
             return null;
         }
 
@@ -1467,7 +1470,7 @@ public partial class MainViewModel
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
         bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
             && rendered.Encoding.Range == NumericRange.Extended;
-        if (!gainMap) return WriteExport(rendered, path, opt);
+        if (!gainMap) return WriteExport(rendered, path, opt, sourceExif);
 
         ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
         RenderedFrame sdrBase = Pipeline.Render(
@@ -1492,7 +1495,7 @@ public partial class MainViewModel
                 path,
                 opt.JpegQuality,
                 gainMapCeiling,
-                profilePolicy: ProfilePolicyFor(opt));
+                profilePolicy: ProfilePolicyFor(opt), sourceExif: sourceExif);
         }
         JpegIO.ExportGainMapJpeg(
             sdrBase,
@@ -1501,7 +1504,7 @@ public partial class MainViewModel
             ep.ResolvedOutputTarget,
             path,
             opt.JpegQuality,
-            profilePolicy: ProfilePolicyFor(opt));
+            profilePolicy: ProfilePolicyFor(opt), sourceExif: sourceExif);
         return null;
     }
 
@@ -1534,7 +1537,7 @@ public partial class MainViewModel
             ? ExportProfilePolicy.EmbedExact
             : ExportProfilePolicy.OmitExactSrgb;
 
-    private static JpegIO.JpegFit? WriteExport(RenderedFrame rendered, string path, ExportOptions opt)
+    private static JpegIO.JpegFit? WriteExport(RenderedFrame rendered, string path, ExportOptions opt, SourceExif? sourceExif)
     {
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
         // whereas shrinking the negative first would throw away detail the render still needed
@@ -1544,6 +1547,9 @@ public partial class MainViewModel
             : rendered;
         output = Sharpened(output, opt);
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
+
+        if (opt.Format == ExportFormat.Heic)
+            return HeicIO.ExportHeic(output, path, opt.HeicQuality, opt.MaxFileBytes, sourceExif);
 
         if (opt.Format == ExportFormat.Jpeg)
         {
@@ -1555,19 +1561,19 @@ public partial class MainViewModel
                     path,
                     opt.JpegQuality,
                     ceiling,
-                    profilePolicy: profilePolicy);
+                    profilePolicy: profilePolicy, sourceExif: sourceExif);
             JpegIO.ExportJpeg(
                 output,
                 path,
                 opt.JpegQuality,
-                profilePolicy: profilePolicy);
+                profilePolicy: profilePolicy, sourceExif: sourceExif);
             return null;
         }
         TiffIO.ExportTiff(
             output,
             path,
             opt.TiffCompression,
-            profilePolicy: profilePolicy);
+            profilePolicy: profilePolicy, sourceExif: sourceExif);
         return null;
     }
 
@@ -1670,7 +1676,7 @@ public partial class MainViewModel
                     ct.ThrowIfCancellationRequested();
                     var (working, boxed) = LoadForExport(
                         f.Path, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: false);
-                    return RenderAndWriteExport(working, boxed, outPath, opt, pipelineVersion, ct);
+                    return RenderAndWriteExport(working, boxed, f.Path, outPath, opt, pipelineVersion, ct);
                 });
                 if (fit is { Shrunk: true }) shrunk++;
                 else if (fit is { QualityReduced: true }) qualityReduced++;

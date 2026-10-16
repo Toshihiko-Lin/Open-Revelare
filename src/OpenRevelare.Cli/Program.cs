@@ -58,6 +58,7 @@ static int Run(string[] args)
             case "--quarter-turns": opts["quarter-turns"] = Next(args, ref i, a); break;
             case "--flip-h": flags.Add("flip-h"); break;
             case "--flip-v": flags.Add("flip-v"); break;
+            case "--no-source-exif": flags.Add("no-source-exif"); break;
             case "--quality": opts["quality"] = Next(args, ref i, a); break;
             case "--distortion": opts["distortion"] = Next(args, ref i, a); break;
             case "--vignette": opts["vignette"] = Next(args, ref i, a); break;
@@ -625,15 +626,22 @@ static int Run(string[] args)
         string outPath = opts["output"];
         string ext = Path.GetExtension(outPath).ToLowerInvariant();
         opts.TryGetValue("description", out var desc);
+        SourceExif? sourceExif = flags.Contains("no-source-exif") ? null : SourceExif.Read(opts["input"]);
         if (ext is ".jpg" or ".jpeg")
         {
             int quality = opts.TryGetValue("quality", out var qv) ? int.Parse(qv) : 95;
-            ManagedCliPipeline.ExportJpeg(rendered, outPath, quality, desc);
+            ManagedCliPipeline.ExportJpeg(rendered, outPath, quality, desc, sourceExif);
             Console.WriteLine($"wrote {outPath} (JPEG q{quality}) in {sw.Elapsed.TotalMilliseconds:F1} ms");
+        }
+        else if (ext is ".heic" or ".heif")
+        {
+            int quality = opts.TryGetValue("quality", out var hq) ? int.Parse(hq) : 90;
+            HeicIO.ExportHeic(rendered, outPath, quality, sourceExif: sourceExif);
+            Console.WriteLine($"wrote {outPath} (10-bit HEIC q{quality}) in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
         else
         {
-            ManagedCliPipeline.ExportTiff(rendered, outPath, compress, desc);
+            ManagedCliPipeline.ExportTiff(rendered, outPath, compress, desc, sourceExif);
             string sampleStorage = rendered.Encoding.Range == NumericRange.Extended
                 ? "32-bit float"
                 : "16-bit unsigned";
@@ -762,7 +770,9 @@ static void PrintUsage()
     Console.WriteLine(
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
-        "  -o, --output <path>         output TIFF (normalized: uint16; scene-linear: float32)\n" +
+        "  -o, --output <path>         output TIFF, JPEG, or HEIC (.heic/.heif)\n" +
+        "  --no-source-exif           omit source capture EXIF (preserved by default)\n" +
+        "  --quality <1-100>           JPEG/HEIC quality (defaults: JPEG 95, HEIC 90)\n" +
         "  --input-linear              OVERRIDE the detected untagged/unusable-ICC input:\n" +
         "                              samples are linear\n" +
         "  --input-srgb                OVERRIDE it with the exact sRGB profile\n" +

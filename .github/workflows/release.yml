@@ -39,6 +39,11 @@ jobs:
           dotnet-version: '8.0.x'
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build HEIC encoder (libheif + x265 Main10)
+        run: python packaging/heif/build.py
       - name: 构建固定 LibRaw 0.22.2
         run: bash packaging/libraw/build-unix.sh
       - name: 回归测试
@@ -71,6 +76,11 @@ jobs:
       - name: 构建固定 Little CMS 2.19.1
         shell: pwsh
         run: ./packaging/lcms/build-windows.ps1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build HEIC encoder (libheif + x265 Main10)
+        run: python packaging/heif/build.py
       - name: 构建固定 LibRaw 0.22.2
         shell: pwsh
         run: ./packaging/libraw/build-windows.ps1
@@ -147,6 +157,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build HEIC encoder (libheif + x265 Main10)
+        run: python packaging/heif/build.py
       - name: 构建固定 LibRaw 0.22.2
         run: bash packaging/libraw/build-unix.sh
       - name: 取 appimagetool 与静态 runtime
@@ -215,6 +230,11 @@ jobs:
       # 显示/导出色彩管理继续使用独立的固定 Little CMS 共享库。
       - name: 构建固定 Little CMS 2.19.1
         run: bash packaging/lcms/build-unix.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build HEIC encoder (libheif + x265 Main10)
+        run: python packaging/heif/build.py
       - name: 构建固定 LibRaw 0.22.2
         run: bash packaging/libraw/build-unix.sh
       - name: LibRaw runtime and decode smoke tests

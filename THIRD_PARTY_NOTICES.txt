@@ -207,6 +207,37 @@ The MIT License (referenced above)
 
 -------------------------------------------------------------------------------
 
+METADATA READING
+
+  MetadataExtractor 2.9.3 — Drew Noakes and contributors; Imazen LLC
+    Apache License 2.0
+    https://github.com/drewnoakes/metadata-extractor-dotnet
+
+  XmpCore 6.1.10.1 — Drew Noakes and contributors; Adobe Systems Incorporated
+    BSD 3-Clause License (Adobe XMP Toolkit)
+    https://github.com/drewnoakes/xmp-core-dotnet
+
+  License texts accompany binaries in licenses/metadata/.
+
+-------------------------------------------------------------------------------
+
+HEIC EXPORT RUNTIME
+
+  libheif 1.21.2 — Dirk Farin and contributors (LGPL-3.0-or-later)
+    https://github.com/strukturag/libheif/releases/tag/v1.21.2
+    Source archive: https://github.com/strukturag/libheif/releases/download/v1.21.2/libheif-1.21.2.tar.gz
+
+  x265 4.1 — MulticoreWare and contributors (GPL-2.0-or-later)
+    https://bitbucket.org/multicoreware/x265_git/src/4.1/
+    Source archive: https://bitbucket.org/multicoreware/x265_git/get/4.1.tar.gz
+
+  These libraries are statically linked into OpenRevelare.Heif.Native, distributed
+  as a separate shared library. Source checksums, build instructions and the
+  x265 CMake policy adjustment are in packaging/heif/build.py and README.md.
+  Their license texts accompany binaries in licenses/heif/.
+
+-------------------------------------------------------------------------------
+
 ACKNOWLEDGEMENTS (no code incorporated)
 
   LightSourceDecouple — Toshihiko-Lin, karasuyasabou (MIT)

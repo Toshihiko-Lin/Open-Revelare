@@ -149,6 +149,10 @@ public static class Settings
         /// <summary>Last confirmed export settings. An export preset is picked once and wanted
         /// every time after, so the dialog opens on what was used last rather than on defaults.</summary>
         public Models.ExportOptions Export { get; set; } = new();
+
+        // Device identities are reusable; per-frame dates/exposures deliberately are not.
+        public List<CaptureDevice> FilmCameras { get; set; } = [];
+        public List<CaptureDevice> FilmLenses { get; set; } = [];
     }
 
     /// <summary>

@@ -53,7 +53,7 @@ internal static class ManagedCliPipeline
         RenderedFrame frame,
         string path,
         int quality,
-        string? description = null)
+        string? description = null, SourceExif? sourceExif = null)
     {
         // The typed exporter rejects scene-linear frames instead of silently clipping and
         // labelling them sRGB. Exact ICC embedding is the only normal CLI policy.
@@ -62,20 +62,20 @@ internal static class ManagedCliPipeline
             path,
             quality,
             description,
-            ExportProfilePolicy.EmbedExact);
+            ExportProfilePolicy.EmbedExact, sourceExif);
     }
 
     internal static void ExportTiff(
         RenderedFrame frame,
         string path,
         TiffIO.CompressionMode compression,
-        string? description = null)
+        string? description = null, SourceExif? sourceExif = null)
     {
         TiffIO.ExportTiff(
             frame,
             path,
             compression,
             description,
-            ExportProfilePolicy.EmbedExact);
+            ExportProfilePolicy.EmbedExact, sourceExif);
     }
 }

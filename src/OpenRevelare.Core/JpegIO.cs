@@ -42,7 +42,8 @@ public static class JpegIO
         string path,
         int quality = 95,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (frame.Encoding.Reference != ColorReference.DisplayReferred
@@ -56,7 +57,7 @@ public static class JpegIO
 
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(frame, profilePolicy);
         ExportFile.Write(path, target => WriteJpeg(
-            frame.Pixels, target, quality, description, profileBytes));
+            frame.Pixels, target, quality, description, profileBytes, sourceExif));
     }
 
     /// <summary>
@@ -71,7 +72,8 @@ public static class JpegIO
         int quality,
         long maxBytes,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         if (frame.Encoding.Reference != ColorReference.DisplayReferred
@@ -91,7 +93,7 @@ public static class JpegIO
         {
             if (Math.Max(scaled.Width, scaled.Height) > maxEdge)
                 scaled = Resample.ToLongEdge(full, maxEdge, allowUpscale: false);
-            return Encode(scaled, q, description, profileBytes, xmp: null);
+            return Encode(scaled, q, description, profileBytes, xmp: null, sourceExif: sourceExif);
         });
         ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
         return fit;
@@ -139,7 +141,8 @@ public static class JpegIO
         int height,
         int quality,
         long maxBytes,
-        Func<int, int, byte[]> encode)
+        Func<int, int, byte[]> encode,
+        string formatName = "JPEG")
     {
         if (maxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
         int sourceEdge = Math.Max(width, height);
@@ -155,7 +158,7 @@ public static class JpegIO
             if (factor > 1 && (width / factor < 1 || height / factor < 1 || maxEdge < 64))
             {
                 throw new InvalidOperationException(
-                    $"Cannot fit the JPEG under {maxBytes} bytes even at quality {MinFitQuality} " +
+                    $"Cannot fit the {formatName} under {maxBytes} bytes even at quality {MinFitQuality} " +
                     $"and a long edge of {(sourceEdge + factor - 2) / (factor - 1)} px.");
             }
             int edge = Math.Min(sourceEdge, maxEdge);
@@ -211,11 +214,12 @@ public static class JpegIO
         string path,
         int quality = 95,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(sdrBase, profilePolicy);
         byte[] file = EncodeGainMapJpeg(
-            sdrBase, hdr, baseSpace, target, quality, description, profileBytes);
+            sdrBase, hdr, baseSpace, target, quality, description, profileBytes, sourceExif);
         ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
     }
 
@@ -236,7 +240,8 @@ public static class JpegIO
         int quality,
         long maxBytes,
         string? description = null,
-        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact)
+        ExportProfilePolicy profilePolicy = ExportProfilePolicy.EmbedExact,
+        SourceExif? sourceExif = null)
     {
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(sdrBase, profilePolicy);
         RenderedFrame scaledBase = sdrBase, scaledHdr = hdr;
@@ -253,7 +258,7 @@ public static class JpegIO
                     Resample.ToLongEdge(hdr.Pixels, maxEdge, allowUpscale: false));
             }
             return EncodeGainMapJpeg(
-                scaledBase, scaledHdr, baseSpace, target, q, description, profileBytes);
+                scaledBase, scaledHdr, baseSpace, target, q, description, profileBytes, sourceExif);
         });
         ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
         return fit;
@@ -267,7 +272,8 @@ public static class JpegIO
         OutputTarget target,
         int quality,
         string? description,
-        byte[]? profileBytes)
+        byte[]? profileBytes,
+        SourceExif? sourceExif)
     {
         HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target, GainMapChannels.PerChannel);
 
@@ -286,26 +292,27 @@ public static class JpegIO
             quality,
             description,
             profileBytes,
-            xmp: GainMapJpegContainer.PrimaryXmp(gainMapJpeg.Length));
+            xmp: GainMapJpegContainer.PrimaryXmp(gainMapJpeg.Length), sourceExif: sourceExif);
         return GainMapJpegContainer.Compose(primaryJpeg, gainMapJpeg);
     }
 
     private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,
-                                  byte[]? iccBytes)
-        => File.WriteAllBytes(path, Encode(img, quality, description, iccBytes, xmp: null));
+                                  byte[]? iccBytes, SourceExif? sourceExif = null)
+        => File.WriteAllBytes(path, Encode(img, quality, description, iccBytes, xmp: null, sourceExif: sourceExif));
 
     /// <summary>
     /// One JPEG stream. <paramref name="grayscale"/> encodes the first channel only, as a
     /// single-component JPEG — for a luminance gain map, whose three channels are equal.
     /// </summary>
     private static byte[] Encode(ImageBuffer img, int quality, string? description,
-                                 byte[]? iccBytes, byte[]? xmp, bool grayscale = false)
+                                 byte[]? iccBytes, byte[]? xmp, bool grayscale = false, SourceExif? sourceExif = null)
     {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;
         using Image image = grayscale ? new Image<L8>(w, h) : new Image<Rgb24>(w, h);
 
-        var exif = new ExifProfile();
+        var exif = sourceExif?.CreateProfile(w, h, exactSrgb: iccBytes is null
+            || iccBytes.AsSpan().SequenceEqual(IccProfiles.Build(ColorSpaces.Srgb))) ?? new ExifProfile();
         exif.SetValue(ExifTag.Software, TiffIO.SoftwareTag);
         if (!string.IsNullOrEmpty(description))
         {
@@ -321,6 +328,7 @@ public static class JpegIO
         if (iccBytes is { Length: > 0 })
             image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
                 iccBytes);
+        xmp = sourceExif?.MergeXmp(xmp) ?? xmp;
         if (xmp is { Length: > 0 })
             image.Metadata.XmpProfile = new SixLabors.ImageSharp.Metadata.Profiles.Xmp.XmpProfile(xmp);
 

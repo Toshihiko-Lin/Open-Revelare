@@ -40,6 +40,7 @@ public partial class ExportDialog : Window
     private bool _displayEmbedIccPreference = true;
 
     private bool _syncingIccControl;
+    private bool _applyingDevice;
 
     /// <summary>
     /// The scheme last selected in the naming picker. Kept so that choosing 自定义… can seed the
@@ -66,12 +67,16 @@ public partial class ExportDialog : Window
     /// <param name="hdrLimitStops">The roll's HDR limit in stops above SDR white, zero when HDR
     /// is off. With it on, TIFF is the float32 master and JPEG is a gain-map JPEG.</param>
     public ExportDialog(bool rollMode, ColorSpaceDef space, double hdrLimitStops,
-                        Func<string, string>? namePreview = null)
+                        Func<string, string>? namePreview = null, string? sourceExifSummary = null)
     {
         _space = space;
         _hdrLimitStops = hdrLimitStops;
         _namePreview = namePreview;
         InitializeComponent();
+        SourceExifSummaryLbl.Text = string.IsNullOrWhiteSpace(sourceExifSummary)
+            ? Loc.T("源文件没有可显示的设备信息；导出时按每帧来源处理。") : sourceExifSummary;
+        LoadDevices(CameraLibraryBox, Settings.Current.FilmCameras ??= []);
+        LoadDevices(LensLibraryBox, Settings.Current.FilmLenses ??= []);
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
         OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
@@ -137,7 +142,8 @@ public partial class ExportDialog : Window
     {
         FmtJpeg.IsChecked = saved.Format == ExportFormat.Jpeg;
         FmtDng.IsChecked = saved.Format == ExportFormat.Dng;
-        FmtTiff.IsChecked = saved.Format is not (ExportFormat.Jpeg or ExportFormat.Dng);
+        FmtHeic.IsChecked = saved.Format == ExportFormat.Heic;
+        FmtTiff.IsChecked = saved.Format is not (ExportFormat.Jpeg or ExportFormat.Dng or ExportFormat.Heic);
         CompressBox.SelectedIndex = saved.TiffCompression switch
         {
             TiffIO.CompressionMode.Deflate => 1,
@@ -145,6 +151,8 @@ public partial class ExportDialog : Window
             _ => 0,
         };
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
+        HeicQualitySlider.Value = Math.Clamp(saved.HeicQuality, 40, 100);
+        KeepExifChk.IsChecked = saved.KeepSourceExif;
         HdrBaseBox.SelectedIndex = Math.Max(0, ExportOptions.GainMapBaseSpaces.ToList()
             .FindIndex(space => space == saved.ResolvedHdrBaseSpace));
 
@@ -204,7 +212,7 @@ public partial class ExportDialog : Window
     private ExportIccUiState ResolveIcc(bool jpeg, bool linear)
     {
         bool gainMap = IsHdr && jpeg && !linear;
-        bool hdrMaster = IsHdr && !jpeg && !linear;
+        bool hdrMaster = IsHdr && FmtTiff.IsChecked == true && !linear;
         return ExportIccUiPolicy.Resolve(
             gainMap ? SelectedHdrBaseSpace : _space,
             linear,
@@ -217,12 +225,13 @@ public partial class ExportDialog : Window
         bool dng = FmtDng.IsChecked == true;
         // Scene-linear ACEScg is a TIFF decision; a DNG is already linear and in its own space, so
         // the checkbox cannot follow the format into it.
-        bool exportLinear = !dng && LinearChk.IsChecked == true;
+        bool exportLinear = FmtTiff.IsChecked == true && LinearChk.IsChecked == true;
         bool jpeg = FmtJpeg.IsChecked == true;
+        bool heic = FmtHeic.IsChecked == true;
         ExportIccUiState icc = ResolveIcc(jpeg, exportLinear);
         return new ExportOptions
         {
-            Format = dng ? ExportFormat.Dng : jpeg ? ExportFormat.Jpeg : ExportFormat.Tiff16,
+            Format = dng ? ExportFormat.Dng : heic ? ExportFormat.Heic : jpeg ? ExportFormat.Jpeg : ExportFormat.Tiff16,
             TiffCompression = CompressBox.SelectedIndex switch
             {
                 1 => TiffIO.CompressionMode.Deflate,
@@ -230,6 +239,9 @@ public partial class ExportDialog : Window
                 _ => TiffIO.CompressionMode.Lzw,
             },
             JpegQuality = (int)QualitySlider.Value,
+            HeicQuality = (int)HeicQualitySlider.Value,
+            KeepSourceExif = KeepExifChk.IsChecked == true,
+            FilmCapture = FilmInfoChk.IsChecked == true ? CollectFilmCapture() : null,
             // Carried, not chosen: the render already landed in this space, at this limit.
             ColorSpace = _space.Name,
             HdrLimitStops = _hdrLimitStops,
@@ -237,7 +249,7 @@ public partial class ExportDialog : Window
             ExportLinear = exportLinear,
             // Normalize here as well as in the visual state. A stale false preset must never
             // escape merely because a control event did not run.
-            EmbedIcc = icc.EmbedIcc,
+            EmbedIcc = heic || icc.EmbedIcc,
             Downsample = DownsampleChk.IsChecked == true,
             MaxLongEdge = (int)(LongEdgeBox.Value ?? 2048),
             AllowUpscale = UpscaleChk.IsChecked == true,
@@ -271,14 +283,26 @@ public partial class ExportDialog : Window
             || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null
             || SharpenBox is null || SharpenRow is null || IccRow is null
             || LongEdgeRow is null || PreviewRow is null
-            || NamePresetBox is null || CustomNameRow is null) return;
+            || NamePresetBox is null || CustomNameRow is null || FmtHeic is null
+            || HeicQualitySlider is null || HeicQualityLbl is null
+            || JpegQualityRow is null || HeicQualityRow is null
+            || JpegFormatDetail is null || HeicFormatDetail is null || TiffFormatDetail is null
+            || KeepExifChk is null || FilmInfoChk is null || FilmEditorGroup is null
+            || FilmCopyrightBox is null || ExifErrorLbl is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
+        bool heic = FmtHeic.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
-        TiffGroup.IsVisible = !jpeg && !dng;
-        JpegGroup.IsVisible = jpeg;
-        if ((jpeg || dng) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
+        TiffGroup.IsVisible = !jpeg && !dng && !heic;
+        JpegGroup.IsVisible = jpeg || heic;
+        JpegQualityRow.IsVisible = jpeg;
+        HeicQualityRow.IsVisible = heic;
+        if ((jpeg || dng || heic) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         bool linear = LinearChk.IsChecked == true;
+        FilmEditorGroup.IsVisible = FilmInfoChk.IsChecked == true;
+        JpegFormatDetail.Text = IsHdr ? Loc.T("HDR 增益图 · 兼容 SDR") : Loc.T("分享 · 广泛兼容");
+        HeicFormatDetail.Text = IsHdr ? Loc.T("HDR PQ · 10-bit 高效压缩") : Loc.T("10-bit · 高效压缩");
+        TiffFormatDetail.Text = IsHdr || linear ? Loc.T("32-bit float · 线性母版") : Loc.T("16-bit · 无损存档");
 
         // Every row below is shown or hidden, never greyed: the dialog shows the parameters of the
         // file it is about to write and nothing else. What a hidden row would have said is in the
@@ -297,15 +321,16 @@ public partial class ExportDialog : Window
 
         RefreshNamePreview();
         QualityLbl.Text = ((int)QualitySlider.Value).ToString();
+        HeicQualityLbl.Text = ((int)HeicQualitySlider.Value).ToString();
 
         // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
         // the effective value independently of the control so a stale false preset is harmless.
         bool gainMap = IsHdr && jpeg && !linear;
-        bool hdrMaster = IsHdr && !jpeg && !linear;
+        bool hdrMaster = IsHdr && FmtTiff.IsChecked == true && !linear;
         ExportIccUiState icc = ResolveIcc(jpeg, linear);
         // A DNG states its colour as ColorMatrix1 — the DNG way — so there is no ICC decision to
         // offer; nor is there one when the profile is forced. The summary reports what was embedded.
-        IccRow.IsVisible = !dng && icc.CanChange;
+        IccRow.IsVisible = !dng && !heic && icc.CanChange;
         if (IccChk.IsChecked != icc.EmbedIcc)
         {
             _syncingIccControl = true;
@@ -320,15 +345,26 @@ public partial class ExportDialog : Window
         SpaceRow.IsVisible = !gainMap;
 
         FormatHint.Text = dng
-            ? Loc.T("线性正片，不含显示曲线；反相、镜头校正与帧编辑已烘焙其中，不是相机 RAW 的原样封装。在 Lightroom / Camera Raw 中 RAW 面板可用，不做输出锐化。")
+            ? Loc.T("在 Lightroom / Camera Raw 中继续调色；反相与帧编辑已烘焙，不含显示曲线。")
+                + (IsHdr ? " " + Loc.T("HDR 卷按 SDR 写出。") : "")
+            : heic
+            ? (IsHdr ? Loc.T("保留 HDR 高光；需要支持 HDR HEIC 的查看器。")
+                : Loc.T("体积较小，适合支持 HEIC 的相册与设备。"))
+            : jpeg
+            ? (IsHdr ? Loc.T("普通查看器显示 SDR，支持增益图的 HDR 查看器可还原高光。")
+                : Loc.T("适合直接分享，兼容照片查看器和网页。"))
+            : linear
+            ? Loc.T("场景线性 ACEScg 中间文件，用于外部调色。")
             : IsHdr
-            ? Loc.F($"HDR +{_hdrLimitStops:0.0} 档：TIFF 为 32-bit float 线性母版，JPEG 为增益图 JPEG，普通看图软件可开、HDR 屏还原高光。两者均不做输出锐化。")
-            : Loc.T("TIFF 保留全部层次，适合存档或继续修图；JPEG 适合直接分享。");
+            ? Loc.T("保留扩展范围与色域，适合存档或继续后期处理。")
+            : Loc.T("无损保留成片层次，适合存档或继续修图。");
 
         ColorSpaceHint.Text = dng
             ? (IsHdr
                 ? Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签；HDR 卷按 SDR 导出，高光母版用 TIFF。")
                 : Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签（ColorMatrix1）。"))
+            : heic && IsHdr
+            ? Loc.T("BT.2020 PQ，参考白 203 nits；保留 HDR 高光。")
             : linear
             ? Loc.T("场景线性 ACEScg，输出空间不参与。")
             : hdrMaster
@@ -402,12 +438,83 @@ public partial class ExportDialog : Window
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
+    private static void LoadDevices(ComboBox box, List<CaptureDevice> devices)
+    {
+        box.Items.Add(new ComboBoxItem { Content = Loc.T("手动填写／新设备") });
+        foreach (CaptureDevice device in devices)
+            box.Items.Add(new ComboBoxItem { Content = device.Label, Tag = device });
+        box.SelectedIndex = 0;
+    }
+
+    private FilmCaptureMetadata CollectFilmCapture() => new()
+    {
+        Camera = new CaptureDevice { Make = CameraMakeBox.Text?.Trim() ?? "", Model = CameraModelBox.Text?.Trim() ?? "", SerialNumber = CameraSerialBox.Text?.Trim() ?? "" },
+        Lens = new CaptureDevice { Make = LensMakeBox.Text?.Trim() ?? "", Model = LensModelBox.Text?.Trim() ?? "", SerialNumber = LensSerialBox.Text?.Trim() ?? "" },
+        Iso = FilmIsoBox.Text?.Trim() ?? "", FNumber = FilmApertureBox.Text?.Trim() ?? "",
+        ExposureTime = FilmShutterBox.Text?.Trim() ?? "", FocalLength = FilmFocalBox.Text?.Trim() ?? "",
+        DateTimeOriginal = FilmDateBox.Text?.Trim() ?? "", Artist = FilmArtistBox.Text?.Trim() ?? "",
+        Copyright = FilmCopyrightBox.Text?.Trim() ?? "",
+    };
+
+    private void ApplyDevice(ComboBox box, TextBox make, TextBox model, TextBox serial)
+    {
+        if (box.SelectedItem is not ComboBoxItem { Tag: CaptureDevice device }) return;
+        _applyingDevice = true;
+        try { make.Text = device.Make; model.Text = device.Model; serial.Text = device.SerialNumber; }
+        finally { _applyingDevice = false; }
+        SyncEnabledState();
+    }
+
+    private void OnCameraSelected(object? sender, SelectionChangedEventArgs e)
+        => ApplyDevice(CameraLibraryBox, CameraMakeBox, CameraModelBox, CameraSerialBox);
+    private void OnLensSelected(object? sender, SelectionChangedEventArgs e)
+        => ApplyDevice(LensLibraryBox, LensMakeBox, LensModelBox, LensSerialBox);
+    private void OnCameraEdited(object? sender, TextChangedEventArgs e)
+    {
+        if (!_applyingDevice && CameraLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
+            && device != CollectFilmCapture().Camera) CameraLibraryBox.SelectedIndex = 0;
+        SyncEnabledState();
+    }
+    private void OnLensEdited(object? sender, TextChangedEventArgs e)
+    {
+        if (!_applyingDevice && LensLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
+            && device != CollectFilmCapture().Lens) LensLibraryBox.SelectedIndex = 0;
+        SyncEnabledState();
+    }
+    private void OnFilmFieldChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (ExifErrorLbl is not null) ExifErrorLbl.IsVisible = false;
+        SyncEnabledState();
+    }
+
     private void OnAcceptClick(object? sender, RoutedEventArgs e)
     {
         Options = Collect();
+        try { Options.FilmCapture?.Validate(); }
+        catch (FormatException ex)
+        {
+            ExifErrorLbl.Text = ex.Message switch
+            {
+                var m when m.StartsWith("ISO", StringComparison.Ordinal) => Loc.T("ISO 必须是 1–65535 之间的整数。"),
+                var m when m.StartsWith("Capture time", StringComparison.Ordinal) => Loc.T("拍摄时间格式须为 YYYY-MM-DD HH:mm:ss。"),
+                var m when m.StartsWith("Aperture", StringComparison.Ordinal) => Loc.T("光圈须为有效正数。"),
+                var m when m.StartsWith("Focal length", StringComparison.Ordinal) => Loc.T("焦距须为有效正数。"),
+                var m when m.StartsWith("Shutter speed", StringComparison.Ordinal) => Loc.T("快门须为正数或有效分数，例如 1/125。"),
+                _ => ex.Message,
+            };
+            ExifErrorLbl.IsVisible = true;
+            ExifEditor.IsExpanded = true;
+            Dispatcher.UIThread.Post(() => ExifErrorLbl.BringIntoView(), DispatcherPriority.Loaded);
+            return;
+        }
         // Remember on confirm, not on every keystroke: a dialog the user cancelled should not
         // have changed anything.
         Settings.Current.Export = Options.Clone();
+        if (Options.FilmCapture is { } film)
+        {
+            CaptureDeviceLibrary.Remember(Settings.Current.FilmCameras, film.Camera);
+            CaptureDeviceLibrary.Remember(Settings.Current.FilmLenses, film.Lens);
+        }
         Settings.Save();
         Close(true);
     }
