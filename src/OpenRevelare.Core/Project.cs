@@ -1,5 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace OpenRevelare.Core;
 
@@ -51,6 +53,8 @@ public static class Project
         public string? CalSourcePath;         // Path-A calibration directory
         public Dictionary<string, string>? CalRgbPaths;   // {"R":…,"G":…,"B":…}
         public string? LccPath;
+        // Availability is transient; a missing reference must not erase the saved choice.
+        public bool? LccEnabled;
         /// <summary>Structured, roll-wide provenance for the exact automatic endpoints stored in
         /// the frames. Optional so old/Python projects remain valid and unknown keys stay benign.</summary>
         public FilmBaseEstimate? BaseCalibration;
@@ -69,11 +73,15 @@ public static class Project
     {
         public string SourcePath = "";
         public bool IsVirtual;
+        public bool? LccEnabled;
+        public string? SourceFingerprint;
         public FrameParams Params = new();
     }
 
     public sealed class Data
     {
+        // Preserve portable archives when an opened project is edited and autosaved.
+        public bool UseRelativePaths;
         /// <summary>
         /// Version of the colour-rendering semantics, independent of the project-file schema.
         /// New projects use the managed pipeline; <see cref="Load"/> assigns legacy v1 when the
@@ -92,7 +100,14 @@ public static class Project
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────
-    public static void Save(string path, Data d)
+    public static void Save(string path, Data d) => SaveCore(path, d, null, false);
+
+    /// <summary>Save only if the file still has the revision read when this editor opened it.
+    /// A null revision means a new file that must not already exist.</summary>
+    public static string SaveIfUnchanged(string path, Data d, string? expectedRevision)
+        => SaveCore(path, d, expectedRevision, true);
+
+    private static string SaveCore(string path, Data d, string? expectedRevision, bool checkRevision)
     {
         ArgumentNullException.ThrowIfNull(d);
         ColorPipelineVersion colorPipelineVersion = RequireSupportedColorPipelineVersion(
@@ -113,6 +128,8 @@ public static class Project
         };
         string? dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path));
         if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
+        if (d.UseRelativePaths) MapResourcePaths(root, value =>
+            Path.GetRelativePath(dir!, Path.GetFullPath(value, dir!)).Replace('\\', '/'));
 
         // Temp file + atomic replace, not a direct overwrite: the GUI autosaves this file on every
         // idle pause, and a process killed mid-write would otherwise leave a truncated project —
@@ -125,13 +142,53 @@ public static class Project
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         });
-        AtomicFile.WriteAllText(path, json);
+        using var gate = ProjectGate(path);
+        EnterProjectGate(gate);
+        try
+        {
+            if (checkRevision && !string.Equals(ReadRevision(path), expectedRevision, StringComparison.Ordinal))
+                throw new IOException(CoreText.T("工程已被另一窗口或程序修改。请另存恢复副本，或重新打开工程后再编辑。"));
+            AtomicFile.WriteAllText(path, json);
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+        }
+        finally { gate.ReleaseMutex(); }
     }
 
-    // ── Load ────────────────────────────────────────────────────────────────────
-    public static Data Load(string path)
+    private static Mutex ProjectGate(string path)
     {
-        JsonNode root = JsonNode.Parse(File.ReadAllText(path))
+        string full = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows()) full = full.ToUpperInvariant();
+        string name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(full)));
+        return new Mutex(false, "OpenRevelare.Project." + name);
+    }
+
+    private static void EnterProjectGate(Mutex gate)
+    {
+        try
+        {
+            if (!gate.WaitOne(TimeSpan.FromSeconds(30)))
+                throw new IOException(CoreText.T("等待工程文件写入超时。"));
+        }
+        catch (AbandonedMutexException) { /* prior writer stopped; inspect the file below */ }
+    }
+
+    private static string? ReadRevision(string path)
+        => File.Exists(path) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) : null;
+
+    // ── Load ────────────────────────────────────────────────────────────────────
+    public static Data Load(string path) => LoadWithRevision(path).Data;
+
+    public static (Data Data, string Revision) LoadWithRevision(string path)
+    {
+        byte[] bytes;
+        using (var gate = ProjectGate(path))
+        {
+            EnterProjectGate(gate);
+            try { bytes = File.ReadAllBytes(path); }
+            finally { gate.ReleaseMutex(); }
+        }
+        string revision = Convert.ToHexString(SHA256.HashData(bytes));
+        JsonNode root = JsonNode.Parse(Encoding.UTF8.GetString(bytes))
                         ?? throw new InvalidDataException(CoreText.T("空的工程文件"));
         int version = (int?)root["version"] ?? 1;
         if (version < MinimumSupportedFormatVersion || version > FormatVersion)
@@ -145,6 +202,11 @@ public static class Project
             ColorPipelineVersion = DesColorPipelineVersion(root["color_pipeline_version"]),
             Meta = DesRollMeta(root["roll_meta"]?.AsObject()),
         };
+        MapResourcePaths(root, value =>
+        {
+            if (!Path.IsPathRooted(value)) d.UseRelativePaths = true;
+            return value;
+        });
         if (root["frames"] is JsonArray frames)
             foreach (JsonNode? f in frames)
                 if (f is JsonObject fo)
@@ -153,8 +215,53 @@ public static class Project
                     // 任何一帧是旧模型就标记整卷：标定是卷级的，逐帧提示没有意义。
                     if (NeedsRecalibration(fo)) d.NeedsRecalibration = true;
                 }
-        return d;
+        ResolveRelativePaths(d, path);
+        return (d, revision);
     }
+
+    // Paths in hand-carried projects belong to the project, never the process working directory.
+    private static void ResolveRelativePaths(Data data, string projectPath)
+    {
+        string directory = Path.GetDirectoryName(Path.GetFullPath(projectPath))!;
+        string? Resolve(string? value) => string.IsNullOrWhiteSpace(value) ? value
+            : Path.GetFullPath(value, directory);
+        data.Meta.CalSourcePath = Resolve(data.Meta.CalSourcePath);
+        data.Meta.LccPath = Resolve(data.Meta.LccPath);
+        if (data.Meta.CalRgbPaths is { } rgb)
+            foreach (string channel in rgb.Keys.ToArray()) rgb[channel] = Resolve(rgb[channel])!;
+        foreach (Frame frame in data.Frames)
+        {
+            frame.SourcePath = Resolve(frame.SourcePath)!;
+            if (!string.IsNullOrWhiteSpace(frame.Params.PrintLut) && !PrintLuts.IsBuiltin(frame.Params.PrintLut))
+                frame.Params.PrintLut = Resolve(frame.Params.PrintLut)!;
+        }
+    }
+
+    private static void MapResourcePaths(JsonNode root, Func<string, string> map)
+    {
+        void Map(JsonNode? node, string key, bool lut = false)
+        {
+            if (node?[key]?.GetValue<string>() is { Length: > 0 } value
+                && !string.IsNullOrWhiteSpace(value) && !(lut && PrintLuts.IsBuiltin(value))) node[key] = map(value);
+        }
+        var meta = root["roll_meta"];
+        Map(meta, "lcc_path"); Map(meta, "cal_source_path");
+        if (meta?["cal_rgb_paths"] is JsonObject rgb)
+            foreach (string key in rgb.Select(p => p.Key).ToArray()) Map(rgb, key);
+        if (root["frames"] is JsonArray frames)
+            foreach (var frame in frames) { Map(frame, "source_path"); Map(frame, "print_lut", lut: true); }
+    }
+
+    internal static Data Snapshot(Data data) => new()
+    {
+        UseRelativePaths = data.UseRelativePaths, ColorPipelineVersion = data.ColorPipelineVersion,
+        NeedsRecalibration = data.NeedsRecalibration, Meta = DesRollMeta(SerRollMeta(data.Meta)),
+        Frames = data.Frames.Select(f => new Frame
+        {
+            SourcePath = f.SourcePath, IsVirtual = f.IsVirtual, LccEnabled = f.LccEnabled,
+            SourceFingerprint = f.SourceFingerprint, Params = f.Params.Clone(),
+        }).ToList(),
+    };
 
     /// <summary>
     /// Explicitly opts a loaded legacy project into the current colour-rendering semantics.
@@ -214,7 +321,11 @@ public static class Project
         foreach (string old in MissingSources(data))
         {
             string candidate = System.IO.Path.Combine(folder, System.IO.Path.GetFileName(old));
-            if (File.Exists(candidate)) remap[old] = candidate;
+            if (!File.Exists(candidate)) continue;
+            string? expected = data.Frames.Where(f => f.SourcePath == old)
+                .Select(f => f.SourceFingerprint).FirstOrDefault(fingerprint => fingerprint is not null);
+            if (expected is not null && SourceFingerprint.TryCapture(candidate) != expected) continue;
+            remap[old] = candidate;
         }
         if (remap.Count == 0) return 0;
 
@@ -240,6 +351,7 @@ public static class Project
             d["cal_rgb_paths"] = o;
         }
         if (rm.LccPath is not null) d["lcc_path"] = rm.LccPath;
+        if (rm.LccEnabled is { } enabled) d["lcc_enabled"] = enabled;
         if (SerCalibrationDiagnostics(rm) is { } diagnostics)
             d["calibration_diagnostics"] = diagnostics;
         // Only emit non-empty annotation fields (tidy file; absent → "" on load).
@@ -268,6 +380,7 @@ public static class Project
             CalSourcePath = d["cal_source_path"]?.GetValue<string>(),
             CalRgbPaths = rgb,
             LccPath = d["lcc_path"]?.GetValue<string>(),
+            LccEnabled = d["lcc_enabled"]?.GetValue<bool>(),
             CameraBody = Str(d, "camera_body", ""), FilmStock = Str(d, "film_stock", ""),
             FilmIso = Str(d, "film_iso", ""), RollNumber = Str(d, "roll_number", ""),
             DevLab = Str(d, "dev_lab", ""), DevProcess = Str(d, "dev_process", ""),
@@ -354,6 +467,9 @@ public static class Project
     // ── frame ───────────────────────────────────────────────────────────────────
     private static JsonObject SerFrame(Frame e)
     {
+        // An original can be deliberately replaced during editing. A new save describes that
+        // current source; retain the previous evidence only while the source is unavailable.
+        e.SourceFingerprint = SourceFingerprint.TryCapture(e.SourcePath) ?? e.SourceFingerprint;
         FrameParams p = e.Params;
         var o = new JsonObject
         {
@@ -398,7 +514,7 @@ public static class Project
             ["vignette_amount"] = p.VignetteAmount,
             ["vignette_falloff"] = p.VignetteFalloff,
             ["distortion_k1"] = p.DistortionK1,
-            ["lcc_enabled"] = p.LccFlatField != null,
+            ["lcc_enabled"] = e.LccEnabled ?? p.LccFlatField != null,
             ["monochrome"] = p.Monochrome,
             // SceneBase adjustments
             ["wb_gains"] = Arr(p.WbGains),
@@ -430,6 +546,7 @@ public static class Project
             // Structure
             ["is_virtual"] = e.IsVirtual,
             ["source_path"] = e.SourcePath,
+            ["source_fingerprint"] = e.SourceFingerprint,
         };
 
         return o;
@@ -505,7 +622,12 @@ public static class Project
         RebaseToNeutral(d, p);
         // lcc_enabled is stored, but the flat-field object is roll-level and re-baked by the loader.
         string src = d["source_path"]?.GetValue<string>() ?? Str(d, "filename", "");
-        return new Frame { SourcePath = src, IsVirtual = Bool(d, "is_virtual", false), Params = p };
+        return new Frame
+        {
+            SourcePath = src, IsVirtual = Bool(d, "is_virtual", false), Params = p,
+            LccEnabled = d["lcc_enabled"]?.GetValue<bool>(),
+            SourceFingerprint = d["source_fingerprint"]?.GetValue<string>(),
+        };
     }
 
     // ── JSON helpers ──────────────────────────────────────────────────────────

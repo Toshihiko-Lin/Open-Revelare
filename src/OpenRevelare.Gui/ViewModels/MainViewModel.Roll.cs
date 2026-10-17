@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -18,11 +18,19 @@ namespace OpenRevelare.Gui.ViewModels;
 public partial class MainViewModel
 {
     // ── Roll structure: add images / virtual copies / remove frame ──────────────
-    // Structural edits change Frames.Count, which the index-keyed undo snapshots can't
-    // track — so each one re-baselines undo (history is dropped, current state kept).
+    // Snapshots retain stable frame identities as well as detached parameters, so a structural
+    // command can be one undo step without discarding the edits that came before it.
+    private void BeginStructuralEdit()
+    {
+        CommitUndo();
+        _undoCts?.Cancel();
+        _undo.Add(CaptureSnapshot());
+        if (_undo.Count > UndoDepth) _undo.RemoveAt(0);
+        _redo.Clear();
+    }
+
     private void ResetUndoAfterStructural()
     {
-        _undo.Clear(); _redo.Clear(); _committed = null;
         SetUndoBaseline();
         UpdateUndoState();
         MarkRollDirty();   // frames added / copied / removed — the roll's shape changed
@@ -93,6 +101,7 @@ public partial class MainViewModel
         {
             int v = Math.Clamp(value, 0, OutputSpaces.Length - 1);
             if (_outputSpaceIndex == v) return;
+            if (Frames.Count > 0) BeginStructuralEdit();
             _outputSpaceIndex = v;
             OnPropertyChanged(nameof(OutputSpaceIndex));
             OnPropertyChanged(nameof(OutputSpaceHint));
@@ -108,6 +117,11 @@ public partial class MainViewModel
             foreach (RollFrame f in Frames) SetThumbnail(f, null);
             RestartThumbnails();
             ScheduleRender();
+            if (Frames.Count > 0)
+            {
+                ResetUndoAfterStructural();
+                StatusText = Loc.T("已更改整卷渲染空间；画面与导出均受影响，可撤销比较。");
+            }
         }
     }
 
@@ -812,6 +826,7 @@ public partial class MainViewModel
         }
         if (Frames.Count > 0) MarkRollDirty();
         SetContractOutput(output);
+        NotifyProjectDependencies();
 
         OnPropertyChanged(nameof(PrintLutIndex));
         OnPropertyChanged(nameof(PrintLutHint));
@@ -903,9 +918,8 @@ public partial class MainViewModel
             // The cube's own TITLE when it loads, so the vendor name on screen is the user's file
             // describing itself. A file that has gone missing is still listed, marked, so the user
             // can see WHY the roll stopped looking right instead of finding 无 selected.
-            string label;
-            try { label = PrintLuts.Validate(p).Title; }
-            catch { label = Loc.F($"{Path.GetFileNameWithoutExtension(p)}（文件缺失）"); }
+            string label = PrintLuts.Resolve(p)?.Title
+                ?? Loc.F($"{Path.GetFileNameWithoutExtension(p)}（文件缺失）");
             names.Add(label);
             ids.Add(p);
         }
@@ -994,7 +1008,6 @@ public partial class MainViewModel
         CubeLut lut;
         try
         {
-            PrintLuts.Forget(path);
             lut = PrintLuts.Validate(path);
         }
         catch (Exception ex)
@@ -1111,6 +1124,7 @@ public partial class MainViewModel
         // The batch is sorted, but appended rather than merged into the existing frames: the roll's
         // order is the user's to own once they have dragged anything, and re-sorting the whole
         // strip on every add would undo that silently.
+        BeginStructuralEdit();
         foreach (string p in SortedByName(toAdd))
             Frames.Add(new RollFrame(p) { Params = template.Clone() });
 
@@ -1169,7 +1183,7 @@ public partial class MainViewModel
         if (parents.Count == 0) return;
         bool usedSelection = parents.Any(f => f.IsSelected);
 
-        CommitUndo();
+        BeginStructuralEdit();
         CommitLiveParams(CurrentFrame);   // capture live edits before anything is cloned
         RollFrame? last = null;
         // Walk the strip bottom-up so an insertion never shifts an index still to be visited.
@@ -1206,9 +1220,7 @@ public partial class MainViewModel
     /// physical strip. Dragging a copy therefore moves its whole group too, from wherever the
     /// group starts, rather than tearing it out on its own.
     ///
-    /// Reordering does not touch any frame's params, so unlike the other structural edits it does
-    /// not have to re-baseline undo — the index-keyed snapshots would be wrong for exactly one
-    /// step, which is the strip's own order, and that is what <see cref="MarkRollDirty"/> persists.
+    /// Reordering participates in the same identity-preserving undo history as parameter edits.
     /// </summary>
     public void MoveFrame(int from, int insertAt)
     {
@@ -1253,6 +1265,7 @@ public partial class MainViewModel
     /// </summary>
     private void Reorder(Action shuffle)
     {
+        BeginStructuralEdit();
         RollFrame? keep = CurrentFrame;
         _reordering = true;
         try
@@ -1262,6 +1275,7 @@ public partial class MainViewModel
         }
         finally { _reordering = false; }
         _prevFrame = CurrentFrame;   // the outgoing-frame link the next real switch relies on
+        ResetUndoAfterStructural();
     }
 
     /// <summary>Put the whole roll back into file-name order, groups intact.</summary>
@@ -1332,11 +1346,14 @@ public partial class MainViewModel
                         victims.Add(f);
         if (victims.Count >= Frames.Count) { StatusText = Loc.T("至少保留一帧，无法移除"); return; }
 
+        BeginStructuralEdit();
+        _thumbCts?.Cancel(); _warmCts?.Cancel(); CancelRollAnalysis();
+
         int anchor = CurrentFrame is { } cur ? Frames.IndexOf(cur) : 0;
         bool currentGoes = CurrentFrame is { } c && victims.Contains(c);
         if (currentGoes) _prevFrame = null;   // don't persist the frame we're deleting on the coming switch
         for (int i = Frames.Count - 1; i >= 0; i--)
-            if (victims.Contains(Frames[i])) { Retire(Frames[i].Thumbnail); Frames.RemoveAt(i); }
+            if (victims.Contains(Frames[i])) { SetThumbnail(Frames[i], null); Frames.RemoveAt(i); }
 
         ResetUndoAfterStructural();
         if (currentGoes) CurrentFrame = Frames[Math.Clamp(anchor, 0, Frames.Count - 1)];
@@ -1345,6 +1362,7 @@ public partial class MainViewModel
             ? (copies > 0 ? Loc.F($"已移除 {targets.Count} 帧及其 {copies} 个副本") : Loc.F($"已移除 {targets.Count} 帧"))
             : (copies > 0 ? Loc.F($"已移除该帧及其 {copies} 个副本") : Loc.T("已从卷中移除该帧"));
         ClearStripSelection();
+        RestartThumbnails();
     }
 
     /// <summary>
@@ -1450,6 +1468,7 @@ public partial class MainViewModel
         SourceStamp sourceStamp = DecodedSources.For(working) ?? SourceStamp.Capture(sourcePath);
         sourceStamp.RequireCurrent();
         CalibrationSources.RequireCurrent(ep);
+        PrintLuts.RequireCurrent(ep.PrintLut);
         SourceExif? sourceExif = SourceExif.ForExport(
             opt.KeepSourceExif ? SourceExif.Read(sourcePath) : null, opt.KeepSourceExif, opt.FilmCapture);
         if (opt.Format == ExportFormat.Dng)
@@ -1639,69 +1658,149 @@ public partial class MainViewModel
         return ExportNaming.Expand(template, ExportNameFields(frame, Math.Max(1, Frames.IndexOf(frame) + 1)));
     }
 
-    /// <summary>Export every frame at full resolution into a folder, each with its own params.</summary>
+    private BatchExportJob? _lastBatchExportJob;
+    public BatchExportJob? LastBatchExportJob
+    {
+        get => _lastBatchExportJob;
+        private set
+        {
+            _lastBatchExportJob = value;
+            OnPropertyChanged(nameof(CanShowBatchExportReport));
+        }
+    }
+    public bool CanShowBatchExportReport => LastBatchExportJob is not null && !HasLongTask;
+
+    /// <summary>Reserve the whole job once; retries keep these exact paths and render inputs.</summary>
     public async Task ExportRollAsync(string folder, ExportOptions opt)
     {
-        if (Frames.Count == 0) return;
+        if (Frames.Count == 0 || !CanExportProject()) return;
+        if (_roll is not null && !await FlushRollAsync()) return;
         if (!TryBeginLongTask(Loc.T("正在导出 …"), out var owner)) return;
-        CancellationToken ct = owner.Token;
-        CommitLiveParams(CurrentFrame);   // capture live edits
+        LastBatchExportJob = null;
         try
         {
-            // Snapshot every input before the first await: edits, removals and roll switches
-            // during export must not change the job that the user already started.
+            opt = opt.Clone();
             var frames = Frames.Select((f, i) => (
-                f.Path, f.FileName, Params: f.Params.Clone(), Box: SplitCropOf(f),
+                f.Path, Params: f.Params.Clone(), Box: SplitCropOf(f),
                 Name: ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1)))).ToList();
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var reserved = ExportFile.NewReservations();
-            string extension = opt.Extension;
             ExportFile.CleanupStale(folder);
-            int renamed = 0, skipped = 0, qualityReduced = 0, shrunk = 0;
-            for (int i = 0; i < frames.Count; i++)
+            var items = new List<BatchExportItem>();
+            foreach (var frame in frames)
             {
-                ct.ThrowIfCancellationRequested();
-                var f = frames[i];
-                ReportLongTask(Loc.F($"导出 {i + 1}/{frames.Count}：{f.FileName} …"));
-                FrameParams p = f.Params;
-                // Virtual copies share the source file name — disambiguate so they don't overwrite.
-                // (They also share every OTHER field a template can name, so this stays necessary
-                // whatever the template is.)
-                string baseName = f.Name;
-                string name = baseName;
-                for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{baseName}_副本{dup - 1}");
-                // A roll export names its files after the SCANS and runs unattended, so the folder
-                // may already hold an earlier export or unrelated matching files. What happens
-                // then is the user's call, made in the export dialog — the default being the one
-                // that cannot destroy anything.
-                string? outPath = ExportFile.Reserve(folder, name, extension, opt.Conflict, reserved);
-                if (outPath is null) { skipped++; continue; }
-                if (!string.Equals(Path.GetFileNameWithoutExtension(outPath), name, StringComparison.Ordinal))
-                    renamed++;
-                FrameParams ep = ForExport(p, opt);
-                var exportBox = f.Box;
-                JpegIO.JpegFit? fit = await Task.Run(() =>
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var (working, boxed) = LoadForExport(
-                        f.Path, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: false);
-                    return RenderAndWriteExport(working, boxed, f.Path, outPath, opt, pipelineVersion, ct);
-                });
-                if (fit is { Shrunk: true }) shrunk++;
-                else if (fit is { QualityReduced: true }) qualityReduced++;
+                string name = frame.Name;
+                for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{frame.Name}_副本{dup - 1}");
+                string? output = ExportFile.Reserve(folder, name, opt.Extension, opt.Conflict, reserved);
+                FrameParams ep = ForExport(frame.Params, opt);
+                SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
+                    ? null : SourceStamp.TryCapture(ep.PrintLut);
+                items.Add(CreateBatchItem(frame.Path, output, frame.Box, ep, opt,
+                    pipelineVersion, tiffInputAssumption, lutSource));
             }
-            string detail = "";
-            if (renamed > 0) detail += Loc.F($"，其中 {renamed} 帧重名已另存");
-            if (skipped > 0) detail += Loc.F($"，跳过 {skipped} 帧同名");
-            if (qualityReduced > 0) detail += Loc.F($"，{qualityReduced} 帧为守住大小降了品质");
-            if (shrunk > 0) detail += Loc.F($"，{shrunk} 帧为守住大小缩了尺寸");
-            StatusText = Loc.F($"整卷导出完成（{frames.Count - skipped}/{frames.Count} 帧{detail}）· {opt.Summary()} → {folder}");
+            var job = new BatchExportJob(folder, items, _roll?.Title ?? "", opt.Summary());
+            LastBatchExportJob = job;
+            if (_roll is { } roll)
+            {
+                var boxes = frames.Select(f => f.Box is { } b
+                    ? new[] { b.X, b.Y, b.W, b.H } : null).ToArray();
+                var snapshot = BuildProjectData();
+                var saved = BatchExportStore.Create(roll.ProjectPath, snapshot, opt,
+                    job, boxes, pipelineVersion, tiffInputAssumption);
+                job.StateChangedAsync = () => Task.Run(() => BatchExportStore.Save(saved, job));
+                job.ValidateRecovery = () => BatchExportStore.Validate(saved, snapshot);
+            }
+            await RunBatchExportAsync(job, owner.Token);
         }
-        catch (OperationCanceledException) { StatusText = Loc.T("导出已取消，已完成的文件已保留"); }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
         finally { EndLongTask(owner); ReleaseBulkBuffers(); }
+    }
+
+    private BatchExportItem CreateBatchItem(string sourcePath, string? output,
+        (double X, double Y, double W, double H)? box, FrameParams ep, ExportOptions opt,
+        ColorPipelineVersion pipelineVersion, TiffInputAssumption tiffInputAssumption,
+        SourceStamp? lutSource) => new(sourcePath, output, ct => Task.Run(() =>
+    {
+        ct.ThrowIfCancellationRequested();
+        // Failed originals may be repaired between attempts; the other render inputs stay frozen.
+        var source = SourceStamp.Capture(sourcePath);
+        if (output is not null && File.Exists(output) && opt.Conflict != ExportFile.ConflictPolicy.Overwrite)
+            throw new IOException(Loc.T("目标文件已被其他操作创建，请移走文件后重试：") + output);
+        if (lutSource is { IsCurrent: false })
+            throw new IOException(Loc.T("任务的 LUT 参考已更改，请重新创建批量导出任务。"));
+        var (working, boxed) = LoadForExport(sourcePath, box, ep,
+            pipelineVersion, tiffInputAssumption, sharedSlot: false);
+        source.RequireCurrent();
+        JpegIO.JpegFit? fit = RenderAndWriteExport(working, boxed, sourcePath,
+            output!, opt, pipelineVersion, ct);
+        return DescribeFit(fit);
+    }));
+
+    private bool RestoreBatchJob(string projectPath)
+    {
+        var found = BatchExportStore.Load(projectPath);
+        LastBatchExportJob = null;
+        if (found is null) return false;
+        var (saved, snapshot, blocked) = found.Value;
+        var opt = saved.Options;
+        opt.FilmCapture = saved.FilmCapture; opt.ExportLinear = saved.ExportLinear;
+        opt.ColorSpace = saved.ColorSpace; opt.HdrLimitStops = saved.HdrLimitStops;
+        var items = new List<BatchExportItem>();
+        for (int i = 0; i < saved.Items.Length; i++)
+        {
+            var source = saved.Items[i];
+            var fp = snapshot.Frames[i].Params;
+            fp.DecoupleMatrix = _decoupleMatrix;
+            fp.DecoupleChromaMatrix = _decoupleChromaMatrix;
+            fp.DecoupleMode = DecoupleMode.Linear;
+            fp.LccFlatField = (snapshot.Meta.LccEnabled ?? snapshot.Frames[i].LccEnabled ?? false)
+                ? _lccFlatField : null;
+            var box = source.Box is { Length: 4 } b ? (b[0], b[1], b[2], b[3])
+                : ((double, double, double, double)?)null;
+            var ep = ForExport(fp, opt);
+            SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
+                ? null : SourceStamp.TryCapture(ep.PrintLut);
+            var item = CreateBatchItem(source.SourcePath, source.OutputPath, box, ep, opt,
+                saved.PipelineVersion, saved.TiffAssumption, lutSource);
+            item.State = source.State; item.Error = source.Error; item.Detail = source.Detail;
+            items.Add(item);
+        }
+        var job = new BatchExportJob(saved.Folder, items, saved.RollTitle, saved.OptionsSummary, saved.StartedAt)
+        {
+            RecoveryBlockedReason = blocked ?? "",
+        };
+        job.StateChangedAsync = () => Task.Run(() => BatchExportStore.Save(saved, job));
+        job.ValidateRecovery = () => BatchExportStore.Validate(saved, snapshot);
+        LastBatchExportJob = job;
+        return true;
+    }
+
+    public async Task RetryBatchExportAsync()
+    {
+        if (LastBatchExportJob is not { CanRetry: true } job) return;
+        if (job.ValidateRecovery?.Invoke() is { } blocked)
+        {
+            job.RecoveryBlockedReason = blocked;
+            StatusText = blocked;
+            return;
+        }
+        if (!TryBeginLongTask(Loc.T("重试未完成的导出 …"), out var owner)) return;
+        try { await RunBatchExportAsync(job, owner.Token); }
+        catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
+        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
+    }
+
+    private async Task RunBatchExportAsync(BatchExportJob job, CancellationToken ct)
+    {
+        await job.RunAsync(ct, (i, item) => ReportLongTask(
+            Loc.F($"导出 {i + 1}/{job.Items.Count}：{Path.GetFileName(item.SourcePath)} …")));
+        int completed = job.Items.Count(i => i.State == BatchExportState.Completed);
+        int failed = job.Items.Count(i => i.State == BatchExportState.Failed);
+        int pending = job.Items.Count(i => i.State == BatchExportState.Pending);
+        int skipped = job.Items.Count(i => i.State == BatchExportState.Skipped);
+        StatusText = Loc.F($"批量导出：完成 {completed}，失败 {failed}，未执行 {pending}，跳过 {skipped} → {job.Folder}");
     }
 
     /// <summary>
@@ -1810,6 +1909,7 @@ public partial class MainViewModel
                                               SheetAspect aspect, SheetOrientation orient,
                                               string path)
     {
+        if (!CanExportProject()) return;
         if (!TryBeginLongTask(Loc.T("正在导出印样 …"), out var owner)) return;
         CancellationToken ct = owner.Token;
         try

@@ -19,24 +19,33 @@ public static class AtomicFile
 
     public static void WriteAllText(string path, string text)
     {
-        string tmp = path + ".tmp";
-        File.WriteAllText(tmp, text);
-        for (int attempt = 1; ; attempt++)
+        string directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        // The target can already use most of the filesystem's filename-length allowance.
+        // A separate short sibling name avoids making a valid project name unsaveable.
+        string tmp = Path.Combine(directory, ".openrevelare-write-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
         {
-            try
+            using (var file = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                if (File.Exists(path)) File.Replace(tmp, path, null);
-                else File.Move(tmp, path);
-                return;
+                using (var writer = new StreamWriter(file, new System.Text.UTF8Encoding(false), leaveOpen: true))
+                {
+                    writer.Write(text);
+                    writer.Flush();
+                }
+                file.Flush(flushToDisk: true);
             }
-            catch (IOException) when (attempt < Attempts)
+            for (int attempt = 1; ; attempt++)
             {
-                Thread.Sleep(RetryDelayMs);
-            }
-            catch (UnauthorizedAccessException) when (attempt < Attempts)
-            {
-                Thread.Sleep(RetryDelayMs);
+                try
+                {
+                    if (File.Exists(path)) File.Replace(tmp, path, null);
+                    else File.Move(tmp, path);
+                    return;
+                }
+                catch (IOException) when (attempt < Attempts) { Thread.Sleep(RetryDelayMs); }
+                catch (UnauthorizedAccessException) when (attempt < Attempts) { Thread.Sleep(RetryDelayMs); }
             }
         }
+        finally { try { File.Delete(tmp); } catch { /* preserve the original write error */ } }
     }
 }

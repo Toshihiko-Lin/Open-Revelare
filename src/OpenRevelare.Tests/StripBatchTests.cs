@@ -13,6 +13,29 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public sealed class StripBatchTests
 {
+    [Fact]
+    public async Task Roll_apply_shows_source_targets_and_selected_groups_without_an_empty_edit()
+    {
+        string dir = Path.Combine(TestDataIsolation.Root, $"sync-hint-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string[] paths = Enumerable.Range(1, 2).Select(i => WriteTiff(Path.Combine(dir, $"f{i}.tif"))).ToArray();
+        try
+        {
+            using var vm = new MainViewModel();
+            await vm.LoadRollAsync(paths); await WhenSettled(vm);
+            Assert.Contains("f1.tif", vm.CalibrationBroadcastHint);
+            Assert.Contains("其余 1 帧", vm.CalibrationBroadcastHint);
+            Assert.Contains("片基与端点", vm.CalibrationBroadcastHint);
+            vm.Sync.SceneWb = vm.Sync.SceneExposure = vm.Sync.SceneTone = vm.Sync.SceneCurves = false;
+            Assert.Contains("未选择同步项", vm.SceneBroadcastHint);
+            bool canUndo = vm.CanUndo;
+            vm.ApplySceneToRoll();
+            Assert.Contains("未选择成片调整同步项", vm.StatusText);
+            Assert.Equal(canUndo, vm.CanUndo);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Theory]
     [InlineData("scene")]
     [InlineData("calibration")]
@@ -396,7 +419,7 @@ public sealed class StripBatchTests
             // Keep a smaller, off-centre square rather than a default centred box.
             // Opening the tool again suppresses it for rendering, never for storage.
             vm.CropEditing = leaveCropToolOpen;
-            vm.FlushRollNow(); // Same synchronous save as closing the main window.
+            Assert.True(await vm.PrepareCloseAsync());
             project = vm.CurrentRoll!.ProjectPath;
             var saved = Project.Load(project);
             AssertRect(copyCrop, saved.Frames[0].Params.CropRect);

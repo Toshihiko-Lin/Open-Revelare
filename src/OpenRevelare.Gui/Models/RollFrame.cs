@@ -18,6 +18,7 @@ namespace OpenRevelare.Gui.Models;
 public sealed partial class RollFrame : ObservableObject
 {
     public string Path { get; }
+    public string? SourceFingerprint { get; set; }
     public string FileName => System.IO.Path.GetFileName(Path);
 
     /// <summary>True when this entry is a virtual copy (shares another frame's source file).</summary>
@@ -67,7 +68,7 @@ public sealed partial class RollFrame : ObservableObject
     /// </summary>
     public static RollFrame MakeVirtualCopy(RollFrame parent)
         // Thumbnail left null so the strip renders it from this copy's own params.
-        => new(parent.Path, isVirtual: true) { Params = parent.Params.Clone() };
+        => new(parent.Path, isVirtual: true) { Params = parent.Params.Clone(), SourceFingerprint = parent.SourceFingerprint };
 
     /// <summary>Reset every Stage-2 (SceneBase) field of <paramref name="p"/> to its neutral default.</summary>
     public static void ResetScene(FrameParams p)

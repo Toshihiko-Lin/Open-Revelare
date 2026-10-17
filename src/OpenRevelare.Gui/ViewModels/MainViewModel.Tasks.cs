@@ -7,9 +7,11 @@ public partial class MainViewModel
 {
     // Explicit jobs own their lifetime and status independently of preview/frame switches.
     private CancellationTokenSource? _longTaskCts;
+    private TaskCompletionSource? _longTaskCompletion;
+    internal Task WaitForLongTaskAsync() => _longTaskCompletion?.Task ?? Task.CompletedTask;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayStatus), nameof(ShowProgress))]
+    [NotifyPropertyChangedFor(nameof(DisplayStatus), nameof(ShowProgress), nameof(CanRestoreProjectReferences), nameof(CanShowBatchExportReport), nameof(CanInspectProjectDependencies))]
     private bool _hasLongTask;
 
     [ObservableProperty] private bool _canCancelLongTask;
@@ -28,6 +30,7 @@ public partial class MainViewModel
         if (HasLongTask) return false;
         owner = new CancellationTokenSource();
         _longTaskCts = owner;
+        _longTaskCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         LongTaskStatus = status;
         CanCancelLongTask = true;
         HasLongTask = true;
@@ -54,5 +57,7 @@ public partial class MainViewModel
         HasLongTask = false;
         CanCancelLongTask = false;
         owner.Dispose();
+        _longTaskCompletion?.TrySetResult();
+        _longTaskCompletion = null;
     }
 }

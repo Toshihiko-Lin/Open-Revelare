@@ -79,6 +79,15 @@ public partial class MainWindow : Window
                     }
                 }
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
+                vm.ConfirmUnverifiedRelink = async count =>
+                {
+                    bool accepted = false;
+                    await new InfoDialog(Loc.T("确认旧工程原片"),
+                        Loc.F($"这份旧工程有 {count} 个同名文件没有内容指纹，无法验证是不是原来的照片。请确认目录正确后再继续。"))
+                        .WithAction(Loc.T("确认使用这些文件"), Loc.T("取消"), () => accepted = true, isDefault: false)
+                        .ShowDialog(this);
+                    return accepted;
+                };
                 vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
                 {
@@ -1190,23 +1199,95 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Every gesture advertised by a menu item's InputGesture is bound here. Avalonia's
-    /// <c>MenuItem.InputGesture</c> only *renders* the shortcut — it does not wire it — so a
-    /// gesture shown in a menu and not listed below is a lie to the user.
+    /// Keep the window alive until in-flight writes and the last edit have reached disk.
+    /// A failed save must leave both the UI and session resources available for recovery.
     /// </summary>
-    /// <summary>
-    /// Last chance to persist the open roll. Synchronous on purpose: an awaited save would be
-    /// racing the process exit, and the whole point of autosave is that closing the window is a
-    /// safe way to stop working.
-    /// </summary>
+    internal bool CloseApproved { get; private set; }
+    private bool _closePending;
+
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        Vm?.FlushRollNow();
+        if (!CloseApproved && Vm is not null)
+        {
+            e.Cancel = true;
+            if (!_closePending) _ = SaveAndCloseAsync();
+            base.OnClosing(e);
+            return;
+        }
         StopWindowsPresentation();
         // Loc.Changed 是静态事件，订阅方却是这个窗口：不摘掉就会把窗口钉在进程生命周期上。
         // 实际只有一个主窗口，但配对的 -= 是这个项目里其余订阅一贯的写法。
         TearDownNativeMenu();
         base.OnClosing(e);
+    }
+
+    private async Task SaveAndCloseAsync()
+    {
+        if (Vm is not { } vm) return;
+        _closePending = true;
+        try
+        {
+            while (true)
+            {
+                bool saved;
+                IsEnabled = false;
+                try { saved = await vm.PrepareCloseAsync(); }
+                finally { IsEnabled = true; }
+                if (saved) { CloseApproved = true; break; }
+                var choice = await new SaveFailureDialog(vm.SaveStatusDetail).ShowDialog<SaveFailureChoice>(this);
+                if (choice == SaveFailureChoice.Retry) continue;
+                if (choice == SaveFailureChoice.Discard) { CloseApproved = true; break; }
+                if (choice == SaveFailureChoice.Recovery)
+                {
+                    var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                    {
+                        Title = Loc.T("另存恢复副本"), DefaultExtension = "ncproj",
+                        SuggestedFileName = (vm.CurrentRoll?.Title ?? "project") + "-recovery",
+                        FileTypeChoices = new[] { NcProjType },
+                    });
+                    if (file?.TryGetLocalPath() is { } path)
+                    {
+                        IsEnabled = false;
+                        try { CloseApproved = await vm.SaveProjectAsync(path); }
+                        finally { IsEnabled = true; }
+                        if (CloseApproved) break;
+                    }
+                    continue;
+                }
+                return;
+            }
+            // Never re-enter Close from the initial synchronous Closing callback.
+            Dispatcher.UIThread.Post(Close);
+        }
+        catch (Exception ex)
+        {
+            IsEnabled = true;
+            await new InfoDialog(Loc.T("暂时无法关闭"), ex.Message).ShowDialog(this);
+        }
+        finally
+        {
+            _closePending = false;
+            if (!CloseApproved) vm.ResumeAfterCancelledClose();
+        }
+    }
+
+    private async void OnRetrySaveClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) await vm.FlushRollAsync();
+    }
+
+    private async void OnRestoreProjectReferencesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = Loc.T("选择原片或校正参考所在的目录"), AllowMultiple = false,
+        });
+        if (folders.FirstOrDefault()?.TryGetLocalPath() is not { } folder) return;
+        IsEnabled = false;
+        try { await vm.RestoreProjectReferencesAsync(folder); }
+        catch (Exception ex) { vm.StatusText = Loc.T("参考恢复失败：") + ex.Message; }
+        finally { IsEnabled = true; }
     }
 
     /// <summary>
@@ -2463,6 +2544,44 @@ public partial class MainWindow : Window
         if (path != null) await Vm.SaveProjectAsync(path);
     }
 
+    private async void OnProjectDependenciesClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { CanInspectProjectDependencies: true } vm) return;
+        string title = vm.CurrentRoll?.Title ?? "project";
+        try
+        {
+            var entries = await vm.InspectProjectDependenciesAsync();
+            if (_closePending || CloseApproved) return;
+            if (!await new ProjectDependenciesDialog(title, entries).ShowDialog<bool>(this)) return;
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = Loc.T("导出依赖清单"), DefaultExtension = "json",
+                SuggestedFileName = title + ".dependencies.json",
+                FileTypeChoices = new[] { new FilePickerFileType("JSON") { Patterns = new[] { "*.json" } } },
+            });
+            if (file?.TryGetLocalPath() is not { } path) return;
+            await Task.Run(() => ProjectDependencies.SaveManifest(path, title, entries));
+            vm.StatusText = Loc.T("依赖清单已保存：") + System.IO.Path.GetFileName(path);
+        }
+        catch (Exception ex) { vm.StatusText = Loc.T("无法生成依赖清单：") + ex.Message; }
+    }
+
+    private async void OnArchiveProjectClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { CanInspectProjectDependencies: true, IsBusy: false } vm) return;
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = Loc.T("选择归档存放位置（将在其中新建目录）"), AllowMultiple = false,
+        });
+        if (folders.FirstOrDefault()?.TryGetLocalPath() is not { } folder) return;
+        string destination = System.IO.Path.Combine(folder,
+            "OpenRevelare-archive-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6]);
+        if (await vm.ArchiveProjectAsync(destination) is not { } project || _closePending || CloseApproved) return;
+        await new InfoDialog(Loc.T("工程归档完成"),
+            Loc.T("原片、已声明的校正文件和自定义 LUT 已复制到新目录。请保留整个目录；project.ncproj 使用相对路径，checksums.json 提供文件 SHA-256 校验值。当前卷继续在原位置保存，归档是操作开始时的编辑快照。")
+            + "\n\n" + project).ShowDialog(this);
+    }
+
     private async void OnMigrateColorPipelineClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is null || !Vm.UsesLegacyColorPipeline) return;
@@ -2605,7 +2724,62 @@ public partial class MainWindow : Window
             AllowMultiple = false,
         });
         string? dir = folders.FirstOrDefault()?.TryGetLocalPath();
-        if (dir != null) await Vm.ExportRollAsync(dir, opt);
+        if (dir != null)
+        {
+            await Vm.ExportRollAsync(dir, opt);
+            if (!_closePending && !CloseApproved) await ShowBatchExportReportAsync();
+        }
+    }
+
+    private async void OnBatchExportReportClick(object? sender, RoutedEventArgs e) => await ShowBatchExportReportAsync();
+
+    private async Task ShowBatchExportReportAsync()
+    {
+        while (Vm is { HasLongTask: false, LastBatchExportJob: { } job } vm && !_closePending && !CloseApproved)
+        {
+            string State(BatchExportState state) => state switch
+            {
+                BatchExportState.Completed => Loc.T("完成"), BatchExportState.Failed => Loc.T("失败"),
+                BatchExportState.Skipped => Loc.T("跳过"), _ => Loc.T("未执行"),
+            };
+            int completed = job.Items.Count(i => i.State == BatchExportState.Completed);
+            int failed = job.Items.Count(i => i.State == BatchExportState.Failed);
+            int pending = job.Items.Count(i => i.State == BatchExportState.Pending);
+            int skipped = job.Items.Count(i => i.State == BatchExportState.Skipped);
+            string body = string.Join("\n\n", job.Items
+                .OrderBy(i => i.State switch
+                {
+                    BatchExportState.Failed => 0,
+                    BatchExportState.Pending => 1,
+                    BatchExportState.Skipped => 2,
+                    _ => 3,
+                })
+                .Select(i => string.Join("\n", new[]
+                {
+                    $"{State(i.State)} · {System.IO.Path.GetFileName(i.SourcePath)}",
+                    i.Error, i.Detail, i.OutputPath,
+                }.Where(line => !string.IsNullOrWhiteSpace(line)))));
+            body = Loc.T("重试会读取当前原片，沿用任务开始时的调整参数与输出路径。") + "\n\n" + body;
+            body = Loc.F($"卷：{job.RollTitle} · 开始于 {job.StartedAt:yyyy-MM-dd HH:mm:ss}")
+                + "\n" + job.OptionsSummary + "\n"
+                + Loc.F($"完成 {completed} · 失败 {failed} · 未执行 {pending} · 跳过 {skipped}")
+                + "\n\n" + body;
+            if (job.WasCancelled) body = Loc.T("导出已取消，已完成的文件已保留") + "\n\n" + body;
+            if (job.RecoveryBlockedReason.Length > 0) body = job.RecoveryBlockedReason + "\n\n" + body;
+            if (job.SystemError.Length > 0) body = job.SystemError + "\n\n" + body;
+            bool retry = false;
+            var dialog = new InfoDialog(Loc.T("批量导出结果"), body)
+                .WithSecondaryAction(Loc.T("打开输出目录"), () =>
+                {
+                    try { Process.Start(new ProcessStartInfo(job.Folder) { UseShellExecute = true }); }
+                    catch (Exception ex) { vm.StatusText = Loc.T("无法打开输出目录：") + ex.Message; }
+                });
+            dialog.Width = 620;
+            if (job.CanRetry) dialog.WithAction(Loc.T("重试失败和未执行项"), Loc.T("关闭"), () => retry = true);
+            await dialog.ShowDialog(this);
+            if (!retry) return;
+            await vm.RetryBatchExportAsync();
+        }
     }
 
     private async void OnContactSheetClick(object? sender, RoutedEventArgs e)

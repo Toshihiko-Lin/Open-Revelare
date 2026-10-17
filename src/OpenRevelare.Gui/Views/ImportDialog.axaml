@@ -7,17 +7,20 @@
         Background="{DynamicResource BgBrush}"
         Title="{i18n:T '新建项目 / 导入'}">
     <DockPanel Margin="16">
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
-                    Spacing="8" Margin="0,12,0,0">
-            <Button Content="{i18n:T '取消'}" Click="OnCancelClick" />
-            <Button Name="OkBtn" Content="{i18n:T '打开 →'}" Click="OnAcceptClick" IsEnabled="False" />
+        <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,12,0,0">
+            <TextBlock Name="ReadyHint" Classes="groupHint" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{i18n:T '取消'}" Click="OnCancelClick" />
+                <Button Name="OkBtn" Content="{i18n:T '导入 →'}" Click="OnAcceptClick" IsEnabled="False" />
+            </StackPanel>
         </StackPanel>
 
         <ScrollViewer>
             <StackPanel Spacing="12">
                 <!-- ── 文件 ─────────────────────────────────────────── -->
                 <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '底片文件'}" FontWeight="SemiBold" />
+                    <TextBlock Text="{i18n:T '底片文件'}" FontWeight="SemiBold"
+                               ToolTip.Tip="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
                     <ListBox Name="FileList" Height="140" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
                     <WrapPanel Orientation="Horizontal">
@@ -28,9 +31,10 @@
                         <TextBlock Name="CountLbl" Text="{i18n:T '0 张'}" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
                     </WrapPanel>
-                    <TextBlock Classes="groupHint" Text="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
                 </StackPanel>
 
+                <Expander Name="AdvancedImportSettings" Header="{i18n:T '高级导入设置（分割 / 光源 / 平场）'}" IsExpanded="False" HorizontalAlignment="Stretch">
+                <StackPanel Spacing="12" Margin="12,8,0,0">
                 <!-- ── 底片分割（仅扫描件）───────────────────────────── -->
                 <StackPanel Spacing="4">
                     <TextBlock Text="{i18n:T '底片分割（仅扫描件）'}" FontWeight="SemiBold" />
@@ -71,14 +75,18 @@
                     </Grid>
                 </StackPanel>
 
+                </StackPanel>
+                </Expander>
+
                 <!-- ── 自动整卷分析去色罩 ───────────────────────────── -->
                 <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '自动整卷分析去色罩'}" FontWeight="SemiBold" />
-                    <CheckBox Name="AutoInvertChk" Content="{i18n:T '导入后自动整卷分析去色罩'}"
+                    <TextBlock Text="{i18n:T '自动处理整卷底片'}" FontWeight="SemiBold" />
+                    <CheckBox Name="AutoInvertChk" Content="{i18n:T '导入后自动分析整卷（推荐）'}"
                               IsChecked="True"
                               ToolTip.Tip="{i18n:T '按顺序自动完成：片基 T_base、白平衡、D-max、黑白场。之后可手动重调任何一项。'}" />
                     <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '遍历整卷、汇总成一组参数应用到所有帧，同卷观感一致。当前帧会先出结果，整卷分析在后台继续——需要解码全卷，视帧数和机器约每帧数秒，完成前缩略图与参数仍会变动。不勾选则完全不做任何自动测量，所有参数保持默认值，全部交给你手动标定。'}" />
+                               Text="{i18n:T '后台分析完成后，画面可能更新。'}"
+                               ToolTip.Tip="{i18n:T '先显示当前帧，后台再统一分析整卷；完成前画面和缩略图可能更新。关闭后需手动标定。'}" />
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

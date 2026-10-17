@@ -4,39 +4,35 @@
 
 **修复**
 
-- **修复 HDR JPEG 在普通 SDR 查看器中的偏色。** SDR 基图保留自身的明暗，并以最终 HDR 主图为色彩依据，避免独立调色或移除 HDR 专用 LUT 后改变颜色。缩略图、印样与 HDR 卷的 SDR DNG 输出使用同一规则；已有照片需要重新导出。此项针对增益图 JPEG 的 SDR 回退，不改变 HDR HEIC 或浮点 TIFF 的读取要求。
-- **调色不再染色齿孔填白。** 齿孔和几何边角的填白在调色、LUT 和几何处理完成后应用，SDR/HDR、整帧预览、区域放大和导出均保持参考白。
-- **替换原片后不再复用旧像素。** 预览、缩略图、放大区域及导出缓存检查源文件版本，处理途中改变的原片不会发布过期结果。平场与设备校正参考改变时，要求显式重载或重新标定。
-- **批量同步失败时整组保持原样。** 标定、场景、方向、裁切、齿孔与批量粘贴先校验目标并准备结果，再统一应用；失败保留选择，成功一次撤销。修复只勾选当前帧时，方向同步误应用到整卷的问题。
+- **工程保存与重开更可靠。** 关闭时会等待保存；失败可重试或另存恢复副本。其他窗口修改同一工程时会提示冲突。LCC 等校正选择会保留，缺失原片或参考时会提醒并阻止错误导出。
+- **编辑与同步更安全。** 移除、添加和排序照片可撤销；整组同步失败不会留下半套修改。重定位原片会核对内容特征，避免误用同名文件。
+- **整卷导出可恢复。** 单张失败不会中断其他照片；重开工程后仍可查看结果，只重试未完成项目。工程或参考改变时会阻止沿用旧任务。
+- **修正颜色与缓存问题。** HDR JPEG 在普通 SDR 查看器中的颜色更准确，齿孔填白不再被调色染色；替换原片后不会继续显示旧预览。已有 HDR JPEG 需要重新导出。
 
 **新增与改进**
 
-- **导出保留 EXIF，并支持胶片设备库。** JPEG、HEIC、TIFF 和 DNG 默认保留源文件的标准 EXIF。导出弹窗可展开填写胶片拍摄信息，机身与镜头分别保存为本地下拉设备库；曝光和日期不保存为默认值。填写胶片信息后，照片管理软件显示胶片设备，原翻拍／扫描信息另存为 XMP 数字化来源，未填参数不混用翻拍数据。
-
-- **整理导出弹窗。** 格式改为两列选择卡片，按主窗口的 SDR/HDR 状态说明实际编码；色彩信息归入格式设置，文件名与重名策略合并，底部摘要和按钮始终可见。中英文与窄窗口布局同步调整。
-
-- **新增 HEIC 导出。** 单帧与整卷均支持 10-bit SDR（精确 ICC）及 HDR（BT.2020 PQ、参考白 203 nits）。可独立设置品质、缩放及文件大小上限。HDR HEIC 为直接 PQ 图像，需要支持 HDR HEIC 的查看器。随程序发行固定版本的 libheif / x265 编码器。
-- **空闲时预热相邻照片。** 复用已解码的预览，提前准备前后照片的处理结果、显示场景和直方图；最多保留两项，内存不足时清空，切帧、调参或耗时任务开始时取消后台准备。
-- **新增“第一卷”中英文指南。** 应用内帮助与首次启动可直接查看从导入、标定、调整到导出和恢复工程的流程，每步附完成标志与失败恢复方法。
-- **补充性能诊断。** 记录阶段耗时、P50/P95、缓存命中、取消和过期结果计数，并提供独立的生成 TIFF 组件基准与复现说明。组件测量不代表完整界面或真实 RAW 的性能。
+- **导出选择更直接。** 新增 HEIC，直接选择 JPEG、TIFF、DNG 等格式；胶片拍摄信息可在侧栏填写，HDR HEIC 需要兼容的查看器。
+- **工程可以连同原片归档。** 可一起保存原片、校正参考和自定义 LUT，并查看所需文件清单；取消或复制失败不会留下不完整的归档。
+- **智能色偏修正更易判断。** 最多分析 30 轮，结果稳定时提前结束；完成后直接提示结果，不确定时可检查画面、撤销或改用灰卡采样。
+- **常用界面更简洁。** 导入以添加照片为主，同步详情按需查看；导出摘要和保存失败提醒保持可见。“第一卷”指南补充了操作与恢复步骤。
+- **浏览更流畅。** 空闲时预热相邻照片，并补充性能诊断，便于定位预览卡顿。
 
 ---
 
 **Fixed**
 
-- **Corrected HDR JPEG colours in ordinary SDR viewers.** The SDR primary retains its tonal placement and takes colour from the finished HDR master, avoiding a different grade or a dropped HDR-only LUT. Thumbnails, contact sheets and SDR DNGs from HDR rolls share this rule. Existing files must be exported again. This fixes gain-map JPEG fallback; HDR HEIC and floating-point TIFF still require compatible readers.
-- **Colour adjustments no longer tint white sprocket fill.** Sprocket and geometry-corner fill is applied after grading, LUTs and geometry, preserving reference white in SDR/HDR, whole-frame previews, zoom regions and exports.
-- **Source replacements invalidate cached pixels.** Preview, thumbnail, zoom and export caches check source revisions and reject results computed while originals changed. Changed flat-field or device-calibration references require an explicit reload or recalibration.
-- **Batch sync failures leave the whole group unchanged.** Calibration, scene, orientation, crop, sprocket and batch-paste operations validate and prepare all targets before applying one undoable edit. Failed operations preserve the selection. Selecting only the current frame no longer applies orientation to the whole roll.
+- **More reliable project saves and reopening.** Closing waits for edits to save; failures allow retry or a recovery copy. Conflicting changes from another window are detected. Calibration choices are retained, while missing originals or references are reported before export.
+- **Safer editing and syncing.** Photo removal, addition and reordering can be undone. Failed group syncs leave existing edits intact. Relinking checks more than a matching filename.
+- **Recoverable roll exports.** One failed photo does not stop the rest. Reopen the project to review results and retry unfinished items; changed projects or references block stale retries.
+- **Corrected colour and cache issues.** HDR JPEG colours are more accurate in ordinary SDR viewers, white sprocket fill stays white, and replaced originals no longer show stale previews. Existing HDR JPEGs need re-exporting.
 
 **Added and improved**
 
-- **Preserve EXIF and remember film equipment.** JPEG, HEIC, TIFF and DNG keep portable source EXIF by default. An expandable film editor provides independent local camera/lens catalogs without reusing exposure or date defaults. Film details replace capture EXIF, while copy/scan metadata is archived separately in XMP.
-- **Reorganized export options.** Two-column format cards describe the actual SDR/HDR encoding. Colour settings sit with the format, naming and conflict handling are grouped, and the summary and buttons stay visible in Chinese, English and narrow windows.
-- **Added HEIC export.** Single-frame and roll exports support 10-bit SDR with exact ICC and HDR in BT.2020 PQ (203-nit reference white), with separate quality, resizing and file-size limits. HDR HEIC is a direct PQ image requiring a compatible viewer. Pinned libheif / x265 encoders are bundled with the app.
-- **Prepare adjacent photos while idle.** Reuses decoded previews to prepare neighbouring renders, canonical scenes and histograms. Retention is bounded to two entries, cleared under memory pressure, and background work is cancelled on navigation, edits or long tasks.
-- **Added a bilingual First roll guide.** Onboarding and in-app help cover importing, calibration, adjustments, export and project recovery, with completion checks and recovery steps.
-- **Added structured performance diagnostics.** Phase timings, P50/P95, cache hits, cancellations and stale-result counters accompany a reproducible synthetic-TIFF component benchmark. Component measurements do not represent full UI or real-RAW performance.
+- **Easier export choices.** Added HEIC alongside direct JPEG, TIFF and DNG selection. Film capture details can be entered in a side panel. HDR HEIC needs a compatible viewer.
+- **Portable project archives.** Save originals, calibration references and custom LUTs with the project, and review its required files. Cancelled or failed copies do not leave incomplete archives.
+- **Clearer smart color-cast correction.** Analysis can run for up to 30 rounds and stops early when stable. Uncertain results offer clear advice to inspect, undo or use a grey card.
+- **Less clutter in common tasks.** Import focuses on adding photos, sync details appear on demand, and export summaries and save failures remain visible. The First roll guide covers the workflow and recovery.
+- **Smoother browsing.** Adjacent photos are prepared while idle, with added diagnostics to investigate preview delays.
 
 ## v1.8.5.1（2026-10-14）
 

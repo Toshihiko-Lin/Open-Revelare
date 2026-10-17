@@ -13,6 +13,9 @@ internal static class CalibrationSources
         Sources.AddOrUpdate(value, sources);
         return value;
     }
+    internal static bool IsCurrent(object? value) => value is null ||
+        !Sources.TryGetValue(value, out var snapshot) || snapshot.IsCurrent;
+
     internal static void RequireCurrent(FrameParams p)
     {
         foreach (object? value in new object?[] { p.LccFlatField, p.DecoupleMatrix, p.DecoupleChromaMatrix })

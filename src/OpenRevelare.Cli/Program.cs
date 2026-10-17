@@ -649,6 +649,11 @@ static int Run(string[] args)
                             $"exact ICC {rendered.OutputProfile.Description}) "
                             + $"in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
+        if (opts.ContainsKey("bench"))
+        {
+            using var process = Process.GetCurrentProcess();
+            Console.WriteLine($"peak working set: {process.PeakWorkingSet64 / 1048576.0:F1} MiB");
+        }
         return 0;
     }
     catch (Exception ex)

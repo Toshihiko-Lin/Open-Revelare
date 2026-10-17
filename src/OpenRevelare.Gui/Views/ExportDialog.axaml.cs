@@ -241,7 +241,8 @@ public partial class ExportDialog : Window
             JpegQuality = (int)QualitySlider.Value,
             HeicQuality = (int)HeicQualitySlider.Value,
             KeepSourceExif = KeepExifChk.IsChecked == true,
-            FilmCapture = FilmInfoChk.IsChecked == true ? CollectFilmCapture() : null,
+            FilmCapture = FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
+                ? CollectFilmCapture() : null,
             // Carried, not chosen: the render already landed in this space, at this limit.
             ColorSpace = _space.Name,
             HdrLimitStops = _hdrLimitStops,
@@ -288,18 +289,20 @@ public partial class ExportDialog : Window
             || JpegQualityRow is null || HeicQualityRow is null
             || JpegFormatDetail is null || HeicFormatDetail is null || TiffFormatDetail is null
             || KeepExifChk is null || FilmInfoChk is null || FilmEditorGroup is null
-            || FilmCopyrightBox is null || ExifErrorLbl is null) return;
+            || FilmCopyrightBox is null || ExifErrorLbl is null || FilmInfoEntry is null) return;
 
         bool jpeg = FmtJpeg.IsChecked == true;
         bool heic = FmtHeic.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
+        FilmInfoEntry.Content = FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
+            ? Loc.T("编辑胶片拍摄信息（已填写） →")
+            : Loc.T("编辑胶片拍摄信息 →");
         TiffGroup.IsVisible = !jpeg && !dng && !heic;
         JpegGroup.IsVisible = jpeg || heic;
         JpegQualityRow.IsVisible = jpeg;
         HeicQualityRow.IsVisible = heic;
         if ((jpeg || dng || heic) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         bool linear = LinearChk.IsChecked == true;
-        FilmEditorGroup.IsVisible = FilmInfoChk.IsChecked == true;
         JpegFormatDetail.Text = IsHdr ? Loc.T("HDR 增益图 · 兼容 SDR") : Loc.T("分享 · 广泛兼容");
         HeicFormatDetail.Text = IsHdr ? Loc.T("HDR PQ · 10-bit 高效压缩") : Loc.T("10-bit · 高效压缩");
         TiffFormatDetail.Text = IsHdr || linear ? Loc.T("32-bit float · 线性母版") : Loc.T("16-bit · 无损存档");
@@ -344,6 +347,7 @@ public partial class ExportDialog : Window
         HdrBaseGroup.IsVisible = gainMap;
         SpaceRow.IsVisible = !gainMap;
 
+        ExportOptions selected = Collect();
         FormatHint.Text = dng
             ? Loc.T("在 Lightroom / Camera Raw 中继续调色；反相与帧编辑已烘焙，不含显示曲线。")
                 + (IsHdr ? " " + Loc.T("HDR 卷按 SDR 写出。") : "")
@@ -352,9 +356,11 @@ public partial class ExportDialog : Window
                 : Loc.T("体积较小，适合支持 HEIC 的相册与设备。"))
             : jpeg
             ? (IsHdr ? Loc.T("普通查看器显示 SDR，支持增益图的 HDR 查看器可还原高光。")
-                : Loc.T("适合直接分享，兼容照片查看器和网页。"))
+                : selected.ResolvedColorSpace != ColorSpaces.Srgb
+                    ? Loc.F($"JPEG 沿用本卷的 {selected.ColorSpace}；如需 sRGB，请先在编辑器中明确切换整卷渲染空间。")
+                    : Loc.T("适合直接分享，兼容照片查看器和网页。"))
             : linear
-            ? Loc.T("场景线性 ACEScg 中间文件，用于外部调色。")
+            ? Loc.T("场景线性 ACEScg TIFF 不包含成片调整；归档时仍需保留原片、工程和参考。")
             : IsHdr
             ? Loc.T("保留扩展范围与色域，适合存档或继续后期处理。")
             : Loc.T("无损保留成片层次，适合存档或继续修图。");
@@ -371,7 +377,7 @@ public partial class ExportDialog : Window
                 ? Loc.T("线性扩展 sRGB，不裁色域；输出空间不参与。")
                 : Loc.F($"{DisplayName(_space)}，在主窗口选定。");
 
-        SummaryLbl.Text = Collect().Summary();
+        SummaryLbl.Text = selected.Summary();
     }
     private void OnFormatChanged(object? sender, RoutedEventArgs e) => SyncEnabledState();
     /// <summary>
@@ -436,11 +442,13 @@ public partial class ExportDialog : Window
     private void OnQualityChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
         => SyncEnabledState();
 
+    private void OnOpenFilmInfoClick(object? sender, RoutedEventArgs e) => FilmInfoDrawer.IsPaneOpen = true;
+    private void OnCloseFilmInfoClick(object? sender, RoutedEventArgs e) => FilmInfoDrawer.IsPaneOpen = false;
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
     private static void LoadDevices(ComboBox box, List<CaptureDevice> devices)
     {
-        box.Items.Add(new ComboBoxItem { Content = Loc.T("手动填写／新设备") });
+        box.Items.Add(new ComboBoxItem { Content = Loc.T("手动填写") });
         foreach (CaptureDevice device in devices)
             box.Items.Add(new ComboBoxItem { Content = device.Label, Tag = device });
         box.SelectedIndex = 0;
@@ -456,6 +464,28 @@ public partial class ExportDialog : Window
         Copyright = FilmCopyrightBox.Text?.Trim() ?? "",
     };
 
+    private bool HasFilmCaptureDetails()
+    {
+        FilmCaptureMetadata film = CollectFilmCapture();
+        return !film.Camera.IsEmpty || !film.Lens.IsEmpty
+            || !string.IsNullOrWhiteSpace(film.Camera.SerialNumber)
+            || !string.IsNullOrWhiteSpace(film.Lens.SerialNumber)
+            || !string.IsNullOrWhiteSpace(film.Iso)
+            || !string.IsNullOrWhiteSpace(film.FNumber)
+            || !string.IsNullOrWhiteSpace(film.ExposureTime)
+            || !string.IsNullOrWhiteSpace(film.FocalLength)
+            || !string.IsNullOrWhiteSpace(film.DateTimeOriginal)
+            || !string.IsNullOrWhiteSpace(film.Artist)
+            || !string.IsNullOrWhiteSpace(film.Copyright);
+    }
+
+    private void EnableFilmInfoIfEdited()
+    {
+        if (!_applyingDevice && FilmInfoChk is not null && FilmCopyrightBox is not null
+            && HasFilmCaptureDetails())
+            FilmInfoChk.IsChecked = true;
+    }
+
     private void ApplyDevice(ComboBox box, TextBox make, TextBox model, TextBox serial)
     {
         if (box.SelectedItem is not ComboBoxItem { Tag: CaptureDevice device }) return;
@@ -466,24 +496,33 @@ public partial class ExportDialog : Window
     }
 
     private void OnCameraSelected(object? sender, SelectionChangedEventArgs e)
-        => ApplyDevice(CameraLibraryBox, CameraMakeBox, CameraModelBox, CameraSerialBox);
+    {
+        ApplyDevice(CameraLibraryBox, CameraMakeBox, CameraModelBox, CameraSerialBox);
+        EnableFilmInfoIfEdited();
+    }
     private void OnLensSelected(object? sender, SelectionChangedEventArgs e)
-        => ApplyDevice(LensLibraryBox, LensMakeBox, LensModelBox, LensSerialBox);
+    {
+        ApplyDevice(LensLibraryBox, LensMakeBox, LensModelBox, LensSerialBox);
+        EnableFilmInfoIfEdited();
+    }
     private void OnCameraEdited(object? sender, TextChangedEventArgs e)
     {
         if (!_applyingDevice && CameraLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
             && device != CollectFilmCapture().Camera) CameraLibraryBox.SelectedIndex = 0;
+        EnableFilmInfoIfEdited();
         SyncEnabledState();
     }
     private void OnLensEdited(object? sender, TextChangedEventArgs e)
     {
         if (!_applyingDevice && LensLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
             && device != CollectFilmCapture().Lens) LensLibraryBox.SelectedIndex = 0;
+        EnableFilmInfoIfEdited();
         SyncEnabledState();
     }
     private void OnFilmFieldChanged(object? sender, TextChangedEventArgs e)
     {
         if (ExifErrorLbl is not null) ExifErrorLbl.IsVisible = false;
+        EnableFilmInfoIfEdited();
         SyncEnabledState();
     }
 
@@ -503,7 +542,7 @@ public partial class ExportDialog : Window
                 _ => ex.Message,
             };
             ExifErrorLbl.IsVisible = true;
-            ExifEditor.IsExpanded = true;
+            FilmInfoDrawer.IsPaneOpen = true;
             Dispatcher.UIThread.Post(() => ExifErrorLbl.BringIntoView(), DispatcherPriority.Loaded);
             return;
         }

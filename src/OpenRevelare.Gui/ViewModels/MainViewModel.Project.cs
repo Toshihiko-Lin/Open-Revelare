@@ -260,16 +260,23 @@ public partial class MainViewModel
     /// <summary>Write a COPY of the roll to an arbitrary path (「另存工程副本」). The open roll
     /// keeps autosaving to its own project file — this is for handing a roll to someone else or
     /// parking a variant, not for saving your work.</summary>
-    public async Task SaveProjectAsync(string path)
+    public async Task<bool> SaveProjectAsync(string path)
     {
-        if (Frames.Count == 0) return;
+        if (Frames.Count == 0) return false;
+        // The copy picker can be pointed at the open project's own path. In that case use the
+        // guarded autosave, otherwise a stale editor could bypass the conflict check.
+        if (_roll is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(_roll.ProjectPath),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            return await FlushRollAsync();
         Project.Data data = BuildProjectData();
         try
         {
             await Task.Run(() => Project.Save(path, data));
+            RememberSourceFingerprints(data);
             StatusText = Loc.T("工程副本已保存：") + Path.GetFileName(path);
+            return true;
         }
-        catch (Exception ex) { StatusText = Loc.T("工程保存失败：") + ex.Message; }
+        catch (Exception ex) { StatusText = Loc.T("工程保存失败：") + ex.Message; return false; }
     }
 
     /// <summary>Open a .ncproj: recompute roll-level ops from the stored calibration source paths,
@@ -281,7 +288,8 @@ public partial class MainViewModel
         IsBusy = true;
         StatusText = Loc.T("正在打开工程 …");
         Project.Data data;
-        try { data = await Task.Run(() => Project.Load(path)); }
+        string loadedRevision;
+        try { (data, loadedRevision) = await Task.Run(() => Project.LoadWithRevision(path)); }
         catch (Exception ex) { StatusText = Loc.T("打开工程失败：") + ex.Message; IsBusy = false; return; }
         if (data.Frames.Count == 0) { StatusText = Loc.T("工程为空"); IsBusy = false; return; }
 
@@ -298,6 +306,8 @@ public partial class MainViewModel
             ? new[] { r["R"], r.GetValueOrDefault("G", ""), r.GetValueOrDefault("B", "") }
             : null;
         string? incomingLccSourcePath = data.Meta.LccPath;
+        bool incomingLccEnabled = data.Meta.LccEnabled ?? data.Frames[0].LccEnabled
+            ?? !string.IsNullOrEmpty(incomingLccSourcePath);
 
         // Before anything reads pixels: the negatives may have moved since this was saved.
         bool relinked = await RelinkIfMissingAsync(data);
@@ -318,6 +328,8 @@ public partial class MainViewModel
                         incomingLccSourcePath, incomingPipelineVersion, incomingTiffInputAssumption,
                         contentPaths.Count > 0 && RawDecode.IsRawExtension(contentPaths[0]));
                 }
+                else if (!string.IsNullOrEmpty(incomingLccSourcePath))
+                    lccWarning = Loc.T("参考文件缺失：") + incomingLccSourcePath;
             }
             catch (Exception ex)
             {
@@ -338,14 +350,16 @@ public partial class MainViewModel
                     rgb = new[] { rp, gp, bp };
                     incomingCalRgbPaths = rgb;
                 }
-                if (rgb is not null)
+                if (data.Meta.SourcePath == "A" && rgb is null)
+                    calibrationWarning = Loc.T("RGB 校正参考缺失，请重新定位参考后重新打开工程。");
+                if (data.Meta.SourcePath == "A" && rgb is not null)
                     (dm, cm) = CalibratePathA(
                         rgb,
                         contentPaths,
                         incomingPipelineVersion,
                         incomingTiffInputAssumption,
                         cachePreviews: false,
-                        lcc);
+                        incomingLccEnabled ? lcc : null);
             }
             catch (Exception ex)
             {
@@ -374,12 +388,15 @@ public partial class MainViewModel
         _roll = null;
         _rollDirty = false;
         _sheetDirty = false;
+        SetSaveState(ProjectSaveState.None);
 
         SetColorPipelineVersion(incomingPipelineVersion);
+        _useRelativeProjectPaths = data.UseRelativePaths;
         SetTiffInputAssumption(incomingTiffInputAssumption);
         // 旧模型的工程载入后画面会变——面板顶部据此提示重跑标定。
         NeedsRecalibration = data.NeedsRecalibration;
         _calSourceDir = incomingCalSourceDir;
+        _declaredPathA = data.Meta.SourcePath == "A";
         _calRgbPaths = incomingCalRgbPaths;
         _lccSourcePath = incomingLccSourcePath;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
@@ -443,18 +460,23 @@ public partial class MainViewModel
         _reordering = true;
         try
         {
+            // Reopening is an explicit reload of external colour references. A normal frame
+            // switch never does this: it must keep the last admitted LUT until the user acts.
+            foreach (string lut in data.Frames.Select(f => f.Params.PrintLut).Distinct())
+                if (!string.IsNullOrEmpty(lut) && !PrintLuts.IsBuiltin(lut)) PrintLuts.Forget(lut);
             Frames.Clear();
             foreach (Project.Frame pf in data.Frames)
             {
                 FrameParams fp = pf.Params;
                 fp.DecoupleMatrix = dm; fp.DecoupleMode = DecoupleMode.Linear; fp.DecoupleChromaMatrix = cm;
-                fp.LccFlatField = lcc;   // roll-uniform (matches import); global toggle gates it
-                Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual) { Params = fp });
+                fp.LccFlatField = incomingLccEnabled ? lcc : null;
+                Frames.Add(new RollFrame(pf.SourcePath, pf.IsVirtual)
+                    { Params = fp, SourceFingerprint = pf.SourceFingerprint });
             }
             CurrentFrame = null;   // so the assignment below is a real change, not a no-op
         }
         finally { _reordering = false; }
-        LccEnabled = lcc is not null;
+        LccEnabled = incomingLccEnabled;
         RefreshSplitPaths();        // reopened split rolls get the sharp region previews too
         IsBusy = false;
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync → decode + LoadParams + render
@@ -463,6 +485,12 @@ public partial class MainViewModel
         // entry's frame count is the real one.
         _autoSave.Discard();
         AdoptProject(path);
+        _savedProjectRevision = loadedRevision;
+        bool recoveredBatch = RestoreBatchJob(path);
+        SetSaveState(ProjectSaveState.Saved);
+        _lastSaved = File.GetLastWriteTime(path);
+        OnPropertyChanged(nameof(SaveStatusDetail));
+        NotifyProjectDependencies();
         if (relinked) MarkRollDirty();   // the repaired paths, written back on the next idle pause
 
         // Opening a DIFFERENT project must offer its own migration again — the dismissal is about
@@ -473,6 +501,10 @@ public partial class MainViewModel
 
         RefreshTiffInputDetection();
         StatusText = Loc.F($"工程已打开：{Path.GetFileName(path)}（{Frames.Count} 帧）");
+        if (recoveredBatch)
+            StatusText += LastBatchExportJob?.RecoveryBlockedReason.Length > 0
+                ? Loc.T(" · 上次批量导出需检查（文件 → 查看上次批量导出结果）")
+                : Loc.T(" · 上次批量导出可查看或重试（文件 → 查看上次批量导出结果）");
         if (calibrationWarning is not null)
             StatusText += Loc.T(" · Path A 标定重算失败，已按无解耦打开：") + calibrationWarning;
         if (lccWarning is not null)
@@ -551,6 +583,7 @@ public partial class MainViewModel
 
         // Retain calibration SOURCE paths so a saved .ncproj can recompute matrices on load.
         _calSourceDir = cfg.PathA ? cfg.CalDir : null;
+        _declaredPathA = cfg.PathA;
         _calRgbPaths = calRgb;
         _lccSourcePath = (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath)) ? cfg.LccPath : null;
 
@@ -785,6 +818,8 @@ public partial class MainViewModel
         _rollDirty = false;
         _sheetDirty = false;
         SetColorPipelineVersion(ColorPipelineVersion.ManagedV2);
+        _useRelativeProjectPaths = false;
+        SetSaveState(ProjectSaveState.None);
         // Startup/automation can call this lower-level entry without the import dialog. It may
         // open a profiled TIFF, but an untagged one must fail closed instead of inheriting the
         // previous roll's choice. LoadRollWithConfigAsync sets the deliberate choice first.
@@ -804,6 +839,7 @@ public partial class MainViewModel
         _pendingSprocketPrompt = true;
         if (!_configLoad)   // config path pre-sets roll-level ops before this call; don't wipe them
         {
+            _declaredPathA = false;
             _decoupleMatrix = null; _decoupleChromaMatrix = null;
             _calSourceDir = null; _calRgbPaths = null; _lccSourcePath = null;
             _lccFlatField = null; LccAvailable = false; LccEnabled = false;
@@ -992,7 +1028,7 @@ public partial class MainViewModel
         _suppressRender = true;
         // Stage 1 — lens / sprocket / intent
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
-        LccEnabled = p.LccFlatField != null;
+        // A missing runtime buffer must not erase the roll's declared enable choice.
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
         DustEnabled = p.DustEnabled;
         _dustSpots = new List<DustSpot>(p.DustSpots);

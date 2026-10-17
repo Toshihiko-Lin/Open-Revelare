@@ -53,6 +53,8 @@ public partial class ImportDialog : Window
 
     public ObservableCollection<string> Files { get; } = new();
     public ImportConfig? Result { get; private set; }
+    private bool _calValid;
+    private bool _calChecking;
 
     public ImportDialog()
     {
@@ -61,10 +63,11 @@ public partial class ImportDialog : Window
         // Opens on whatever the last import chose (OnAcceptClick writes them back).
         AutoInvertChk.IsChecked = Settings.Current.AutoInvertOnImport;
         SplitChk.IsChecked = Settings.Current.SplitStripsOnImport;
+        AdvancedImportSettings.IsExpanded = SplitChk.IsChecked == true;
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
-            UpdateTiffAdmissionUi();
+            UpdateReadyUi();
         };
     }
 
@@ -105,9 +108,28 @@ public partial class ImportDialog : Window
     /// on convention — a decision the user can actually judge, because by then the picture is on
     /// screen. Asking upfront taxed every import for a minority of files.
     /// </summary>
-    private void UpdateTiffAdmissionUi() => OkBtn.IsEnabled = Files.Count > 0;
+    private void UpdateReadyUi()
+    {
+        if (OkBtn is null || ReadyHint is null) return;
+        string issue = MissingReference(SrcA.IsChecked == true, _calValid, _calChecking,
+            LccChk.IsChecked == true, LccEdit.Text);
+        OkBtn.IsEnabled = Files.Count > 0 && issue.Length == 0;
+        ReadyHint.Text = issue;
+    }
 
-    private void OnSourceChanged(object? sender, RoutedEventArgs e) => CalRow.IsVisible = SrcA.IsChecked == true;
+    internal static string MissingReference(bool pathA, bool calValid, bool calChecking,
+        bool lccEnabled, string? lccPath) => pathA && !calValid
+            ? calChecking ? Loc.T("正在识别 R/G/B 校正图…") : Loc.T("请先选择有效的 R/G/B 校正图目录。")
+            : lccEnabled && !File.Exists(lccPath)
+                ? Loc.T("请先选择 LCC 平场参考图。") : "";
+
+    private void OnSourceChanged(object? sender, RoutedEventArgs e)
+    {
+        if (CalRow is null) return;
+        CalRow.IsVisible = SrcA.IsChecked == true;
+        if (SrcA.IsChecked == true) AdvancedImportSettings.IsExpanded = true;
+        UpdateReadyUi();
+    }
 
     private async void OnPickCal(object? sender, RoutedEventArgs e)
     {
@@ -115,15 +137,26 @@ public partial class ImportDialog : Window
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
         CalEdit.Text = dir;
         CalDetect.Text = Loc.T("识别中 …");
+        _calValid = false;
+        _calChecking = true;
+        UpdateReadyUi();
         try
         {
             var r = await Task.Run(() => DecoupleCalibration.AutoIdentifyRgbFiles(dir));
+            _calValid = true;
             CalDetect.Text = Loc.F($"识别到  R: {Path.GetFileName(r.R)}   G: {Path.GetFileName(r.G)}   B: {Path.GetFileName(r.B)}");
         }
         catch (Exception ex) { CalDetect.Text = Loc.T("识别失败：") + ex.Message; }
+        finally { _calChecking = false; UpdateReadyUi(); }
     }
 
-    private void OnLccToggled(object? sender, RoutedEventArgs e) => LccRow.IsVisible = LccChk.IsChecked == true;
+    private void OnLccToggled(object? sender, RoutedEventArgs e)
+    {
+        if (LccRow is null) return;
+        LccRow.IsVisible = LccChk.IsChecked == true;
+        if (LccChk.IsChecked == true) AdvancedImportSettings.IsExpanded = true;
+        UpdateReadyUi();
+    }
 
     private async void OnPickLcc(object? sender, RoutedEventArgs e)
     {
@@ -138,12 +171,15 @@ public partial class ImportDialog : Window
             },
         });
         if (picked.FirstOrDefault()?.TryGetLocalPath() is { } p) LccEdit.Text = p;
+        UpdateReadyUi();
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
     private async void OnAcceptClick(object? sender, RoutedEventArgs e)
     {
+        UpdateReadyUi();
+        if (!OkBtn.IsEnabled) return;
         // Scans and camera RAW take different routes through the pipeline — a scan may hold a
         // whole strip and gets the split pre-pass, a RAW is one frame and does not — and a roll
         // mixing them would be half-processed either way. Rejecting the mix here is clearer than

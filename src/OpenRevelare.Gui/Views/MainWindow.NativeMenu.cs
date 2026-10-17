@@ -109,9 +109,12 @@ public partial class MainWindow
                 Item(Loc.T("打开工程…"), OnOpenProjectClick),
                 Item(Loc.T("扫描文件夹加入目录…"), OnScanFolderClick),
                 Bind(Item(Loc.T("另存工程副本…"), OnSaveProjectClick), nameof(Vm.HasImage)),
+                Bind(Item(Loc.T("查看工程依赖…"), OnProjectDependenciesClick), nameof(Vm.CanInspectProjectDependencies)),
+                Bind(Item(Loc.T("归档工程与原片…"), OnArchiveProjectClick), nameof(Vm.CanInspectProjectDependencies)),
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("导出当前帧…"), OnExportClick, gesture: "E"), nameof(Vm.HasImage)),
                 Bind(Item(Loc.T("导出整卷…"), OnExportRollClick), nameof(Vm.HasImage)),
+                Bind(Item(Loc.T("查看上次批量导出结果…"), OnBatchExportReportClick), nameof(Vm.CanShowBatchExportReport)),
                 Bind(Item(Loc.T("导出印样…"), OnContactSheetClick), nameof(Vm.HasImage)),
             },
         };

@@ -21,6 +21,40 @@ public partial class MainViewModel
     [ObservableProperty] private bool _hasCalClipboard;
     [ObservableProperty] private bool _hasSceneClipboard;
 
+    /// <summary>Context for roll-wide actions, shown before the user applies either one.</summary>
+    private string RollBroadcastHint => CurrentFrame is { } source
+        ? Loc.F($"来自 {source.FileName} → 其余 {Math.Max(0, Frames.Count - 1)} 帧 · 可撤销")
+        : "";
+    public string CalibrationBroadcastHint => RollBroadcastHint.Length == 0 ? "" :
+        RollBroadcastHint + "\n" + Loc.T("同步：") + string.Join("、", new[]
+        {
+            Sync.CalFilmBase ? Loc.T("片基与端点") : "",
+            Sync.CalChroma ? Loc.T("色度") : "",
+            Sync.CalLens ? Loc.T("镜头与平场") : "",
+            Loc.T("整卷输出意图"),
+        }.Where(s => s.Length > 0));
+    public string SceneBroadcastHint => RollBroadcastHint.Length == 0 ? "" :
+        RollBroadcastHint + "\n" + Loc.T("同步：") + (string.Join("、", new[]
+        {
+            Sync.SceneWb ? Loc.T("白平衡") : "",
+            Sync.SceneExposure ? Loc.T("曝光") : "",
+            Sync.SceneTone ? Loc.T("影调") : "",
+            Sync.SceneCurves ? Loc.T("曲线") : "",
+        }.Where(s => s.Length > 0)) is { Length: > 0 } selected ? selected : Loc.T("未选择同步项"));
+
+    private void NotifyRollBroadcastHints()
+    {
+        OnPropertyChanged(nameof(CalibrationBroadcastHint));
+        OnPropertyChanged(nameof(SceneBroadcastHint));
+    }
+    private bool HasSceneSyncGroups => Sync.SceneWb || Sync.SceneExposure || Sync.SceneTone || Sync.SceneCurves;
+    private bool CheckSceneSyncGroups(bool scene)
+    {
+        if (!scene || HasSceneSyncGroups) return true;
+        StatusText = Loc.T("未选择成片调整同步项，请在编辑菜单中选择。");
+        return false;
+    }
+
     /// <summary>Copy Stage-1 calibration (per SyncOptions) from the current frame to every other frame.</summary>
     public void ApplyCalibrationToRoll() => Broadcast(cal: true, scene: false, onlySelected: false, Loc.T("标定"));
 
@@ -66,6 +100,7 @@ public partial class MainViewModel
     {
         if (CurrentFrame is null) return;
         if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
+        if (!CheckSceneSyncGroups(scene)) return;
         CommitUndo();   // close the previous edit as its own undo step
 
         // Through the live controls, not the stored params: the live values are the truth for
@@ -141,6 +176,7 @@ public partial class MainViewModel
     private void Broadcast(bool cal, bool scene, bool onlySelected, string what)
     {
         if (CurrentFrame is null) return;
+        if (!CheckSceneSyncGroups(scene)) return;
         FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);   // never store a suppressed crop
         var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
                                         && (!onlySelected || f.IsSelected)).ToList();
@@ -153,6 +189,7 @@ public partial class MainViewModel
     private void Paste(FrameParams? clip, bool cal, bool scene, string what)
     {
         if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
+        if (!CheckSceneSyncGroups(scene)) return;
         var targets = Frames.Where(f => f.IsSelected && !ReferenceEquals(f, CurrentFrame)).ToList();
         if (!TryApplyBatch(targets, d => CopyGroups(clip, d, cal, scene))) return;
         int n = targets.Count;

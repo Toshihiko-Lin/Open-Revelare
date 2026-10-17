@@ -36,7 +36,7 @@
             <Button Name="ActionButton" IsVisible="False" Click="OnActionClick" Margin="6,0,0,6" />
         </WrapPanel>
         <ScrollViewer>
-            <TextBlock Name="BodyText" TextWrapping="Wrap" LineHeight="20" />
+            <SelectableTextBlock Name="BodyText" TextWrapping="Wrap" LineHeight="20" />
         </ScrollViewer>
     </DockPanel>
 </Window>

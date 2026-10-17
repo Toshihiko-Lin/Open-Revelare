@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
 
+using System.Runtime.CompilerServices;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -18,6 +20,42 @@ namespace OpenRevelare.Core;
 public static class PrintLuts
 {
     private static readonly ConcurrentDictionary<string, CubeLut?> Cache = new();
+    private sealed record Revision(string Path, long Length, long Modified, long Created);
+    private static readonly ConditionalWeakTable<CubeLut, Revision> Revisions = new();
+
+    private static Revision RevisionOf(string path)
+    {
+        var file = new FileInfo(path);
+        return new Revision(file.FullName, file.Length, file.LastWriteTimeUtc.Ticks, file.CreationTimeUtc.Ticks);
+    }
+
+    /// <summary>Validate a candidate without changing the active render cache. Recovery can be
+    /// cancelled or fail later, so parsing must not itself publish a different colour basis.</summary>
+    public static CubeLut ReadDetached(string path)
+    {
+        if (IsBuiltin(path)) return LoadBuiltin(path);
+        Revision before = RevisionOf(path);
+        CubeLut lut = CubeLut.Load(path);
+        if (before != RevisionOf(path)) throw new IOException(CoreText.T("读取期间 LUT 已更改，请重试。"));
+        Revisions.Add(lut, before);
+        return lut;
+    }
+
+    public static bool IsCurrent(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return true;
+        CubeLut? lut = Resolve(path);
+        if (lut is null) return false;
+        if (IsBuiltin(path)) return true;
+        try { return Revisions.TryGetValue(lut, out var revision) && revision == RevisionOf(path); }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    public static void RequireCurrent(string? path)
+    {
+        if (!IsCurrent(path)) throw new IOException(CoreText.T("LUT 不可用或已更改，请显式重载后重试：") + path);
+    }
 
     /// <summary>
     /// The two stocks embedded in the assembly, keyed by the sentinel projects written before
@@ -152,7 +190,7 @@ public static class PrintLuts
         if (string.IsNullOrWhiteSpace(path)) return null;
         return Cache.GetOrAdd(path, static p =>
         {
-            try { return IsBuiltin(p) ? LoadBuiltin(p) : CubeLut.Load(p); }
+            try { return ReadDetached(p); }
             catch { return null; }
         });
     }
@@ -163,7 +201,7 @@ public static class PrintLuts
     /// </summary>
     public static CubeLut Validate(string path)
     {
-        var lut = IsBuiltin(path) ? LoadBuiltin(path) : CubeLut.Load(path);
+        var lut = ReadDetached(path);
         Cache[path] = lut;
         return lut;
     }

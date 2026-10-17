@@ -46,6 +46,10 @@
                                   ToolTip.Tip="{i18n:T '找出该文件夹（含子文件夹）里所有 .ncproj 并登记到图库；目录丢了也能这样重建'}" />
                         <MenuItem Header="{i18n:T '另存工程副本…'}" Click="OnSaveProjectClick" IsEnabled="{Binding HasImage}"
                                   ToolTip.Tip="{i18n:T '当前卷会自动保存；这里是导出一份副本'}" />
+                        <MenuItem Header="{i18n:T '查看工程依赖…'}" Click="OnProjectDependenciesClick"
+                                  IsEnabled="{Binding CanInspectProjectDependencies}" />
+                        <MenuItem Header="{i18n:T '归档工程与原片…'}" Click="OnArchiveProjectClick"
+                                  IsEnabled="{Binding CanInspectProjectDependencies}" />
                         <Separator />
                         <MenuItem Header="{i18n:T '导出当前帧…'}" InputGesture="{i18n:Accel 'E'}"
                                   Click="OnExportClick" IsEnabled="{Binding HasImage}">
@@ -54,6 +58,8 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" IsEnabled="{Binding HasImage}" />
+                        <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
+                                  IsEnabled="{Binding CanShowBatchExportReport}" />
                         <MenuItem Header="{i18n:T '导出印样…'}" Click="OnContactSheetClick" IsEnabled="{Binding HasImage}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoGrid}" />
@@ -261,7 +267,7 @@
         <!-- ── Status bar ──────────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Bottom" Padding="10,4" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
                 <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="80" Height="3" Margin="0,0,10,0"
                              IsVisible="{Binding ShowProgress}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding DisplayStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
@@ -269,6 +275,11 @@
                 <Button Grid.Column="2" Content="{i18n:T '取消'}" Click="OnCancelLongTaskClick"
                         IsVisible="{Binding HasLongTask}" IsEnabled="{Binding CanCancelLongTask}"
                         Padding="6,1" MinHeight="0" Margin="8,0,0,0" FontSize="{DynamicResource FontXs}" />
+                <Button Grid.Column="5" Classes="saveStatus" Classes.warning="{Binding SaveNeedsAttention}"
+                        Content="{Binding SaveStatusText}" Click="OnRetrySaveClick"
+                        IsVisible="{Binding HasSaveStatus}"
+                        ToolTip.Tip="{Binding SaveStatusDetail}" Padding="6,1" MinHeight="0"
+                        FontSize="{DynamicResource FontXs}" Margin="8,0,0,0" />
                 <!-- Background stage (解耦矩阵 / 色度补偿 / 后台解码 …). Its own field so roll
                      progress and the current frame name never overwrite each other. -->
                 <Border Grid.Column="3" Classes="chip" Margin="8,0,0,0" MaxWidth="240"
@@ -430,7 +441,12 @@
                      Tools wrap on narrow viewports; zoom keeps its own stable group. -->
                 <Border Name="PreviewToolbar" Grid.Row="0" Padding="8,4" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
-                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                        <StackPanel Grid.Row="2" Grid.ColumnSpan="2" IsVisible="{Binding HasProjectDependencyWarning}" Margin="0,6,0,0">
+                            <TextBlock Text="{Binding ProjectDependencyWarning}" TextWrapping="Wrap" />
+                            <Button Content="{i18n:T '恢复工程参考…'}" Click="OnRestoreProjectReferencesClick"
+                                    IsEnabled="{Binding CanRestoreProjectReferences}" HorizontalAlignment="Left" />
+                        </StackPanel>
                         <WrapPanel Grid.Column="0" Orientation="Horizontal">
                             <ToggleButton Name="ViewNegBtn" Classes="viewMode" AutomationProperties.Name="{i18n:T '负片'}" Click="OnViewNegToggle" IsEnabled="{Binding HasImage}"
                                           Padding="9,5"
@@ -823,8 +839,13 @@
                      exited in whatever 输出空间 named. It is a checkbox in the export dialog now. -->
                 <!-- One output toolbar preserves vertical room for the photograph. -->
                 <Border Grid.Row="3" Padding="8,5" Background="{DynamicResource ChromeBrush}">
-                    <Grid Name="OutputToolbar" ColumnDefinitions="90,6,*,8,Auto,8,Auto,Auto">
-                        <ComboBox Name="OutputSpacePicker" Grid.Column="0" HorizontalAlignment="Stretch" AutomationProperties.Name="{i18n:T '输出空间'}" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
+                    <Grid Name="OutputToolbar" ColumnDefinitions="90,6,*,8,Auto,8,Auto,Auto" RowDefinitions="Auto,Auto">
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="8" Margin="0,4,0,0" FontSize="{DynamicResource FontXs}"
+                                   IsVisible="{Binding CanChooseOutputSpace}"
+                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                   Text="{i18n:T '整卷渲染空间 · 改动影响画面和导出，可撤销'}"
+                                   ToolTip.Tip="{i18n:T '整卷渲染空间：切换会改变整卷画面与导出，可撤销比较。'}" />
+                        <ComboBox Name="OutputSpacePicker" Grid.Column="0" HorizontalAlignment="Stretch" AutomationProperties.Name="{i18n:T '整卷渲染空间'}" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
                                   IsVisible="{Binding CanChooseOutputSpace}"
                                   ToolTip.Tip="{i18n:T 'Cineon 第 4 步的目标空间：反相结果转换到它，帧编辑在它内进行，导出也写成它。工作空间为 ACEScg，每个选项都是真实的色域变换。切换空间保留滑块数值，画面随之改变。属于胶卷参数，随工程保存。'}">
                             <ComboBoxItem Content="sRGB" />
@@ -868,6 +889,8 @@
                             <Button.Flyout>
                                 <MenuFlyout Placement="TopEdgeAlignedRight">
                                     <MenuItem Name="ExportRollButton" Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" />
+                                    <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
+                                              IsEnabled="{Binding CanShowBatchExportReport}" />
                                     <MenuItem Name="ContactSheetButton" Header="{i18n:T '导出印样…'}" Click="OnContactSheetClick"
                                               ToolTip.Tip="{i18n:T '把整卷所有帧拼成一张网格印样图导出'}">
                                         <MenuItem.Icon>
@@ -1163,13 +1186,18 @@
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     IsVisible="{Binding IsColourRoll}"
                                                     Click="OnAutoWbAiClick" IsEnabled="{Binding HasImage}"
-                                                    ToolTip.Tip="{i18n:T 'Deep-WB 神经网络推断色偏（不需画面中有中性物）。建议先裁掉齿孔/片边。'}">
+                                                    ToolTip.Tip="{i18n:T '不需要灰卡。建议先裁掉齿孔和片边；结果可以撤销。'}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '智能色偏修正（Beta）'}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
                                         </Grid>
+                                        <Border Classes="smartFeedback" Classes.warning="{Binding SmartCastNeedsReview}"
+                                                IsVisible="{Binding HasSmartCastFeedback}">
+                                            <TextBlock Text="{Binding SmartCastFeedbackText}" TextWrapping="Wrap"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
                                         <TextBlock Classes="groupHint" Text="{Binding GreyCardText}"
                                                    IsVisible="{Binding GreyCardText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                                    TextWrapping="Wrap" />
@@ -1181,7 +1209,8 @@
                                      (the one this whole tab exists for) stays on-screen. -->
                                 <Button Click="OnApplyCalToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
                                         IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{i18n:T '把当前帧的标定按色彩同步项写入本卷其他所有帧。'}">
+                                        ToolTip.Tip="{Binding CalibrationBroadcastHint}"
+                                        AutomationProperties.HelpText="{Binding CalibrationBroadcastHint}">
                                     <Grid ColumnDefinitions="Auto,*">
                                         <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCheck}" />
                                         <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '应用 Cineon 标定到整卷'}" VerticalAlignment="Center" />
@@ -1276,7 +1305,8 @@
 
                                 <Button Click="OnApplySceneToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
                                         IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{i18n:T '把当前帧的场景调整（白平衡、曝光、影调、曲线）写入本卷其他所有帧。'}">
+                                        ToolTip.Tip="{Binding SceneBroadcastHint}"
+                                        AutomationProperties.HelpText="{Binding SceneBroadcastHint}">
                                     <Grid ColumnDefinitions="Auto,*">
                                         <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCheck}" />
                                         <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '应用 Display 参数到整卷'}" VerticalAlignment="Center" />

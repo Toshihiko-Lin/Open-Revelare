@@ -744,11 +744,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     partial void OnCurrentFrameChanged(RollFrame? value)
     {
+        NotifyRollBroadcastHints();
         // A reorder pulls the selected frame out of Frames and puts it back, which the strip's
         // SelectedItem binding reports as null-then-reselect. Nothing about the frame changed, so
         // neither half of that is a real switch: folding params against the null would run with no
         // outgoing frame, and the re-select would re-render a frame already on screen.
         if (_reordering) return;
+
+        SetSmartCastFeedback(null);
 
         // Persist the outgoing frame's live edits before swapping in the new one.
         // Skipped during a restore switch — the frames already hold the restored params.
@@ -770,7 +773,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _reordering;
 
     // ══ Undo / redo (full-roll snapshots, coalesced) ════════════════════════════
-    private sealed record RollSnapshot(FrameParams[] Params, int Index);
+    private sealed record RollSnapshot(RollFrame[] Frames, FrameParams[] Params, bool[] Selection,
+        int Index, bool LccEnabled, ImageBuffer? LccField, string? LccPath);
     private readonly List<RollSnapshot> _undo = new();
     private readonly List<RollSnapshot> _redo = new();
     private RollSnapshot? _committed;
@@ -787,7 +791,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         CommitLiveParams(CurrentFrame);
         var arr = new FrameParams[Frames.Count];
         for (int i = 0; i < Frames.Count; i++) arr[i] = Frames[i].Params.Clone();
-        return new RollSnapshot(arr, CurrentFrame is null ? 0 : Frames.IndexOf(CurrentFrame));
+        return new RollSnapshot(Frames.ToArray(), arr, Frames.Select(f => f.IsSelected).ToArray(),
+            CurrentFrame is null ? 0 : Frames.IndexOf(CurrentFrame), LccEnabled, _lccFlatField, _lccSourcePath);
     }
 
     /// <summary>Establish the current state as the undo baseline (no history entry).</summary>
@@ -851,9 +856,35 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _restoring = true;
         try
         {
+            bool structureChanged = !Frames.SequenceEqual(snap.Frames);
+            if (structureChanged)
+            {
+                _thumbCts?.Cancel(); _warmCts?.Cancel(); CancelRollAnalysis();
+                _renderCts?.Cancel(); _patchCts?.Cancel(); _switchToken++;
+                _reordering = true;
+                try
+                {
+                    foreach (RollFrame f in Frames) SetThumbnail(f, null);
+                    Frames.Clear();
+                    foreach (RollFrame f in snap.Frames) Frames.Add(f);
+                    CurrentFrame = null;
+                }
+                finally { _reordering = false; }
+                _prevFrame = null;
+                _paramsLoaded = false;
+                RefreshSplitPaths();
+            }
             for (int i = 0; i < snap.Params.Length && i < Frames.Count; i++)
+            {
                 Frames[i].Params = snap.Params[i].Clone();
+                Frames[i].IsSelected = snap.Selection[i];
+            }
             int idx = Math.Clamp(snap.Index, 0, Math.Max(0, Frames.Count - 1));
+            _lccFlatField = snap.LccField;
+            _lccSourcePath = snap.LccPath;
+            LccAvailable = snap.LccField is not null;
+            LccEnabled = snap.LccEnabled;
+            NotifyProjectDependencies();
             if (idx < Frames.Count && ReferenceEquals(Frames[idx], CurrentFrame))
                 LoadParams(CurrentFrame!.Params);   // same frame → reload UI from restored params
             else if (idx < Frames.Count)
@@ -863,6 +894,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         finally { _restoring = false; }
         _committed = snap;
         _committedVersion = _editVersion;
+        MarkRollDirty();
         UpdateUndoState();
     }
 
@@ -894,12 +926,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private string[]? _calRgbPaths;     // resolved [R, G, B] cal files
     private string? _lccSourcePath;     // LCC flat-field reference file
 
-    // LCC 平场校正（卷级平场数据 + 逐帧启用开关；逐帧存在 FrameParams.LccFlatField）
+    // LCC 参考与启用选择均为卷级；FrameParams 携带该卷当前有效的运行时引用。
     private ImageBuffer? _lccFlatField;
     [ObservableProperty] private bool _lccAvailable;
     [ObservableProperty] private bool _lccEnabled;
     [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
-    partial void OnLccEnabledChanged(bool value) => InvalidateOpticalCalibration();
+    partial void OnLccEnabledChanged(bool value)
+    {
+        foreach (RollFrame frame in Frames)
+            frame.Params.LccFlatField = value && LccAvailable ? _lccFlatField : null;
+        InvalidateOpticalCalibration();
+        NotifyProjectDependencies();
+        if (_roll is not null && _paramsLoaded && !_configLoad && !_restoring)
+        {
+            foreach (RollFrame frame in Frames) SetThumbnail(frame, null);
+            RestartThumbnails();
+        }
+    }
 
     /// <summary>Load a flat-field reference (RAW/TIFF) → mean-normalised LCC field, roll-level.</summary>
     public async Task LoadLccAsync(string path)
@@ -918,11 +961,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             LccAvailable = true;
             bool wasEnabled = LccEnabled;
             LccEnabled = true;   // triggers render
+            foreach (RollFrame frame in Frames) frame.Params.LccFlatField = ff;
             // Replacing an already-enabled field does not change the boolean property, but it
             // still changes the optical domain the stored endpoints were measured in.
             if (wasEnabled)
                 InvalidateOpticalCalibration();
             LccStatus = Loc.T("已载入平场：") + Path.GetFileName(path);
+            NotifyProjectDependencies();
+            MarkRollDirty();
+            RestartThumbnails();
         }
         catch (Exception ex) { LccStatus = Loc.T("平场载入失败：") + ex.Message; }
     }
@@ -1313,6 +1360,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void InvalidateBaseEndpointDiagnostics()
     {
         if (_suppressRender || !_paramsLoaded) return;
+        SetSmartCastFeedback(null);
         _calibrationDiagnosticsRollWide = false;
         _rollBaseCalibration = null;
         _rollHighlightCalibration = null;
@@ -1324,6 +1372,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void InvalidateHighlightEndpointDiagnostics()
     {
         if (_suppressRender || !_paramsLoaded) return;
+        SetSmartCastFeedback(null);
         _calibrationDiagnosticsRollWide = false;
         _rollHighlightCalibration = null;
         _rollUsedFallbackHighlight = false;
@@ -3837,6 +3886,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // Stage 2 reset to defaults (the WB decision must not be polluted by artistic edits).
     };
 
+    // null: no current result; false: stable; true: the user should inspect the result. This
+    // describes only the frame and endpoints that were analysed, so frame/endpoint changes clear it.
+    private bool? _smartCastNeedsReview;
+    public bool HasSmartCastFeedback => _smartCastNeedsReview.HasValue;
+    public bool SmartCastNeedsReview => _smartCastNeedsReview == true;
+    public string SmartCastFeedbackText => _smartCastNeedsReview switch
+    {
+        false => Loc.T("色偏已修正。可对比前后效果，或撤销。"),
+        true => Loc.T("结果不稳定。请检查画面；不合适可撤销，或改用灰卡采样。"),
+        null => "",
+    };
+
+    private void SetSmartCastFeedback(bool? needsReview)
+    {
+        if (_smartCastNeedsReview == needsReview) return;
+        _smartCastNeedsReview = needsReview;
+        OnPropertyChanged(nameof(HasSmartCastFeedback));
+        OnPropertyChanged(nameof(SmartCastNeedsReview));
+        OnPropertyChanged(nameof(SmartCastFeedbackText));
+    }
+
     /// <summary>
     /// Smart white balance (Beta) — the Deep-WB net closed over the per-channel HIGHLIGHT
     /// ENDPOINT. Descends from the source worker (gui/main_window.py _AutoWBAffineWorker +
@@ -3865,6 +3935,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         SourceStamp? analysisSource = _previewStamp;
         long analysisGeneration = _previews.Generation;
         if (!TryBeginLongTask(Loc.T("智能色偏修正分析中 …"), out var owner)) return;
+        SetSmartCastFeedback(null);
         CancellationToken ct = owner.Token;
         try
         {
@@ -3878,7 +3949,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // "unconverged" would only teach people to distrust a good answer. MaxRounds is the
             // safety cap; a normal frame is done in 4–8 with the exact step.
             const double Tol = 0.005, Accept = 0.01, Plateau = 3e-4;
-            const int MaxRounds = 16;
+            const int MaxRounds = 30;
 
             double[] dMin = DMinPerChannel, tBase = TBaseArr();
             // raw — the pipeline decouples internally, which only holds because
@@ -3969,7 +4040,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (ReferenceEquals(_longTaskCts, owner))
-                            ReportLongTask(Loc.F($"智能色偏修正 第 {round}/{MaxRounds} 轮 · 收敛度 {dev:F4}"));
+                            ReportLongTask(Loc.F($"正在分析色偏（{round}/{MaxRounds}）…"));
                     });
 
                     if (dev < bestDev) { bestDev = dev; best = (double[])span.Clone(); }
@@ -4013,8 +4084,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             DMaxPerChannel = wbHigh;
             _calibrationDiagnosticsRollWide = false;
             HighlightConfidenceText = Loc.F($"高光：神经网络场景推断 · 非物理 D-max · 残差 {residual:F4}");
+            SetSmartCastFeedback(!converged);
             // The residual is reported so the noise floor is visible next to the verdict.
-            StatusText = Loc.F($"智能色偏修正{(converged ? "" : Loc.T("（未收敛，仅供参考）"))} → 亮端 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}（{rounds} 轮 · 残差 {residual:F4}）");
+            StatusText = converged
+                ? Loc.T("智能色偏修正已应用；可用撤销恢复。")
+                : Loc.T("智能色偏修正已应用，但结果不稳定；请检查画面，必要时撤销。");
         }
         catch (OperationCanceledException) { StatusText = Loc.T("智能色偏修正已取消"); }
         catch (Exception ex) { StatusText = Loc.T("智能色偏修正失败：") + ex.Message; }
@@ -4367,6 +4441,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // user explicitly opts into the managed pipeline; BuildProjectData creates a fresh snapshot,
     // so the version has to live with the open roll rather than rely on Project.Data's default.
     private ColorPipelineVersion _colorPipelineVersion = ColorPipelineVersion.ManagedV2;
+    private bool _useRelativeProjectPaths;
     // One assumption for the whole TIFF roll. It participates in every decode cache key; changing
     // it can never reuse pixels admitted under a different transfer/profile claim.
     private TiffInputAssumption _tiffInputAssumption =
@@ -4380,6 +4455,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public MainViewModel()
     {
+        Frames.CollectionChanged += (_, _) => NotifyRollBroadcastHints();
+        Sync.PropertyChanged += (_, _) => NotifyRollBroadcastHints();
         _presentationRevisions.Published += revision => PresentationRevision = revision;
         _autoSave = new RollAutoSave(AutoSaveAsync);
         // The library edits roll info straight from a card. When that card IS the open roll, it
@@ -4427,6 +4504,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RetranslateText()
     {
+        NotifyRollBroadcastHints();
+        OnPropertyChanged(nameof(SmartCastFeedbackText));
         NotifyCalibrationInfo();
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");
@@ -4443,6 +4522,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         foreach (RollFrame f in Frames) f.RefreshText();
         NotifyHdrText();
+        OnPropertyChanged(nameof(SaveStatusText));
+        OnPropertyChanged(nameof(SaveStatusDetail));
+        NotifyProjectDependencies();
         OnPropertyChanged(nameof(LegacyColorPipelineNotice));
     }
 
@@ -4483,7 +4565,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void MarkRollDirty()
     {
         if (_roll is null) return;
+        _projectRevision++;
         _rollDirty = true;
+        if (SaveState != ProjectSaveState.Failed) SetSaveState(ProjectSaveState.Pending);
         _sheetDirty = true;
         _autoSave.MarkDirty();
     }
@@ -4513,9 +4597,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(title)) title = Loc.T("未命名卷");
 
         _roll = new Catalog.Roll { Title = title, ProjectPath = Catalog.NewProjectPath(dir, title) };
+        _savedProjectRevision = null;
         SyncRollEntry();
         _roll.ImportedAt = _roll.LastOpenedAt = DateTime.Now;
         Catalog.Upsert(_roll);
+        _rollDirty = true;
+        SetSaveState(ProjectSaveState.Pending);
+        NotifyProjectDependencies();
         _autoSave.MarkDirty();   // the first .ncproj lands on the next idle pause
     }
 
@@ -4546,11 +4634,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         CommitLiveParams(CurrentFrame);
         var data = new Project.Data
         {
+            UseRelativePaths = _useRelativeProjectPaths,
             ColorPipelineVersion = _colorPipelineVersion,
             Meta = new Project.RollMeta
             {
                 InputType = RollIsRaw ? "raw" : "tiff",
-                SourcePath = _decoupleMatrix is not null ? "A" : "B",
+                SourcePath = _declaredPathA ? "A" : "B",
                 TiffIsLinear = RollIsRaw
                     ? null
                     : TiffInputAssumptionPolicy.ToPersistedLinearFlag(_tiffInputAssumption),
@@ -4559,6 +4648,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     ? new Dictionary<string, string> { ["R"] = r[0], ["G"] = r[1], ["B"] = r[2] }
                     : null,
                 LccPath = _lccSourcePath,
+                LccEnabled = LccEnabled,
                 BaseCalibration = _calibrationDiagnosticsRollWide && _rollBaseCalibration is { } bc
                     ? bc with { TBase = (double[])bc.TBase.Clone() }
                     : null,
@@ -4576,6 +4666,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             data.Frames.Add(new Project.Frame
             {
                 SourcePath = f.Path, IsVirtual = f.IsVirtual, Params = f.Params.Clone(),
+                SourceFingerprint = f.SourceFingerprint,
             });
         return data;
     }
@@ -4590,18 +4681,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Project.Data data = BuildProjectData();
             string path = _roll.ProjectPath;
             _rollDirty = false;
+            SetSaveState(ProjectSaveState.Saving);
             try
             {
-                await Task.Run(() => Project.Save(path, data));
+                string savedRevision = await Task.Run(() =>
+                    Project.SaveIfUnchanged(path, data, _savedProjectRevision));
+                _savedProjectRevision = savedRevision;
             }
             catch (Exception ex)
             {
                 _rollDirty = true;
+                SetSaveState(ProjectSaveState.Failed, ex.Message);
                 StatusText = Loc.T("自动保存失败：") + ex.Message;
                 throw;   // RollAutoSave re-dirties and retries on the next idle pause
             }
             SyncRollEntry();
             Catalog.Upsert(_roll);
+            RememberSourceFingerprints(data);
+            SetSaveState(_rollDirty ? ProjectSaveState.Pending : ProjectSaveState.Saved);
         }
 
         if (_sheetDirty)
@@ -4771,44 +4868,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Synchronous flush for window close, where there is no time left to await anything: the app
-    /// may be gone before a continuation would run. A 36-frame project is ~50 KB, so this costs
-    /// single-digit milliseconds on the UI thread.
-    /// </summary>
-    public void FlushRollNow()
-    {
-        if (_roll is null || Frames.Count == 0) return;
-        if (_rollDirty)
-        {
-            try
-            {
-                Project.Save(_roll.ProjectPath, BuildProjectData());
-                _rollDirty = false;
-                SyncRollEntry();
-                Catalog.Upsert(_roll);
-            }
-            catch { /* closing down; nothing useful left to report */ }
-        }
-        // The cover too — OnClosing runs before the window is torn down, so the rasteriser is
-        // still there. Skipping it used to mean an edit-then-close session left the wall showing
-        // the previous cover until that roll was opened again.
-        if (_sheetDirty)
-        {
-            _sheetDirty = false;
-            try { UpdateRollSheetNow(); } catch { /* cosmetic; never hold up the close */ }
-            // No retry to schedule here — the app is going away. A refused redraw simply leaves
-            // the previous cover in place, which is the point of refusing.
-        }
-        _autoSave.Discard();
-    }
-
-    /// <summary>
     /// Asked when a project's negatives are not where it left them: gets the number of missing
     /// frames and the first missing file's name, returns a folder to look in, or null to open the
     /// roll as-is. Supplied by the window — this is a file picker, which a view model has no
     /// business owning.
     /// </summary>
     public Func<int, string, Task<string?>>? AskRelinkFolder;
+    public Func<int, Task<bool>>? ConfirmUnverifiedRelink;
+
+    private async Task<bool> ApproveRelinkAsync(Project.Data data, string folder)
+    {
+        int unverified = data.Frames.Where(f => !f.IsVirtual && f.SourceFingerprint is null &&
+                !File.Exists(f.SourcePath) && File.Exists(Path.Combine(folder, Path.GetFileName(f.SourcePath))))
+            .Select(f => f.SourcePath).Distinct().Count();
+        return unverified == 0 || (ConfirmUnverifiedRelink is { } confirm && await confirm(unverified));
+    }
 
     /// <summary>Ask where the negatives went, and re-point the project at them. The matching
     /// itself is <see cref="Project.Relink"/> — data surgery, testable without a file picker.
@@ -4820,9 +4894,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         string? folder = await AskRelinkFolder(missing.Count, Path.GetFileName(missing[0]));
         if (string.IsNullOrEmpty(folder)) return false;
+        if (!await ApproveRelinkAsync(data, folder)) return false;
 
         int found = Project.Relink(data, folder);
-        if (found == 0) { StatusText = Loc.T("所选文件夹里没有找到同名的底片"); return false; }
+        if (found == 0) { StatusText = Loc.T("没有找到内容指纹匹配的底片，请检查所选目录。"); return false; }
 
         StatusText = Loc.F($"已重新定位 {found}/{missing.Count} 个源文件");
         return true;   // the new paths have to be written back, or the fix is lost on exit

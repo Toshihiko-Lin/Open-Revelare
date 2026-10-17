@@ -56,15 +56,19 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // The cache is session-scoped: take it with us on the way out. ShutdownRequested
-            // fires for a normal close; a crash leaves an orphan the NEXT run identifies by its
-            // dead process id and sweeps.
+            // A requested shutdown can be cancelled by a failed save. Dispose session resources
+            // only at Exit, after the window's asynchronous save/recovery flow has approved it.
             var vm = new MainViewModel();
-            // Also flush the open roll here, not only in MainWindow.OnClosing: a shutdown driven
-            // by the OS or by Exit() never closes the window through the normal path.
-            desktop.ShutdownRequested += (_, _) =>
+            desktop.ShutdownRequested += (_, e) =>
             {
-                vm.FlushRollNow();
+                if (desktop.MainWindow is MainWindow { CloseApproved: false } window)
+                {
+                    e.Cancel = true;
+                    window.Close();
+                }
+            };
+            desktop.Exit += (_, _) =>
+            {
                 vm.Dispose();
                 Services.DngCache.Cleanup();
             };

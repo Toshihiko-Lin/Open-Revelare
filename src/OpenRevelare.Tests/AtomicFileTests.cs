@@ -5,6 +5,30 @@ namespace OpenRevelare.Tests;
 
 public sealed class AtomicFileTests
 {
+    [Fact]
+    public async Task Concurrent_writes_use_independent_staging_files_and_leave_a_complete_document()
+    {
+        string dir = Path.Combine(TestDataIsolation.Root, $"atomic-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "project.txt");
+        string[] documents = Enumerable.Range(0, 12).Select(i => new string((char)('a' + i), 65536)).ToArray();
+        await Task.WhenAll(documents.Select(text => Task.Run(() => AtomicFile.WriteAllText(path, text))));
+        Assert.Contains(File.ReadAllText(path), documents);
+        Assert.Empty(Directory.EnumerateFiles(dir, ".openrevelare-write-*.tmp"));
+    }
+
+    [Fact]
+    public void A_valid_long_filename_does_not_make_the_staging_filename_too_long()
+    {
+        string dir = Path.Combine(TestDataIsolation.Root, $"long-name-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, new string('a', 230) + ".ncproj");
+        AtomicFile.WriteAllText(path, "first");
+        AtomicFile.WriteAllText(path, "second");
+        Assert.Equal("second", File.ReadAllText(path));
+        Assert.Empty(Directory.EnumerateFiles(dir, ".openrevelare-write-*.tmp"));
+    }
+
     /// <summary>The two lock tests describe Windows sharing semantics: on POSIX an open file does
     /// not block a rename over it, so there is neither a transient to outlast nor a hold to give
     /// up on. They are the mechanism's reason to exist, and it only exists there.</summary>

@@ -75,7 +75,11 @@ public partial class MainViewModel
     // The sampling path already learned this (MainWindow's pointer-released backstop and
     // TrySample); a render is exactly as user-triggered and exactly as fatal. Cancellation
     // stays silent — it is the normal outcome of superseding a queued render.
-    private void ReportRenderFailure(Exception ex) => StatusText = Loc.T("渲染失败：") + ex.Message;
+    private void ReportRenderFailure(Exception ex)
+    {
+        StatusText = Loc.T("渲染失败：") + ex.Message;
+        NotifyProjectDependencies();
+    }
 
     private async void ScheduleRender()
     {

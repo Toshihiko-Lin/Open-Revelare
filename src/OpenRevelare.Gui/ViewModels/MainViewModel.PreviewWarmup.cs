@@ -11,24 +11,18 @@ public partial class MainViewModel
     private readonly PreparedPreviewCache _preparedPreviews = new();
     private CancellationTokenSource? _previewWarmCts;
     private readonly SemaphoreSlim _previewRenderLane = new(1, 1);
-    private readonly Dictionary<string, SourceStamp?> _lutSources = new(StringComparer.Ordinal);
 
     private void CancelPreviewWarmup() => _previewWarmCts?.Cancel();
 
     private PreparedPreviewKey? PreparedKey(RollFrame? frame, SourceStamp? source, string? region, FrameParams p)
     {
         CalibrationSources.RequireCurrent(p);
+        PrintLuts.RequireCurrent(p.PrintLut);
         if (frame is null || source is null || region is null) return null;
         SourceStamp? lut = null;
         if (!string.IsNullOrWhiteSpace(p.PrintLut) && !PrintLuts.IsBuiltin(p.PrintLut))
         {
             lut = SourceStamp.TryCapture(p.PrintLut);
-            lock (_lutSources)
-            {
-                if (!_lutSources.TryGetValue(p.PrintLut, out var old) || old != lut)
-                    PrintLuts.Forget(p.PrintLut);
-                _lutSources[p.PrintLut] = lut;
-            }
         }
         return new(frame, source, region, PreviewParametersKey.Create(p), _colorPipelineVersion, lut);
     }

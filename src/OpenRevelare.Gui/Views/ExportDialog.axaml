@@ -66,6 +66,117 @@
         </Style>
     </Window.Styles>
 
+    <SplitView Name="FilmInfoDrawer" DisplayMode="Overlay" PanePlacement="Right"
+               OpenPaneLength="430" CompactPaneLength="0" IsPaneOpen="False">
+        <SplitView.Pane>
+            <Border Background="{DynamicResource BgBrush}" BorderBrush="{DynamicResource BorderSoftBrush}"
+                    BorderThickness="1,0,0,0" Padding="16">
+                <DockPanel>
+                    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                        <TextBlock Classes="sectionHead" Text="{i18n:T '胶片拍摄信息'}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="{i18n:T '关闭'}" Click="OnCloseFilmInfoClick" />
+                    </Grid>
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                                    <StackPanel Name="FilmInfoPaneContent" Spacing="10">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
+                                    <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox Name="FilmInfoChk" Content="{i18n:T '导出时写入胶片拍摄信息'}" IsCheckedChanged="OnAnyChanged"/>
+                                <StackPanel Name="FilmEditorGroup" Spacing="10">
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
+                                    <Grid ColumnDefinitions="*,12,*">
+                                        <StackPanel Grid.Column="0">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片机身'}"/>
+                                                <ComboBox Name="CameraLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnCameraSelected"/>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
+                                                    <TextBox Name="CameraMakeBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
+                                                    <TextBox Name="CameraModelBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
+                                                    <TextBox Name="CameraSerialBox" TextChanged="OnCameraEdited"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片镜头'}"/>
+                                                <ComboBox Name="LensLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnLensSelected"/>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
+                                                    <TextBox Name="LensMakeBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
+                                                    <TextBox Name="LensModelBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
+                                                    <TextBox Name="LensSerialBox" TextChanged="OnLensEdited"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Classes="groupHint" Text="{i18n:T '确认导出后记住机身和镜头；曝光与日期不记忆。'}"/>
+                                    <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto">
+                                        <StackPanel Grid.Row="0" Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '胶片 ISO'}"/>
+                                                <TextBox Name="FilmIsoBox" Watermark="400" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="0" Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '光圈'}"/>
+                                                <TextBox Name="FilmApertureBox" Watermark="2.8" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '快门（秒）'}"/>
+                                                <TextBox Name="FilmShutterBox" Watermark="1/125" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '焦距（mm）'}"/>
+                                                <TextBox Name="FilmFocalBox" Watermark="50" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Classes="formatDetail" Text="{i18n:T '胶片拍摄时间（可选）'}"/>
+                                        <TextBox Name="FilmDateBox" Watermark="YYYY-MM-DD HH:mm:ss" TextChanged="OnFilmFieldChanged"/>
+                                    </StackPanel>
+                                    <Grid ColumnDefinitions="*,12,*">
+                                        <StackPanel Grid.Column="0">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '作者'}"/>
+                                                <TextBox Name="FilmArtistBox" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Classes="formatDetail" Text="{i18n:T '版权'}"/>
+                                                <TextBox Name="FilmCopyrightBox" TextChanged="OnFilmFieldChanged"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                                <TextBlock Name="ExifErrorLbl" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="False"/>
+                            </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </SplitView.Pane>
+        <SplitView.Content>
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,14,0,0">
             <!-- 结论条：这些选项最后写出的是什么文件。也是被隐藏的那些参数的唯一去处。 -->
@@ -265,104 +376,10 @@
                      never borrows the copying camera's exposure or location. -->
                 <Border Classes="section">
                     <StackPanel Spacing="6">
-                        <TextBlock Classes="sectionHead" Text="{i18n:T 'EXIF 与设备'}"/>
+                        <TextBlock Classes="sectionHead" Text="EXIF"/>
                         <CheckBox Name="KeepExifChk" Content="{i18n:T '保留源文件 EXIF／数字化来源'}" IsCheckedChanged="OnAnyChanged" ToolTip.Tip="{i18n:T '未填写胶片信息时沿用源 EXIF；填写后，源翻拍／扫描信息单独保存在 XMP 中。'}"/>
-                        <Expander Name="ExifEditor" Header="{i18n:T '胶片拍摄信息与设备库'}" HorizontalAlignment="Stretch">
-                            <StackPanel Spacing="10" Margin="10,4,10,10">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
-                                    <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <CheckBox Name="FilmInfoChk" Content="{i18n:T '填写胶片拍摄信息，替换成片拍摄 EXIF'}" IsCheckedChanged="OnAnyChanged"/>
-                                <StackPanel Name="FilmEditorGroup" Spacing="10">
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
-                                    <Grid ColumnDefinitions="*,12,*">
-                                        <StackPanel Grid.Column="0">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片机身'}"/>
-                                                <ComboBox Name="CameraLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnCameraSelected"/>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
-                                                    <TextBox Name="CameraMakeBox" TextChanged="OnCameraEdited"/>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
-                                                    <TextBox Name="CameraModelBox" TextChanged="OnCameraEdited"/>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
-                                                    <TextBox Name="CameraSerialBox" TextChanged="OnCameraEdited"/>
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Classes="sectionHead" Text="{i18n:T '胶片镜头'}"/>
-                                                <ComboBox Name="LensLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnLensSelected"/>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
-                                                    <TextBox Name="LensMakeBox" TextChanged="OnLensEdited"/>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '型号'}"/>
-                                                    <TextBox Name="LensModelBox" TextChanged="OnLensEdited"/>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Classes="formatDetail" Text="{i18n:T '序列号（可选）'}"/>
-                                                    <TextBox Name="LensSerialBox" TextChanged="OnLensEdited"/>
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Grid>
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '确认导出后记住机身和镜头；曝光与日期不记忆。'}"/>
-                                    <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto">
-                                        <StackPanel Grid.Row="0" Grid.Column="0">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '胶片 ISO'}"/>
-                                                <TextBox Name="FilmIsoBox" Watermark="400" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="0" Grid.Column="2">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '光圈'}"/>
-                                                <TextBox Name="FilmApertureBox" Watermark="2.8" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="2" Grid.Column="0">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '快门（秒）'}"/>
-                                                <TextBox Name="FilmShutterBox" Watermark="1/125" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <StackPanel Grid.Row="2" Grid.Column="2">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '焦距（mm）'}"/>
-                                                <TextBox Name="FilmFocalBox" Watermark="50" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Grid>
-                                    <StackPanel Spacing="3">
-                                        <TextBlock Classes="formatDetail" Text="{i18n:T '胶片拍摄时间（可选）'}"/>
-                                        <TextBox Name="FilmDateBox" Watermark="YYYY-MM-DD HH:mm:ss" TextChanged="OnFilmFieldChanged"/>
-                                    </StackPanel>
-                                    <Grid ColumnDefinitions="*,12,*">
-                                        <StackPanel Grid.Column="0">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '作者'}"/>
-                                                <TextBox Name="FilmArtistBox" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2">
-                                            <StackPanel Spacing="3">
-                                                <TextBlock Classes="formatDetail" Text="{i18n:T '版权'}"/>
-                                                <TextBox Name="FilmCopyrightBox" TextChanged="OnFilmFieldChanged"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-                                <TextBlock Name="ExifErrorLbl" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="False"/>
-                            </StackPanel>
-                        </Expander>
+                        <Button Name="FilmInfoEntry" HorizontalAlignment="Left"
+                                Content="{i18n:T '编辑胶片拍摄信息 →'}" Click="OnOpenFilmInfoClick" />
                     </StackPanel>
                 </Border>
 
@@ -423,4 +440,6 @@
             </StackPanel>
         </ScrollViewer>
     </DockPanel>
+        </SplitView.Content>
+    </SplitView>
 </Window>

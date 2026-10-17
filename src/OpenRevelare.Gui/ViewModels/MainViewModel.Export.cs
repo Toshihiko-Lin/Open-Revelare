@@ -20,10 +20,12 @@ public partial class MainViewModel
     public async Task ExportAsync(string path, ExportOptions opt)
     {
         if (CurrentFrame is not { } frame || !HasImage) return;
+        if (!CanExportProject()) return;
         if (!TryBeginLongTask(Loc.T("正在导出 …"), out var owner)) return;
         CancellationToken ct = owner.Token;
         try
         {
+            opt = opt.Clone();
             FrameParams p = BuildParams();
             string srcPath = frame.Path;
             // Overwrite stays the rule for a single export: the save dialog already asked, and the
