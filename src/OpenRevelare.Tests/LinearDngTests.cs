@@ -28,6 +28,31 @@ public sealed class LinearDngTests
         Path.Combine(TestDataIsolation.Root, $"linear-{Guid.NewGuid():N}.dng");
 
     [Fact]
+    public void Both_image_directories_use_the_required_long_type_for_new_subfile_type()
+    {
+        string path = NewPath();
+        LinearDng.Write(Encoded(64, 48, (_, _) => (0.5f, 0.5f, 0.5f)), ColorSpaces.Srgb, path);
+        byte[] bytes = File.ReadAllBytes(path);
+        int root = BitConverter.ToInt32(bytes, 4);
+        int main = 0;
+        for (int i = 0; i < BitConverter.ToUInt16(bytes, root); i++)
+        {
+            int entry = root + 2 + i * 12;
+            if (BitConverter.ToUInt16(bytes, entry) == 330) main = BitConverter.ToInt32(bytes, entry + 8);
+        }
+        Assert.True(main > 0);
+        foreach ((int offset, uint value) in new[] { (root, 1u), (main, 0u) })
+        {
+            // Sorted IFDs put NewSubfileType first; TIFF 6.0 specifies LONG, count 1.
+            int entry = offset + 2;
+            Assert.Equal(254, BitConverter.ToUInt16(bytes, entry));
+            Assert.Equal(4, BitConverter.ToUInt16(bytes, entry + 2));
+            Assert.Equal(1u, BitConverter.ToUInt32(bytes, entry + 4));
+            Assert.Equal(value, BitConverter.ToUInt32(bytes, entry + 8));
+        }
+    }
+
+    [Fact]
     public void Writes_a_file_libraw_can_decode()
     {
         string path = NewPath();

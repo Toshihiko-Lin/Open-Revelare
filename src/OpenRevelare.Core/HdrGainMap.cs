@@ -146,7 +146,8 @@ public sealed class HdrGainMap
         RenderedFrame hdr,
         ColorSpaceDef baseSpace,
         OutputTarget target,
-        GainMapChannels channels = GainMapChannels.Luminance)
+        GainMapChannels channels = GainMapChannels.Luminance,
+        bool useCommonChannelRange = false)
     {
         ArgumentNullException.ThrowIfNull(sdrBase);
         ArgumentNullException.ThrowIfNull(hdr);
@@ -237,6 +238,16 @@ public sealed class HdrGainMap
                 max[0] = Math.Max(max[0], hiR); max[1] = Math.Max(max[1], hiG); max[2] = Math.Max(max[2], hiB);
             }
         });
+        // libultrahdr's XMP reader accepts scalar range attributes but not
+        // RDF arrays. A common range retains independent RGB gains while allowing
+        // exactly the same metadata to be serialized as scalars in XMP and ISO.
+        if (useCommonChannelRange)
+        {
+            float commonMin = Math.Min(Math.Min(min[0], min[1]), min[2]);
+            float commonMax = Math.Max(Math.Max(max[0], max[1]), max[2]);
+            Array.Fill(min, commonMin);
+            Array.Fill(max, commonMax);
+        }
         for (int c = 0; c < 3; c++)
         {
             if (max[c] - min[c] < MinimumSpan) max[c] = min[c] + MinimumSpan;

@@ -121,11 +121,17 @@ public static class Resample
         var (dw, dh) = LongEdgeSize(src.Width, src.Height, longEdge, allowUpscale);
         if (dw == src.Width && dh == src.Height) return src;
 
+        float[] Cpu() => ResizeOnCpu(src, dw, dh);
+        float[] both = GpuAcceleration.TryResize(src, dw, dh, Cpu, out float[] accelerated) ? accelerated : Cpu();
+        return new ImageBuffer(dw, dh, both).InheritSourceFrom(src);
+    }
+
+    private static float[] ResizeOnCpu(ImageBuffer src, int dw, int dh)
+    {
         // Horizontal first, into a full-height intermediate, then vertical: two 1-D passes cost
         // (dw·h + dw·dh) weighted samples against the (dw·dh·taps²) of a single 2-D pass.
         float[] horizontal = ResampleAxis(src.Data, src.Width, src.Height, dw, horizontally: true);
-        float[] both = ResampleAxis(horizontal, dw, src.Height, dh, horizontally: false);
-        return new ImageBuffer(dw, dh, both).InheritSourceFrom(src);
+        return ResampleAxis(horizontal, dw, src.Height, dh, horizontally: false);
     }
 
     /// <summary>
@@ -142,9 +148,7 @@ public static class Resample
         int dstHeight = horizontally ? height : length;
         var dst = new float[dstWidth * dstHeight * 3];
         // Computed once per axis: every output row (or column) shares the same weights.
-        (int Start, float[] Weights)[] taps = length < srcLength
-            ? AreaTaps(srcLength, length)
-            : CatmullRomTaps(srcLength, length);
+        (int Start, float[] Weights)[] taps = AxisTaps(srcLength, length);
 
         int lines = horizontally ? height : width;
         Parallel.For(0, lines, line =>
@@ -170,6 +174,9 @@ public static class Resample
         });
         return dst;
     }
+
+    internal static (int Start, float[] Weights)[] AxisTaps(int source, int destination) => destination < source
+        ? AreaTaps(source, destination) : CatmullRomTaps(source, destination);
 
     /// <summary>
     /// Exact area-average weights: output sample <c>i</c> covers the source interval

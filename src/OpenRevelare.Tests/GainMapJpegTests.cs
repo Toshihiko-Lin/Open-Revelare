@@ -51,12 +51,17 @@ public sealed class GainMapJpegTests
     /// gamut — comes back component for component, on the colourful fixture whose every pixel
     /// needed fitting.
     /// </summary>
-    [Fact]
-    public void Per_channel_gain_map_reconstructs_the_hdr_rendition_from_the_sdr_base()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Per_channel_gain_map_reconstructs_the_hdr_rendition_from_the_sdr_base(bool useCommonChannelRange)
     {
         (RenderedFrame sdr, RenderedFrame hdr, OutputTarget target) = RenderPair(ColorSpaces.Srgb);
 
-        HdrGainMap map = HdrGainMap.Compute(sdr, hdr, ColorSpaces.Srgb, target, GainMapChannels.PerChannel);
+        HdrGainMap map = HdrGainMap.Compute(sdr, hdr, ColorSpaces.Srgb, target,
+            GainMapChannels.PerChannel, useCommonChannelRange);
+
+        if (useCommonChannelRange) Assert.True(map.Metadata.IsUniform);
 
         Assert.Equal(0f, map.Metadata.HdrCapacityMin);
         // Capacity is the content's largest gain, never more than the master's headroom.
@@ -263,7 +268,11 @@ public sealed class GainMapJpegTests
             // The ISO 21496-1 segment says the same thing as the XMP, in the standard's terms; the
             // base carries only the version fields, the map the full structure.
             GainMapMetadata fromXmp = ParseMetadata(mapXmp);
-            Assert.False(fromXmp.IsUniform);
+            // Scalar metadata is understood by Android's XMP-only readers too.
+            // The actual map remains RGB; shared bounds do not turn it into luma.
+            Assert.True(fromXmp.IsUniform);
+            Assert.Contains("hdrgm:GainMapMax=\"", mapXmp, StringComparison.Ordinal);
+            Assert.DoesNotContain("<hdrgm:GainMapMax>", mapXmp, StringComparison.Ordinal);
             Assert.Equal(4, IsoPayloadLength(primary));
             GainMapMetadata iso = ReadIsoMetadata(map);
             Assert.Equal(fromXmp.HdrCapacityMin, iso.HdrCapacityMin, 5);

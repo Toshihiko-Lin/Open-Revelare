@@ -365,6 +365,11 @@ public partial class ExportDialog : Window
             ? Loc.T("保留扩展范围与色域，适合存档或继续后期处理。")
             : Loc.T("无损保留成片层次，适合存档或继续修图。");
 
+        if (dng)
+            FormatHint.Text += " " + Loc.T("系统相册可能仅显示缩略图，完整图像请用 RAW 软件打开。");
+        else if (!jpeg && !heic)
+            FormatHint.Text += " " + Loc.T("手机相册对 TIFF 支持有限，跨设备分享建议使用 JPEG。");
+
         ColorSpaceHint.Text = dng
             ? (IsHdr
                 ? Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签；HDR 卷按 SDR 导出，高光母版用 TIFF。")

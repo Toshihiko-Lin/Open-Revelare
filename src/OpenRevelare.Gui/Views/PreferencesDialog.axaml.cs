@@ -28,6 +28,7 @@ public sealed class PreferencesDialog : Window
     private ComboBox _theme = new();
     private ComboBox _language = new();
     private ComboBox _concurrency = new();
+    private ComboBox _gpu = new();
     private TextBlock _dngNote = new();
     private TextBlock _concurrencyNote = new();
     private CheckBox _autoInvert = new();
@@ -46,7 +47,7 @@ public sealed class PreferencesDialog : Window
     /// <summary>Everything the user can have changed but not yet saved.</summary>
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
-                                string SheetDir, int SheetBudget, bool AutoInvert);
+                                string SheetDir, int SheetBudget, bool AutoInvert, int Gpu);
 
     public PreferencesDialog()
     {
@@ -69,7 +70,8 @@ public sealed class PreferencesDialog : Window
             CacheBudget: cb >= 0 ? cb : Array.IndexOf(CacheBudgets, 5),
             SheetDir: s.SheetCacheDirectory,
             SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1),
-            AutoInvert: s.AutoInvertOnImport));
+            AutoInvert: s.AutoInvertOnImport,
+            Gpu: s.GpuMode == GpuAccelerationMode.Off ? 1 : 0));
     }
 
     private State Snapshot() => new(
@@ -84,7 +86,8 @@ public sealed class PreferencesDialog : Window
         CacheBudget: Math.Max(0, _cacheBudget.SelectedIndex),
         SheetDir: _sheetDir.Text ?? "",
         SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex),
-        AutoInvert: _autoInvert.IsChecked ?? true);
+        AutoInvert: _autoInvert.IsChecked ?? true,
+        Gpu: Math.Max(0, _gpu.SelectedIndex));
 
     private void Build(State v)
     {
@@ -93,6 +96,7 @@ public sealed class PreferencesDialog : Window
         _backend = Combo(new[] { Loc.T("自动（LibRaw；打不开的文件才用 DNG Converter）"), "LibRaw", "Adobe DNG Converter" }, v.Backend);
         _fbdd = Combo(new[] { Loc.T("关闭", "FBDD"), Loc.T("轻度"), Loc.T("完全") }, v.Fbdd);
         _theme = Combo(new[] { Loc.T("深色"), Loc.T("浅色") }, v.Theme);
+        _gpu = Combo(new[] { Loc.T("自动（按实测选择 CPU 或 GPU）"), Loc.T("关闭", "GPU") }, v.Gpu);
         // Each language names ITSELF, untranslated — someone who lands in the wrong one has to be
         // able to find the way back out, and "Chinese" is no help if you only read 中文.
         _language = Combo(new[] { Loc.T("跟随系统"), "中文", "English" }, v.Language);
@@ -138,6 +142,10 @@ public sealed class PreferencesDialog : Window
         panel.Children.Add(Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd));
         panel.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
         panel.Children.Add(_concurrencyNote);
+        panel.Children.Add(Row(Loc.T("GPU 加速"), _gpu));
+        panel.Children.Add(new TextBlock {
+            Text = Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。"),
+            TextWrapping = TextWrapping.Wrap, Opacity = 0.7 });
 
         var browse = new Button { Content = Loc.T("浏览…"), Margin = new Thickness(6, 0, 0, 0) };
         browse.Click += async (_, _) =>
@@ -310,6 +318,8 @@ public sealed class PreferencesDialog : Window
         s.Theme = _theme.SelectedIndex == 1 ? "light" : "dark";
         s.Language = _language.SelectedIndex switch { 1 => "zh", 2 => "en", _ => "auto" };
         s.DecodeConcurrency = Math.Max(0, _concurrency.SelectedIndex);
+        s.GpuMode = _gpu.SelectedIndex == 1 ? GpuAccelerationMode.Off : GpuAccelerationMode.Auto;
+        GpuAcceleration.Mode = s.GpuMode;
         s.AutoInvertOnImport = _autoInvert.IsChecked ?? true;
         s.CacheEnabled = _cacheOn.IsChecked ?? true;
         s.CachePersistent = _cachePersist.IsChecked ?? false;

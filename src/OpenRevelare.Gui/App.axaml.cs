@@ -48,6 +48,8 @@ public partial class App : Application
         Services.Loc.Apply();       // language first: the main window resolves its text as it loads
         ApplyTheme();               // honour the saved theme before the window shows
         ApplyViewerBackground();    // …and the saved photo backdrop
+        if (Environment.GetEnvironmentVariable("OPENREVELARE_GPU") is null)
+            OpenRevelare.Core.GpuAcceleration.Mode = Services.Settings.Current.GpuMode;
         // Let Core reach the session DNG cache without depending on it (see
         // RawDecode.LinearDngCache) — the Adobe round trip then happens once per frame instead
         // of once per decode, and a cached linear DNG is what makes region decoding possible on
@@ -70,6 +72,7 @@ public partial class App : Application
             desktop.Exit += (_, _) =>
             {
                 vm.Dispose();
+                OpenRevelare.Core.GpuAcceleration.ReleaseResources();
                 Services.DngCache.Cleanup();
             };
             desktop.MainWindow = new MainWindow { DataContext = vm };

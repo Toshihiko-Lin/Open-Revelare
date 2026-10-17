@@ -65,6 +65,8 @@ internal static class RenderTrace
                 Platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
                 Runtime = Environment.Version.ToString(), ProcessorCount = Environment.ProcessorCount,
                 PeakWorkingSetBytes = process.PeakWorkingSet64,
+                Gpu = GpuAcceleration.Diagnostics,
+                GpuMeasurements = GpuAcceleration.Measurements(),
                 PercentileMethod = "nearest-rank, last 2048 samples per phase; durations include failed attempts",
                 Phases = Statistics.Snapshot(), Counters = Statistics.Counters(),
             }, new JsonSerializerOptions { WriteIndented = true }));

@@ -21,16 +21,23 @@ public static class HeicIO
         if (maxBytes is { } ceiling)
         {
             RenderedFrame scaled = frame;
+            ushort[]? pixels = null;
             var (bytes, fit) = JpegIO.FitToSize(frame.Pixels.Width, frame.Pixels.Height, quality, ceiling, (edge, q) =>
             {
                 if (Math.Max(scaled.Pixels.Width, scaled.Pixels.Height) > edge)
+                {
                     scaled = frame.WithPixels(Resample.ToLongEdge(frame.Pixels, edge, allowUpscale: false));
-                return Encode(scaled, hdr, q, profile, sourceExif);
+                    pixels = null;
+                }
+                // Quality probes share the same quantized pixels, including the expensive
+                // HDR gamut/PQ conversion. Only a resolution change invalidates them.
+                pixels ??= PreparePixels(scaled);
+                return Encode(scaled, pixels, hdr, q, profile, sourceExif);
             }, formatName: "HEIC");
             ExportFile.Write(path, destination => File.WriteAllBytes(destination, bytes));
             return fit;
         }
-        byte[] file = Encode(frame, hdr, quality, profile, sourceExif);
+        byte[] file = Encode(frame, PreparePixels(frame), hdr, quality, profile, sourceExif);
         ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
         return null;
     }
@@ -71,9 +78,8 @@ public static class HeicIO
         return result;
     }
 
-    private static byte[] Encode(RenderedFrame frame, bool hdr, int quality, byte[]? profile, SourceExif? sourceExif)
+    private static byte[] Encode(RenderedFrame frame, ushort[] pixels, bool hdr, int quality, byte[]? profile, SourceExif? sourceExif)
     {
-        ushort[] pixels = PreparePixels(frame);
         byte[]? exif = sourceExif?.ToByteArray(frame.Pixels.Width, frame.Pixels.Height,
             exactSrgb: !hdr && frame.OutputProfile.Identity == BuiltInColorProfiles.For(ColorSpaces.Srgb, ProfileRole.Output).Identity);
         byte[]? xmp = sourceExif?.MergeXmp(null);

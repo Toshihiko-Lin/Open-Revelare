@@ -49,15 +49,18 @@ OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int q
         check(heif_encoder_set_parameter_string(encoder.get(), "chroma", "420"));
         check(heif_encoder_set_parameter_string(encoder.get(), "preset", "medium"));
         check(heif_encoder_set_parameter_string(encoder.get(), "x265:log-level", "-1"));
-        heif_image* raw_image = nullptr;
-        check(heif_image_create(width, height, heif_colorspace_RGB,
-                               heif_chroma_interleaved_RRGGBB_LE, &raw_image));
-        owned<heif_image, heif_image_release> image(raw_image, heif_image_release);
-        check(heif_image_add_plane(image.get(), heif_channel_interleaved, width, height, 10));
-        int stride = 0;
-        auto plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
-        for (int y = 0; y < height; ++y)
-            std::memcpy(plane + y * stride, rgb + size_t(y) * width * 3, size_t(width) * 6);
+        // libheif requests main10-intra and totalFrames=1, which x265 signals as
+        // Range Extensions (profile_idc=4), NOT ordinary Main10. Phone hardware
+        // decoders commonly accept Main10 (2) but reject RExt. These encoder
+        // settings select genuine Main10; we still feed/flush exactly one I frame.
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:total-frames", "0"));
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:keyint", "2"));
+        // libheif's still-image adapter flushes only once. Explicitly disable
+        // inter-frame lookahead/delay when using the non-RExt profile settings.
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:bframes", "0"));
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:rc-lookahead", "0"));
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:frame-threads", "1"));
+        check(heif_encoder_set_parameter_string(encoder.get(), "x265:repeat-headers", "1"));
         owned<heif_color_profile_nclx, heif_nclx_color_profile_free> color(
             heif_nclx_color_profile_alloc(), heif_nclx_color_profile_free);
         if (!color) throw std::bad_alloc();
@@ -67,18 +70,59 @@ OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int q
         check(heif_nclx_color_profile_set_transfer_characteristics(color.get(), hdr ? 16 : 2));
         check(heif_nclx_color_profile_set_matrix_coefficients(color.get(), hdr ? 9 : 1));
         color->full_range_flag = 1;
-        check(heif_image_set_nclx_color_profile(image.get(), color.get()));
-        if (icc && icc_size > 0)
-            check(heif_image_set_raw_color_profile(image.get(), "prof", icc, size_t(icc_size)));
         owned<heif_encoding_options, heif_encoding_options_free> options(
             heif_encoding_options_alloc(), heif_encoding_options_free);
         if (!options) throw std::bad_alloc();
         options->output_nclx_profile = color.get();
         options->save_two_colr_boxes_when_ICC_and_nclx_available = 1;
         options->macOS_compatibility_workaround_no_nclx_profile = 0;
+
+        // A single 80 MP HEVC picture exceeds common hardware picture/level limits.
+        // Standard HEIF grids bound each coded image to 1024x1024 (Main10 Level 4), preserving the
+        // complete photograph and its PQ/BT.2020 characterization at the primary item.
+        constexpr int tile_edge = 1024;
+        bool tiled = width > tile_edge || height > tile_edge;
         heif_image_handle* raw_handle = nullptr;
-        check(heif_context_encode_image(ctx.get(), image.get(), encoder.get(), options.get(), &raw_handle));
+        if (tiled)
+            check(heif_context_add_grid_image(ctx.get(), uint32_t(width), uint32_t(height),
+                uint32_t((width + tile_edge - 1) / tile_edge), uint32_t((height + tile_edge - 1) / tile_edge),
+                options.get(), &raw_handle));
         owned<heif_image_handle, heif_image_handle_release> handle(raw_handle, heif_image_handle_release);
+        int columns = tiled ? (width + tile_edge - 1) / tile_edge : 1;
+        int rows = tiled ? (height + tile_edge - 1) / tile_edge : 1;
+        int tw = tiled ? tile_edge : width, th = tiled ? tile_edge : height;
+        for (int ty = 0; ty < rows; ++ty) {
+            for (int tx = 0; tx < columns; ++tx) {
+                heif_image* raw_image = nullptr;
+                check(heif_image_create(tw, th, heif_colorspace_RGB, heif_chroma_interleaved_RRGGBB_LE, &raw_image));
+                owned<heif_image, heif_image_release> image(raw_image, heif_image_release);
+                check(heif_image_add_plane(image.get(), heif_channel_interleaved, tw, th, 10));
+                int stride = 0;
+                auto plane = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
+                // Replicate right/bottom edge samples to fill the last tile. The grid
+                // retains the exact original dimensions, so padding never becomes picture.
+                for (int y = 0; y < th; ++y) {
+                    int sy = std::min(ty * tile_edge + y, height - 1);
+                    int sx = tx * tile_edge;
+                    int copied = std::min(tw, width - sx);
+                    const uint16_t* source = rgb + (size_t(sy) * width + sx) * 3;
+                    auto destination = reinterpret_cast<uint16_t*>(plane + size_t(y) * stride);
+                    std::memcpy(destination, source, size_t(copied) * 6);
+                    for (int x = copied; x < tw; ++x)
+                        std::memcpy(destination + size_t(x) * 3, source + size_t(copied - 1) * 3, 6);
+                }
+                check(heif_image_set_nclx_color_profile(image.get(), color.get()));
+                if (icc && icc_size > 0)
+                    check(heif_image_set_raw_color_profile(image.get(), "prof", icc, size_t(icc_size)));
+                if (tiled)
+                    check(heif_context_add_image_tile(ctx.get(), handle.get(), uint32_t(tx), uint32_t(ty), image.get(), encoder.get()));
+                else {
+                    check(heif_context_encode_image(ctx.get(), image.get(), encoder.get(), options.get(), &raw_handle));
+                    handle.reset(raw_handle);
+                }
+            }
+        }
+        check(heif_context_set_primary_image(ctx.get(), handle.get()));
         if (exif && exif_size > 0)
             check(heif_context_add_exif_metadata(ctx.get(), handle.get(), exif, exif_size));
         if (xmp && xmp_size > 0)

@@ -1,5 +1,6 @@
 using OpenRevelare.ColorManagement;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Advanced;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
@@ -89,14 +90,24 @@ public static class JpegIO
         ImageBuffer full = frame.Pixels;
         // One downsampled copy per size step, reused across the quality search at that step.
         ImageBuffer scaled = full;
-        var (file, fit) = FitToSize(full.Width, full.Height, quality, maxBytes, (maxEdge, q) =>
+        Image? prepared = null;
+        try
         {
-            if (Math.Max(scaled.Width, scaled.Height) > maxEdge)
-                scaled = Resample.ToLongEdge(full, maxEdge, allowUpscale: false);
-            return Encode(scaled, q, description, profileBytes, xmp: null, sourceExif: sourceExif);
-        });
-        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
-        return fit;
+            var (file, fit) = FitToSize(full.Width, full.Height, quality, maxBytes, (maxEdge, q) =>
+            {
+                if (Math.Max(scaled.Width, scaled.Height) > maxEdge)
+                {
+                    prepared?.Dispose();
+                    prepared = null;
+                    scaled = Resample.ToLongEdge(full, maxEdge, allowUpscale: false);
+                }
+                prepared ??= PrepareImage(scaled, description, profileBytes, xmp: null, sourceExif: sourceExif);
+                return Encode(prepared, q);
+            });
+            ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+            return fit;
+        }
+        finally { prepared?.Dispose(); }
     }
 
     /// <summary>
@@ -165,6 +176,7 @@ public static class JpegIO
 
             byte[] best = encode(maxEdge, requested);
             if (best.Length <= maxBytes) return (best, Result(requested, best));
+            if (requested == MinFitQuality) continue; // the failed probe already WAS the floor
 
             byte[] floor = encode(maxEdge, MinFitQuality);
             if (floor.Length > maxBytes) continue;   // even the floor is too big: shrink
@@ -245,23 +257,29 @@ public static class JpegIO
     {
         byte[]? profileBytes = ExportColorPolicy.ResolveProfileBytes(sdrBase, profilePolicy);
         RenderedFrame scaledBase = sdrBase, scaledHdr = hdr;
-        var (file, fit) = FitToSize(
-            sdrBase.Pixels.Width, sdrBase.Pixels.Height, quality, maxBytes, (maxEdge, q) =>
+        PreparedGainMap? prepared = null;
+        try
         {
-            if (Math.Max(scaledBase.Pixels.Width, scaledBase.Pixels.Height) > maxEdge)
+            var (file, fit) = FitToSize(
+                sdrBase.Pixels.Width, sdrBase.Pixels.Height, quality, maxBytes, (maxEdge, q) =>
             {
-                // Both layers through the same call, as everywhere else: a gain map is only valid
-                // against a base of exactly its own dimensions.
-                scaledBase = sdrBase.WithPixels(
-                    Resample.ToLongEdge(sdrBase.Pixels, maxEdge, allowUpscale: false));
-                scaledHdr = hdr.WithPixels(
-                    Resample.ToLongEdge(hdr.Pixels, maxEdge, allowUpscale: false));
-            }
-            return EncodeGainMapJpeg(
-                scaledBase, scaledHdr, baseSpace, target, q, description, profileBytes, sourceExif);
-        });
-        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
-        return fit;
+                if (Math.Max(scaledBase.Pixels.Width, scaledBase.Pixels.Height) > maxEdge)
+                {
+                    prepared?.Dispose();
+                    prepared = null;
+                    // Both renditions are always resampled from their originals.
+                    scaledBase = sdrBase.WithPixels(
+                        Resample.ToLongEdge(sdrBase.Pixels, maxEdge, allowUpscale: false));
+                    scaledHdr = hdr.WithPixels(
+                        Resample.ToLongEdge(hdr.Pixels, maxEdge, allowUpscale: false));
+                }
+                prepared ??= new PreparedGainMap(scaledBase, scaledHdr, baseSpace, target, description, profileBytes, sourceExif);
+                return prepared.Encode(q);
+            });
+            ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+            return fit;
+        }
+        finally { prepared?.Dispose(); }
     }
 
     /// <summary>The complete gain-map file for one base/HDR pair at one quality.</summary>
@@ -275,25 +293,45 @@ public static class JpegIO
         byte[]? profileBytes,
         SourceExif? sourceExif)
     {
-        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target, GainMapChannels.PerChannel);
+        using var prepared = new PreparedGainMap(sdrBase, hdr, baseSpace, target, description, profileBytes, sourceExif);
+        return prepared.Encode(quality);
+    }
 
-        // The map first, finished: the base's XMP has to state the map's final byte length.
-        byte[] gainMapJpeg = GainMapJpegContainer.WithIsoMetadata(
-            Encode(
-                map.Map,
-                quality,
-                description: null,
-                iccBytes: null,
-                xmp: GainMapJpegContainer.GainMapXmp(map.Metadata),
-                grayscale: map.Channels == GainMapChannels.Luminance),
-            map.Metadata);
-        byte[] primaryJpeg = Encode(
-            sdrBase.Pixels,
-            quality,
-            description,
-            profileBytes,
-            xmp: GainMapJpegContainer.PrimaryXmp(gainMapJpeg.Length), sourceExif: sourceExif);
-        return GainMapJpegContainer.Compose(primaryJpeg, gainMapJpeg);
+    /// <summary>One resolution's gain calculation, quantized images and fixed metadata.
+    /// Only the compressed streams and the base's final-length XMP vary with quality.</summary>
+    private sealed class PreparedGainMap : IDisposable
+    {
+        private readonly Image _primary, _gain;
+        private readonly GainMapMetadata _metadata;
+        private readonly SourceExif? _sourceExif;
+
+        internal PreparedGainMap(RenderedFrame sdrBase, RenderedFrame hdr, ColorSpaceDef baseSpace,
+            OutputTarget target, string? description, byte[]? profileBytes, SourceExif? sourceExif)
+        {
+            HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target,
+                GainMapChannels.PerChannel, useCommonChannelRange: true);
+            _metadata = map.Metadata;
+            _sourceExif = sourceExif;
+            _primary = PrepareImage(sdrBase.Pixels, description, profileBytes, xmp: null, sourceExif: sourceExif);
+            try
+            {
+                _gain = PrepareImage(map.Map, description: null, iccBytes: null,
+                    xmp: GainMapJpegContainer.GainMapXmp(map.Metadata),
+                    grayscale: map.Channels == GainMapChannels.Luminance);
+            }
+            catch { _primary.Dispose(); throw; }
+        }
+
+        internal byte[] Encode(int quality)
+        {
+            byte[] gainMapJpeg = GainMapJpegContainer.WithIsoMetadata(JpegIO.Encode(_gain, quality), _metadata);
+            byte[] xmp = GainMapJpegContainer.PrimaryXmp(gainMapJpeg.Length);
+            _primary.Metadata.XmpProfile = new SixLabors.ImageSharp.Metadata.Profiles.Xmp.XmpProfile(
+                _sourceExif?.MergeXmp(xmp) ?? xmp);
+            return GainMapJpegContainer.Compose(JpegIO.Encode(_primary, quality), gainMapJpeg);
+        }
+
+        public void Dispose() { _primary.Dispose(); _gain.Dispose(); }
     }
 
     private static void WriteJpeg(ImageBuffer img, string path, int quality, string? description,
@@ -307,50 +345,55 @@ public static class JpegIO
     private static byte[] Encode(ImageBuffer img, int quality, string? description,
                                  byte[]? iccBytes, byte[]? xmp, bool grayscale = false, SourceExif? sourceExif = null)
     {
+        using Image prepared = PrepareImage(img, description, iccBytes, xmp, grayscale, sourceExif);
+        return Encode(prepared, quality);
+    }
+
+    private static Image PrepareImage(ImageBuffer img, string? description,
+        byte[]? iccBytes, byte[]? xmp, bool grayscale = false, SourceExif? sourceExif = null)
+    {
         int w = img.Width, h = img.Height;
         float[] src = img.Data;
-        using Image image = grayscale ? new Image<L8>(w, h) : new Image<Rgb24>(w, h);
-
-        var exif = sourceExif?.CreateProfile(w, h, exactSrgb: iccBytes is null
-            || iccBytes.AsSpan().SequenceEqual(IccProfiles.Build(ColorSpaces.Srgb))) ?? new ExifProfile();
-        exif.SetValue(ExifTag.Software, TiffIO.SoftwareTag);
-        if (!string.IsNullOrEmpty(description))
+        Image image = grayscale ? new Image<L8>(w, h) : new Image<Rgb24>(w, h);
+        try
         {
-            // ImageDescription (270) is ASCII per spec, so it gets the folded copy and the full
-            // Unicode text goes to UserComment (37510) — same split as TiffIO, for the same reason.
-            exif.SetValue(ExifTag.ImageDescription, TiffIO.ToAsciiSafe(description));
-            exif.SetValue(ExifTag.UserComment,
-                new EncodedString(EncodedString.CharacterCode.Unicode, description));
-        }
-        image.Metadata.ExifProfile = exif;
-        // Same profile the TIFF path embeds, from the same builder — an export dialog that offers
-        // one "embed ICC" switch must mean the same thing in both containers.
-        if (iccBytes is { Length: > 0 })
-            image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
-                iccBytes);
-        xmp = sourceExif?.MergeXmp(xmp) ?? xmp;
-        if (xmp is { Length: > 0 })
-            image.Metadata.XmpProfile = new SixLabors.ImageSharp.Metadata.Profiles.Xmp.XmpProfile(xmp);
-
-        if (image is Image<L8> gray)
-        {
-            gray.ProcessPixelRows(accessor =>
+            var exif = sourceExif?.CreateProfile(w, h, exactSrgb: iccBytes is null
+                || iccBytes.AsSpan().SequenceEqual(IccProfiles.Build(ColorSpaces.Srgb))) ?? new ExifProfile();
+            exif.SetValue(ExifTag.Software, TiffIO.SoftwareTag);
+            if (!string.IsNullOrEmpty(description))
             {
-                for (int y = 0; y < h; y++)
+                // ImageDescription (270) is ASCII per spec, so it gets the folded copy and the full
+                // Unicode text goes to UserComment (37510) — same split as TiffIO, for the same reason.
+                exif.SetValue(ExifTag.ImageDescription, TiffIO.ToAsciiSafe(description));
+                exif.SetValue(ExifTag.UserComment,
+                    new EncodedString(EncodedString.CharacterCode.Unicode, description));
+            }
+            image.Metadata.ExifProfile = exif;
+            // Same profile the TIFF path embeds, from the same builder — an export dialog that offers
+            // one "embed ICC" switch must mean the same thing in both containers.
+            if (iccBytes is { Length: > 0 })
+                image.Metadata.IccProfile = new SixLabors.ImageSharp.Metadata.Profiles.Icc.IccProfile(
+                    iccBytes);
+            xmp = sourceExif?.MergeXmp(xmp) ?? xmp;
+            if (xmp is { Length: > 0 })
+                image.Metadata.XmpProfile = new SixLabors.ImageSharp.Metadata.Profiles.Xmp.XmpProfile(xmp);
+
+            if (image is Image<L8> gray)
+            {
+                void Fill(int y)
                 {
-                    Span<L8> row = accessor.GetRowSpan(y);
+                    Span<L8> row = gray.DangerousGetPixelRowMemory(y).Span;
                     int o = y * w * 3;
                     for (int x = 0; x < w; x++) row[x] = new L8(To8(src[o + x * 3]));
                 }
-            });
-        }
-        else
-        {
-            ((Image<Rgb24>)image).ProcessPixelRows(accessor =>
+                FillRows(w, h, Fill);
+            }
+            else
             {
-                for (int y = 0; y < h; y++)
+                var rgb = (Image<Rgb24>)image;
+                void Fill(int y)
                 {
-                    Span<Rgb24> row = accessor.GetRowSpan(y);
+                    Span<Rgb24> row = rgb.DangerousGetPixelRowMemory(y).Span;
                     int o = y * w * 3;
                     for (int x = 0; x < w; x++)
                     {
@@ -358,14 +401,28 @@ public static class JpegIO
                         row[x] = new Rgb24(To8(src[j]), To8(src[j + 1]), To8(src[j + 2]));
                     }
                 }
-            });
-        }
+                FillRows(w, h, Fill);
+            }
 
+            return image;
+        }
+        catch { image.Dispose(); throw; }
+    }
+
+    private static void FillRows(int width, int height, Action<int> fill)
+    {
+        // The image's storage is fixed before workers start; each owns disjoint rows.
+        if ((long)width * height >= 262144) Parallel.For(0, height, fill);
+        else for (int y = 0; y < height; y++) fill(y);
+    }
+
+    private static byte[] Encode(Image image, int quality)
+    {
         var encoder = new JpegEncoder
         {
             Quality = quality,
             // 4:4:4 — no chroma subsampling; a single-component stream for the grayscale map.
-            ColorType = grayscale ? JpegEncodingColor.Luminance : JpegEncodingColor.YCbCrRatio444,
+            ColorType = image is Image<L8> ? JpegEncodingColor.Luminance : JpegEncodingColor.YCbCrRatio444,
         };
         using var stream = new MemoryStream();
         image.Save(stream, encoder);

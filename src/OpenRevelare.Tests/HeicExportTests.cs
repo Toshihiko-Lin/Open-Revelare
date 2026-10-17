@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using MetadataExtractor;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Models;
@@ -31,6 +32,7 @@ public sealed class HeicExportTests
             Assert.Equal(17u, BinaryPrimitives.ReadUInt32BigEndian(aperture.AsSpan(8)));
             Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(aperture.AsSpan(12)));
             byte[] config = Assert.Single(properties, p => p.Type == "hvcC").Data;
+            Assert.Equal(2, config[1] & 31); // Main10, not Main10 Intra/Range Extensions (4).
             Assert.Equal(2, config[17] & 7); // Main10 really carries 10 bits, not an 8-bit fallback.
             byte[] icc = Assert.Single(properties, p => p.Type == "colr"
                 && Encoding.ASCII.GetString(p.Data, 0, 4) == "prof").Data;
@@ -57,7 +59,58 @@ public sealed class HeicExportTests
             Assert.Equal(9, BinaryPrimitives.ReadUInt16BigEndian(color.AsSpan(8)));
             Assert.Equal(0x80, color[10]);
             byte[] config = Assert.Single(properties, p => p.Type == "hvcC").Data;
+            Assert.Equal(2, config[1] & 31);
             Assert.Equal(2, config[17] & 7);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Large_photo_is_a_bounded_main10_grid_with_exact_dimensions_and_color(bool hdr)
+    {
+        var frame = Frame(hdr ? ColorSpaces.LinearExtendedSrgb : ColorSpaces.DisplayP3, hdr, 1031, 769);
+        WithFile(path =>
+        {
+            var metadata = SourceExif.ForExport(null, false, new FilmCaptureMetadata {
+                Camera = new CaptureDevice { Model = "Grid camera" }, Artist = "Grid photographer" });
+            HeicIO.ExportHeic(frame, path, sourceExif: metadata);
+            byte[] file = File.ReadAllBytes(path);
+            var properties = Properties(file);
+            Assert.Contains(properties, p => p.Type == "ispe"
+                && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(4)) == 1031
+                && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(8)) == 769);
+            var configs = properties.Where(p => p.Type == "hvcC").ToArray();
+            Assert.NotEmpty(configs);
+            Assert.All(configs, config =>
+            {
+                Assert.Equal(2, config.Data[1] & 31);
+                Assert.Equal(2, config.Data[17] & 7);
+                Assert.InRange(config.Data[12], (byte)1, (byte)120); // at most Level 4 per tile
+            });
+            Assert.Contains(properties, p => p.Type == "ispe"
+                && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(4)) == 1024
+                && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(8)) == 1024);
+            var colors = properties.Where(p => p.Type == "colr" && Encoding.ASCII.GetString(p.Data, 0, 4) == "nclx");
+            Assert.NotEmpty(colors);
+            Assert.All(colors, p =>
+            {
+                Assert.Equal(hdr ? 9 : 2, BinaryPrimitives.ReadUInt16BigEndian(p.Data.AsSpan(4)));
+                Assert.Equal(hdr ? 16 : 2, BinaryPrimitives.ReadUInt16BigEndian(p.Data.AsSpan(6)));
+            });
+            var profiles = properties.Where(p => p.Type == "colr" && Encoding.ASCII.GetString(p.Data, 0, 4) == "prof");
+            if (hdr) Assert.Empty(profiles);
+            else
+            {
+                Assert.NotEmpty(profiles);
+                Assert.All(profiles, p => Assert.Equal(frame.OutputProfile.IccBytes.ToArray(), p.Data[4..]));
+            }
+            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(path);
+            var root = directories.OfType<MetadataExtractor.Formats.Exif.ExifIfd0Directory>().First();
+            Assert.Equal("Grid camera", root.GetString(272));
+            var exif = directories.OfType<MetadataExtractor.Formats.Exif.ExifSubIfdDirectory>().First(d => d.ContainsTag(0xa002));
+            Assert.Equal(1031, exif.GetInt32(0xa002));
+            Assert.Equal(769, exif.GetInt32(0xa003));
         });
     }
 
@@ -105,9 +158,11 @@ public sealed class HeicExportTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Size_ceiling_reduces_quality_and_counts_the_complete_heic_file(bool hdr)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Size_ceiling_reduces_quality_and_counts_the_complete_heic_file(bool hdr, bool forceResize)
     {
         WithFile(path =>
         {
@@ -115,16 +170,24 @@ public sealed class HeicExportTests
             var random = new Random(42);
             for (int i = 0; i < frame.Pixels.Data.Length; i++)
                 frame.Pixels.Data[i] = random.NextSingle() * (hdr ? 4f : 1f);
-            HeicIO.ExportHeic(frame, path, 90);
+            // A ceiling below the quality floor forces the search to invalidate its pixel cache.
+            HeicIO.ExportHeic(frame, path, forceResize ? JpegIO.MinFitQuality : 90);
             long ceiling = new FileInfo(path).Length * 3 / 4;
             var fit = HeicIO.ExportHeic(frame, path, 90, maxBytes: ceiling);
             Assert.NotNull(fit);
             Assert.Equal(new FileInfo(path).Length, fit.Bytes);
             Assert.True(fit.Bytes <= ceiling);
             Assert.True(fit.QualityReduced || fit.Shrunk);
+            if (forceResize) Assert.True(fit.Shrunk);
             byte[] color = Assert.Single(Properties(File.ReadAllBytes(path)), p => p.Type == "colr"
                 && Encoding.ASCII.GetString(p.Data, 0, 4) == "nclx").Data;
             Assert.Equal(hdr ? 16 : 2, BinaryPrimitives.ReadUInt16BigEndian(color.AsSpan(6)));
+            // Reusing pixels across quality probes must match a fresh encode at the chosen
+            // quality/resolution, including after shrinking the original HDR or SDR frame.
+            byte[] fitted = File.ReadAllBytes(path);
+            var expected = frame.WithPixels(Resample.ToLongEdge(frame.Pixels, fit.LongEdge, allowUpscale: false));
+            HeicIO.ExportHeic(expected, path, fit.Quality);
+            Assert.Equal(fitted, File.ReadAllBytes(path));
         });
     }
 

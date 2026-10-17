@@ -1645,7 +1645,8 @@ public static class TiffIO
         tif.SetField(TiffTag.COMPRESSION, compression);
         if (compression == Compression.LZW || compression == Compression.DEFLATE)
             tif.SetField(TiffTag.PREDICTOR, Predictor.HORIZONTAL); // improves 16-bit compression
-        tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
+        int rowsPerStrip = compression == Compression.LZW ? tif.DefaultStripSize(0) : ExportRowsPerStrip(w, h, sizeof(ushort));
+        tif.SetField(TiffTag.ROWSPERSTRIP, rowsPerStrip);
 
         if (iccBytes is { Length: > 0 })
         {
@@ -1665,20 +1666,32 @@ public static class TiffIO
         // The producing application — standard TIFF tag 305, always stamped.
         tif.SetField(TiffTag.SOFTWARE, SoftwareTag);
 
-        float[] src = img.Data;
-        byte[] row = new byte[w * 3 * 2];
-        for (int y = 0; y < h; y++)
+        if (compression == Compression.DEFLATE && BitConverter.IsLittleEndian)
         {
-            int o = y * w * 3;
-            for (int x = 0; x < w; x++)
+            WriteDeflateStrips(tif, img, rowsPerStrip, sizeof(ushort));
+            tif.FlushData();
+            return;
+        }
+        if (compression == Compression.LZW)
+        {
+            WriteLzwScanlines(tif, img, sizeof(ushort));
+            tif.FlushData();
+            return;
+        }
+
+        float[] src = img.Data;
+        byte[] strip = new byte[checked(w * 3 * sizeof(ushort) * rowsPerStrip)];
+        for (int y = 0; y < h; y += rowsPerStrip)
+        {
+            int offset = y * w * 3;
+            int samples = checked(Math.Min(rowsPerStrip, h - y) * w * 3);
+            ParallelSweep.Over(samples, (from, to) =>
             {
-                int j = o + x * 3;
-                WriteU16(row, x * 3 + 0, To16(src[j]));
-                WriteU16(row, x * 3 + 1, To16(src[j + 1]));
-                WriteU16(row, x * 3 + 2, To16(src[j + 2]));
-            }
-            if (!tif.WriteScanline(row, y))
-                throw new IOException($"failed writing TIFF scanline {y}");
+                for (int i = from; i < to; i++) WriteU16(strip, i, To16(src[offset + i]));
+            });
+            // LibTiff's predictor may modify this buffer, so every strip is prepared afresh.
+            if (tif.WriteEncodedStrip(y / rowsPerStrip, strip, samples * sizeof(ushort)) < 0)
+                throw new IOException($"failed writing TIFF strip at row {y}");
         }
 
         tif.FlushData();
@@ -1711,7 +1724,8 @@ public static class TiffIO
         tif.SetField(TiffTag.COMPRESSION, compression);
         // Do not use the integer horizontal predictor here. Floating-point predictor support
         // varies across TIFF readers, while raw LZW/Deflate float scanlines are portable.
-        tif.SetField(TiffTag.ROWSPERSTRIP, tif.DefaultStripSize(0));
+        int rowsPerStrip = compression == Compression.LZW ? tif.DefaultStripSize(0) : ExportRowsPerStrip(w, h, sizeof(float));
+        tif.SetField(TiffTag.ROWSPERSTRIP, rowsPerStrip);
 
         if (iccBytes is { Length: > 0 })
             tif.SetField(TiffTag.ICCPROFILE, iccBytes.Length, iccBytes);
@@ -1724,17 +1738,108 @@ public static class TiffIO
         }
         tif.SetField(TiffTag.SOFTWARE, SoftwareTag);
 
+        if (compression == Compression.DEFLATE && BitConverter.IsLittleEndian)
+        {
+            WriteDeflateStrips(tif, img, rowsPerStrip, sizeof(float));
+            tif.FlushData();
+            return;
+        }
+        if (compression == Compression.LZW)
+        {
+            WriteLzwScanlines(tif, img, sizeof(float));
+            tif.FlushData();
+            return;
+        }
+
         float[] src = img.Data;
-        byte[] row = new byte[checked(w * 3 * sizeof(float))];
-        for (int y = 0; y < h; y++)
+        byte[] strip = new byte[checked(w * 3 * sizeof(float) * rowsPerStrip)];
+        for (int y = 0; y < h; y += rowsPerStrip)
         {
             int sourceOffset = checked(y * w * 3 * sizeof(float));
-            Buffer.BlockCopy(src, sourceOffset, row, 0, row.Length);
-            if (!tif.WriteScanline(row, y))
-                throw new IOException($"failed writing float TIFF scanline {y}");
+            int bytes = checked(Math.Min(rowsPerStrip, h - y) * w * 3 * sizeof(float));
+            Buffer.BlockCopy(src, sourceOffset, strip, 0, bytes);
+            if (tif.WriteEncodedStrip(y / rowsPerStrip, strip, bytes) < 0)
+                throw new IOException($"failed writing float TIFF strip at row {y}");
         }
 
         tif.FlushData();
+    }
+
+    // Small default strips often contain just one photographic scanline. Larger bounded
+    // strips amortize codec setup and per-row dispatch without allocating a whole image.
+    private static int ExportRowsPerStrip(int width, int height, int bytesPerSample)
+        => Math.Clamp((256 * 1024) / checked(width * 3 * bytesPerSample), 1, height);
+
+    private static void WriteLzwScanlines(Tiff tif, ImageBuffer image, int bytesPerSample)
+    {
+        int width = image.Width, height = image.Height;
+        float[] source = image.Data;
+        int samples = checked(width * 3);
+        byte[] row = new byte[checked(samples * bytesPerSample)];
+        for (int y = 0; y < height; y++)
+        {
+            if (bytesPerSample == sizeof(ushort))
+            {
+                int offset = y * samples;
+                for (int x = 0; x < width; x++)
+                {
+                    int j = offset + x * 3;
+                    WriteU16(row, x * 3, To16(source[j]));
+                    WriteU16(row, x * 3 + 1, To16(source[j + 1]));
+                    WriteU16(row, x * 3 + 2, To16(source[j + 2]));
+                }
+            }
+            else Buffer.BlockCopy(source, checked(y * row.Length), row, 0, row.Length);
+            if (!tif.WriteScanline(row, y)) throw new IOException($"failed writing LZW TIFF scanline {y}");
+        }
+    }
+
+    /// <summary>Compress independent strips with the runtime's zlib backend, in bounded batches.
+    /// Workers never touch the LibTiff handle; the owner writes completed strips in order.</summary>
+    private static void WriteDeflateStrips(Tiff tif, ImageBuffer image, int rowsPerStrip, int bytesPerSample)
+    {
+        int rowSamples = checked(image.Width * 3);
+        int strips = (image.Height + rowsPerStrip - 1) / rowsPerStrip;
+        int workers = Math.Min(strips, Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+        var completed = new (byte[] Bytes, int Count)[workers];
+        var options = new ParallelOptions { MaxDegreeOfParallelism = workers };
+        for (int first = 0; first < strips; first += workers)
+        {
+            int count = Math.Min(workers, strips - first);
+            Parallel.For(0, count, options, i =>
+            {
+                int y = (first + i) * rowsPerStrip;
+                int rows = Math.Min(rowsPerStrip, image.Height - y);
+                int samples = checked(rows * rowSamples);
+                byte[] raw = new byte[checked(samples * bytesPerSample)];
+                if (bytesPerSample == sizeof(ushort))
+                {
+                    int offset = y * rowSamples;
+                    for (int s = 0; s < samples; s++) WriteU16(raw, s, To16(image.Data[offset + s]));
+                    // TIFF horizontal prediction subtracts the PREVIOUS PIXEL's same
+                    // channel, modulo 2^16, resetting at every row. Work backwards so
+                    // every subtraction still reads the unmodified predecessor.
+                    var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(raw.AsSpan());
+                    for (int row = 0; row < rows; row++)
+                        for (int s = (row + 1) * rowSamples - 1; s >= row * rowSamples + 3; s--)
+                            words[s] = unchecked((ushort)(words[s] - words[s - 3]));
+                }
+                else Buffer.BlockCopy(image.Data, checked(y * rowSamples * sizeof(float)), raw, 0, raw.Length);
+
+                using var packed = new MemoryStream(raw.Length);
+                using (var zip = new System.IO.Compression.ZLibStream(packed,
+                    System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+                    zip.Write(raw);
+                completed[i] = (packed.GetBuffer(), checked((int)packed.Length));
+            });
+            for (int i = 0; i < count; i++)
+            {
+                var packed = completed[i];
+                if (tif.WriteRawStrip(first + i, packed.Bytes, packed.Count) < 0)
+                    throw new IOException($"failed writing Deflate TIFF strip {first + i}");
+                completed[i] = default; // release this batch before preparing the next
+            }
+        }
     }
 
     /// <summary>

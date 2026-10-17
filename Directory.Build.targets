@@ -24,11 +24,21 @@
     <Error Condition="!Exists('$(_RawPath)')" Text="Cannot publish without LibRaw 0.22.2: $(_RawPath)" />
   </Target>
   <PropertyGroup>
+    <_ComputeName Condition="$(_RawRid.StartsWith('win'))">OpenRevelare.Compute.Native.dll</_ComputeName>
+    <_ComputeName Condition="$(_RawRid.StartsWith('osx'))">libOpenRevelare.Compute.Native.dylib</_ComputeName>
+    <_ComputePath>$(MSBuildThisFileDirectory)native/$(_RawRid)/$(_ComputeName)</_ComputePath>
     <_HeifName Condition="$(_RawRid.StartsWith('win'))">OpenRevelare.Heif.Native.dll</_HeifName>
     <_HeifName Condition="$(_RawRid.StartsWith('linux'))">libOpenRevelare.Heif.Native.so</_HeifName>
     <_HeifName Condition="$(_RawRid.StartsWith('osx'))">libOpenRevelare.Heif.Native.dylib</_HeifName>
     <_HeifPath>$(MSBuildThisFileDirectory)native/$(_RawRid)/$(_HeifName)</_HeifPath>
   </PropertyGroup>
+  <ItemGroup Condition="'$(_NeedsRaw)' == 'true' And '$(_ComputeName)' != '' And Exists('$(_ComputePath)')">
+    <Content Include="$(_ComputePath)" Link="$(_ComputeName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="RequireGpuComputeForPublish" BeforeTargets="PrepareForPublish"
+          Condition="'$(_NeedsRaw)' == 'true' And '$(_ComputeName)' != ''">
+    <Error Condition="!Exists('$(_ComputePath)')" Text="GPU compute backend is missing. Run python packaging/compute/build.py for $(_RawRid)." />
+  </Target>
   <ItemGroup Condition="'$(_NeedsRaw)' == 'true' And Exists('$(_HeifPath)')">
     <Content Include="$(_HeifPath)" Link="$(_HeifName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="$(MSBuildThisFileDirectory)native/$(_RawRid)/heif.manifest.json"

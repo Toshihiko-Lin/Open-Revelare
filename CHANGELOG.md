@@ -1,6 +1,6 @@
 # OpenRevelare — 更新日志
 
-## v1.8.6（2026-10-17）
+## v1.8.6（2026-10-18）
 
 **修复**
 
@@ -8,14 +8,17 @@
 - **编辑与同步更安全。** 移除、添加和排序照片可撤销；整组同步失败不会留下半套修改。重定位原片会核对内容特征，避免误用同名文件。
 - **整卷导出可恢复。** 单张失败不会中断其他照片；重开工程后仍可查看结果，只重试未完成项目。工程或参考改变时会阻止沿用旧任务。
 - **修正颜色与缓存问题。** HDR JPEG 在普通 SDR 查看器中的颜色更准确，齿孔填白不再被调色染色；替换原片后不会继续显示旧预览。已有 HDR JPEG 需要重新导出。
+- **改善 HDR JPEG 与 DNG 的兼容性。** 让更多查看软件正确读取导出的照片。导出时会提示 TIFF 的手机相册支持限制，以及 DNG 可能只显示缩略图的情况。已有文件需要重新导出。
 
 **新增与改进**
 
-- **导出选择更直接。** 新增 HEIC，直接选择 JPEG、TIFF、DNG 等格式；胶片拍摄信息可在侧栏填写，HDR HEIC 需要兼容的查看器。
+- **新增 HEIC 导出。** 支持导出普通或 HDR 照片，可选择输出尺寸和文件大小限制；HDR 显示需要设备和查看器支持。导出窗口可直接选择 HEIC、JPEG、TIFF、DNG 等格式，胶片拍摄信息可在侧栏填写。
 - **工程可以连同原片归档。** 可一起保存原片、校正参考和自定义 LUT，并查看所需文件清单；取消或复制失败不会留下不完整的归档。
 - **智能色偏修正更易判断。** 最多分析 30 轮，结果稳定时提前结束；完成后直接提示结果，不确定时可检查画面、撤销或改用灰卡采样。
 - **常用界面更简洁。** 导入以添加照片为主，同步详情按需查看；导出摘要和保存失败提醒保持可见。“第一卷”指南补充了操作与恢复步骤。
 - **浏览更流畅。** 空闲时预热相邻照片，并补充性能诊断，便于定位预览卡顿。
+- **大图处理支持 GPU 加速。** 加快大图缩放和输出锐化，支持 Windows 与 macOS；默认自动选择较快的处理方式，也可在偏好设置中关闭。
+- **多种格式导出更快。** 优化 JPEG、TIFF 和 DNG 的导出速度，减少限制文件大小时的重复处理。实际提速取决于照片尺寸、导出设置和设备。
 
 ---
 
@@ -25,14 +28,17 @@
 - **Safer editing and syncing.** Photo removal, addition and reordering can be undone. Failed group syncs leave existing edits intact. Relinking checks more than a matching filename.
 - **Recoverable roll exports.** One failed photo does not stop the rest. Reopen the project to review results and retry unfinished items; changed projects or references block stale retries.
 - **Corrected colour and cache issues.** HDR JPEG colours are more accurate in ordinary SDR viewers, white sprocket fill stays white, and replaced originals no longer show stale previews. Existing HDR JPEGs need re-exporting.
+- **Improved HDR JPEG and DNG compatibility.** More viewers can read exported photos correctly. Export hints explain limited TIFF support in phone galleries and cases where DNG files show only a thumbnail. Existing files need re-exporting.
 
 **Added and improved**
 
-- **Easier export choices.** Added HEIC alongside direct JPEG, TIFF and DNG selection. Film capture details can be entered in a side panel. HDR HEIC needs a compatible viewer.
+- **New HEIC export.** Export SDR or HDR photos with output size and file-size controls. HDR display requires a compatible device and viewer. Choose HEIC, JPEG, TIFF or DNG directly in the export window, and enter film capture details in a side panel.
 - **Portable project archives.** Save originals, calibration references and custom LUTs with the project, and review its required files. Cancelled or failed copies do not leave incomplete archives.
 - **Clearer smart color-cast correction.** Analysis can run for up to 30 rounds and stops early when stable. Uncertain results offer clear advice to inspect, undo or use a grey card.
 - **Less clutter in common tasks.** Import focuses on adding photos, sync details appear on demand, and export summaries and save failures remain visible. The First roll guide covers the workflow and recovery.
 - **Smoother browsing.** Adjacent photos are prepared while idle, with added diagnostics to investigate preview delays.
+- **GPU acceleration for large images.** Speeds up resizing and output sharpening on Windows and macOS. The app automatically selects the faster processing method; acceleration can also be disabled in Preferences.
+- **Faster exports across formats.** Improved JPEG, TIFF and DNG export performance, with less repeated processing when limiting file size. Actual gains depend on photo dimensions, export settings and device.
 
 ## v1.8.5.1（2026-10-14）
 

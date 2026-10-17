@@ -13,6 +13,10 @@ RID = {"Windows": "win", "Darwin": "osx", "Linux": "linux"}[platform.system()] +
     "-arm64" if platform.machine().lower() in ("arm64", "aarch64") else "-x64")
 if RID not in ("win-x64", "linux-x64", "osx-x64", "osx-arm64"):
     raise RuntimeError("Unsupported HEIC build target: " + RID)
+# Do not silently ship a scalar x265 build when the assembler is missing.
+nasm = shutil.which("nasm") if RID.endswith("-x64") else None
+if RID.endswith("-x64") and not nasm:
+    raise RuntimeError("HEIC x64 builds require NASM 2.13+ on PATH (choco/apt/brew install nasm).")
 WORK = ROOT / "scratch" / "heif-build" / RID
 PREFIX = WORK / "prefix"
 DEST = ROOT / "native" / RID
@@ -53,11 +57,13 @@ common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 if platform.system() == "Windows":
     common += ["-A", "x64"]
 # One Main10 library serves SDR and PQ alike. No runtime codec/plugin discovery and no
-# system HEVC extension is needed. Scalar builds also work without an assembler installed.
+# system HEVC extension is needed. Keep SIMD primitives enabled; x265 dispatches at
+# runtime to the instruction set supported by the user's CPU.
 run("cmake", "-S", x265 / "source", "-B", WORK / "x265-build", *common,
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_INSTALL_PREFIX=" + str(PREFIX),
     "-DHIGH_BIT_DEPTH=ON", "-DMAIN12=OFF", "-DENABLE_SHARED=OFF", "-DENABLE_CLI=OFF",
-    "-DENABLE_ASSEMBLY=OFF", "-DENABLE_HDR10_PLUS=OFF", "-DSTATIC_LINK_CRT=ON")
+    "-DENABLE_ASSEMBLY=ON", "-DENABLE_HDR10_PLUS=OFF", "-DSTATIC_LINK_CRT=ON",
+    *(["-DNASM_EXECUTABLE=" + nasm] if nasm else []))
 run("cmake", "--build", WORK / "x265-build", "--config", "Release", "--parallel", "4")
 run("cmake", "--install", WORK / "x265-build", "--config", "Release")
 library = next((PREFIX / "lib").glob("*x265*.lib")) if platform.system() == "Windows" else PREFIX / "lib/libx265.a"
@@ -75,6 +81,6 @@ licenses.mkdir(exist_ok=True)
 shutil.copy2(heif / "COPYING", licenses / "libheif-LGPL-3.0.txt")
 shutil.copy2(x265 / "COPYING", licenses / "x265-GPL-2.0.txt")
 (DEST / "heif.manifest.json").write_text(json.dumps({
-    "libheif": "1.21.2", "x265": "4.1", "rid": RID,
+    "libheif": "1.21.2", "x265": "4.1", "rid": RID, "assembly": True,
     "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
 }, indent=2) + "\n", encoding="utf-8")

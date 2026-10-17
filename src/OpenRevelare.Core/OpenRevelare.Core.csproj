@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="OpenRevelare.Tests" />
+    <InternalsVisibleTo Include="OpenRevelare.ComputeBenchmark" />
     <PackageReference Include="MetadataExtractor" Version="2.9.3" />
     <ProjectReference Include="..\OpenRevelare.ColorManagement\OpenRevelare.ColorManagement.csproj" />
     <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.660" />

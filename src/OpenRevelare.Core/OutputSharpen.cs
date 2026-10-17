@@ -96,6 +96,22 @@ public static class OutputSharpen
         if (w < 3 || h < 3) return;   // nothing to sharpen; a kernel would only touch borders
 
         float[] data = displayReferred.Data;
+        float[] Cpu()
+        {
+            var copy = (float[])data.Clone();
+            ApplyCpu(copy, w, h, sigma, amount);
+            return copy;
+        }
+        if (GpuAcceleration.TrySharpen(displayReferred, Kernel(sigma), amount, Threshold, OvershootLimit, Cpu, out float[] accelerated))
+        {
+            accelerated.CopyTo(data, 0);
+            return;
+        }
+        ApplyCpu(data, w, h, sigma, amount);
+    }
+
+    private static void ApplyCpu(float[] data, int w, int h, float sigma, float amount)
+    {
         float[] luma = Luma(data, w, h);
         float[] blurred = GaussianBlur(luma, w, h, sigma);
 

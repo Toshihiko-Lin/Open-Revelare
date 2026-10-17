@@ -48,8 +48,8 @@ public static class LinearDng
     /// Write <paramref name="displayReferred"/> — a finished render, encoded with
     /// <paramref name="space"/>'s curve — as a linear DNG at <paramref name="path"/>.
     ///
-    /// The buffer is NOT modified: the decode runs on a copy, because callers hand this the same
-    /// frame they may still be holding for a thumbnail.
+    /// The buffer is NOT modified: decoding writes directly into the separate 16-bit payload,
+    /// because callers may still hold the encoded frame for a thumbnail.
     /// </summary>
     /// <param name="cameraModel">What the file reports as the camera. It is a made-up device by
     /// definition — the pixels went through this program, not through a sensor — so it names the
@@ -58,17 +58,15 @@ public static class LinearDng
     public static void Write(ImageBuffer displayReferred, ColorSpaceDef space, string path,
                              string? cameraModel = null, SourceExif? sourceExif = null)
     {
-        var linear = new ImageBuffer(displayReferred.Width, displayReferred.Height,
-                                     (float[])displayReferred.Data.Clone());
-        OutputRender.Decode(linear.Data, space);
-
-        ushort[] raw = Quantise16(linear);
+        // Decode and quantize together. A full-resolution float copy plus a separate
+        // linearization sweep used to precede this same 16-bit result.
+        ushort[] raw = Quantise16(displayReferred, space);
         ImageBuffer thumbSource = Resample.ToLongEdge(displayReferred, ThumbnailLongEdge, allowUpscale: false);
         byte[] thumb = Quantise8(thumbSource);
 
         var ifd0 = new List<Entry>
         {
-            Entry.Short(254, 1),                                   // NewSubfileType: reduced-resolution
+            Entry.Long(254, 1),                                    // NewSubfileType: TIFF requires LONG
             Entry.Long(256, (uint)thumbSource.Width),
             Entry.Long(257, (uint)thumbSource.Height),
             Entry.Shorts(258, 8, 8, 8),                            // BitsPerSample
@@ -96,15 +94,15 @@ public static class LinearDng
 
         var subIfd = new List<Entry>
         {
-            Entry.Short(254, 0),                                   // NewSubfileType: the main image
-            Entry.Long(256, (uint)linear.Width),
-            Entry.Long(257, (uint)linear.Height),
+            Entry.Long(254, 0),                                    // NewSubfileType: the main image (LONG)
+            Entry.Long(256, (uint)displayReferred.Width),
+            Entry.Long(257, (uint)displayReferred.Height),
             Entry.Shorts(258, 16, 16, 16),
             Entry.Short(259, 1),                                   // Compression: none (see the remarks)
             Entry.Short(262, PhotometricLinearRaw),
             Entry.Placeholder(273, EntryType.Long, 1),             // StripOffsets — patched below
             Entry.Short(277, 3),
-            Entry.Long(278, (uint)linear.Height),
+            Entry.Long(278, (uint)displayReferred.Height),
             Entry.Long(279, (uint)raw.Length * 2),
             Entry.Short(284, 1),
             Entry.Shorts(339, 1, 1, 1),                            // SampleFormat: unsigned integer
@@ -119,7 +117,7 @@ public static class LinearDng
         ExportFile.Write(path, staging =>
         {
             WriteFile(staging, ifd0, subIfd, thumb, raw);
-            sourceExif?.ApplyToTiff(staging, linear.Width, linear.Height, exactSrgb: false);
+            sourceExif?.ApplyToTiff(staging, displayReferred.Width, displayReferred.Height, exactSrgb: false);
         });
     }
 
@@ -134,16 +132,27 @@ public static class LinearDng
         return [m[0, 0], m[0, 1], m[0, 2], m[1, 0], m[1, 1], m[1, 2], m[2, 0], m[2, 1], m[2, 2]];
     }
 
-    private static ushort[] Quantise16(ImageBuffer linear)
+    private static ushort[] Quantise16(ImageBuffer encoded, ColorSpaceDef space)
     {
-        var raw = new ushort[linear.Data.Length];
-        for (int i = 0; i < raw.Length; i++)
+        float[] source = encoded.Data;
+        var raw = new ushort[source.Length];
+        float[]? lut = space.Transfer == TransferFunction.SrgbPiecewise ? Srgb.InverseLut : null;
+        bool power = space.Transfer == TransferFunction.Power;
+        float gamma = (float)space.Gamma;
+        ParallelSweep.Over(raw.Length, (from, to) =>
         {
-            float v = linear.Data[i];
-            raw[i] = v <= 0f ? (ushort)0
-                   : v >= 1f ? (ushort)65535
-                   : (ushort)MathF.Round(v * 65535f);
-        }
+            for (int i = from; i < to; i++)
+            {
+                // Exactly OutputRender.Decode's LUT/index/power arithmetic and the
+                // original ties-to-even quantization, including extended/nonfinite inputs.
+                float v = source[i];
+                if (lut is not null) v = lut[Srgb.LutIndex(v)];
+                else if (power) v = MathF.Pow(Math.Clamp(v, 0f, 1f), gamma);
+                raw[i] = v <= 0f ? (ushort)0
+                       : v >= 1f ? (ushort)65535
+                       : (ushort)MathF.Round(v * 65535f);
+            }
+        });
         return raw;
     }
 
@@ -269,7 +278,23 @@ public static class LinearDng
 
         w.Write(thumb);
         if (fs.Position % 2 != 0) w.Write((byte)0);
-        foreach (ushort v in raw) w.Write(v);
+        if (BitConverter.IsLittleEndian)
+        {
+            w.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(raw.AsSpan()));
+        }
+        else
+        {
+            // DNG's II header always promises little endian, regardless of the host.
+            byte[] block = new byte[64 * 1024];
+            for (int offset = 0; offset < raw.Length;)
+            {
+                int count = Math.Min(block.Length / 2, raw.Length - offset);
+                for (int i = 0; i < count; i++)
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(block.AsSpan(i * 2), raw[offset + i]);
+                w.Write(block.AsSpan(0, count * 2));
+                offset += count;
+            }
+        }
     }
 
     /// <summary>Pads a value to an even length: TIFF requires every value offset to be
