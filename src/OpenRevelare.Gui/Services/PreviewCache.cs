@@ -43,12 +43,13 @@ public sealed class PreviewCache
     public sealed record Entry(WorkingFrame Working, int SourceWidth, int SourceHeight)
     {
         public ImageBuffer Preview => Working.Pixels;
+        internal SourceStamp? Source { get; init; }
     }
 
-    private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _lru = new();          // front = most recently used
-    private readonly Dictionary<string, LinkedListNode<string>> _nodes = new(StringComparer.OrdinalIgnoreCase);
-    private HashSet<string> _protectedKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LinkedListNode<string>> _nodes = new(StringComparer.Ordinal);
+    private HashSet<string> _protectedKeys = new(StringComparer.Ordinal);
     private long _bytes;
     private long _generation;
     private readonly object _gate = new();
@@ -77,7 +78,7 @@ public sealed class PreviewCache
     internal void Protect(IEnumerable<string> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        lock (_gate) _protectedKeys = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+        lock (_gate) _protectedKeys = new HashSet<string>(keys, StringComparer.Ordinal);
     }
 
     private static long SizeOf(ImageBuffer b) => (long)b.Data.Length * sizeof(float);
@@ -88,6 +89,13 @@ public sealed class PreviewCache
         lock (_gate)
         {
             if (!_entries.TryGetValue(path, out Entry? e)) return null;
+            if (e.Source is { IsCurrent: false })
+            {
+                _bytes -= SizeOf(e.Preview);
+                _entries.Remove(path);
+                if (_nodes.Remove(path, out var node)) _lru.Remove(node);
+                return null;
+            }
             Touch(path);
             Trim(path);
             return e;
@@ -100,15 +108,15 @@ public sealed class PreviewCache
         => PutIfCurrent(path, working, sourceWidth, sourceHeight, Generation);
 
     internal bool PutIfCurrent(string path, WorkingFrame working, int sourceWidth,
-        int sourceHeight, long generation)
+        int sourceHeight, long generation, SourceStamp? source = null)
     {
         ArgumentNullException.ThrowIfNull(working);
         lock (_gate)
         {
-            if (generation != _generation) return false;
+            if (generation != _generation || source is { IsCurrent: false }) return false;
             if (_entries.TryGetValue(path, out Entry? old))
                 _bytes -= SizeOf(old.Preview);
-            _entries[path] = new Entry(working, sourceWidth, sourceHeight);
+            _entries[path] = new Entry(working, sourceWidth, sourceHeight) { Source = source };
             _bytes += SizeOf(working.Pixels);
             Touch(path);
             Trim(path);

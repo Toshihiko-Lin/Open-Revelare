@@ -23,6 +23,7 @@ public partial class MainViewModel
 
     internal bool TryBeginLongTask(string status, out CancellationTokenSource owner)
     {
+        CancelPreviewWarmup();
         owner = null!;
         if (HasLongTask) return false;
         owner = new CancellationTokenSource();

@@ -3,6 +3,8 @@
 The whole route, from copying the negative to exporting the positive. For the algorithms, see
 "Theory".
 
+Start with the "First roll" tab for a short import-to-export walkthrough, completion checks and recovery steps.
+
 One sentence on where this program stands: **the restoration is computed, the look is adjusted.**
 The first lives in the "Roll calibration" panel (Stage 1), the second in "Frame edit" (Stage 2), and
 neither contaminates the other.

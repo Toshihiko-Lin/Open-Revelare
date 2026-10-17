@@ -1,0 +1,97 @@
+{
+  "Schema": "openrevelare-preview-component-benchmark-v1",
+  "TimestampUtc": "2026-10-16T14:48:04.441817Z",
+  "Platform": "Microsoft Windows 10.0.26200",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 12,
+  "SourceDimensions": "2400x1600",
+  "PreviewDimensions": "1200x800",
+  "Pipeline": "ManagedV2",
+  "Iterations": 30,
+  "PeakWorkingSetBytes": 475979776,
+  "PreparedResidentBytes": 19204096,
+  "PixelEquality": true,
+  "Scope": "Synthetic TIFF, in-process CPU pipeline/canonical scene/histogram; excludes Avalonia fallback bitmap, compositor and real RAW; OS file cache unspecified.",
+  "Phases": {
+    "first-preview-decode": {
+      "Count": 1,
+      "SampleCount": 1,
+      "TotalMs": 78.4024,
+      "MaximumMs": 78.4024,
+      "P50Ms": 78.4024,
+      "P95Ms": 78.4024
+    },
+    "pipeline": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 660.839,
+      "MaximumMs": 64.5046,
+      "P50Ms": 16.6188,
+      "P95Ms": 52.4939
+    },
+    "canonical-scene": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 4242.1265,
+      "MaximumMs": 152.4049,
+      "P50Ms": 135.7295,
+      "P95Ms": 143.2254
+    },
+    "histogram": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 50.985400000000006,
+      "MaximumMs": 4.602,
+      "P50Ms": 1.4285,
+      "P95Ms": 3.1
+    },
+    "foreground-prepare-without-cache": {
+      "Count": 30,
+      "SampleCount": 30,
+      "TotalMs": 4732.9317,
+      "MaximumMs": 192.7218,
+      "P50Ms": 153.888,
+      "P95Ms": 186.8656
+    },
+    "foreground-prepared-hit-with-key": {
+      "Count": 30,
+      "SampleCount": 30,
+      "TotalMs": 11.922200000000004,
+      "MaximumMs": 3.5151,
+      "P50Ms": 0.2855,
+      "P95Ms": 0.6111
+    },
+    "uncached-preview-decode-os-cache-unspecified": {
+      "Count": 5,
+      "SampleCount": 5,
+      "TotalMs": 237.8665,
+      "MaximumMs": 76.4377,
+      "P50Ms": 41.2508,
+      "P95Ms": 76.4377
+    },
+    "drag-pipeline-800": {
+      "Count": 12,
+      "SampleCount": 12,
+      "TotalMs": 48.3837,
+      "MaximumMs": 4.5428,
+      "P50Ms": 3.9336,
+      "P95Ms": 4.5428
+    },
+    "zoom-region-render": {
+      "Count": 8,
+      "SampleCount": 8,
+      "TotalMs": 80.6308,
+      "MaximumMs": 29.2601,
+      "P50Ms": 6.736,
+      "P95Ms": 29.2601
+    },
+    "full-tiff-render-and-write": {
+      "Count": 3,
+      "SampleCount": 3,
+      "TotalMs": 980.8058000000001,
+      "MaximumMs": 345.7088,
+      "P50Ms": 326.4156,
+      "P95Ms": 345.7088
+    }
+  }
+}

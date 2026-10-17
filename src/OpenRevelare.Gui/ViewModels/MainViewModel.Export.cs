@@ -142,7 +142,8 @@ public partial class MainViewModel
         int X0,
         int Y0,
         int X1,
-        int Y1);
+        int Y1,
+        SourceStamp Source);
     private RegionSlot? _regionSlot;
 
     /// <summary>
@@ -211,7 +212,10 @@ public partial class MainViewModel
         ColorPipelineVersion pipelineVersion,
         TiffInputAssumption tiffInputAssumption)
     {
+        using var regionTrace = RenderTrace.Scope("zoom.region-read");
+        SourceStamp stamp = SourceStamp.Capture(path);
         if (_regionSlot is { } s && string.Equals(s.Path, path, StringComparison.OrdinalIgnoreCase)
+            && s.Source == stamp
             && s.PipelineVersion == pipelineVersion
             && s.TiffInputAssumption == tiffInputAssumption
             && s.X0 <= need.X0 && s.Y0 <= need.Y0 && s.X1 >= need.X1 && s.Y1 >= need.Y1)
@@ -224,6 +228,7 @@ public partial class MainViewModel
         FullSlot? full;
         lock (_fullSlotGate) full = _fullSlot;
         if (full is not null
+            && full.Source == stamp
             && string.Equals(full.Path, path, StringComparison.OrdinalIgnoreCase)
             && full.PipelineVersion == pipelineVersion
             && full.TiffInputAssumption == tiffInputAssumption
@@ -235,7 +240,7 @@ public partial class MainViewModel
         {
             _regionSlot = new RegionSlot(
                 path, pipelineVersion, tiffInputAssumption, full.Working,
-                0, 0, full.Working.Pixels.Width, full.Working.Pixels.Height);
+                0, 0, full.Working.Pixels.Width, full.Working.Pixels.Height, stamp);
             return full.Working;
         }
 
@@ -258,6 +263,8 @@ public partial class MainViewModel
             ColorManagement,
             tiffInputAssumption);
         if (decoded is not ({ } working, int gx, int gy)) return null;
+        stamp.RequireCurrent();
+        DecodedSources.Track(working, stamp);
         _regionSlot = new RegionSlot(
             path,
             pipelineVersion,
@@ -266,7 +273,7 @@ public partial class MainViewModel
             gx,
             gy,
             gx + working.Pixels.Width,
-            gy + working.Pixels.Height);
+            gy + working.Pixels.Height, stamp);
         return working;
     }
 
@@ -328,6 +335,7 @@ public partial class MainViewModel
     /// </summary>
     public async Task RequestSharpPatchAsync(RegionRender.Roi roi)
     {
+        using var patchTrace = RenderTrace.Scope("zoom.patch.total");
         if (CurrentFrame is not { } frame || !HasImage) return;
         // The before-edits view strips Stage 2 from a chain the region renderer applies whole, so
         // there is no matching patch to render and the (soft) preview stands in. The NEGATIVE view
@@ -396,6 +404,7 @@ public partial class MainViewModel
         if (needsDecode) ReportBackground(Loc.T("载入全分辨率 …"));
         try
         {
+            SourceStamp patchSource = SourceStamp.Capture(srcPath);
             var result = await Task.Run(() =>
             {
                 RenderedRegion region;
@@ -461,7 +470,8 @@ public partial class MainViewModel
                     realised.H);
             }, cts.Token);
 
-            if (tok != _patchToken || cts.IsCancellationRequested) { result?.Image.Dispose(); return; }
+            if (tok != _patchToken || cts.IsCancellationRequested || !patchSource.IsCurrent)
+            { result?.Image.Dispose(); return; }
             if (result is not null) { Patch = result; _patchDirty = true; }
         }
         catch (OperationCanceledException) { }

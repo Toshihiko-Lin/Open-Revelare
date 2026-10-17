@@ -72,6 +72,7 @@ internal static class DngCache
                 // drives, and a root we never recorded is a root we never delete.
                 string dir = DirectoryFor(sourcePath);
                 Directory.CreateDirectory(dir);
+                SourceStamp stamp = SourceStamp.Capture(sourcePath);
                 string target = Path.Combine(dir, KeyFor(sourcePath) + ".dng");
 
                 if (File.Exists(target))
@@ -87,6 +88,7 @@ internal static class DngCache
                 string partial = $"{target}.{Environment.ProcessId}.part";
                 convert(partial);
                 if (!File.Exists(partial)) return null;
+                if (!stamp.IsCurrent) { File.Delete(partial); return null; }
                 File.Move(partial, target, overwrite: true);
                 Evict(dir);
                 return target;
@@ -102,8 +104,7 @@ internal static class DngCache
     /// original is a different key rather than a stale hit.</summary>
     private static string KeyFor(string sourcePath)
     {
-        var fi = new FileInfo(sourcePath);
-        string raw = $"{sourcePath.ToLowerInvariant()}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}";
+        string raw = SourceStamp.Capture(sourcePath).Key + "|adobe-linear-v1";
         return Path.GetFileNameWithoutExtension(sourcePath) + "-" +
                Convert.ToHexString(System.Security.Cryptography.MD5.HashData(
                    System.Text.Encoding.UTF8.GetBytes(raw)))[..12];

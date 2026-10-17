@@ -34,6 +34,8 @@
 
 ## Overview
 
+New users can start with [Your first roll](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.en.md), also available offline in Help → documentation → First roll.
+
 Colour negatives contain an orange base and dye layers. OpenRevelare linearises the input, removes the base, white-balances and inverts it in the Cineon log-density domain, then exports a positive.
 
 - **Explainable**: base, maximum density and channel-balance parameters have defined meanings.

@@ -32,22 +32,18 @@ public partial class MainViewModel
     {
         if (CurrentFrame is null) return;
         bool hadSelection = Frames.Any(f => f.IsSelected);
-        CommitUndo();
         FrameParams source = CurrentParamsForStorage();
-        CurrentFrame.Params = source;
         var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
                                         && (!hadSelection || f.IsSelected)).ToList();
-        foreach (RollFrame frame in targets)
+        if (!TryApplyBatch(targets, d =>
         {
-            frame.Params.SprocketEnabled = source.SprocketEnabled;
-            frame.Params.SprocketThreshold = source.SprocketThreshold;
-            SetThumbnail(frame, null);
-        }
+            d.SprocketEnabled = source.SprocketEnabled;
+            d.SprocketThreshold = source.SprocketThreshold;
+        }, CurrentFrame)) return;
         if (hadSelection) ClearStripSelection();
         StatusText = hadSelection
             ? Loc.F($"已把齿孔遮罩应用到勾选的 {targets.Count} 帧")
             : Loc.F($"已把齿孔遮罩应用到整卷（{targets.Count} 帧）");
-        MarkEdit();
         RestartThumbnails();
     }
 
@@ -107,28 +103,22 @@ public partial class MainViewModel
     {
         if (CurrentFrame is null) return;
         bool hadSelection = Frames.Any(f => f.IsSelected);
-        CommitUndo();
         // Through ForStorage: with the crop tool open BuildParams suppresses the crop for the
         // render, and stored (here, and on every target) that null would erase it.
         FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
-        CurrentFrame.Params = src;
-        var ticked = Frames.Where(f => f.IsSelected && !ReferenceEquals(f, CurrentFrame)).ToList();
-        bool onlySelected = ticked.Count > 0;
-        int n = 0;
-        foreach (RollFrame f in Frames)
+        bool onlySelected = hadSelection;
+        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
+                                        && (!onlySelected || f.IsSelected)).ToList();
+        if (!TryApplyBatch(targets, d =>
         {
-            if (ReferenceEquals(f, CurrentFrame)) continue;
-            if (onlySelected && !f.IsSelected) continue;
-            FrameParams d = f.Params;
             d.QuarterTurns = src.QuarterTurns; d.FlipH = src.FlipH; d.FlipV = src.FlipV;
             d.Rotation = src.Rotation;
-            SetThumbnail(f, null); n++;
-        }
+        }, CurrentFrame)) return;
+        int n = targets.Count;
         StatusText = onlySelected
             ? Loc.F($"已把旋转 / 翻转和拉直应用到勾选的 {n} 帧")
             : Loc.F($"已把旋转 / 翻转和拉直应用到整卷（{n} 帧）");
         if (hadSelection) ClearStripSelection();
-        MarkEdit();
         RestartThumbnails();
     }
 
@@ -137,58 +127,67 @@ public partial class MainViewModel
     {
         if (CurrentFrame is null) return;
         bool hadSelection = Frames.Any(f => f.IsSelected);
-        CommitUndo();
         FrameParams source = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
-        CurrentFrame.Params = source;
         var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
                                         && (!hadSelection || f.IsSelected)).ToList();
-        foreach (RollFrame frame in targets)
-        {
-            frame.Params.CropRect = RebaseCrop(source, frame.Params);
-            SetThumbnail(frame, null);
-        }
+        if (!TryApplyBatch(targets, d => d.CropRect = RebaseCrop(source, d), CurrentFrame)) return;
         if (hadSelection) ClearStripSelection();
         StatusText = hadSelection
             ? Loc.F($"已把裁切应用到勾选的 {targets.Count} 帧")
             : Loc.F($"已把裁切应用到整卷（{targets.Count} 帧）");
-        MarkEdit();
         RestartThumbnails();
     }
 
     private void Broadcast(bool cal, bool scene, bool onlySelected, string what)
     {
         if (CurrentFrame is null) return;
-        CommitUndo();   // close the previous edit as its own undo step
         FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);   // never store a suppressed crop
-        CurrentFrame.Params = src;
-        int n = 0;
-        foreach (RollFrame f in Frames)
-        {
-            if (ReferenceEquals(f, CurrentFrame)) continue;
-            if (onlySelected && !f.IsSelected) continue;
-            CopyGroups(src, f.Params, cal, scene);
-            SetThumbnail(f, null); n++;
-        }
+        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
+                                        && (!onlySelected || f.IsSelected)).ToList();
+        if (!TryApplyBatch(targets, d => CopyGroups(src, d, cal, scene), CurrentFrame)) return;
+        int n = targets.Count;
         StatusText = onlySelected ? Loc.F($"已把{what}应用到选中 {n} 帧") : Loc.F($"已应用{what}到整卷（{n} 帧）");
-        MarkEdit();
         RestartThumbnails();
     }
 
     private void Paste(FrameParams? clip, bool cal, bool scene, string what)
     {
         if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
-        CommitUndo();
-        int n = 0;
-        foreach (RollFrame f in Frames)
-        {
-            if (!f.IsSelected || ReferenceEquals(f, CurrentFrame)) continue;
-            CopyGroups(clip, f.Params, cal, scene);
-            SetThumbnail(f, null); n++;
-        }
+        var targets = Frames.Where(f => f.IsSelected && !ReferenceEquals(f, CurrentFrame)).ToList();
+        if (!TryApplyBatch(targets, d => CopyGroups(clip, d, cal, scene))) return;
+        int n = targets.Count;
         StatusText = n == 0 ? Loc.F($"没有选中的目标帧（在胶片条勾选帧）") : Loc.F($"已把{what}粘贴到 {n} 帧");
         if (n > 0) ClearStripSelection();
-        MarkEdit();
         RestartThumbnails();
+    }
+
+    private bool TryApplyBatch(IReadOnlyList<RollFrame> targets, Action<FrameParams> edit,
+        RollFrame? source = null)
+    {
+        if (targets.Count == 0)
+        {
+            StatusText = Loc.T("没有选中的目标帧（在胶片条勾选帧）");
+            return false;
+        }
+        IReadOnlyList<(RollFrame Frame, FrameParams Params)> prepared;
+        try { prepared = BatchParameterEdit.Prepare(targets, edit, source); }
+        catch (Exception ex)
+        {
+            StatusText = Loc.F($"批量操作未应用：{ex.Message}");
+            return false;
+        }
+
+        // Preparation has no side effects. Publish only on this UI-thread turn, after all
+        // targets succeeded; commit both boundaries so the next slider edit is a separate undo.
+        CommitUndo();
+        foreach (var (frame, next) in prepared)
+        {
+            frame.Params = next;
+            SetThumbnail(frame, null);
+        }
+        MarkEdit();
+        CommitUndo();
+        return true;
     }
 
     /// <summary>Copy the SyncOptions-enabled field groups from s into d.</summary>

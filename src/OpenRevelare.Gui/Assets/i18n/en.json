@@ -1023,5 +1023,10 @@
   "拍摄时间格式须为 YYYY-MM-DD HH:mm:ss。": "Capture time must use YYYY-MM-DD HH:mm:ss.",
   "光圈须为有效正数。": "Aperture must be a valid positive number.",
   "焦距须为有效正数。": "Focal length must be a valid positive number.",
-  "快门须为正数或有效分数，例如 1/125。": "Shutter speed must be a positive number or valid fraction, such as 1/125."
+  "快门须为正数或有效分数，例如 1/125。": "Shutter speed must be a positive number or valid fraction, such as 1/125.",
+  "原片不可用：{0}": "Source unavailable: {0}",
+  "批量操作未应用：{0}": "Batch operation was not applied: {0}",
+  "第一卷": "First roll",
+  "处理期间原片已改变，请重试：{0}": "Source changed during processing; retry: {0}",
+  "原片已改变，正在重新载入：{0}": "Source changed, reloading: {0}"
 }

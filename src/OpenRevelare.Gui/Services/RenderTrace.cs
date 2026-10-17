@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text.Json;
+using OpenRevelare.Core;
 
 namespace OpenRevelare.Gui.Services;
 
@@ -22,6 +24,54 @@ internal static class RenderTrace
         Path.Combine(Path.GetTempPath(), "openrevelare-render-trace.log");
 
     private static readonly object Gate = new();
+    private static readonly PerformanceStatistics Statistics = new();
+
+    public static T Measure<T>(string phase, Func<T> work)
+    {
+        if (!Enabled) return work();
+        long start = Stopwatch.GetTimestamp();
+        try { return work(); }
+        finally { Statistics.Observe(phase, Stopwatch.GetElapsedTime(start).TotalMilliseconds); }
+    }
+
+    public static void Count(string counter)
+    {
+        if (Enabled) Statistics.Increment(counter);
+    }
+
+    public static void Observe(string phase, double milliseconds)
+    {
+        if (Enabled) Statistics.Observe(phase, milliseconds);
+    }
+
+    public static IDisposable? Scope(string phase) => Enabled ? new Span(phase) : null;
+
+    private sealed class Span(string phase) : IDisposable
+    {
+        private readonly long _start = Stopwatch.GetTimestamp();
+        public void Dispose() => Statistics.Observe(phase, Stopwatch.GetElapsedTime(_start).TotalMilliseconds);
+    }
+
+    public static void SaveSummary()
+    {
+        if (!Enabled) return;
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            string path = Path.Combine(Path.GetTempPath(), $"openrevelare-performance-{Environment.ProcessId}.json");
+            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(new
+            {
+                Schema = "openrevelare-performance-v1", ProcessId = Environment.ProcessId, AppVersion = AppInfo.Version,
+                Platform = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+                Runtime = Environment.Version.ToString(), ProcessorCount = Environment.ProcessorCount,
+                PeakWorkingSetBytes = process.PeakWorkingSet64,
+                PercentileMethod = "nearest-rank, last 2048 samples per phase; durations include failed attempts",
+                Phases = Statistics.Snapshot(), Counters = Statistics.Counters(),
+            }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     public static Stopwatch? Start() => Enabled ? Stopwatch.StartNew() : null;
 

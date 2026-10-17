@@ -16,6 +16,17 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class Pipeline
 {
+    /// <summary>SDR companion of the finished HDR grade. The template chooses SDR brightness;
+    /// master chroma survives differing Stage-2 encodings and HDR-only print LUTs.</summary>
+    public static RenderedFrame RenderSdrRendition(WorkingFrame source, FrameParams parameters,
+        ColorPipelineVersion version, IColorManagementEngine colorManagement, ColorSpaceDef? baseSpace = null)
+    {
+        RenderedFrame master = Render(source, parameters, version, colorManagement);
+        if (master.Encoding.Range != NumericRange.Extended) return master;
+        ColorSpaceDef space = baseSpace ?? ColorSpaces.Srgb;
+        RenderedFrame template = Render(source, parameters.SdrRendition(space), version, colorManagement);
+        return HdrGainMap.ColourMatchedSdrBase(template, master, space);
+    }
     /// <summary>
     /// Typed render boundary for new callers. M1 deliberately delegates the pixel math to the
     /// frozen v1 implementation below; it adds truthful identity and diagnostics without changing
@@ -244,10 +255,9 @@ public static class Pipeline
             // whose legacy route either bypassed the cube or applied only a target TRC.
             FrameParams scene = cal.Clone();
             scene.OutputIntent = OutputIntent.None;
-            // An extended target needs to know which output pixels are FILL — the sprocket mask
-            // and the rotation's corners — because fill is not picture and must not be rendered
-            // as one (see below). The SDR path never asks, so it stays bit-identical.
-            pixels = ProcessFrame(source.Pixels, scene, target.IsExtended, out bool[]? fill);
+            // Fill belongs to the finished page, not to the photographed scene. Track it for
+            // SDR too: white balance, LUTs and channel curves must never tint sprocket white.
+            pixels = ProcessFrame(source.Pixels, scene, trackFill: true, out bool[]? fill);
             ColorPipeline.ToOutputTargetFor(
                 pixels.Data,
                 cal,
@@ -266,23 +276,14 @@ public static class Pipeline
                 Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
                 HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
 
-                // FILL IS PAPER WHITE, NOT A HIGHLIGHT. The mask and the rotation corners are
-                // written as linear 1.0 before the log encode, which is the TOP of the Cineon
-                // domain (code 1032): the SDR shoulder squeezes that to paper white, which is what
-                // the fill has always meant, but the extended shoulder aims at the headroom and
-                // would carry the same value to the peak — sprocket holes blazing at the roll's
-                // HDR limit, and a gain map that lights them up on every HDR display. Nothing was
-                // measured there, so there is nothing for the headroom to show; the fill is pinned
-                // to the carrier's diffuse white, where it reads exactly as it does in SDR and the
-                // gain map stays empty. It runs after the guard because exposure is multiplicative
-                // and the fill is not something exposure applies to either.
-                if (fill is not null)
-                    Sprocket.ApplyMask(pixels.Data, fill);
             }
             else
             {
                 Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
             }
+            // Layout fill is reference white in either encoding, independent of exposure,
+            // channel curves, print look or the HDR ceiling. Nothing was photographed there.
+            if (fill is not null) Sprocket.ApplyMask(pixels.Data, fill);
         }
 
         return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.ManagedV2);
@@ -300,7 +301,7 @@ public static class Pipeline
 
     /// <summary>Run Stage 1 and, for BASIC intent, the sRGB exit TRC.</summary>
     public static ImageBuffer ProcessFrame(ImageBuffer img, FrameParams cal)
-        => ProcessFrame(img, cal, trackFill: false, out _);
+        => ProcessFrame(img, cal, trackFill: cal.OutputIntent == OutputIntent.Basic, out _);
 
     /// <summary>
     /// <see cref="ProcessFrame(ImageBuffer, FrameParams)"/>, optionally reporting which OUTPUT
@@ -436,6 +437,7 @@ public static class Pipeline
         //    The result is display-encoded in cal.ResolvedOutputSpace — which is what both
         //    the preview and the exported file use, so the two agree by construction.
         Stage2.ApplyChain(result.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
+        if (fill is not null) Sprocket.ApplyMask(result.Data, fill);
         return result;
     }
 

@@ -84,7 +84,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// want the same file at the same instant (the roll warms from the current frame outward, and
     /// that is exactly the frame being switched to); without this they would each decode it.</summary>
     private readonly Dictionary<string, (long Generation, Task<PreviewCache.Entry> Task)> _decoding =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
 
     /// <summary>
     /// How much slack the region decode leaves around a split frame, as a fraction of the frame's
@@ -411,11 +411,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         string path,
         (double X, double Y, double W, double H)? preCrop,
         ColorPipelineVersion pipelineVersion,
-        TiffInputAssumption tiffInputAssumption)
+        TiffInputAssumption tiffInputAssumption, SourceStamp? stamp = null)
     {
+        string revision = (stamp ?? SourceStamp.TryCapture(path))?.Key ?? $"missing:{path}";
         string source = preCrop is { } pc
-            ? $"{path}|{pc.X:F6},{pc.Y:F6},{pc.W:F6},{pc.H:F6}"
-            : path;
+            ? FormattableString.Invariant($"{revision}|{pc.X:R},{pc.Y:R},{pc.W:R},{pc.H:R}")
+            : revision;
         return $"{source}|color-pipeline:{(int)pipelineVersion}|tiff-input:{(int)tiffInputAssumption}";
     }
 
@@ -445,20 +446,29 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ColorPipelineVersion pipelineVersion,
         TiffInputAssumption tiffInputAssumption)
     {
-        string key = PreviewKey(path, preCrop, pipelineVersion, tiffInputAssumption);
+        SourceStamp stamp;
+        try { stamp = SourceStamp.Capture(path); }
+        catch (Exception ex) { return Task.FromException<PreviewCache.Entry>(ex); }
+        string key = PreviewKey(path, preCrop, pipelineVersion, tiffInputAssumption, stamp);
         long generation = _previews.Generation;
 
         if (_previews.Get(key) is { } hit)
         {
-            CaptureTile(key, hit.Working, generation);
+            RenderTrace.Count("decode.preview.hit");
+            CaptureTile(key, hit.Working, generation, stamp);
             return Task.FromResult(hit);
         }
         lock (_decoding)
         {
             if (_decoding.TryGetValue(key, out var running) && running.Generation == generation)
+            {
+                RenderTrace.Count("decode.preview.join");
                 return running.Task;
+            }
+            RenderTrace.Count("decode.preview.miss");
             Task<PreviewCache.Entry> task = Task.Run(() =>
             {
+                using var decodeTrace = RenderTrace.Scope("decode.preview");
                 // Straight to preview size: the full-resolution float frame this used to decode
                 // and immediately throw away is the biggest allocation in the program.
                 var (preview, srcW, srcH) = preCrop is { } rect
@@ -475,9 +485,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         pipelineVersion,
                         ColorManagement,
                         tiffInputAssumption);
-                var e = new PreviewCache.Entry(preview, srcW, srcH);
-                if (_previews.PutIfCurrent(key, e.Working, e.SourceWidth, e.SourceHeight, generation))
-                    CaptureTile(key, e.Working, generation);
+                stamp.RequireCurrent();
+                DecodedSources.Track(preview, stamp);
+                var e = new PreviewCache.Entry(preview, srcW, srcH) { Source = stamp };
+                if (_previews.PutIfCurrent(key, e.Working, e.SourceWidth, e.SourceHeight, generation, stamp))
+                    CaptureTile(key, e.Working, generation, stamp);
                 return e;
             });
             _decoding[key] = (generation, task);
@@ -515,15 +527,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // aspect the double crop produced. Virtual copies of a whole frame have no rect in their key
     // and still share one tile, which is correct.
     private const int TileMaxEdge = 320;   // ≈ the cell width of a 2048 px sheet at 6 columns
-    private readonly Dictionary<string, WorkingFrame> _tiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WorkingFrame> _tiles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SourceStamp> _tileSources = new(StringComparer.Ordinal);
 
-    private void CaptureTile(string key, WorkingFrame preview, long generation)
+    private void CaptureTile(string key, WorkingFrame preview, long generation, SourceStamp stamp)
     {
         lock (_tiles)
         {
-            if (_previews.Generation != generation) return;
+            if (_previews.Generation != generation || !stamp.IsCurrent) return;
+            if (_tileSources.TryGetValue(stamp.Path, out var old) && old != stamp)
+                foreach (string stale in _tiles.Keys.Where(k => k.StartsWith(old.Key + "|", StringComparison.Ordinal)).ToArray())
+                    _tiles.Remove(stale);
+            _tileSources[stamp.Path] = stamp;
             if (_tiles.ContainsKey(key)) return;
-            _tiles[key] = preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge));
+            _tiles[key] = DecodedSources.Track(preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
         }
     }
 
@@ -534,16 +551,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         lock (_tiles) return _tiles.TryGetValue(key, out WorkingFrame? t) ? t : null;
     }
 
-    private void ClearTiles() { lock (_tiles) _tiles.Clear(); }
+    private void ClearTiles() { lock (_tiles) { _tiles.Clear(); _tileSources.Clear(); } }
 
     private void ClearPreviewCaches()
     {
+        CancelPreviewWarmup();
+        _preparedPreviews.Clear();
         // Keep cache invalidation and tile insertion under one gate: a decode from the previous
         // roll must never repopulate either cache after a switch.
         lock (_tiles)
         {
             _previews.Clear();
             _tiles.Clear();
+            _tileSources.Clear();
         }
     }
 
@@ -571,7 +591,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         string Path,
         ColorPipelineVersion PipelineVersion,
         TiffInputAssumption TiffInputAssumption,
-        WorkingFrame Working);
+        WorkingFrame Working,
+        SourceStamp Source);
     private FullSlot? _fullSlot;
 
     [ObservableProperty] private Bitmap? _previewImage;
@@ -885,8 +906,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         try
         {
+            long generation = _previews.Generation;
+            ColorPipelineVersion pipeline = _colorPipelineVersion;
+            TiffInputAssumption input = _tiffInputAssumption;
+            bool raw = RollIsRaw;
             ImageBuffer ff = await Task.Run(() => LoadLccField(
-                path, _colorPipelineVersion, _tiffInputAssumption, RollIsRaw));
+                path, pipeline, input, raw));
+            if (generation != _previews.Generation) return;
             _lccFlatField = ff;
             _lccSourcePath = path;
             LccAvailable = true;
@@ -907,6 +933,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                                      TiffInputAssumption tiffInputAssumption,
                                      bool expectedRaw)
     {
+        var sources = new SourceSnapshot(new[] { path });
         bool lccIsRaw = RawDecode.IsRawExtension(path);
         if (lccIsRaw != expectedRaw)
             throw new InvalidOperationException(expectedRaw
@@ -914,7 +941,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 : Loc.T("TIFF 卷必须使用 TIFF 平场参考图；RAW 平场仍在相机原生通道，不能安全地乘到已表征的扫描 RGB。"));
         var (previews, _, _) = ImageIo.LoadWorkingPreviews(
             path, pipelineVersion, ColorManagement, tiffInputAssumption, Lcc.MaxEdge);
-        return Lcc.FromDecoded(previews[0].Pixels);
+        ImageBuffer field = Lcc.FromDecoded(previews[0].Pixels);
+        sources.RequireCurrent();
+        return CalibrationSources.Track(field, sources);
     }
 
     // 镜头校正（预反相线性域，不依赖镜头库）：手动畸变 + 手动暗角
@@ -1708,6 +1737,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>The preview-cache key <see cref="_previewLinear"/> was loaded under, so a resync can
     /// tell whether the buffer on hand is already the right region.</summary>
     private string? _previewKey;
+    private SourceStamp? _previewStamp;
+
+    private bool EnsureCurrentPreviewSource()
+    {
+        if (_previewStamp is null || _previewStamp.IsCurrent) return true;
+        if (CurrentFrame is { } frame)
+        {
+            StatusText = Loc.F($"原片已改变，正在重新载入：{frame.FileName}");
+            _ = ReloadRegionAsync(frame, SplitCropOf(frame), PreviewKey(frame.Path, SplitCropOf(frame)));
+        }
+        return false;
+    }
 
     /// <summary>
     /// Point <see cref="_previewLinear"/> at a different region of the same file.
@@ -1743,8 +1784,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void AdoptPreview(RollFrame frame, PreviewCache.Entry entry,
                               (double X, double Y, double W, double H)? margin, string key)
     {
+        entry.Source?.RequireCurrent();
         _sprocketOverlayDirty = true;
         _previewWorking = entry.Working;
+        _previewStamp = entry.Source;
         _calibrationInfoFramePath = frame.Path;
         NotifyCalibrationInfo();
         _previewMargin = margin;
@@ -1887,7 +1930,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// Keyed by PATH, like the preview cache, so a split scan's frames and any virtual copies
     /// share the one probe. Cleared with the roll.
     /// </summary>
-    private readonly Dictionary<string, double[]?> _negativeWb = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, double[]?> _negativeWb = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The display white balance for the frame on screen, probing the file at most once.
@@ -1901,10 +1944,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (CurrentFrame is not { } f) return null;
         string path = f.Path;
-        if (_negativeWb.TryGetValue(path, out double[]? cached)) return cached;
+        SourceStamp stamp = SourceStamp.Capture(path);
+        string key = stamp.Key;
+        if (_negativeWb.TryGetValue(key, out double[]? cached)) return cached;
 
         double[]? wb = RawDecode.IsRawExtension(path) ? RawDecode.CameraWhiteBalance(path) : null;
-        _negativeWb[path] = wb;
+        stamp.RequireCurrent();
+        _negativeWb[key] = wb;
         return wb;
     }
 
@@ -2041,6 +2087,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // ── Sampling view: show the NEGATIVE while picking the film base ─────────────
     public void ShowNegativeView()
     {
+        CancelPreviewWarmup();
+        if (!EnsureCurrentPreviewSource()) return;
         if (_previewLinear is not { } negative) return;
         PreparedPreview preview = PrepareNegativePreview(negative);
         UpdatePresentation(() =>
@@ -2258,6 +2306,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // ── Before/after compare: show the positive WITHOUT Stage-2 (scene) edits ─────
     public void ShowBeforeEdits()
     {
+        CancelPreviewWarmup();
+        if (!EnsureCurrentPreviewSource()) return;
         if (_previewWorking is null) return;
         FrameParams p = BuildParams();
         RollFrame.ResetScene(p);   // strip every Stage-2 adjustment
@@ -2308,6 +2358,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private ImageBuffer? Stage1Source(ImageBuffer? neg)
     {
         if (neg is null) return null;
+        if (ReferenceEquals(neg, _previewLinear)) _previewStamp?.RequireCurrent();
+        CalibrationSources.RequireCurrent(BuildParams());
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
         if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
@@ -2883,6 +2935,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private async Task AutoInvertRollCoreAsync()
     {
         if (_previewLinear is null) return;
+        _previewStamp?.RequireCurrent();
 
         // Cancellation must cover stage 1 as well as the roll-wide pass. Creating the token
         // only after stage 1 allowed a roll switch to receive stale endpoints from the old roll.
@@ -2978,6 +3031,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var order = new List<(int RollIndex, string Path,
                 (double X, double Y, double W, double H)? Pre, RollFrame Frame)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var analysisSources = new SourceSnapshot(frames.Select(f => f.Path)
+                .Concat(_calRgbPaths ?? Array.Empty<string>())
+                .Concat(_lccSourcePath is { } lccPath ? new[] { lccPath } : Array.Empty<string>()));
             for (int i = 0; i < frames.Count; i++)
             {
                 int rollIndex = (start + i) % frames.Count;
@@ -3194,6 +3250,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 : AbsoluteFrom(highlightEstimate.Density);
 
             ct.ThrowIfCancellationRequested();
+            analysisSources.RequireCurrent();
+            CalibrationSources.RequireCurrent(BuildParams());
 
             _suppressRender = true;
             try
@@ -3804,6 +3862,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public async Task AutoWbAiAsync()
     {
         if (_previewWorking is null) return;
+        SourceStamp? analysisSource = _previewStamp;
+        long analysisGeneration = _previews.Generation;
         if (!TryBeginLongTask(Loc.T("智能色偏修正分析中 …"), out var owner)) return;
         CancellationToken ct = owner.Token;
         try
@@ -3932,6 +3992,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ct.ThrowIfCancellationRequested();
 
             // Finish on the frame that was analysed, even when the editor now shows another one.
+            analysisSource?.RequireCurrent();
+            if (analysisGeneration != _previews.Generation) return;
             if (targetFrame is not null && (CurrentFrame != targetFrame || !_paramsLoaded))
             {
                 targetFrame.Params.DMaxPerChannel = wbHigh;
@@ -4338,6 +4400,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        CancelPreviewWarmup();
+        _preparedPreviews.Clear();
+        RenderTrace.SaveSummary();
         _renderCts?.Cancel();
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
@@ -4571,6 +4636,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task<bool> UpdateRollSheetAsync()
     {
+        var sources = new SourceSnapshot(Frames.Select(f => f.Path));
         if (BuildSheetCells() is not { } cells) return false;
         string rollId = _roll!.Id;
         if (!MayWriteCover(rollId)) return false;
@@ -4586,6 +4652,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);   // UI thread
         ImageBuffer sheet = SheetComposer.ToBuffer(composed);
 
+        sources.RequireCurrent();
         await Task.Run(() => SheetStore.Save(rollId, sheet));
         return true;
     }
@@ -4650,9 +4717,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // they would print a dark, clipped sheet.
         foreach (var (tile, p) in cells)
             list.Add(tile is null ? Placeholder(sample.Width, sample.Height)
-                                  : Pipeline.Render(
+                                  : Pipeline.RenderSdrRendition(
                                       tile,
-                                      p.SdrRendition(),
+                                      p,
                                       pipelineVersion,
                                       ColorManagement).Pixels);
         return list;

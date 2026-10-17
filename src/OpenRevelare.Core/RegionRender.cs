@@ -207,7 +207,7 @@ public static class RegionRender
         ImageBuffer source, int sourceX0, int sourceY0, int frameW, int frameH,
         FrameParams cal, Roi roi, bool negative = false, double[]? negativeWb = null)
         => RenderFromSlice(source, sourceX0, sourceY0, frameW, frameH, cal, roi, negative,
-                           negativeWb, trackFill: false, out _);
+                           negativeWb, trackFill: !negative && cal.OutputIntent == OutputIntent.Basic, out _);
 
     /// <summary>
     /// <see cref="RenderFromSlice(ImageBuffer,int,int,int,int,FrameParams,Roi,bool,double[]?)"/>,
@@ -326,7 +326,10 @@ public static class RegionRender
 
         // ── Step 4 + Stage 2 (pointwise; no region dependence) ───────────────────
         if (cal.OutputIntent == OutputIntent.Basic)
+        {
             Stage2.ApplyChain(outImg.Data, cal, cal.ResolvedOutputSpace, encodeExit: true);
+            if (fill is not null) Sprocket.ApplyMask(outImg.Data, fill);
+        }
         return (outImg, realised);
     }
 
@@ -474,7 +477,7 @@ public static class RegionRender
         OutputTarget target = cal.ResolvedOutputTarget;
         var (pixels, realised) = RenderFromSlice(
             source, sourceX0, sourceY0, frameW, frameH, scene, roi,
-            negative: false, negativeWb: null, trackFill: target.IsExtended, out bool[]? fill);
+            negative: false, negativeWb: null, trackFill: true, out bool[]? fill);
 
         if (cal.OutputIntent == OutputIntent.Basic)
         {
@@ -494,13 +497,12 @@ public static class RegionRender
             {
                 Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
                 HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
-                if (fill is not null)
-                    Sprocket.ApplyMask(pixels.Data, fill);
             }
             else
             {
                 Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
             }
+            if (fill is not null) Sprocket.ApplyMask(pixels.Data, fill);
         }
 
         return (pixels, realised);

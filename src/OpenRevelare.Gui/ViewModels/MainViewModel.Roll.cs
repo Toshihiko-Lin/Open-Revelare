@@ -1389,15 +1389,21 @@ public partial class MainViewModel
         TiffInputAssumption tiffInputAssumption,
         bool sharedSlot)
     {
+        using var decodeTrace = RenderTrace.Scope("export.decode");
+        SourceStamp stamp = SourceStamp.Capture(sourcePath);
         if (box is { } bx
             && ImageIo.LoadWorkingTiffRegionFull(
                 sourcePath, bx, pipelineVersion, ColorManagement, tiffInputAssumption) is { } window)
-            return (window, ForBox(ep, bx));
+        {
+            stamp.RequireCurrent();
+            return (DecodedSources.Track(window, stamp), ForBox(ep, bx));
+        }
 
         WorkingFrame full = sharedSlot
             ? LoadFullWorking(sourcePath, pipelineVersion, tiffInputAssumption)
             : ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement, tiffInputAssumption);
-        return (full, ep);
+        stamp.RequireCurrent();
+        return (DecodedSources.Track(full, stamp), ep);
     }
 
     /// <summary>
@@ -1415,16 +1421,12 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// The SDR base of a gain-map JPEG: the roll's SDR rendition (<see cref="FrameParams.SdrRendition"/>,
+    /// The brightness template of a gain-map JPEG: the roll's SDR rendition (<see cref="FrameParams.SdrRendition"/>,
     /// D-031) in the base space the export chose.
     ///
-    /// The two renditions of a gain-map file are one picture at two headrooms — a reader blends
-    /// between them by how much headroom its display has — so they must be members of one
-    /// rendering. The extended rendition never runs the print stock (D-021); a base that did
-    /// would make every intermediate display show a picture that is half print look and half
-    /// analytic shoulder, and an SDR display show a print the HDR display never shows. The base
-    /// is therefore the asymptote-1 member of the same shoulder family, bit-identical to the HDR
-    /// rendition below the knee, which is also what makes the map nearly empty.
+    /// This template supplies SDR tonal placement only. ColourMatchedSdrBase subsequently takes
+    /// chroma from the finished master, so a reader ignoring the map still sees the same grade,
+    /// including an HDR-only LUT that cannot be independently evaluated on an SDR target.
     /// </summary>
     private static FrameParams GainMapBaseParams(FrameParams hdr, ColorSpaceDef baseSpace) =>
         hdr.SdrRendition(baseSpace);
@@ -1443,7 +1445,11 @@ public partial class MainViewModel
         ColorPipelineVersion pipelineVersion,
         CancellationToken ct = default)
     {
+        using var exportTrace = RenderTrace.Scope("export.render-and-write");
         ct.ThrowIfCancellationRequested();
+        SourceStamp sourceStamp = DecodedSources.For(working) ?? SourceStamp.Capture(sourcePath);
+        sourceStamp.RequireCurrent();
+        CalibrationSources.RequireCurrent(ep);
         SourceExif? sourceExif = SourceExif.ForExport(
             opt.KeepSourceExif ? SourceExif.Read(sourcePath) : null, opt.KeepSourceExif, opt.FilmCapture);
         if (opt.Format == ExportFormat.Dng)
@@ -1454,12 +1460,13 @@ public partial class MainViewModel
             // JPEG uses for its base. LinearDng then undoes that space's encoding curve; the
             // highlights above diffuse white belong to the float32 master, not here.
             ColorSpaceDef dngSpace = opt.ResolvedColorSpace;
-            RenderedFrame positive = Pipeline.Render(
-                working, ep.SdrRendition(dngSpace), pipelineVersion, ColorManagement);
+            RenderedFrame positive = Pipeline.RenderSdrRendition(
+                working, ep, pipelineVersion, ColorManagement, dngSpace);
             ImageBuffer pixels = opt.Downsample
                 ? Resample.ToLongEdge(positive.Pixels, opt.MaxLongEdge, opt.AllowUpscale)
                 : positive.Pixels;
             ct.ThrowIfCancellationRequested();
+            sourceStamp.RequireCurrent();
             LinearDng.Write(pixels, dngSpace, path, sourceExif: sourceExif);
             return null;
         }
@@ -1470,11 +1477,13 @@ public partial class MainViewModel
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
         bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
             && rendered.Encoding.Range == NumericRange.Extended;
+        sourceStamp.RequireCurrent();
         if (!gainMap) return WriteExport(rendered, path, opt, sourceExif);
 
         ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
         RenderedFrame sdrBase = Pipeline.Render(
             working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
+        sdrBase = HdrGainMap.ColourMatchedSdrBase(sdrBase, rendered, baseSpace);
         ct.ThrowIfCancellationRequested();
         if (opt.Downsample)
         {
@@ -1487,6 +1496,7 @@ public partial class MainViewModel
         }
         if (opt.MaxFileBytes is { } gainMapCeiling)
         {
+            sourceStamp.RequireCurrent();
             return JpegIO.ExportGainMapJpeg(
                 sdrBase,
                 rendered,
@@ -1497,6 +1507,7 @@ public partial class MainViewModel
                 gainMapCeiling,
                 profilePolicy: ProfilePolicyFor(opt), sourceExif: sourceExif);
         }
+        sourceStamp.RequireCurrent();
         JpegIO.ExportGainMapJpeg(
             sdrBase,
             rendered,
@@ -1731,6 +1742,7 @@ public partial class MainViewModel
                 var box = SplitCropOf(f);
                 return (f.Path, Box: box, Params: ForRegion(f.Params.Clone(), f, box));
             }).ToList();
+            var sourcesSnapshot = new SourceSnapshot(frames.Select(f => f.Path));
             int done = 0, total = frames.Count;
             var sources = new WorkingFrame[total];
             var cellParams = new FrameParams[total];
@@ -1765,22 +1777,21 @@ public partial class MainViewModel
                 for (int i = 0; i < total; i++)
                 {
                     ct.ThrowIfCancellationRequested();
+                    CalibrationSources.RequireCurrent(cellParams[i]);
                     WorkingFrame source = sources[i].WithPixels(
                         Resample.Box(sources[i].Pixels, 900));
-                    sdr.Add(Pipeline.Render(
-                        source,
-                        cellParams[i].SdrRendition(),
-                        pipelineVersion,
-                        ColorManagement).Pixels);
-                    hdr?.Add(Pipeline.Render(
-                        source,
-                        cellParams[i],
-                        pipelineVersion,
-                        ColorManagement).Pixels);
+                    RenderedFrame master = Pipeline.Render(source, cellParams[i], pipelineVersion, ColorManagement);
+                    RenderedFrame companion = extended
+                        ? HdrGainMap.ColourMatchedSdrBase(Pipeline.Render(source, cellParams[i].SdrRendition(),
+                            pipelineVersion, ColorManagement), master, ColorSpaces.Srgb)
+                        : master;
+                    sdr.Add(companion.Pixels);
+                    hdr?.Add(master.Pixels);
                 }
                 return new ContactThumbs(sdr, hdr, target);
             });
             ct.ThrowIfCancellationRequested();
+            sourcesSnapshot.RequireCurrent();
             StatusText = Loc.F($"印样已生成（{total} 帧）");
             return thumbs;
         }
@@ -1909,7 +1920,9 @@ public partial class MainViewModel
     {
         lock (_fullSlotGate)
         {
+            SourceStamp stamp = SourceStamp.Capture(sourcePath);
             if (_fullSlot is { } slot
+                && slot.Source == stamp
                 && slot.PipelineVersion == pipelineVersion
                 && slot.TiffInputAssumption == tiffInputAssumption
                 && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
@@ -1919,7 +1932,9 @@ public partial class MainViewModel
                 pipelineVersion,
                 ColorManagement,
                 tiffInputAssumption);
-            _fullSlot = new FullSlot(sourcePath, pipelineVersion, tiffInputAssumption, full);
+            stamp.RequireCurrent();
+            DecodedSources.Track(full, stamp);
+            _fullSlot = new FullSlot(sourcePath, pipelineVersion, tiffInputAssumption, full, stamp);
             return full;
         }
     }

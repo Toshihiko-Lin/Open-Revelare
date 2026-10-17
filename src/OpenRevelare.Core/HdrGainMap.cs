@@ -312,6 +312,49 @@ public sealed class HdrGainMap
         return d;
     }
 
+    /// <summary>The SDR template supplies tonal placement; the final HDR master supplies colour.
+    /// Re-running Stage 2 in an SDR encoding (or dropping a PQ LUT) is not the same grade, so
+    /// using that render verbatim as a JPEG primary changes hue when a reader ignores gain maps.</summary>
+    public static RenderedFrame ColourMatchedSdrBase(RenderedFrame template, RenderedFrame hdr, ColorSpaceDef baseSpace)
+    {
+        RequireBase(template, baseSpace);
+        RequireHdr(hdr);
+        if (template.Pixels.Width != hdr.Pixels.Width || template.Pixels.Height != hdr.Pixels.Height)
+            throw new ArgumentException("SDR template and HDR master must share one geometry.");
+        float[] sdr = (float[])template.Pixels.Data.Clone();
+        OutputRender.Decode(sdr, baseSpace);
+        float[] pixels = HdrInBaseGamut(hdr, baseSpace);
+        (float wr, float wg, float wb) = LuminanceWeights(baseSpace);
+        ParallelSweep.OverPixels(template.Pixels.PixelCount, (from, to) =>
+        {
+            for (int i = from; i < to; i += 3)
+            {
+                float ys = wr * sdr[i] + wg * sdr[i + 1] + wb * sdr[i + 2];
+                float yh = wr * pixels[i] + wg * pixels[i + 1] + wb * pixels[i + 2];
+                float scale = yh > 1e-10f && float.IsFinite(ys) ? Math.Max(0, ys) / yh : 0;
+                pixels[i] *= scale; pixels[i + 1] *= scale; pixels[i + 2] *= scale;
+            }
+        });
+        // Bound the triplet uniformly, rather than clipping channels and introducing a new cast.
+        HighlightRolloff.BoundAbove(pixels, 1);
+        OutputRender.Encode(pixels, baseSpace);
+        // Exact diffuse-white layout fill stays exact after the output TRC's float round trip.
+        ParallelSweep.OverPixels(template.Pixels.PixelCount, (from, to) =>
+        {
+            for (int i = from; i < to; i += 3)
+                if (template.Pixels.Data[i] == 1 && template.Pixels.Data[i + 1] == 1 && template.Pixels.Data[i + 2] == 1
+                    && hdr.Pixels.Data[i] == 1 && hdr.Pixels.Data[i + 1] == 1 && hdr.Pixels.Data[i + 2] == 1)
+                    pixels[i] = pixels[i + 1] = pixels[i + 2] = 1;
+        });
+        var buffer = new ImageBuffer(template.Pixels.Width, template.Pixels.Height, pixels).InheritSourceFrom(template.Pixels);
+        var recipe = new OutputRecipe(template.Recipe.PipelineVersion, template.OutputProfile,
+            template.Recipe.Intent, template.Recipe.BlackPointCompensation,
+            "HDR-master chroma / SDR-template luminance v1; uniform gamut bound", hdr.Recipe.PrintLutIdentity,
+            pixelProfileMismatch: false);
+        return new RenderedFrame(buffer, template.Encoding, recipe,
+            () => RenderFingerprint.ComputeManaged(buffer, template.Encoding, recipe));
+    }
+
     /// <summary>The Y row of the space's RGB→XYZ matrix — its own luminance weights, not sRGB's.</summary>
     private static (float R, float G, float B) LuminanceWeights(ColorSpaceDef space)
     {

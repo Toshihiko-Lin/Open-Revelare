@@ -646,6 +646,7 @@ public partial class MainViewModel
     {
         int nF = Math.Min(6, paths.Count);
         string[] samplePaths = EvenlySpacedPaths(paths, nF);
+        var sourceSnapshot = new SourceSnapshot(calRgb.Concat(samplePaths));
         var roi = new double[3][];                 // calibration ROI means
         var negs = new ImageBuffer[nF];            // content frames at 720, pre-decouple
         double[]? lccCentre = lccField is null ? null : DecoupleCalibration.RoiMean(lccField);
@@ -675,6 +676,7 @@ public partial class MainViewModel
             else
             {
                 int fi = i - 3;
+                SourceStamp stamp = SourceStamp.Capture(samplePaths[fi]);
                 // Both sizes off ONE decode, neither of them via a full-resolution frame. The
                 // evenly spaced previews go into the cache, so reaching them later costs no second
                 // decode.
@@ -692,8 +694,10 @@ public partial class MainViewModel
                         preCrop: null,
                         pipelineVersion,
                         tiffInputAssumption);
-                    if (_previews.PutIfCurrent(previewKey, outs[0], srcW, srcH, cacheGeneration))
-                        CaptureTile(previewKey, outs[0], cacheGeneration);
+                    stamp.RequireCurrent();
+                    DecodedSources.Track(outs[0], stamp);
+                    if (_previews.PutIfCurrent(previewKey, outs[0], srcW, srcH, cacheGeneration, stamp))
+                        CaptureTile(previewKey, outs[0], cacheGeneration, stamp);
                 }
                 negs[fi] = outs[1].Pixels;
             }
@@ -722,7 +726,11 @@ public partial class MainViewModel
             amplifications.Add(
                 DecoupleCalibration.ChromaAxisAmplificationDetailed(preSample, postSample));
         }
-        return (dm, DecoupleCalibration.ChromaAxisCompensationMatrixFromEstimates(amplifications));
+        double[,] cm = DecoupleCalibration.ChromaAxisCompensationMatrixFromEstimates(amplifications);
+        sourceSnapshot.RequireCurrent();
+        CalibrationSources.Track(dm, sourceSnapshot);
+        CalibrationSources.Track(cm, sourceSnapshot);
+        return (dm, cm);
     }
 
     /// <summary>At most <paramref name="count"/> paths spanning the whole roll, including both
@@ -921,6 +929,10 @@ public partial class MainViewModel
     /// <summary>Decode the selected frame, load its params into the UI, render.</summary>
     private async Task SwitchFrameAsync(RollFrame frame)
     {
+        using var switchTrace = RenderTrace.Scope("frame.switch.decode-and-load");
+        _frameSwitchTrace = RenderTrace.Start();
+        CancelPreviewWarmup();
+        _renderCts?.Cancel();
         IsBusy = true;
         StatusText = Loc.F($"正在解码 {frame.FileName} …");
         int tok = ++_switchToken;
@@ -960,6 +972,7 @@ public partial class MainViewModel
             LoadParams(frame.Params);          // sets UI (suppressed) + renders
             _paramsLoaded = true;              // _cropRect now describes THIS frame
             ProtectNearbyPreviews(frame);
+            SchedulePreviewWarmup();
             int idx = Frames.IndexOf(frame);
             StatusText = $"{FileName} — {entry.SourceWidth}×{entry.SourceHeight}（{idx + 1}/{Frames.Count}）";
             if (!_restoring) SetUndoBaseline();   // new frame's state is the fresh undo baseline

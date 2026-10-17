@@ -71,27 +71,33 @@ public partial class MainViewModel
                                             (double X, double Y, double W, double H)? margin,
                                             CancellationToken ct)
     {
-        FrameParams p = ForRegion(f.Params, f, margin).SdrRendition();
+        SourceStamp stamp = DecodedSources.For(preview) ?? SourceStamp.Capture(f.Path);
+        stamp.RequireCurrent();
+        FrameParams p = ForRegion(f.Params.Clone(), f, margin);
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         Bitmap bmp = await Task.Run(() =>
         {
             WorkingFrame small = preview.WithPixels(Resample.Box(preview.Pixels, ThumbMaxEdge));
-            RenderedFrame rendered = Pipeline.Render(small, p, pipelineVersion, ColorManagement);
+            RenderedFrame rendered = Pipeline.RenderSdrRendition(small, p, pipelineVersion, ColorManagement);
             return BuildFallbackBitmap(rendered);
         }, ct);
-        if (ct.IsCancellationRequested) { bmp.Dispose(); return; }
-        await Dispatcher.UIThread.InvokeAsync(() => SetThumbnail(f, bmp));
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (ct.IsCancellationRequested || !stamp.IsCurrent) { bmp.Dispose(); return; }
+            SetThumbnail(f, bmp);
+        });
     }
 
     /// <summary>Regenerate a frame's thumbnail from the in-memory preview (no re-decode).</summary>
     private void RefreshThumbnail(RollFrame frame)
     {
         if (_previewWorking is null) return;
+        if (_previewStamp is { IsCurrent: false }) return;
         // _previewLinear may be a region decode — same rule as RenderPreviewAsync.
-        FrameParams p = ForRegion(frame.Params, frame, _previewMargin).SdrRendition();
+        FrameParams p = ForRegion(frame.Params.Clone(), frame, _previewMargin);
         WorkingFrame preview = _previewWorking.WithPixels(
             Resample.Box(_previewWorking.Pixels, ThumbMaxEdge));
-        RenderedFrame rendered = Pipeline.Render(
+        RenderedFrame rendered = Pipeline.RenderSdrRendition(
             preview,
             p,
             _colorPipelineVersion,

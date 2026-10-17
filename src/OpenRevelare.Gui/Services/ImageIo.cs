@@ -174,7 +174,8 @@ public static class ImageIo
     /// in for it.
     /// </summary>
     private static T GatedFull<T>(string path, Func<T> decode)
-        => Gated(RawDecode.IsRawExtension(path) ? FullSlotBytes : TiffFullBytes(path), decode);
+        => Gated(RawDecode.IsRawExtension(path) ? FullSlotBytes : TiffFullBytes(path),
+            () => SourceStamp.ReadStable(path, decode));
 
     /// <summary>A preview decode's weight — light when it is a half-size LibRaw decode or a
     /// TIFF window (which streams: the output plus one scanline, whatever the file's size — see
@@ -184,7 +185,7 @@ public static class ImageIo
         => Gated(RawDecode.IsRawExtension(path) && Settings.Current.DecodeBackend == RawDecode.RawBackend.Dng
                      ? FullSlotBytes
                      : PreviewSlotBytes,
-                 decode);
+                 () => SourceStamp.ReadStable(path, decode));
 
     /// <summary>
     /// A full-resolution decode of one rectangle of <paramref name="path"/>: its share of the
@@ -194,7 +195,7 @@ public static class ImageIo
     {
         double share = Math.Clamp(rect.W, 0.0, 1.0) * Math.Clamp(rect.H, 0.0, 1.0);
         long bytes = Math.Max((long)(TiffFullBytes(path) * share), 64L << 20);
-        return Gated(bytes, decode);
+        return Gated(bytes, () => SourceStamp.ReadStable(path, decode));
     }
 
     /// <summary>
@@ -278,11 +279,11 @@ public static class ImageIo
             var (w, h) = TiffIO.ReadTiffSize(path);
             var (rect, whole) = RoiPixels(w, h);
             return whole
-                ? Gated(TiffFullBytes(path), () => DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false)))
+                ? GatedFull(path, () => DecoupleCalibration.RoiMean(TiffIO.LoadTiff(path, inputIsSrgb: false)))
                 : GatedTiffRegion(path, Normalised(rect, w, h), () => DecoupleCalibration.MeanAll(
                     TiffIO.LoadTiffRegionExact(path, inputIsSrgb: false, rect)));
         }
-        return Gated(() =>
+        return GatedFull(path, () =>
         {
             var s = Settings.Current;
             return RawDecode.RoiMeanFull(path, s.DecodeBackend, s.FbddMode);
@@ -321,7 +322,7 @@ public static class ImageIo
             var (rect, whole) = RoiPixels(w, h);
             if (whole)
             {
-                return Gated(TiffFullBytes(path), () => DecoupleCalibration.RoiMean(TiffIO.LoadWorkingFrame(
+                return GatedFull(path, () => DecoupleCalibration.RoiMean(TiffIO.LoadWorkingFrame(
                     path, tiffInputAssumption, pipelineVersion, colorManagement).Pixels));
             }
             var slice = LoadWorkingRegion(
@@ -330,7 +331,7 @@ public static class ImageIo
             return DecoupleCalibration.MeanAll(slice.Slice.Pixels);
         }
 
-        return Gated(() =>
+        return GatedFull(path, () =>
         {
             var settings = Settings.Current;
             return RawDecode.RoiMeanFull(path, settings.DecodeBackend, settings.FbddMode);
@@ -465,7 +466,7 @@ public static class ImageIo
     {
         if (!RawDecode.IsRawExtension(path)) return null;
         var s = Settings.Current;
-        return Gated(() => RawDecode.DecodeRawRegion(path, s.DecodeBackend, s.FbddMode,
+        return GatedFull(path, () => RawDecode.DecodeRawRegion(path, s.DecodeBackend, s.FbddMode,
                                                      x, y, w, h, frameW, frameH));
     }
 
@@ -508,7 +509,7 @@ public static class ImageIo
             return (slice, x, y);
         }
         var settings = Settings.Current;
-        return Gated<(WorkingFrame Slice, int X0, int Y0)?>(() =>
+        return GatedFull<(WorkingFrame Slice, int X0, int Y0)?>(path, () =>
         {
             var decoded = RawDecode.DecodeRawRegion(
                 path,

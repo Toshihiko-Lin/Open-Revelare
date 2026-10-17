@@ -13,6 +13,100 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public sealed class StripBatchTests
 {
+    [Theory]
+    [InlineData("scene")]
+    [InlineData("calibration")]
+    [InlineData("geometry")]
+    [InlineData("crop")]
+    [InlineData("sprocket")]
+    [InlineData("paste")]
+    public async Task Missing_target_keeps_batch_parameters_selection_and_undo_unchanged(string operation)
+    {
+        string dir = Path.Combine(TestDataIsolation.Root, $"atomic-sync-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string[] paths = Enumerable.Range(1, 3).Select(i => WriteTiff(Path.Combine(dir, $"f{i}.tif"))).ToArray();
+        try
+        {
+            using var vm = new MainViewModel();
+            await vm.LoadRollAsync(paths);
+            await WhenSettled(vm);
+            vm.ExposureEv = 1.5;
+            vm.Rotation = 2.5;
+            vm.SprocketEnabled = true;
+            vm.SetCrop((0.1, 0.1, 0.7, 0.7));
+            vm.CopyScene();
+            // Close the source edit first, so a failure cannot hide behind a pending undo.
+            vm.Undo();
+            vm.Redo();
+            await WhenSettled(vm);
+            bool canUndo = vm.CanUndo, canRedo = vm.CanRedo;
+            var before = vm.Frames.Select(f => f.Params.Clone()).ToArray();
+            vm.Frames[1].IsSelected = vm.Frames[2].IsSelected = true;
+            // Use an unavailable source without racing the import's background TIFF reader.
+            // Deletion during that reader's file lock tests Windows sharing, not batch semantics.
+            vm.Frames[2] = new RollFrame(Path.Combine(dir, "missing", "f3.tif"))
+            {
+                Params = before[2].Clone(), IsSelected = true,
+            };
+
+            switch (operation)
+            {
+                case "scene": vm.ApplySceneToRoll(); break;
+                case "calibration": vm.ApplyCalibrationToRoll(); break;
+                case "geometry": vm.ApplyGeometryToFrames(); break;
+                case "crop": vm.ApplyCropToFrames(); break;
+                case "sprocket": vm.ApplySprocketToFrames(); break;
+                case "paste": vm.PasteSceneToSelected(); break;
+            }
+
+            Assert.Contains("f3.tif", vm.StatusText);
+            Assert.True(vm.Frames[1].IsSelected);
+            Assert.True(vm.Frames[2].IsSelected);
+            Assert.Equal(canUndo, vm.CanUndo);
+            Assert.Equal(canRedo, vm.CanRedo);
+            for (int i = 0; i < vm.Frames.Count; i++)
+            {
+                Assert.Equal(before[i].ExposureEv, vm.Frames[i].Params.ExposureEv);
+                Assert.Equal(before[i].Rotation, vm.Frames[i].Params.Rotation);
+                Assert.Equal(before[i].CropRect, vm.Frames[i].Params.CropRect);
+                Assert.Equal(before[i].SprocketEnabled, vm.Frames[i].Params.SprocketEnabled);
+                Assert.Equal(before[i].TBase, vm.Frames[i].Params.TBase);
+            }
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Geometry_batch_is_one_immediate_undo_and_current_only_selection_does_not_expand()
+    {
+        string dir = Path.Combine(TestDataIsolation.Root, $"undo-sync-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        string[] paths = Enumerable.Range(1, 3).Select(i => WriteTiff(Path.Combine(dir, $"f{i}.tif"))).ToArray();
+        try
+        {
+            using var vm = new MainViewModel();
+            await vm.LoadRollAsync(paths);
+            await WhenSettled(vm);
+            vm.Rotation = 2.5;
+            vm.Frames[0].IsSelected = true;
+            vm.ApplyGeometryToFrames();
+            Assert.Equal(0, vm.Frames[1].Params.Rotation);
+            Assert.Equal(0, vm.Frames[2].Params.Rotation);
+            Assert.True(vm.Frames[0].IsSelected);
+
+            vm.Frames[0].IsSelected = false;
+            vm.ApplyGeometryToFrames();
+            Assert.All(vm.Frames, f => Assert.Equal(2.5, f.Params.Rotation));
+            vm.Undo();
+            Assert.Equal(2.5, vm.Frames[0].Params.Rotation);
+            Assert.Equal(0, vm.Frames[1].Params.Rotation);
+            Assert.Equal(0, vm.Frames[2].Params.Rotation);
+            vm.Redo();
+            Assert.All(vm.Frames, f => Assert.Equal(2.5, f.Params.Rotation));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
     [Fact]
     public void Modifier_selection_toggles_individual_frames_and_selects_ranges()
     {

@@ -40,12 +40,14 @@ public partial class MainViewModel
     //
     // Release restores full resolution with one immediate, un-debounced pass.
     private bool _interacting;
+    private Stopwatch? _frameSwitchTrace;
     private ImageBuffer? _dragSmall;
     private const int DragMaxEdge = PreviewMaxEdge / 2;
 
     /// <summary>A slider thumb or curve point was grabbed — enter low-latency drag mode.</summary>
     public void BeginInteractive()
     {
+        CancelPreviewWarmup();
         CommitUndo();          // the grab closes the previous edit; the drag itself is one step
         _renderCts?.Cancel();  // whatever the last change queued is about to be superseded
         _interacting = true;
@@ -77,7 +79,9 @@ public partial class MainViewModel
 
     private async void ScheduleRender()
     {
+        CancelPreviewWarmup();
         if (_suppressRender || _previewLinear is null) return;
+        if (!EnsureCurrentPreviewSource()) return;
         // The sprocket overlay is drawn in the FINISHED preview's geometry, so a rotation, a flip
         // or a crop moves it too. Refreshing here catches all of them at once — they each land in
         // this method, and hooking them individually is how one gets missed.
@@ -110,7 +114,9 @@ public partial class MainViewModel
     /// <summary>Full-resolution render with no debounce — the settling pass after a drag.</summary>
     private async void RenderNow()
     {
+        CancelPreviewWarmup();
         if (_suppressRender || _previewLinear is null) return;
+        if (!EnsureCurrentPreviewSource()) return;
         if (_showingNegative) { RefreshNegativeView(); return; }
         if (_showingBeforeEdits) { ShowBeforeEdits(); return; }
         ClearSharpPatch();
@@ -125,6 +131,7 @@ public partial class MainViewModel
     /// <summary>One drag frame, inline on the UI thread at drag resolution.</summary>
     private void RenderInteractive()
     {
+        using var dragTrace = RenderTrace.Scope("drag.total");
         if (_previewWorking is null) return;
         try
         {
@@ -173,33 +180,41 @@ public partial class MainViewModel
 
     private async Task RenderPreviewAsync(FrameParams p, CancellationToken ct)
     {
+        CancelPreviewWarmup();
+        using var totalTrace = RenderTrace.Scope("preview.total");
         WorkingFrame source = _previewWorking!;
-        p = ForPreview(p);
+        p = ForPreview(p).Clone();
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         // Captured now, not read at apply time: if the user switches frames while this render is
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
         RollFrame? frame = CurrentFrame;
+        SourceStamp? sourceStamp = _previewStamp;
+        PreparedPreviewKey? preparedKey = PreparedKey(frame, sourceStamp, _previewKey, p);
+        long preparedGeneration = _preparedPreviews.Generation;
 
         bool wantClipping = ShowClipping;
 
         bool wantThumbnail = frame is not null && !RollAnalysisPending;
 
         (Bitmap bmp, HistogramData hist, Bitmap? thumb, WriteableBitmap? clip,
-         PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(() =>
+         PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(async () =>
         {
+            await _previewRenderLane.WaitAsync(ct);
             Bitmap? bitmap = null;
             Bitmap? thumbnail = null;
             WriteableBitmap? clipping = null;
             try
             {
                 ct.ThrowIfCancellationRequested();
-                RenderedFrame rendered = Pipeline.Render(source, p, pipelineVersion, ColorManagement);
-                ct.ThrowIfCancellationRequested();
+                CachedPreviewData? prepared = preparedKey is null ? null : _preparedPreviews.Get(preparedKey);
+                RenderTrace.Count(prepared is null ? "preview.prepared.miss" : "preview.prepared.hit");
+                prepared ??= PrepareDisplayData(source, p, pipelineVersion, ct);
+                RenderedFrame rendered = prepared.Rendered;
                 ImageBuffer outImg = rendered.Pixels;
-                PresentationScene scene = ConvertPreviewScene(rendered);
+                PresentationScene scene = prepared.Scene;
                 ct.ThrowIfCancellationRequested();
                 // Histogram on the same buffer that feeds the display (Basic = already sRGB-encoded).
-                HistogramData h = HistogramData.FromFrame(rendered, p.ResolvedOutputTarget.HighlightHeadroom);
+                HistogramData h = prepared.Histogram;
                 ct.ThrowIfCancellationRequested();
                 ClippingMasks? masks = wantClipping ? DetectClipping(outImg) : null;
                 clipping = masks is { } detected
@@ -224,16 +239,19 @@ public partial class MainViewModel
                 if (wantThumbnail)
                 {
                     RenderedFrame thumbnailFrame = rendered.Encoding.Range == NumericRange.Extended
-                        ? Pipeline.Render(
+                        ? Pipeline.RenderSdrRendition(
                             source.WithPixels(Resample.Box(source.Pixels, ThumbMaxEdge)),
-                            p.SdrRendition(),
+                            p,
                             pipelineVersion,
                             ColorManagement)
                         : rendered.WithPixels(Resample.Box(outImg, ThumbMaxEdge));
                     ct.ThrowIfCancellationRequested();
                     thumbnail = BuildFallbackBitmap(thumbnailFrame);
                 }
-                bitmap = BuildFallbackBitmap(rendered, scene);
+                bitmap = RenderTrace.Measure("preview.fallback", () => BuildFallbackBitmap(rendered, scene));
+                sourceStamp?.RequireCurrent();
+                ct.ThrowIfCancellationRequested();
+                if (preparedKey is not null) _preparedPreviews.Put(preparedKey, prepared, preparedGeneration);
                 return (bitmap, h, thumbnail, clipping,
                         scene, clipScene, rendered);
             }
@@ -244,11 +262,16 @@ public partial class MainViewModel
                 clipping?.Dispose();
                 throw;
             }
+            finally { _previewRenderLane.Release(); }
         }, ct);
 
         if (ct.IsCancellationRequested) { bmp.Dispose(); thumb?.Dispose(); clip?.Dispose(); return; }
         void Apply()
         {
+            using var publishTrace = RenderTrace.Scope("preview.publish");
+            if (ct.IsCancellationRequested || !ReferenceEquals(frame, CurrentFrame)
+                || sourceStamp is { IsCurrent: false })
+            { RenderTrace.Count("preview.publish.stale"); bmp.Dispose(); thumb?.Dispose(); clip?.Dispose(); return; }
             PublishCompletePreview(
                 rendered,
                 scene,
@@ -259,6 +282,12 @@ public partial class MainViewModel
                 refreshSprocketMask: true);
             if (frame is not null && thumb is not null) SetThumbnail(frame, thumb);
             else thumb?.Dispose();
+            if (_frameSwitchTrace is { } switchTrace)
+            {
+                RenderTrace.Observe("frame.switch.first-publication", switchTrace.Elapsed.TotalMilliseconds);
+                _frameSwitchTrace = null;
+            }
+            SchedulePreviewWarmup();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();
         else await Dispatcher.UIThread.InvokeAsync(Apply);
