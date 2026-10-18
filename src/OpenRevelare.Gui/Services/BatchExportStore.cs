@@ -46,6 +46,7 @@ internal static class BatchExportStore
         public DateTime StartedAt { get; set; }
         public ExportOptions Options { get; set; } = new();
         public FilmCaptureMetadata? FilmCapture { get; set; }
+        public FilmCaptureMetadata[]? FrameFilmCaptures { get; set; }
         public bool ExportLinear { get; set; }
         public string ColorSpace { get; set; } = "sRGB";
         public double HdrLimitStops { get; set; }
@@ -89,6 +90,7 @@ internal static class BatchExportStore
             ProjectPath = Path.GetFullPath(projectPath), ProjectHash = HashProject(projectPath),
             Folder = job.Folder, RollTitle = job.RollTitle, OptionsSummary = job.OptionsSummary,
             StartedAt = job.StartedAt, Options = opt.Clone(), FilmCapture = opt.FilmCapture,
+            FrameFilmCaptures = opt.FrameFilmCaptures?.ToArray(),
             ExportLinear = opt.ExportLinear, ColorSpace = opt.ColorSpace, HdrLimitStops = opt.HdrLimitStops,
             PipelineVersion = pipeline, TiffAssumption = assumption,
             ReferenceFingerprints = References(snapshot),
@@ -151,7 +153,9 @@ internal static class BatchExportStore
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new InvalidDataException();
             var snapshot = Project.Load(Path.Combine(folder, state.Id + ".ncproj"));
-            if (state.Items.Length != snapshot.Frames.Count) throw new InvalidDataException();
+            if (state.Items.Length != snapshot.Frames.Count ||
+                (state.FrameFilmCaptures is { } films && (films.Length != state.Items.Length || films.Any(f => f is null))))
+                throw new InvalidDataException();
             return (state, snapshot, Validate(state, snapshot));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or ArgumentException)

@@ -2714,7 +2714,8 @@ public partial class MainWindow : Window
         if (Vm is null) return;
         var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
                                     namePreview: Vm.ExportNamePreview,
-                                    sourceExifSummary: await ReadExportSourceSummaryAsync());
+                                    sourceExifSummary: await ReadExportSourceSummaryAsync(),
+                                    frames: Vm.Frames.ToArray());
         if (await opts.ShowDialog<bool>(this) != true) return;
         Models.ExportOptions opt = opts.Options;
 

@@ -1688,7 +1688,7 @@ public partial class MainViewModel
         {
             opt = opt.Clone();
             var frames = Frames.Select((f, i) => (
-                f.Path, Params: f.Params.Clone(), Box: SplitCropOf(f),
+                f.Path, Params: f.Params.Clone(), Box: SplitCropOf(f), Index: i,
                 Name: ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1)))).ToList();
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
@@ -1701,10 +1701,11 @@ public partial class MainViewModel
                 string name = frame.Name;
                 for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{frame.Name}_副本{dup - 1}");
                 string? output = ExportFile.Reserve(folder, name, opt.Extension, opt.Conflict, reserved);
-                FrameParams ep = ForExport(frame.Params, opt);
+                var frameOptions = opt.ForFrame(frame.Index);
+                FrameParams ep = ForExport(frame.Params, frameOptions);
                 SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
                     ? null : SourceStamp.TryCapture(ep.PrintLut);
-                items.Add(CreateBatchItem(frame.Path, output, frame.Box, ep, opt,
+                items.Add(CreateBatchItem(frame.Path, output, frame.Box, ep, frameOptions,
                     pipelineVersion, tiffInputAssumption, lutSource));
             }
             var job = new BatchExportJob(folder, items, _roll?.Title ?? "", opt.Summary());
@@ -1752,6 +1753,7 @@ public partial class MainViewModel
         if (found is null) return false;
         var (saved, snapshot, blocked) = found.Value;
         var opt = saved.Options;
+        opt.FrameFilmCaptures = saved.FrameFilmCaptures;
         opt.FilmCapture = saved.FilmCapture; opt.ExportLinear = saved.ExportLinear;
         opt.ColorSpace = saved.ColorSpace; opt.HdrLimitStops = saved.HdrLimitStops;
         var items = new List<BatchExportItem>();
@@ -1766,10 +1768,11 @@ public partial class MainViewModel
                 ? _lccFlatField : null;
             var box = source.Box is { Length: 4 } b ? (b[0], b[1], b[2], b[3])
                 : ((double, double, double, double)?)null;
-            var ep = ForExport(fp, opt);
+            var frameOptions = opt.ForFrame(i);
+            var ep = ForExport(fp, frameOptions);
             SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
                 ? null : SourceStamp.TryCapture(ep.PrintLut);
-            var item = CreateBatchItem(source.SourcePath, source.OutputPath, box, ep, opt,
+            var item = CreateBatchItem(source.SourcePath, source.OutputPath, box, ep, frameOptions,
                 saved.PipelineVersion, saved.TiffAssumption, lutSource);
             item.State = source.State; item.Error = source.Error; item.Detail = source.Detail;
             items.Add(item);

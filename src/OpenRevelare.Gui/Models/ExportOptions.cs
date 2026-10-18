@@ -93,6 +93,18 @@ public sealed class ExportOptions
     [JsonIgnore]
     public FilmCaptureMetadata? FilmCapture { get; set; }
 
+    /// <summary>Detached per-frame metadata in roll export order; never a reusable preset.</summary>
+    [JsonIgnore]
+    public FilmCaptureMetadata[]? FrameFilmCaptures { get; set; }
+
+    public ExportOptions ForFrame(int index)
+    {
+        var result = Clone();
+        result.FilmCapture = FrameFilmCaptures is { } frames ? frames[index] : FilmCapture;
+        result.FrameFilmCaptures = null;
+        return result;
+    }
+
     /// <summary>
     /// Embed the profile describing what was written. This is a user preference only for exact
     /// display-referred sRGB; wider/different display spaces and scene-linear output normalize it
@@ -259,7 +271,12 @@ public sealed class ExportOptions
     [JsonIgnore]
     public bool IsDng => Format == ExportFormat.Dng;
 
-    public ExportOptions Clone() => (ExportOptions)MemberwiseClone();
+    public ExportOptions Clone()
+    {
+        var copy = (ExportOptions)MemberwiseClone();
+        copy.FrameFilmCaptures = FrameFilmCaptures?.ToArray();
+        return copy;
+    }
 
     /// <summary>The picker's label for a level — named after the delivery, as the levels are.</summary>
     public static string SharpenName(OutputSharpen.Level level) => level switch
@@ -319,7 +336,7 @@ public sealed class ExportOptions
     /// <summary>One line naming the decisions that change the file, for the dialog footer and the
     /// status bar — the same summary in both places, so what you confirmed is what gets reported.</summary>
     public string Summary() => SummaryCore() + " · "
-        + (FilmCapture is not null
+        + (FilmCapture is not null || FrameFilmCaptures is not null
             ? (KeepSourceExif ? Loc.T("胶片 EXIF + 数字化来源") : Loc.T("胶片 EXIF"))
             : KeepSourceExif ? Loc.T("保留源 EXIF") : Loc.T("不保留源 EXIF"));
 

@@ -12,6 +12,7 @@
 
 **新增与改进**
 
+- **整卷导出支持逐张填写 EXIF。** 在胶片拍摄信息侧栏通过左右按钮切换照片，并查看缩略图和帧序号；机身、镜头默认同步整卷，取消各自同步后可单张修改。ISO、光圈、快门、焦距、拍摄时间等参数独立保存，导出重试和任务恢复也会保留逐张信息。
 - **新增 HEIC 导出。** 支持导出普通或 HDR 照片，可选择输出尺寸和文件大小限制；HDR 显示需要设备和查看器支持。导出窗口可直接选择 HEIC、JPEG、TIFF、DNG 等格式，胶片拍摄信息可在侧栏填写。
 - **工程可以连同原片归档。** 可一起保存原片、校正参考和自定义 LUT，并查看所需文件清单；取消或复制失败不会留下不完整的归档。
 - **智能色偏修正更易判断。** 最多分析 30 轮，结果稳定时提前结束；完成后直接提示结果，不确定时可检查画面、撤销或改用灰卡采样。
@@ -33,6 +34,7 @@
 
 **Added and improved**
 
+- **Per-photo EXIF editing in roll exports.** Switch between photos with left and right buttons in the film capture side panel, with a thumbnail and frame number for reference. Camera and lens details sync across the roll by default; turn off either sync to override that photo. ISO, aperture, shutter speed, focal length and capture time stay independent for each photo, including export retries and task recovery.
 - **New HEIC export.** Export SDR or HDR photos with output size and file-size controls. HDR display requires a compatible device and viewer. Choose HEIC, JPEG, TIFF or DNG directly in the export window, and enter film capture details in a side panel.
 - **Portable project archives.** Save originals, calibration references and custom LUTs with the project, and review its required files. Cancelled or failed copies do not leave incomplete archives.
 - **Clearer smart color-cast correction.** Analysis can run for up to 30 rounds and stops early when stable. Uncertain results offer clear advice to inspect, undo or use a grey card.

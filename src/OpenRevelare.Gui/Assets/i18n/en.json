@@ -1154,5 +1154,12 @@
   "手机相册对 TIFF 支持有限，跨设备分享建议使用 JPEG。": "Phone gallery support for TIFF is limited. Use JPEG for sharing across devices.",
   "GPU 加速": "GPU acceleration",
   "自动（按实测选择 CPU 或 GPU）": "Automatic (measure CPU and GPU performance)",
-  "加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。": "Accelerates large-image resizing and output sharpening. Uses the CPU when the GPU is unavailable or slower. Supports Windows and macOS."
+  "加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。": "Accelerates large-image resizing and output sharpening. Uses the CPU when the GPU is unavailable or slower. Supports Windows and macOS.",
+  "上一张": "Previous frame",
+  "下一张": "Next frame",
+  "机身同步整卷": "Sync camera across roll",
+  "镜头同步整卷": "Sync lens across roll",
+  "正在读取源 EXIF …": "Reading source EXIF …",
+  "数字化来源（当前帧）": "Digitization source (current frame)",
+  "未填项目留空，不沿用翻拍参数。曝光、日期等参数按张填写；取消同步可单独修改机身或镜头。": "Empty fields stay unknown. Set exposure and date per frame; turn off sync to override its camera or lens."
 }

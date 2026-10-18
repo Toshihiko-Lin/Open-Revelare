@@ -80,6 +80,18 @@
                     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Name="FilmInfoPaneContent" Spacing="10">
                                 <StackPanel Name="FilmEditorGroup" Spacing="10">
+                                    <StackPanel Name="FilmFrameNavigator" Spacing="6" IsVisible="False">
+                                        <Image Name="FilmFramePreview" Height="110" Stretch="Uniform" />
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Button Name="PreviousFilmFrameBtn" Content="←" Click="OnPreviousFilmFrame" ToolTip.Tip="{i18n:T '上一张'}" />
+                                            <TextBlock Name="FilmFrameLabel" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="8,0" />
+                                            <Button Name="NextFilmFrameBtn" Grid.Column="2" Content="→" Click="OnNextFilmFrame" ToolTip.Tip="{i18n:T '下一张'}" />
+                                        </Grid>
+                                        <Grid Name="FilmDeviceSyncRow" ColumnDefinitions="*,12,*">
+                                            <CheckBox Name="CameraSyncChk" Content="{i18n:T '机身同步整卷'}" IsChecked="True" IsCheckedChanged="OnDeviceSyncChanged" />
+                                            <CheckBox Name="LensSyncChk" Grid.Column="2" Content="{i18n:T '镜头同步整卷'}" IsChecked="True" IsCheckedChanged="OnDeviceSyncChanged" />
+                                        </Grid>
+                                    </StackPanel>
                                     <Grid ColumnDefinitions="*,12,*">
                                         <StackPanel Grid.Column="0">
                                             <StackPanel Spacing="6">
@@ -167,9 +179,9 @@
                                     </Grid>
                                 </StackPanel>
                                 <CheckBox Name="FilmInfoChk" Content="{i18n:T '导出时写入胶片拍摄信息'}" IsCheckedChanged="OnAnyChanged"/>
-                                <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
+                                <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。曝光、日期等参数按张填写；取消同步可单独修改机身或镜头。'}"/>
                                 <StackPanel Spacing="3">
-                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
+                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧）'}"/>
                                     <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <TextBlock Name="ExifErrorLbl" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="False"/>

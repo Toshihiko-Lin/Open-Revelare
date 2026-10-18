@@ -41,6 +41,11 @@ public partial class ExportDialog : Window
 
     private bool _syncingIccControl;
     private bool _applyingDevice;
+    private bool _loadingFilmFrame = true;
+    private readonly IReadOnlyList<RollFrame>? _filmFrames;
+    private readonly RollFilmCaptureEditor? _filmEditor;
+    private int _filmFrameIndex;
+
 
     /// <summary>
     /// The scheme last selected in the naming picker. Kept so that choosing 自定义… can seed the
@@ -67,8 +72,11 @@ public partial class ExportDialog : Window
     /// <param name="hdrLimitStops">The roll's HDR limit in stops above SDR white, zero when HDR
     /// is off. With it on, TIFF is the float32 master and JPEG is a gain-map JPEG.</param>
     public ExportDialog(bool rollMode, ColorSpaceDef space, double hdrLimitStops,
-                        Func<string, string>? namePreview = null, string? sourceExifSummary = null)
+                        Func<string, string>? namePreview = null, string? sourceExifSummary = null,
+                        IReadOnlyList<RollFrame>? frames = null)
     {
+        _filmFrames = rollMode && frames is { Count: > 0 } ? frames : null;
+        _filmEditor = _filmFrames is null ? null : new RollFilmCaptureEditor(_filmFrames.Count);
         _space = space;
         _hdrLimitStops = hdrLimitStops;
         _namePreview = namePreview;
@@ -103,6 +111,9 @@ public partial class ExportDialog : Window
             + "{Camera} 机身 · {Film} 胶卷 · {Date} 冲洗日期；空字段连同相邻分隔符一并省略。");
 
         Load(Settings.Current.Export);
+        _loadingFilmFrame = false;
+        FilmFrameNavigator.IsVisible = _filmEditor is not null;
+        if (_filmEditor is not null) LoadFilmFrame();
         SyncEnabledState();
     }
 
@@ -220,8 +231,78 @@ public partial class ExportDialog : Window
             hdrMaster);
     }
 
+    private void SaveFilmFrame()
+    {
+        if (!_loadingFilmFrame && !_applyingDevice && _filmEditor is not null)
+            _filmEditor.Update(_filmFrameIndex, CollectFilmCapture());
+    }
+
+    private void LoadFilmFrame()
+    {
+        if (_filmEditor is null || _filmFrames is null) return;
+        _loadingFilmFrame = true;
+        try
+        {
+            FilmCaptureMetadata film = _filmEditor.Get(_filmFrameIndex);
+            CameraLibraryBox.SelectedIndex = 0;
+            LensLibraryBox.SelectedIndex = 0;
+            CameraMakeBox.Text = film.Camera.Make; CameraModelBox.Text = film.Camera.Model;
+            CameraSerialBox.Text = film.Camera.SerialNumber;
+            LensMakeBox.Text = film.Lens.Make; LensModelBox.Text = film.Lens.Model;
+            LensSerialBox.Text = film.Lens.SerialNumber;
+            FilmIsoBox.Text = film.Iso; FilmApertureBox.Text = film.FNumber;
+            FilmShutterBox.Text = film.ExposureTime; FilmFocalBox.Text = film.FocalLength;
+            FilmDateBox.Text = film.DateTimeOriginal; FilmArtistBox.Text = film.Artist;
+            FilmCopyrightBox.Text = film.Copyright;
+            CameraSyncChk.IsChecked = _filmEditor.CameraSync(_filmFrameIndex);
+            LensSyncChk.IsChecked = _filmEditor.LensSync(_filmFrameIndex);
+            var frame = _filmFrames[_filmFrameIndex];
+            FilmFrameLabel.Text = $"{_filmFrameIndex + 1} / {_filmFrames.Count} · {frame.Label}";
+            FilmFramePreview.Source = frame.Thumbnail;
+            PreviousFilmFrameBtn.IsEnabled = _filmFrameIndex > 0;
+            NextFilmFrameBtn.IsEnabled = _filmFrameIndex + 1 < _filmFrames.Count;
+            ExifErrorLbl.IsVisible = false;
+        }
+        finally { _loadingFilmFrame = false; }
+        SyncEnabledState();
+        _ = RefreshFilmSourceSummaryAsync(_filmFrameIndex);
+    }
+
+    private async Task RefreshFilmSourceSummaryAsync(int index)
+    {
+        if (_filmFrames is null) return;
+        SourceExifSummaryLbl.Text = Loc.T("正在读取源 EXIF …");
+        string summary;
+        try
+        {
+            summary = await Task.Run(() => SourceExif.Read(_filmFrames[index].Path)?.CaptureSummary)
+                ?? Loc.T("源文件没有可显示的设备信息；导出时按每帧来源处理。");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        { summary = Loc.T("源 EXIF 暂无法读取；关闭来源保留后仍可导出。"); }
+        if (_filmFrameIndex == index) SourceExifSummaryLbl.Text = summary;
+    }
+
+    private void MoveFilmFrame(int delta)
+    {
+        if (_filmFrames is null) return;
+        SaveFilmFrame();
+        _filmFrameIndex = Math.Clamp(_filmFrameIndex + delta, 0, _filmFrames.Count - 1);
+        LoadFilmFrame();
+    }
+    private void OnPreviousFilmFrame(object? sender, RoutedEventArgs e) => MoveFilmFrame(-1);
+    private void OnNextFilmFrame(object? sender, RoutedEventArgs e) => MoveFilmFrame(1);
+    private void OnDeviceSyncChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_loadingFilmFrame || _filmEditor is null) return;
+        SaveFilmFrame();
+        _filmEditor.SetSync(_filmFrameIndex, CameraSyncChk.IsChecked == true, LensSyncChk.IsChecked == true);
+        LoadFilmFrame();
+    }
+
     private ExportOptions Collect()
     {
+        SaveFilmFrame();
         bool dng = FmtDng.IsChecked == true;
         // Scene-linear ACEScg is a TIFF decision; a DNG is already linear and in its own space, so
         // the checkbox cannot follow the format into it.
@@ -241,7 +322,8 @@ public partial class ExportDialog : Window
             JpegQuality = (int)QualitySlider.Value,
             HeicQuality = (int)HeicQualitySlider.Value,
             KeepSourceExif = KeepExifChk.IsChecked == true,
-            FilmCapture = FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
+            FrameFilmCaptures = FilmInfoChk.IsChecked == true ? _filmEditor?.Snapshot() : null,
+            FilmCapture = _filmEditor is null && FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
                 ? CollectFilmCapture() : null,
             // Carried, not chosen: the render already landed in this space, at this limit.
             ColorSpace = _space.Name,
@@ -294,7 +376,8 @@ public partial class ExportDialog : Window
         bool jpeg = FmtJpeg.IsChecked == true;
         bool heic = FmtHeic.IsChecked == true;
         bool dng = FmtDng.IsChecked == true;
-        FilmInfoEntry.Content = FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
+        FilmInfoEntry.Content = FilmInfoChk.IsChecked == true
+            && (HasFilmCaptureDetails() || _filmEditor?.Snapshot().Any(f => f != new FilmCaptureMetadata()) == true)
             ? Loc.T("编辑胶片拍摄信息（已填写） →")
             : Loc.T("编辑胶片拍摄信息 →");
         TiffGroup.IsVisible = !jpeg && !dng && !heic;
@@ -487,13 +570,14 @@ public partial class ExportDialog : Window
 
     private void EnableFilmInfoIfEdited()
     {
-        if (!_applyingDevice && FilmInfoChk is not null && FilmCopyrightBox is not null
+        if (!_loadingFilmFrame && !_applyingDevice && FilmInfoChk is not null && FilmCopyrightBox is not null
             && HasFilmCaptureDetails())
             FilmInfoChk.IsChecked = true;
     }
 
     private void ApplyDevice(ComboBox box, TextBox make, TextBox model, TextBox serial)
     {
+        if (_loadingFilmFrame) return;
         if (box.SelectedItem is not ComboBoxItem { Tag: CaptureDevice device }) return;
         _applyingDevice = true;
         try { make.Text = device.Make; model.Text = device.Model; serial.Text = device.SerialNumber; }
@@ -513,14 +597,14 @@ public partial class ExportDialog : Window
     }
     private void OnCameraEdited(object? sender, TextChangedEventArgs e)
     {
-        if (!_applyingDevice && CameraLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
+        if (!_loadingFilmFrame && !_applyingDevice && CameraLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
             && device != CollectFilmCapture().Camera) CameraLibraryBox.SelectedIndex = 0;
         EnableFilmInfoIfEdited();
         SyncEnabledState();
     }
     private void OnLensEdited(object? sender, TextChangedEventArgs e)
     {
-        if (!_applyingDevice && LensLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
+        if (!_loadingFilmFrame && !_applyingDevice && LensLibraryBox?.SelectedItem is ComboBoxItem { Tag: CaptureDevice device }
             && device != CollectFilmCapture().Lens) LensLibraryBox.SelectedIndex = 0;
         EnableFilmInfoIfEdited();
         SyncEnabledState();
@@ -535,9 +619,24 @@ public partial class ExportDialog : Window
     private void OnAcceptClick(object? sender, RoutedEventArgs e)
     {
         Options = Collect();
-        try { Options.FilmCapture?.Validate(); }
+        int validatingIndex = -1;
+        try
+        {
+            Options.FilmCapture?.Validate();
+            if (Options.FrameFilmCaptures is { } films)
+                for (int i = 0; i < films.Length; i++)
+                {
+                    validatingIndex = i;
+                    films[i].Validate();
+                }
+        }
         catch (FormatException ex)
         {
+            if (validatingIndex >= 0)
+            {
+                _filmFrameIndex = validatingIndex;
+                LoadFilmFrame();
+            }
             ExifErrorLbl.Text = ex.Message switch
             {
                 var m when m.StartsWith("ISO", StringComparison.Ordinal) => Loc.T("ISO 必须是 1–65535 之间的整数。"),
@@ -555,7 +654,8 @@ public partial class ExportDialog : Window
         // Remember on confirm, not on every keystroke: a dialog the user cancelled should not
         // have changed anything.
         Settings.Current.Export = Options.Clone();
-        if (Options.FilmCapture is { } film)
+        foreach (var film in Options.FrameFilmCaptures
+            ?? (Options.FilmCapture is { } single ? new[] { single } : Array.Empty<FilmCaptureMetadata>()))
         {
             CaptureDeviceLibrary.Remember(Settings.Current.FilmCameras, film.Camera);
             CaptureDeviceLibrary.Remember(Settings.Current.FilmLenses, film.Lens);
