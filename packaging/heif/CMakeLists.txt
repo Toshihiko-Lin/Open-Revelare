@@ -19,4 +19,9 @@ add_library(OpenRevelare.Heif.Native SHARED bridge.cpp)
 target_compile_features(OpenRevelare.Heif.Native PRIVATE cxx_std_17)
 target_include_directories(OpenRevelare.Heif.Native PRIVATE "${HEIF_SOURCE}/libheif/api" "${CMAKE_CURRENT_BINARY_DIR}/heif")
 target_link_libraries(OpenRevelare.Heif.Native PRIVATE heif)
+if(UNIX AND NOT APPLE)
+  # The codecs are private static dependencies. Bind their symbols locally so
+  # x265's direct x86 assembly calls cannot be preempted across the ELF boundary.
+  target_link_options(OpenRevelare.Heif.Native PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
 install(TARGETS OpenRevelare.Heif.Native RUNTIME DESTINATION . LIBRARY DESTINATION .)

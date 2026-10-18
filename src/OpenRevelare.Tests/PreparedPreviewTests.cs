@@ -12,8 +12,10 @@ namespace OpenRevelare.Tests;
 
 public sealed class PreparedPreviewTests
 {
-    [Fact]
-    public async Task Idle_warmup_uses_resident_neighbour_and_its_exact_foreground_parameters()
+    [Theory]
+    [InlineData(2L << 30, true)]
+    [InlineData(0L, false)]
+    public async Task Idle_warmup_respects_memory_and_uses_resident_neighbour_parameters(long availableBytes, bool expectedWarmup)
     {
         string root = Path.Combine(TestDataIsolation.Root, "warm-preview-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -21,7 +23,8 @@ public sealed class PreparedPreviewTests
         foreach (string path in paths) SourceRevisionTests.WriteTiff(path, 120);
         try
         {
-            using var vm = new MainViewModel();
+            // Exercise warmup independently of the runner's current free memory.
+            using var vm = new MainViewModel(() => availableBytes);
             const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
             foreach (string path in paths) vm.Frames.Add(new RollFrame(path));
             typeof(MainViewModel).GetField("_currentFrame", flags)!.SetValue(vm, vm.Frames[0]);
@@ -40,8 +43,14 @@ public sealed class PreparedPreviewTests
                 .Invoke(vm, new object?[] { vm.Frames[1], entry.Source, region, p })!;
             var cache = (PreparedPreviewCache)typeof(MainViewModel).GetField("_preparedPreviews", flags)!.GetValue(vm)!;
             typeof(MainViewModel).GetMethod("SchedulePreviewWarmup", flags)!.Invoke(vm, null);
-            CachedPreviewData? hit = null;
-            for (int i = 0; i < 200 && hit is null; i++) { await Task.Delay(20); hit = cache.Get(key); }
+            await vm.PreviewWarmupTask.WaitAsync(TimeSpan.FromSeconds(30));
+            CachedPreviewData? hit = cache.Get(key);
+            if (!expectedWarmup)
+            {
+                Assert.Null(hit);
+                Assert.Equal(0, cache.ResidentBytes);
+                return;
+            }
             Assert.NotNull(hit);
             using var cmm = new LittleCmsEngine();
             var fresh = Pipeline.Render(entry.Working, p, key.Pipeline, cmm);

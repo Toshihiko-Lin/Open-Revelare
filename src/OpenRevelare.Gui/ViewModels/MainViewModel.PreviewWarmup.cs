@@ -8,7 +8,9 @@ namespace OpenRevelare.Gui.ViewModels;
 
 public partial class MainViewModel
 {
-    private readonly PreparedPreviewCache _preparedPreviews = new();
+    private readonly PreparedPreviewCache _preparedPreviews;
+    private readonly Func<long?> _previewAvailableBytes;
+    internal Task PreviewWarmupTask { get; private set; } = Task.CompletedTask;
     private CancellationTokenSource? _previewWarmCts;
     private readonly SemaphoreSlim _previewRenderLane = new(1, 1);
 
@@ -44,9 +46,11 @@ public partial class MainViewModel
     private static readonly bool PreviewWarmupEnabled = Environment.GetEnvironmentVariable("OPENREVELARE_PREVIEW_WARMUP") != "0";
     private bool MayWarmPreview => PreviewWarmupEnabled && !_disposed && !_interacting && !_showingNegative && !_showingBeforeEdits
         && !_cropEditing && !RollAnalysisPending && !ShowProgress && _paramsLoaded
-        && (!SystemMemory.TryGetAvailableBytes(out long free) || free >= (1L << 30));
+        && _previewAvailableBytes() is not (>= 0 and < (1L << 30));
 
-    private async void SchedulePreviewWarmup()
+    private void SchedulePreviewWarmup() => PreviewWarmupTask = WarmPreviewAsync();
+
+    private async Task WarmPreviewAsync()
     {
         CancelPreviewWarmup();
         if (!MayWarmPreview || CurrentFrame is not { } active) return;

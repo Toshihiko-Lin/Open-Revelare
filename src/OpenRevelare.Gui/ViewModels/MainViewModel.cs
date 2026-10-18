@@ -4453,8 +4453,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _rollDirty;
     private bool _sheetDirty;
 
-    public MainViewModel()
+    public MainViewModel() : this(null) { }
+
+    internal MainViewModel(Func<long?>? previewAvailableBytes)
     {
+        _previewAvailableBytes = previewAvailableBytes ?? (() =>
+            SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
+        _preparedPreviews = new PreparedPreviewCache(availableBytes: _previewAvailableBytes);
         Frames.CollectionChanged += (_, _) => NotifyRollBroadcastHints();
         Sync.PropertyChanged += (_, _) => NotifyRollBroadcastHints();
         _presentationRevisions.Published += revision => PresentationRevision = revision;
