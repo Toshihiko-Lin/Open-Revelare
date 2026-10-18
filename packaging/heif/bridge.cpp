@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#ifdef OR_HEVC_HARDWARE
+#include "hardware.h"
+#endif
 
 #ifdef _WIN32
 #define OR_API extern "C" __declspec(dllexport)
@@ -32,20 +35,34 @@ heif_error write_bytes(heif_context*, const void* data, size_t size, void* user)
 
 // A flat ABI keeps libheif's versioned structs out of managed code. Files are returned
 // in memory so Windows Unicode paths and atomic replacement stay with ExportFile.
-OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int quality,
+static int encode(const uint16_t* rgb, int width, int height, int quality,
                          int hdr, const uint8_t* icc, int icc_size,
                          const uint8_t* exif, int exif_size,
                          const uint8_t* xmp, int xmp_size,
-                         void** output, size_t* output_size, char* error, int error_size) {
+                         bool hardware, void** output, size_t* output_size, char* error, int error_size) {
     *output = nullptr;
     *output_size = 0;
     try {
+#ifdef OR_HEVC_HARDWARE
+        // libheif's registry is not synchronized. All callers, including the
+        // software ABI, wait for the single registration before reading it.
+        or_hevc::register_hardware_encoder();
+#endif
         owned<heif_context, heif_context_free> ctx(heif_context_alloc(), heif_context_free);
         if (!ctx) throw std::bad_alloc();
         heif_encoder* raw_encoder = nullptr;
+#ifdef OR_HEVC_HARDWARE
+        if (hardware) {
+            const heif_encoder_descriptor* descriptor = nullptr;
+            if (heif_get_encoder_descriptors(heif_compression_HEVC, "or-hardware", &descriptor, 1) != 1)
+                throw std::runtime_error("Hardware HEVC plugin is unavailable");
+            check(heif_context_get_encoder(ctx.get(), descriptor, &raw_encoder));
+        } else
+#endif
         check(heif_context_get_encoder_for_format(ctx.get(), heif_compression_HEVC, &raw_encoder));
         owned<heif_encoder, heif_encoder_release> encoder(raw_encoder, heif_encoder_release);
         check(heif_encoder_set_lossy_quality(encoder.get(), quality));
+        if (!hardware) {
         check(heif_encoder_set_parameter_string(encoder.get(), "chroma", "420"));
         // Still tiles have no inter-frame motion to search. Keep the requested CRF,
         // 10-bit samples and compatibility profile while reducing intra search work.
@@ -64,6 +81,7 @@ OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int q
         check(heif_encoder_set_parameter_string(encoder.get(), "x265:rc-lookahead", "0"));
         check(heif_encoder_set_parameter_string(encoder.get(), "x265:frame-threads", "1"));
         check(heif_encoder_set_parameter_string(encoder.get(), "x265:repeat-headers", "1"));
+        }
         owned<heif_color_profile_nclx, heif_nclx_color_profile_free> color(
             heif_nclx_color_profile_alloc(), heif_nclx_color_profile_free);
         if (!color) throw std::bad_alloc();
@@ -145,5 +163,35 @@ OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int q
         }
         return 1;
     }
+}
+// Keep the original ABI as the deterministic software route for older callers.
+OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int quality,
+    int hdr, const uint8_t* icc, int icc_size, const uint8_t* exif, int exif_size,
+    const uint8_t* xmp, int xmp_size, void** output, size_t* output_size, char* error, int error_size) {
+    if (error_size > 0) error[0] = 0;
+    return encode(rgb, width, height, quality, hdr, icc, icc_size, exif, exif_size, xmp, xmp_size,
+        false, output, output_size, error, error_size);
+}
+
+OR_API int or_heif_encode_exif_accelerated(const uint16_t* rgb, int width, int height, int quality,
+    int hdr, const uint8_t* icc, int icc_size, const uint8_t* exif, int exif_size,
+    const uint8_t* xmp, int xmp_size, int allow_hardware, int* hardware_used,
+    void** output, size_t* output_size, char* error, int error_size) {
+    *hardware_used = 0;
+    if (error_size > 0) error[0] = 0;
+#ifdef OR_HEVC_HARDWARE
+    // Tiny/odd standalone images keep the software route. Large photos already
+    // use even-sized tiles; hardware never changes their delivered dimensions.
+    bool tiled = width > 1024 || height > 1024;
+    if (allow_hardware && (tiled || (width >= 256 && height >= 256 && width % 2 == 0 && height % 2 == 0))) {
+        int status = encode(rgb, width, height, quality, hdr, icc, icc_size, exif, exif_size, xmp, xmp_size,
+            true, output, output_size, error, error_size);
+        if (status == 0) { *hardware_used = 1; return 0; }
+        // Discard the complete failed context and all partial tiles. A file never
+        // mixes backends, and the caller's existing destination is still untouched.
+    }
+#endif
+    return encode(rgb, width, height, quality, hdr, icc, icc_size, exif, exif_size, xmp, xmp_size,
+        false, output, output_size, error, error_size);
 }
 OR_API void or_heif_free(void* bytes) { delete[] static_cast<uint8_t*>(bytes); }

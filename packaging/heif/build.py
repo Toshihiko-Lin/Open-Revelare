@@ -60,8 +60,8 @@ x265_cmake.write_text(text)
 common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 if platform.system() == "Windows":
     common += ["-A", "x64"]
-# One Main10 library serves SDR and PQ alike. No runtime codec/plugin discovery and no
-# system HEVC extension is needed. Keep SIMD primitives enabled; x265 dispatches at
+# One Main10 fallback serves SDR and PQ alike, without a system HEVC extension.
+# Windows/macOS also try their OS hardware encoder at runtime. Keep SIMD enabled; x265 dispatches at
 # runtime to the instruction set supported by the user's CPU.
 run("cmake", "-S", x265 / "source", "-B", WORK / "x265-build", *common,
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_INSTALL_PREFIX=" + str(PREFIX),
@@ -87,5 +87,6 @@ shutil.copy2(heif / "COPYING", licenses / "libheif-LGPL-3.0.txt")
 shutil.copy2(x265 / "COPYING", licenses / "x265-GPL-2.0.txt")
 (DEST / "heif.manifest.json").write_text(json.dumps({
     "libheif": "1.21.2", "x265": "4.1", "rid": RID, "assembly": True,
+    "hardware": {"Windows": "Media Foundation", "Darwin": "VideoToolbox", "Linux": None}[platform.system()],
     "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
 }, indent=2) + "\n", encoding="utf-8")

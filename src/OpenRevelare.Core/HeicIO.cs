@@ -10,6 +10,11 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class HeicIO
 {
+    private static readonly object HardwareEncoderGate = new();
+    private static string _encoderDiagnostics = "not initialized";
+    /// <summary>The last completed encode, including any hardware fallback reason.</summary>
+    public static string EncoderDiagnostics => Volatile.Read(ref _encoderDiagnostics);
+
     public static JpegIO.JpegFit? ExportHeic(
         RenderedFrame frame, string path, int quality = 90, long? maxBytes = null, SourceExif? sourceExif = null)
     {
@@ -107,21 +112,57 @@ public static class HeicIO
         byte[]? xmp = sourceExif?.MergeXmp(null);
         var error = new StringBuilder(1024);
         IntPtr output = IntPtr.Zero;
+        bool hardwareLease = GpuAcceleration.Mode != GpuAccelerationMode.Off
+            && (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+            && Monitor.TryEnter(HardwareEncoderGate);
         try
         {
-            int status = Native.or_heif_encode_exif(pixels, frame.Pixels.Width, frame.Pixels.Height,
-                Math.Clamp(quality, 1, 100), hdr ? 1 : 0, profile, profile?.Length ?? 0,
-                exif, exif?.Length ?? 0, xmp, xmp?.Length ?? 0, out output, out nuint size, error, error.Capacity);
+            int status, usedHardware = 0;
+            nuint size;
+            if (hardwareLease)
+            {
+                try
+                {
+                    status = Native.or_heif_encode_exif_accelerated(pixels, frame.Pixels.Width, frame.Pixels.Height,
+                        Math.Clamp(quality, 1, 100), hdr ? 1 : 0, profile, profile?.Length ?? 0,
+                        exif, exif?.Length ?? 0, xmp, xmp?.Length ?? 0, 1, out usedHardware,
+                        out output, out size, error, error.Capacity);
+                }
+                catch (EntryPointNotFoundException)
+                {
+                    // Older native payloads remain usable after an application-only update.
+                    status = SoftwareEncode(out size);
+                }
+            }
+            else status = SoftwareEncode(out size);
             if (status != 0) throw new InvalidOperationException("HEIC: " + error);
+            string backend = usedHardware != 0
+                ? OperatingSystem.IsWindows() ? "Media Foundation hardware Main10" : "VideoToolbox hardware Main10"
+                : "x265";
+            Volatile.Write(ref _encoderDiagnostics, error.Length > 0 ? backend + "; fallback=" + error : backend);
             var file = new byte[checked((int)size)];
             Marshal.Copy(output, file, 0, file.Length);
             return file;
+
+            int SoftwareEncode(out nuint length)
+            {
+                int result = Native.or_heif_encode_exif(pixels, frame.Pixels.Width, frame.Pixels.Height,
+                    Math.Clamp(quality, 1, 100), hdr ? 1 : 0, profile, profile?.Length ?? 0,
+                    exif, exif?.Length ?? 0, xmp, xmp?.Length ?? 0, out output, out length, error, error.Capacity);
+                // The legacy ABI only writes the out buffer on failure.
+                if (result == 0) error.Clear();
+                return result;
+            }
         }
         catch (DllNotFoundException ex)
         {
             throw new NotSupportedException("HEIC encoder is missing. Build packaging/heif/build.py for this platform.", ex);
         }
-        finally { if (output != IntPtr.Zero) Native.or_heif_free(output); }
+        finally
+        {
+            if (output != IntPtr.Zero) Native.or_heif_free(output);
+            if (hardwareLease) Monitor.Exit(HardwareEncoderGate);
+        }
     }
 
     private static class Native
@@ -130,6 +171,11 @@ public static class HeicIO
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern int or_heif_encode_exif(ushort[] rgb, int width, int height, int quality,
             int hdr, byte[]? icc, int iccSize, byte[]? exif, int exifSize, byte[]? xmp, int xmpSize, out IntPtr output, out nuint outputSize,
+            [Out] StringBuilder error, int errorSize);
+        [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+        internal static extern int or_heif_encode_exif_accelerated(ushort[] rgb, int width, int height, int quality,
+            int hdr, byte[]? icc, int iccSize, byte[]? exif, int exifSize, byte[]? xmp, int xmpSize,
+            int allowHardware, out int hardwareUsed, out IntPtr output, out nuint outputSize,
             [Out] StringBuilder error, int errorSize);
         [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
         internal static extern void or_heif_free(IntPtr output);

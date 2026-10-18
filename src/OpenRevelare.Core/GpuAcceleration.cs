@@ -60,7 +60,7 @@ public static class GpuAcceleration
     /// <summary>Reading diagnostics does not initialize the GPU or compile shaders.</summary>
     public static string Diagnostics => $"{Mode}; backend={Backend}; runs={Interlocked.Read(ref _gpuRuns)}; " +
         $"resourceFallbacks={Interlocked.Read(ref _resourceFallbacks)}; lastResourceFallback={_lastResourceFallback ?? "none"}; " +
-        (_failure ?? (_session is null ? "not initialized" : "ready"));
+        (_failure ?? (_session is null ? "not initialized" : "ready")) + $"; HEIC={HeicIO.EncoderDiagnostics}";
     private static string Backend => OperatingSystem.IsWindows() ? "DirectCompute" : OperatingSystem.IsMacOS() ? "Metal" : "CPU";
 
     public static void ReleaseResources()

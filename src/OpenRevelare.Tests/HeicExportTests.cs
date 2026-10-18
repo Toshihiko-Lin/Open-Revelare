@@ -9,8 +9,61 @@ using Xunit;
 
 namespace OpenRevelare.Tests;
 
+[Collection("GPU scheduler")]
 public sealed class HeicExportTests
 {
+    [Fact]
+    public void Disabling_gpu_keeps_heic_on_the_software_encoder()
+    {
+        var previous = GpuAcceleration.Mode;
+        try
+        {
+            GpuAcceleration.Mode = GpuAccelerationMode.Off;
+            WithFile(path => HeicIO.ExportHeic(Frame(ColorSpaces.DisplayP3, false, 512, 512), path));
+            Assert.Equal("x265", HeicIO.EncoderDiagnostics);
+        }
+        finally { GpuAcceleration.Mode = previous; }
+    }
+
+    [HeicHardwareFact]
+    public void Real_hardware_repeated_exports_keep_main10_profiles_metadata_and_geometry()
+    {
+        var previous = GpuAcceleration.Mode;
+        try
+        {
+            GpuAcceleration.Mode = GpuAccelerationMode.Auto;
+            foreach (bool hdr in new[] { false, true })
+            {
+                var frame = Frame(hdr ? ColorSpaces.LinearExtendedSrgb : ColorSpaces.DisplayP3, hdr, 1031, 769);
+                for (int attempt = 0; attempt < 5; attempt++) WithFile(path =>
+                {
+                    var metadata = SourceExif.ForExport(null, false, new FilmCaptureMetadata { Artist = "Hardware HEVC test" });
+                    HeicIO.ExportHeic(frame, path, sourceExif: metadata);
+                    Assert.Contains("hardware Main10", HeicIO.EncoderDiagnostics);
+                    byte[] file = File.ReadAllBytes(path);
+                    var properties = Properties(file);
+                    foreach (var config in properties.Where(p => p.Type == "hvcC"))
+                    {
+                        Assert.Equal(2, config.Data[1] & 31);
+                        Assert.Equal(2, config.Data[17] & 7);
+                    }
+                    Assert.Contains(properties, p => p.Type == "ispe"
+                        && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(4)) == 1031
+                        && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(8)) == 769);
+                    if (!hdr)
+                    {
+                        byte[] icc = Assert.Single(properties, p => p.Type == "colr" && Encoding.ASCII.GetString(p.Data, 0, 4) == "prof").Data;
+                        Assert.Equal(frame.OutputProfile.IccBytes.ToArray(), icc[4..]);
+                    }
+                    byte[] nclx = Assert.Single(properties, p => p.Type == "colr" && Encoding.ASCII.GetString(p.Data, 0, 4) == "nclx").Data;
+                    Assert.Equal(hdr ? 16 : 2, BinaryPrimitives.ReadUInt16BigEndian(nclx.AsSpan(6)));
+                    Assert.Contains("Hardware HEVC test", Encoding.UTF8.GetString(file));
+                });
+            }
+        }
+        finally { GpuAcceleration.Mode = previous; }
+    }
+
     [Theory]
     [InlineData(false, 33, 17)]
     [InlineData(true, 33, 17)]
@@ -256,5 +309,14 @@ public sealed class HeicExportTests
         string path = Path.Combine(Path.GetTempPath(), $"正片-heic-{Guid.NewGuid():N}.heic");
         try { action(path); }
         finally { File.Delete(path); }
+    }
+}
+
+public sealed class HeicHardwareFactAttribute : FactAttribute
+{
+    public HeicHardwareFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("OPENREVELARE_REQUIRE_HEVC") != "1")
+            Skip = "Requires a Main10 hardware encoder; set OPENREVELARE_REQUIRE_HEVC=1 to run.";
     }
 }

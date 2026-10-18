@@ -10,7 +10,7 @@ on:
       - 'packaging/libraw/**'
       - 'packaging/heif/**'
       - 'packaging/compute/**'
-      - 'packaging/ci/verify-native.py'
+      - 'packaging/ci/**'
       - '.github/actions/build-native/**'
       - '.github/workflows/native-cache.yml'
   workflow_dispatch:

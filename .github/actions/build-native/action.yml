@@ -64,3 +64,6 @@ runs:
     - name: Verify native outputs
       shell: bash
       run: python packaging/ci/verify-native.py "${{ steps.target.outputs.rid }}"
+    - name: HEIC software and hardware fallback smoke tests
+      shell: bash
+      run: python packaging/ci/heic-smoke.py "${{ steps.target.outputs.rid }}"

@@ -11,7 +11,7 @@
 **新增与改进**
 
 - 高像素 RAW 导入与自动去色罩更快，减少等待和界面卡顿。
-- 提升 HEIC 导出速度，降低高像素 HDR 照片导出的内存占用。
+- HEIC 导出支持自动硬件加速，不支持时自动回退；降低高像素 HDR 照片导出的内存占用。
 - 印样导出新增小、中、大三档，约 6、12、24 MP，默认中档并记住选择。
 
 ---
@@ -25,7 +25,7 @@
 **Added and improved**
 
 - Faster high-resolution RAW import and automatic roll calibration, with less waiting and freezing.
-- Faster HEIC exports with lower memory use for high-resolution HDR photos.
+- Automatic hardware acceleration for HEIC exports, with software fallback and lower memory use for high-resolution HDR photos.
 - Added small, medium and large contact-sheet exports at approximately 6, 12 and 24 MP. Defaults to medium and remembers your choice.
 
 ## v1.8.6（2026-10-18）
