@@ -52,6 +52,10 @@ x265_cmake = x265 / "source/CMakeLists.txt"
 text = x265_cmake.read_text()
 for policy in ("CMP0025", "CMP0054"):
     text = text.replace(policy + " OLD", policy + " NEW")
+# CMP0025 NEW identifies Apple's compiler as AppleClang. x265 4.1 only
+# recognizes Clang, otherwise skipping the flags/defines that enable ARM NEON.
+text = text.replace('if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")',
+                    'if(CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")')
 x265_cmake.write_text(text)
 common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 if platform.system() == "Windows":
@@ -62,7 +66,8 @@ if platform.system() == "Windows":
 run("cmake", "-S", x265 / "source", "-B", WORK / "x265-build", *common,
     "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_INSTALL_PREFIX=" + str(PREFIX),
     "-DHIGH_BIT_DEPTH=ON", "-DMAIN12=OFF", "-DENABLE_SHARED=OFF", "-DENABLE_CLI=OFF",
-    "-DENABLE_ASSEMBLY=ON", "-DENABLE_HDR10_PLUS=OFF", "-DSTATIC_LINK_CRT=ON",
+    "-DENABLE_ASSEMBLY=ON", "-DENABLE_HDR10_PLUS=OFF",
+    "-DSTATIC_LINK_CRT=" + ("ON" if platform.system() == "Windows" else "OFF"),
     *(["-DNASM_EXECUTABLE=" + nasm] if nasm else []))
 run("cmake", "--build", WORK / "x265-build", "--config", "Release", "--parallel", "4")
 run("cmake", "--install", WORK / "x265-build", "--config", "Release")
