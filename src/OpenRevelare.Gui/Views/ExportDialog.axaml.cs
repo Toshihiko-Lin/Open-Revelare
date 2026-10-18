@@ -75,8 +75,8 @@ public partial class ExportDialog : Window
         InitializeComponent();
         SourceExifSummaryLbl.Text = string.IsNullOrWhiteSpace(sourceExifSummary)
             ? Loc.T("源文件没有可显示的设备信息；导出时按每帧来源处理。") : sourceExifSummary;
-        LoadDevices(CameraLibraryBox, Settings.Current.FilmCameras ??= []);
-        LoadDevices(LensLibraryBox, Settings.Current.FilmLenses ??= []);
+        LoadDevices(CameraLibraryBox, Settings.Current.FilmCameras ??= [], "选用已保存机身");
+        LoadDevices(LensLibraryBox, Settings.Current.FilmLenses ??= [], "选用已保存镜头");
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
         OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
@@ -451,9 +451,10 @@ public partial class ExportDialog : Window
     private void OnCloseFilmInfoClick(object? sender, RoutedEventArgs e) => FilmInfoDrawer.IsPaneOpen = false;
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
-    private static void LoadDevices(ComboBox box, List<CaptureDevice> devices)
+    private static void LoadDevices(ComboBox box, List<CaptureDevice> devices, string prompt)
     {
-        box.Items.Add(new ComboBoxItem { Content = Loc.T("手动填写") });
+        box.IsVisible = devices.Count > 0;
+        box.Items.Add(new ComboBoxItem { Content = Loc.T(prompt) });
         foreach (CaptureDevice device in devices)
             box.Items.Add(new ComboBoxItem { Content = device.Label, Tag = device });
         box.SelectedIndex = 0;

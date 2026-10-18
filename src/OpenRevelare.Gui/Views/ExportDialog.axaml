@@ -78,19 +78,14 @@
                         <Button Grid.Column="1" Content="{i18n:T '关闭'}" Click="OnCloseFilmInfoClick" />
                     </Grid>
                     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                                                    <StackPanel Name="FilmInfoPaneContent" Spacing="10">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
-                                    <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <CheckBox Name="FilmInfoChk" Content="{i18n:T '导出时写入胶片拍摄信息'}" IsCheckedChanged="OnAnyChanged"/>
+                        <StackPanel Name="FilmInfoPaneContent" Spacing="10">
                                 <StackPanel Name="FilmEditorGroup" Spacing="10">
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
                                     <Grid ColumnDefinitions="*,12,*">
                                         <StackPanel Grid.Column="0">
                                             <StackPanel Spacing="6">
                                                 <TextBlock Classes="sectionHead" Text="{i18n:T '胶片机身'}"/>
-                                                <ComboBox Name="CameraLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnCameraSelected"/>
+                                                <ComboBox Name="CameraLibraryBox" HorizontalAlignment="Stretch"
+                                                          SelectionChanged="OnCameraSelected"/>
                                                 <StackPanel Spacing="3">
                                                     <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
                                                     <TextBox Name="CameraMakeBox" TextChanged="OnCameraEdited"/>
@@ -108,7 +103,8 @@
                                         <StackPanel Grid.Column="2">
                                             <StackPanel Spacing="6">
                                                 <TextBlock Classes="sectionHead" Text="{i18n:T '胶片镜头'}"/>
-                                                <ComboBox Name="LensLibraryBox" HorizontalAlignment="Stretch" SelectionChanged="OnLensSelected"/>
+                                                <ComboBox Name="LensLibraryBox" HorizontalAlignment="Stretch"
+                                                          SelectionChanged="OnLensSelected"/>
                                                 <StackPanel Spacing="3">
                                                     <TextBlock Classes="formatDetail" Text="{i18n:T '品牌'}"/>
                                                     <TextBox Name="LensMakeBox" TextChanged="OnLensEdited"/>
@@ -170,8 +166,14 @@
                                         </StackPanel>
                                     </Grid>
                                 </StackPanel>
+                                <CheckBox Name="FilmInfoChk" Content="{i18n:T '导出时写入胶片拍摄信息'}" IsCheckedChanged="OnAnyChanged"/>
+                                <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。整卷导出时，填写的胶片信息应用到所有帧。'}"/>
+                                <StackPanel Spacing="3">
+                                    <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧示例）'}"/>
+                                    <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
+                                </StackPanel>
                                 <TextBlock Name="ExifErrorLbl" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="False"/>
-                            </StackPanel>
+                        </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
             </Border>
