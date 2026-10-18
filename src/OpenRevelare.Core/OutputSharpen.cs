@@ -81,6 +81,36 @@ public static class OutputSharpen
     /// </summary>
     private const float OvershootLimit = 0.12f;
 
+    /// <summary>Resize then sharpen a bounded display-encoded delivery, preserving the source.</summary>
+    public static ImageBuffer ResizeAndApply(ImageBuffer source, int longEdge, bool allowUpscale, Level level)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var (width, height) = Resample.LongEdgeSize(source.Width, source.Height, longEdge, allowUpscale);
+        var (sigma, amount) = Settings(level);
+        if (sigma <= 0 || amount <= 0 || width < 3 || height < 3)
+            return Resample.ToLongEdge(source, longEdge, allowUpscale);
+        if (width == source.Width && height == source.Height)
+        {
+            var copy = new ImageBuffer(width, height, (float[])source.Data.Clone()).InheritSourceFrom(source);
+            Apply(copy, level);
+            return copy;
+        }
+        float[] Cpu()
+        {
+            float[] pixels = Resample.ResizeOnCpu(source, width, height);
+            ApplyCpu(pixels, width, height, sigma, amount);
+            return pixels;
+        }
+        if (GpuAcceleration.TryResizeSharpen(source, width, height, Kernel(sigma), amount, Threshold, OvershootLimit,
+            Cpu, out var accelerated))
+            return new ImageBuffer(width, height, accelerated).InheritSourceFrom(source);
+        // A combined working set may not fit even when each individual operation does.
+        var resized = Resample.ToLongEdge(source, longEdge, allowUpscale);
+        var result = new ImageBuffer(width, height, (float[])resized.Data.Clone()).InheritSourceFrom(source);
+        Apply(result, level);
+        return result;
+    }
+
     /// <summary>
     /// Sharpen <paramref name="displayReferred"/> IN PLACE. The buffer must be display-encoded and
     /// bounded to [0,1] — see the remarks for why this is not run on scene-linear or extended data.

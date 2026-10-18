@@ -25,6 +25,19 @@ internal static class RenderTrace
 
     private static readonly object Gate = new();
     private static readonly PerformanceStatistics Statistics = new();
+    private static readonly ActivityListener? RawListener;
+
+    static RenderTrace()
+    {
+        if (!Enabled) return;
+        RawListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "OpenRevelare.RawDecode",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = activity => Statistics.Observe(activity.OperationName, activity.Duration.TotalMilliseconds),
+        };
+        ActivitySource.AddActivityListener(RawListener);
+    }
 
     public static T Measure<T>(string phase, Func<T> work)
     {

@@ -16,8 +16,9 @@
 - **工程可以连同原片归档。** 可一起保存原片、校正参考和自定义 LUT，并查看所需文件清单；取消或复制失败不会留下不完整的归档。
 - **智能色偏修正更易判断。** 最多分析 30 轮，结果稳定时提前结束；完成后直接提示结果，不确定时可检查画面、撤销或改用灰卡采样。
 - **常用界面更简洁。** 导入以添加照片为主，同步详情按需查看；导出摘要和保存失败提醒保持可见。“第一卷”指南补充了操作与恢复步骤。
-- **浏览更流畅。** 空闲时预热相邻照片，并补充性能诊断，便于定位预览卡顿。
-- **大图处理支持 GPU 加速。** 加快大图缩放和输出锐化，支持 Windows 与 macOS；默认自动选择较快的处理方式，也可在偏好设置中关闭。
+- **浏览更流畅。** 空闲时预热相邻照片，并补充预览及 RAW 读取、解压和处理的分阶段性能诊断，便于定位卡顿。
+- **图像处理支持自适应 GPU 加速。** 支持 Windows 与 macOS，可加速缩放、输出锐化和胶片风格 LUT 插值；导出时可在 GPU 上连续完成缩放与锐化，减少数据传输。默认按实测选择较快的方式，持续变慢时自动退回 CPU，也可在偏好设置中关闭。实际导出提速取决于照片、设置和设备，RAW 解码、ICC 转换与文件编码仍使用 CPU。
+- **低显存设备处理更稳。** 分配前检查显存预算，锐化支持分块处理；显存不足时仅回退当前任务，后续照片仍可使用 GPU 加速。
 - **多种格式导出更快。** 优化 JPEG、TIFF 和 DNG 的导出速度，减少限制文件大小时的重复处理。实际提速取决于照片尺寸、导出设置和设备。
 
 ---
@@ -36,8 +37,9 @@
 - **Portable project archives.** Save originals, calibration references and custom LUTs with the project, and review its required files. Cancelled or failed copies do not leave incomplete archives.
 - **Clearer smart color-cast correction.** Analysis can run for up to 30 rounds and stops early when stable. Uncertain results offer clear advice to inspect, undo or use a grey card.
 - **Less clutter in common tasks.** Import focuses on adding photos, sync details appear on demand, and export summaries and save failures remain visible. The First roll guide covers the workflow and recovery.
-- **Smoother browsing.** Adjacent photos are prepared while idle, with added diagnostics to investigate preview delays.
-- **GPU acceleration for large images.** Speeds up resizing and output sharpening on Windows and macOS. The app automatically selects the faster processing method; acceleration can also be disabled in Preferences.
+- **Smoother browsing.** Adjacent photos are prepared while idle, with added phase timings for previews and RAW reading, unpacking and processing to investigate delays.
+- **Adaptive GPU acceleration.** Supports resizing, output sharpening and film-look LUT interpolation on Windows and macOS. Exports can resize and sharpen on the GPU in one sequence to reduce transfers. The app selects the faster method through measurement and falls back to CPU after sustained slowdowns; acceleration can also be disabled in Preferences. Overall export gains depend on the photo, settings and device; RAW decoding, ICC conversion and file encoding remain on CPU.
+- **More reliable processing with limited GPU memory.** Checks the memory budget before allocation and supports tiled sharpening. Insufficient GPU memory sends only the current operation to CPU, allowing later photos to continue using acceleration.
 - **Faster exports across formats.** Improved JPEG, TIFF and DNG export performance, with less repeated processing when limiting file size. Actual gains depend on photo dimensions, export settings and device.
 
 ## v1.8.5.1（2026-10-14）

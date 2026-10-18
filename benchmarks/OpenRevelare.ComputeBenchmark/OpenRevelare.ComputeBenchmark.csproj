@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/OpenRevelare.Core/OpenRevelare.Core.csproj" />
+    <ProjectReference Include="../../src/OpenRevelare.Presentation/OpenRevelare.Presentation.csproj" />
   </ItemGroup>
 </Project>

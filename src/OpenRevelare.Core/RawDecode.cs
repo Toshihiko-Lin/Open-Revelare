@@ -1,5 +1,6 @@
 using OpenRevelare.Core.NativeRaw;
 using OpenRevelare.ColorManagement;
+using System.Diagnostics;
 
 namespace OpenRevelare.Core;
 
@@ -17,6 +18,8 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class RawDecode
 {
+    /// <summary>Opt-in phase timing; emits no file names or image content.</summary>
+    public static readonly ActivitySource Diagnostics = new("OpenRevelare.RawDecode");
     // Camera RAW extensions, as a ROUTING HINT ONLY — this decides whether a file is handed to
     // LibRaw or to TiffIO, nothing more. LibRaw itself dispatches on file CONTENT, not on the
     // name: a file with a RAW extension that is not actually RAW is rejected by the decoder
@@ -546,11 +549,13 @@ public static class RawDecode
         // the decoder at all (see UnsupportedRawReason).
         if (UnsupportedRawReason(path) is { } unsupported) throw new NotSupportedException(unsupported);
 
-        byte[] bytes = ReadFilePinned(path);
-        RawContext ctx = RawContext.FromBuffer(bytes);
+        byte[] bytes;
+        using (Diagnostics.StartActivity("raw.read")) bytes = ReadFilePinned(path);
+        RawContext ctx;
+        using (Diagnostics.StartActivity("raw.open")) ctx = RawContext.FromBuffer(bytes);
         try
         {
-            ctx.Unpack();
+            using (Diagnostics.StartActivity("raw.unpack")) ctx.Unpack();
 
             // Preserve the SENSOR lattice before dcraw_process scales it into a 16-bit output.
             // LibRaw exposes this file's actual colour maximum, so 1/maximum describes a raw code
@@ -586,7 +591,8 @@ public static class RawDecode
 
             // Mirror rawpy.postprocess(..) from _decode_rawpy: UniWB, raw colour,
             // linear gamma, 16-bit, no auto-bright, AHD demosaic, FBDD per preference.
-            ctx.Process((int)fbdd, halfSize, cropbox);
+            using (Diagnostics.StartActivity(halfSize ? "raw.process.preview" : "raw.process.full"))
+                ctx.Process((int)fbdd, halfSize, cropbox);
             return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep);
         }
         catch { ctx.Dispose(); throw; }
@@ -668,7 +674,7 @@ public static class RawDecode
         double sourceQuantisationStep;
         using (RawSession session = OpenAndProcess(path, fbdd, halfSize, demosaic, regionInFrame))
         {
-            img = session.Context.MakeDcrawMemoryImage();
+            using (Diagnostics.StartActivity("raw.output-copy")) img = session.Context.MakeDcrawMemoryImage();
             frameW = session.FrameWidth; frameH = session.FrameHeight;
             sourceQuantisationStep = session.SourceQuantisationStep;
         }
@@ -689,6 +695,7 @@ public static class RawDecode
     private static ImageBuffer DecodeLibRaw(string path, FbddMode fbdd, bool halfSize)
     {
         using Decoded decoded = Process(path, fbdd, halfSize);
+        using var conversionTrace = Diagnostics.StartActivity("raw.rgb-float");
         ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
 
@@ -779,6 +786,7 @@ public static class RawDecode
 
         using Decoded decoded = Process(path, fbdd, halfSize: false, demosaic,
                                         new System.Drawing.Rectangle(x0, y0, x1 - x0, y1 - y0));
+        using var conversionTrace = Diagnostics.StartActivity("raw.region-rgb-float");
         ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
         ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
@@ -843,6 +851,7 @@ public static class RawDecode
         ProcessedImage img, int w, int h, int ch, int factor,
         double sourceQuantisationStep)
     {
+        using var conversionTrace = Diagnostics.StartActivity("raw.preview-box");
         const float Inv = 1.0f / 65535.0f;
         int ow = w / factor, oh = h / factor;
         var dst = new ImageBuffer(ow, oh)

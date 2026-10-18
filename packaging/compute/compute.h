@@ -3,6 +3,46 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <array>
+#include <algorithm>
+#include <limits>
+
+// Resource pressure is recoverable: only this operation should use the CPU.
+struct resource_unavailable : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+using BufferPlan = std::array<size_t, 9>; // eight device buffers plus optional readback
+
+inline size_t plan_bytes(const BufferPlan& plan, size_t max_buffer, size_t budget) {
+    // Kernels address float elements with signed 32-bit indices on both APIs.
+    max_buffer = std::min(max_buffer, size_t(std::numeric_limits<int32_t>::max()) * sizeof(float));
+    size_t total = 0;
+    for (size_t bytes : plan) {
+        if (bytes > max_buffer || bytes > budget - total)
+            throw resource_unavailable("GPU working set exceeds device memory budget");
+        total += bytes;
+    }
+    return total;
+}
+
+inline BufferPlan resize_plan(int sw, int sh, int dw, int dh, int xc, int yc, bool readback) {
+    return {size_t(sw)*sh*12, size_t(dw)*sh*12, size_t(dw)*dh*12,
+        size_t(xc)*4, size_t(dw)*12, size_t(yc)*4, size_t(dh)*12, 0,
+        readback ? size_t(dw)*dh*12 : 0};
+}
+
+inline BufferPlan sharpen_plan(int w, int h, int count, bool readback) {
+    return {size_t(w)*h*12, size_t(w)*h*4, size_t(w)*h*12,
+        size_t(count)*4, 4, 0, 0, 0, readback ? size_t(w)*h*12 : 0};
+}
+
+inline BufferPlan delivery_plan(int sw, int sh, int dw, int dh, int xc, int yc, int count, bool readback) {
+    auto plan = resize_plan(sw,sh,dw,dh,xc,yc,readback);
+    plan[0] = std::max(plan[0],size_t(dw)*dh*12); // reuse uploaded source for final output
+    plan[4] = std::max(plan[4],size_t(dw)*dh*4);  // metadata then blur intermediate
+    plan[7] = size_t(count)*4;
+    return plan;
+}
 
 #ifdef _WIN32
 #define OR_GPU extern "C" __declspec(dllexport)
@@ -33,6 +73,7 @@ inline constexpr char kernels[] = R"SHADER(
 #include <metal_stdlib>
 using namespace metal;
 #pragma clang fp contract(off)
+#define PRECISE
 struct Params {
     int sw, sh, dw, dh;
     int vertical, radius;
@@ -55,6 +96,7 @@ struct Params {
     float limit;
     int3 reserved;
 };
+#define PRECISE precise
 cbuffer Constants : register(b0) { Params p; }
 StructuredBuffer<float> input : register(t0);
 StructuredBuffer<float> auxiliary : register(t1);
@@ -112,5 +154,36 @@ KERNEL(sharpen_vertical) {
     // any nonfinite/out-of-range value. Preserve that branch explicitly.
     for (int c = 0; c < 3; ++c)
         output[i*3+c] = unchanged ? input[i*3+c] : clamp_float(input[i*3+c]+add, 0.0f, 1.0f);
+}
+
+// Red-fastest tetrahedral interpolation, using the CPU's expression order.
+// weights: domain scales followed by biases. auxiliary: RGB cube.
+KERNEL(film_lut) {
+    int pixel = int(tid.y)*p.sw + int(tid.x);
+    if (int(tid.x) >= p.sw || pixel >= p.dw) return;
+    int last = p.radius - 1;
+    PRECISE float fr = clamp(input[pixel*3]*weights[0]+weights[3], 0.0f, float(last));
+    PRECISE float fg = clamp(input[pixel*3+1]*weights[1]+weights[4], 0.0f, float(last));
+    PRECISE float fb = clamp(input[pixel*3+2]*weights[2]+weights[5], 0.0f, float(last));
+    int r0 = min(int(fr), last-1), g0 = min(int(fg), last-1), b0 = min(int(fb), last-1);
+    PRECISE float dr = fr-r0, dg = fg-g0, db = fb-b0;
+    int sg = p.radius*3, sb = p.radius*p.radius*3;
+    int base = r0*3 + g0*sg + b0*sb;
+    int ca, cb;
+    PRECISE float w0, wa, wb, w1;
+    if (dr >= dg) {
+        if (dg >= db) { ca=base+3; cb=base+3+sg; w0=1.0f-dr; wa=dr-dg; wb=dg-db; w1=db; }
+        else if (dr >= db) { ca=base+3; cb=base+3+sb; w0=1.0f-dr; wa=dr-db; wb=db-dg; w1=dg; }
+        else { ca=base+sb; cb=base+3+sb; w0=1.0f-db; wa=db-dr; wb=dr-dg; w1=dg; }
+    } else {
+        if (db >= dg) { ca=base+sb; cb=base+sg+sb; w0=1.0f-db; wa=db-dg; wb=dg-dr; w1=dr; }
+        else if (db >= dr) { ca=base+sg; cb=base+sg+sb; w0=1.0f-dg; wa=dg-db; wb=db-dr; w1=dr; }
+        else { ca=base+sg; cb=base+3+sg; w0=1.0f-dg; wa=dg-dr; wb=dr-db; w1=db; }
+    }
+    int end = base+3+sg+sb;
+    for (int c=0; c<3; ++c) {
+        PRECISE float value = w0*auxiliary[base+c] + wa*auxiliary[ca+c] + wb*auxiliary[cb+c] + w1*auxiliary[end+c];
+        output[pixel*3+c] = value;
+    }
 }
 )SHADER";

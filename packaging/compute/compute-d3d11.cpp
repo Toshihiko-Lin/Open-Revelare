@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <dxgi1_4.h>
 #include <wrl/client.h>
 #include <array>
 #include <limits>
@@ -10,6 +11,7 @@
 using Microsoft::WRL::ComPtr;
 namespace {
 void check(HRESULT hr) {
+    if (hr == E_OUTOFMEMORY) throw resource_unavailable("DirectCompute allocation failed");
     if (FAILED(hr)) throw std::runtime_error("DirectCompute failed (HRESULT " + std::to_string(hr) + ")");
 }
 struct Buffer {
@@ -21,16 +23,47 @@ struct Buffer {
 struct Session {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
-    ComPtr<ID3D11ComputeShader> resize, horizontal, vertical;
+    ComPtr<ID3D11ComputeShader> resize, horizontal, vertical, film;
     ComPtr<ID3D11Buffer> constants, staging;
     size_t staging_bytes = 0;
-    std::array<Buffer,7> buffers;
+    std::array<Buffer,8> buffers;
+    ComPtr<IDXGIAdapter3> adapter;
+
+    void clear_buffers() {
+        context->ClearState();
+        buffers = {};
+        staging.Reset();
+        staging_bytes = 0;
+        context->Flush();
+    }
+    void prepare(const BufferPlan& required) {
+        // Query the process budget each time: other applications may consume VRAM.
+        size_t budget = 512ull * 1024 * 1024;
+        DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+        if (adapter && SUCCEEDED(adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
+            size_t owned = staging_bytes;
+            for (const auto& b : buffers) owned += b.bytes;
+            size_t other = info.CurrentUsage > owned ? size_t(info.CurrentUsage) - owned : 0;
+            size_t available = info.Budget > other ? size_t(info.Budget) - other : 0;
+            budget = std::min(size_t(info.Budget / 2), available > 128ull*1024*1024 ? available - 128ull*1024*1024 : size_t(0));
+        }
+        plan_bytes(required, std::numeric_limits<UINT>::max(), budget);
+        BufferPlan retained{};
+        for (size_t i = 0; i < buffers.size(); ++i) retained[i] = std::max(required[i], buffers[i].bytes);
+        retained[8] = std::max(required[8], staging_bytes);
+        try { plan_bytes(retained, std::numeric_limits<UINT>::max(), budget); }
+        catch (const resource_unavailable&) { clear_buffers(); }
+    }
 
     Session() {
         D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
         // Hardware only: WARP is a CPU implementation, not GPU acceleration.
         check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
             &level, 1, D3D11_SDK_VERSION, &device, nullptr, &context));
+        ComPtr<IDXGIDevice> dxgi;
+        ComPtr<IDXGIAdapter> base_adapter;
+        if (SUCCEEDED(device.As(&dxgi)) && SUCCEEDED(dxgi->GetAdapter(&base_adapter)))
+            base_adapter.As(&adapter);
         auto compile = [&](const char* entry, ComPtr<ID3D11ComputeShader>& shader) {
             ComPtr<ID3DBlob> code, errors;
             HRESULT hr = D3DCompile(kernels, std::strlen(kernels), "OpenRevelareCompute", nullptr, nullptr,
@@ -43,6 +76,7 @@ struct Session {
         compile("resize_axis", resize);
         compile("sharpen_horizontal", horizontal);
         compile("sharpen_vertical", vertical);
+        compile("film_lut", film);
         D3D11_BUFFER_DESC desc{};
         desc.ByteWidth = sizeof(Params);
         desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
@@ -132,6 +166,7 @@ OR_GPU int or_gpu_resize(void* session, const float* input, int sw, int sh, floa
     char* error, int error_size) {
     try {
         auto& s = *static_cast<Session*>(session);
+        s.prepare(resize_plan(sw,sh,dw,dh,xcount,ycount,true));
         s.buffer(0,size_t(sw)*sh*3,input);
         s.buffer(1,size_t(dw)*sh*3);
         s.buffer(2,size_t(dw)*dh*3);
@@ -143,13 +178,16 @@ OR_GPU int or_gpu_resize(void* session, const float* input, int sw, int sh, floa
         s.dispatch(s.resize.Get(),p,1,1,5,6,2);
         s.read(2,output,size_t(dw)*dh*3);
         return 0;
-    } catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
+    } catch (const resource_unavailable& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::bad_alloc& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
 }
 
 OR_GPU int or_gpu_sharpen(void* session, const float* input, float* output, int w, int h,
     const float* kernel, int count, float amount, float threshold, float limit, char* error, int error_size) {
     try {
         auto& s = *static_cast<Session*>(session);
+        s.prepare(sharpen_plan(w,h,count,true));
         s.buffer(0,size_t(w)*h*3,input); s.buffer(1,size_t(w)*h); s.buffer(2,size_t(w)*h*3);
         s.buffer(3,count,kernel); s.buffer(4,1);
         Params p{w,h,w,h,0,count/2,amount,threshold,limit};
@@ -157,5 +195,52 @@ OR_GPU int or_gpu_sharpen(void* session, const float* input, float* output, int 
         s.dispatch(s.vertical.Get(),p,0,1,3,4,2);
         s.read(2,output,size_t(w)*h*3);
         return 0;
-    } catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
+    } catch (const resource_unavailable& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::bad_alloc& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
+}
+
+OR_GPU int or_gpu_cube_lut(void* session, const float* input, float* output, int pixels,
+    const float* lut, int edge, const float* parameters, char* error, int error_size) {
+    try {
+        auto& s = *static_cast<Session*>(session);
+        size_t bytes = size_t(pixels)*12;
+        size_t lut_count = size_t(edge)*edge*edge*3;
+        s.prepare({bytes,lut_count*4,bytes,6*4,4,0,0,0,bytes});
+        s.buffer(0,size_t(pixels)*3,input); s.buffer(1,lut_count,lut);
+        s.buffer(2,size_t(pixels)*3); s.buffer(3,6,parameters); s.buffer(4,1);
+        int width = std::min(pixels,1024);
+        Params p{width,(pixels+width-1)/width,pixels,1,0,edge,0,0,0};
+        s.dispatch(s.film.Get(),p,0,1,3,4,2);
+        s.read(2,output,size_t(pixels)*3);
+        return 0;
+    } catch (const resource_unavailable& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::bad_alloc& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
+}
+
+OR_GPU int or_gpu_resize_sharpen(void* session, const float* input, int sw, int sh, float* output, int dw, int dh,
+    const int* xm, const float* xw, int xcount, const int* ym, const float* yw, int ycount,
+    const float* kernel, int count, float amount, float threshold, float limit, char* error, int error_size) {
+    try {
+        auto& s = *static_cast<Session*>(session);
+        s.prepare(delivery_plan(sw,sh,dw,dh,xcount,ycount,count,true));
+        s.buffer(0,std::max(size_t(sw)*sh*3,size_t(dw)*dh*3));
+        s.buffer(0,size_t(sw)*sh*3,input);
+        s.buffer(1,size_t(dw)*sh*3); s.buffer(2,size_t(dw)*dh*3);
+        s.buffer(3,xcount,xw); s.buffer(4,std::max(size_t(dw)*3,size_t(dw)*dh));
+        s.buffer(4,size_t(dw)*3,xm); s.buffer(5,ycount,yw); s.buffer(6,size_t(dh)*3,ym);
+        s.buffer(7,count,kernel);
+        Params p{sw,sh,dw,sh,0,0,0,0,0};
+        s.dispatch(s.resize.Get(),p,0,0,3,4,1);
+        p.sw=dw; p.dh=dh; p.vertical=1;
+        s.dispatch(s.resize.Get(),p,1,1,5,6,2);
+        p = Params{dw,dh,dw,dh,0,count/2,amount,threshold,limit};
+        s.dispatch(s.horizontal.Get(),p,2,2,7,6,4);
+        s.dispatch(s.vertical.Get(),p,2,4,7,6,0);
+        s.read(0,output,size_t(dw)*dh*3);
+        return 0;
+    } catch (const resource_unavailable& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::bad_alloc& e) { static_cast<Session*>(session)->clear_buffers(); set_error(error,error_size,e.what()); return 2; }
+    catch (const std::exception& e) { set_error(error,error_size,e.what()); return 1; }
 }

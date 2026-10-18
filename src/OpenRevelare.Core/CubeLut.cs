@@ -140,6 +140,18 @@ public sealed class CubeLut
 
     /// <summary>Flat RGB triples, red-fastest. Length is <c>Size³ · 3</c>.</summary>
     private readonly float[] _data;
+    internal float[] Table => _data;
+
+    internal float[] GpuParameters()
+    {
+        var parameters = new float[6];
+        for (int c = 0; c < 3; c++)
+        {
+            parameters[c] = (Size - 1) / (DomainMax[c] - DomainMin[c]);
+            parameters[c + 3] = -DomainMin[c] * parameters[c];
+        }
+        return parameters;
+    }
 
     /// <summary>Per-channel input domain floor, from <c>DOMAIN_MIN</c> (default 0,0,0).</summary>
     public float[] DomainMin { get; }
@@ -511,6 +523,22 @@ public sealed class CubeLut
     /// detail that the stock does not have.
     /// </summary>
     public void Apply(float[] data)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        float[] Reference()
+        {
+            var copy = (float[])data.Clone();
+            ApplyCpu(copy);
+            return copy;
+        }
+        var parameters = GpuParameters();
+        if (data.Length > 0 && data.Length % 3 == 0 && parameters.All(float.IsFinite)
+            && parameters[0] > 0 && parameters[1] > 0 && parameters[2] > 0
+            && GpuAcceleration.TryCubeLut(data, this, parameters, Reference, out var result)) result.CopyTo(data, 0);
+        else ApplyCpu(data);
+    }
+
+    internal void ApplyCpu(float[] data)
     {
         int n = Size;
         int last = n - 1;

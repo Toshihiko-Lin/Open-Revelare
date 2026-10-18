@@ -126,7 +126,7 @@ public static class Resample
         return new ImageBuffer(dw, dh, both).InheritSourceFrom(src);
     }
 
-    private static float[] ResizeOnCpu(ImageBuffer src, int dw, int dh)
+    internal static float[] ResizeOnCpu(ImageBuffer src, int dw, int dh)
     {
         // Horizontal first, into a full-height intermediate, then vertical: two 1-D passes cost
         // (dw·h + dw·dh) weighted samples against the (dw·dh·taps²) of a single 2-D pass.

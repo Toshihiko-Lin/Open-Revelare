@@ -1572,10 +1572,17 @@ public partial class MainViewModel
         // Downsample AFTER the render, not before: averaging finished pixels supersamples them,
         // whereas shrinking the negative first would throw away detail the render still needed
         // — and would move every Stage-1 measurement with it.
-        RenderedFrame output = opt.Downsample
-            ? rendered.WithPixels(Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale))
-            : rendered;
-        output = Sharpened(output, opt);
+        RenderedFrame output;
+        if (opt.Downsample && opt.SharpenApplies && opt.Sharpen != OutputSharpen.Level.None)
+            output = rendered.WithPixels(OutputSharpen.ResizeAndApply(
+                rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale, opt.Sharpen));
+        else
+        {
+            output = opt.Downsample
+                ? rendered.WithPixels(Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale))
+                : rendered;
+            output = Sharpened(output, opt);
+        }
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
         if (opt.Format == ExportFormat.Heic)
