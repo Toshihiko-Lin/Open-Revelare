@@ -4,8 +4,8 @@ name: release
 #   git tag v1.0.0 && git push origin v1.0.0
 # 也可以在 Actions 页面手动跑（workflow_dispatch），那种情况下只上传构建产物、不建 release。
 #
-# 公开仓库的 Actions 分钟数不计费，但 macOS runner 一次要跑约 9 分钟（编 LibRaw 占大头），
-# 所以仍然只挂在 tag 上，别挂 push —— 每次推代码都编三个平台没有意义。
+# 原生依赖复用 main 预热的缓存，源码或 runner 镜像改变时自动重编。
+# 应用和安装包仍只在 tag 或手动触发时构建。
 
 on:
   push:
@@ -37,29 +37,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: 构建固定 Little CMS 2.19.1
-        run: bash packaging/lcms/build-unix.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        run: bash packaging/libraw/build-unix.sh
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - name: 回归测试
         run: dotnet test -c Release --nologo
       - id: v
@@ -87,31 +66,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: 构建固定 Little CMS 2.19.1
-        shell: pwsh
-        run: ./packaging/lcms/build-windows.ps1
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        shell: pwsh
-        run: ./packaging/libraw/build-windows.ps1
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - name: 构建可重复 Win32 presenter
         shell: pwsh
         run: ./packaging/windows/build-win32-presenter.ps1
@@ -183,29 +139,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - name: 构建固定 Little CMS 2.19.1
-        run: bash packaging/lcms/build-unix.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        run: bash packaging/libraw/build-unix.sh
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - name: 取 appimagetool 与静态 runtime
         run: |
           mkdir -p tools
@@ -270,29 +205,8 @@ jobs:
       - name: 编 macOS 原生 presenter
         run: ./packaging/macos/build-macos-presenter.sh
       # 显示/导出色彩管理继续使用独立的固定 Little CMS 共享库。
-      - name: 构建固定 Little CMS 2.19.1
-        run: bash packaging/lcms/build-unix.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        run: bash packaging/libraw/build-unix.sh
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - name: LibRaw runtime and decode smoke tests
         run: dotnet test src/OpenRevelare.Tests -c Release --nologo --filter "FullyQualifiedName~LibRawRuntimeTests|FullyQualifiedName~LinearDngTests"
       - name: publish + 装配 Little CMS manifest

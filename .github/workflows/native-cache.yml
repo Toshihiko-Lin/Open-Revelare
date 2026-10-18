@@ -1,0 +1,30 @@
+name: native-cache
+
+# Tag caches are isolated from other tags. Warm main's cache so all releases
+# can reuse it. Ordinary application changes do not rebuild native dependencies.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/lcms/**'
+      - 'packaging/libraw/**'
+      - 'packaging/heif/**'
+      - 'packaging/compute/**'
+      - 'packaging/ci/verify-native.py'
+      - '.github/actions/build-native/**'
+      - '.github/workflows/native-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, windows-2022, macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-native

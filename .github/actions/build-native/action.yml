@@ -1,0 +1,66 @@
+name: Build native dependencies
+description: Reuse native binaries only for identical sources, target and runner image.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - id: target
+      shell: bash
+      run: |
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64) rid=linux-x64 ;;
+          Windows/X64) rid=win-x64 ;;
+          macOS/X64) rid=osx-x64 ;;
+          macOS/ARM64) rid=osx-arm64 ;;
+          *) echo "Unsupported native target: $RUNNER_OS/$RUNNER_ARCH"; exit 1 ;;
+        esac
+        echo "rid=$rid" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+    # No prefix fallback: a source or toolchain change must rebuild the binaries.
+    # Explicit paths keep platform presenter outputs outside this cache.
+    - uses: actions/cache@v4
+      id: native
+      with:
+        key: native-v1-${{ steps.target.outputs.rid }}-${{ steps.target.outputs.image }}-${{ hashFiles('packaging/lcms/**', 'packaging/libraw/**', 'packaging/heif/**', 'packaging/compute/**', 'packaging/ci/verify-native.py', '.github/actions/build-native/**') }}
+        path: |
+          native/${{ steps.target.outputs.rid }}/*lcms*
+          native/${{ steps.target.outputs.rid }}/*OpenRevelare.Raw.Native*
+          native/${{ steps.target.outputs.rid }}/*OpenRevelare.Compute.Native*
+          native/${{ steps.target.outputs.rid }}/*OpenRevelare.Heif.Native*
+          native/${{ steps.target.outputs.rid }}/heif.manifest.json
+          native/${{ steps.target.outputs.rid }}/heif-licenses
+    - name: Install NASM for x265 SIMD
+      if: steps.native.outputs.cache-hit != 'true' && runner.arch == 'X64'
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
+          Windows)
+            choco install nasm --yes --no-progress
+            echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
+            ;;
+          macOS) brew install nasm ;;
+        esac
+    - name: Build Little CMS and LibRaw (Unix)
+      if: steps.native.outputs.cache-hit != 'true' && runner.os != 'Windows'
+      shell: bash
+      run: |
+        bash packaging/lcms/build-unix.sh
+        bash packaging/libraw/build-unix.sh
+    - name: Build Little CMS and LibRaw (Windows)
+      if: steps.native.outputs.cache-hit != 'true' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        ./packaging/lcms/build-windows.ps1
+        ./packaging/libraw/build-windows.ps1
+    - name: Build GPU backend and HEIC encoder
+      if: steps.native.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        python packaging/compute/build.py
+        python packaging/heif/build.py
+    - name: Verify native outputs
+      shell: bash
+      run: python packaging/ci/verify-native.py "${{ steps.target.outputs.rid }}"
