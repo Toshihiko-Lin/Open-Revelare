@@ -105,6 +105,10 @@ public static class Settings
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public SheetOrientation SheetOrientation { get; set; } = SheetOrientation.Landscape;
 
+        /// <summary>Finished contact-sheet resolution: approximately 6, 12 or 24 megapixels.</summary>
+        [JsonConverter(typeof(JsonStringEnumConverter))]
+        public SheetExportSize SheetExportSize { get; set; } = SheetExportSize.Medium;
+
         /// <summary>
         /// Run the full auto-inversion chain (片基 → 亮部 WB → D-max → 色阶) when a roll is
         /// imported, instead of only estimating the film base.

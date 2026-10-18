@@ -21,6 +21,11 @@ public static class SheetComposer
 {
     private const double RefWidth = 2048.0;
 
+    // Choose the design at the export's reference scale. Integer rounding in gaps,
+    // cells and page padding can change near-tie scores; output resolution must never choose
+    // a different number of strips. Only raster dimensions use the requested maxLong.
+    private const int LayoutReferenceSize = (int)RefWidth;
+
     private static readonly FontFamily Face =
         new("Noto Sans SC, Microsoft YaHei, PingFang SC, Segoe UI, sans-serif");
 
@@ -60,46 +65,46 @@ public static class SheetComposer
     /// paper the grid does not know about, and at 12 frames they are enough to turn what looks
     /// like a square grid into a portrait page — then scored against the target.
     ///
-    /// Candidates are ranked by the actual photo area in the finished page; near-ties are broken
-    /// on empty cells so a complete grid wins when the visible size is effectively the same.
+    /// Candidates are ranked by the grid's footprint on the finished page. An incomplete final
+    /// strip is part of that footprint: only paper around the grid counts as unused space.
     /// </summary>
     public static ContactSheet.Layout Plan(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
     {
+        int cols = ChooseColumns(thumbs, opt);
         Metrics m = Metrics.Of(maxLong);
+        return ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi, cols);
+    }
+
+    private static int ChooseColumns(IReadOnlyList<ImageBuffer> thumbs, Options opt)
+    {
+        Metrics m = Metrics.Of(LayoutReferenceSize);
         int n = thumbs.Count;
 
         ContactSheet.Layout? best = null;
-        (double Visual, int Empty) bestScore = default;
+        double bestScore = double.NegativeInfinity;
 
         for (int cols = 1; cols <= n; cols++)
         {
             // Rows are spaced wider than columns: the extra band is where the frame number goes.
             // Both gaps are the design values and stay that way — see PadFor.
-            ContactSheet.Layout l = ContactSheet.Plan(thumbs, maxLong, m.GapXi, m.GapYi, cols);
+            ContactSheet.Layout l = ContactSheet.Plan(thumbs, LayoutReferenceSize, m.GapXi, m.GapYi, cols);
             (int padX, int padY) = PadFor(l, opt);
             PixelSize page = PaddedSize(l, padX, padY);
-            // Optimise what the viewer actually sees: the share of the finished page occupied by
-            // photographs. This accounts for surround, aspect padding and incomplete last rows in
-            // one number; minimising padding alone could still choose a grid with smaller frames.
-            double coverage = (double)n * l.ThumbW * l.ThumbH / ((double)page.Width * page.Height);
+            // Measure only the paper outside the rectangular grid. Unfilled positions in the
+            // last strip are intentional and must not push the planner towards wider margins.
+            double coverage = (double)l.Width * l.Height / ((double)page.Width * page.Height);
             // Horizontal ratio padding is especially conspicuous: it repeats beside every row and
             // pulls the header inward. Prefer a grid that spends the unavoidable ratio difference
-            // vertically when the actual photo area is comparable.
+            // vertically when the grid footprint is comparable.
             double sidePadding = (double)(padX * 2) / page.Width;
             double visual = coverage - sidePadding * 0.25;
-            int empty = l.Rows * l.Cols - n;
-
-            // Inside a one-point visual difference the fuller grid wins. A clearly denser layout
-            // may still use a short final strip, as physical contact sheets routinely do.
-            const double Same = 0.01;
-            if (best is null || visual > bestScore.Visual + Same ||
-                (visual > bestScore.Visual - Same && empty < bestScore.Empty))
+            if (best is null || visual > bestScore)
             {
                 best = l;
-                bestScore = (visual, empty);
+                bestScore = visual;
             }
         }
-        return best!;
+        return best!.Cols;
     }
 
     /// <summary>
@@ -119,7 +124,7 @@ public static class SheetComposer
     /// an extra ROW is usable too instead of only ever approaching from the wide side.
     ///
     /// Because it works in both directions every column count can reach every target, so the
-    /// search above is free to pick the largest actual photo coverage rather than merely the
+    /// search above is free to pick the largest grid footprint rather than merely the
     /// closest nominal grid shape. Nothing is capped: margin is paper around a grid that keeps
     /// every pixel of its thumbnails; the compact base furniture keeps that paper subordinate.
     ///
@@ -185,6 +190,31 @@ public static class SheetComposer
     /// decides the geometry, so the dialog can label the button without doing the work.</summary>
     public static PixelSize SizeFor(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
         => SizeOf(Plan(thumbs, maxLong, opt), opt);
+
+    /// <summary>Choose the grid resolution from the FINISHED page's pixel budget. The surround
+    /// and footer count towards it, so square and landscape pages deliver the same megapixels.
+    /// Column selection remains independent of this raster size.</summary>
+    public static int ExportGridLimit(IReadOnlyList<ImageBuffer> thumbs, Options opt, SheetExportSize size)
+    {
+        int targetPixels = size switch
+        {
+            SheetExportSize.Small => 6_000_000,
+            SheetExportSize.Medium => 12_000_000,
+            SheetExportSize.Large => 24_000_000,
+            _ => throw new ArgumentOutOfRangeException(nameof(size)),
+        };
+        int limit = LayoutReferenceSize;
+        // Refine after rounding the actual cells, gaps and padding. No image allocation here.
+        for (int i = 0; i < 3; i++)
+        {
+            PixelSize page = SizeFor(thumbs, limit, opt);
+            int next = Math.Max(1, (int)Math.Round(limit * Math.Sqrt(
+                targetPixels / ((double)page.Width * page.Height))));
+            if (next == limit) break;
+            limit = next;
+        }
+        return limit;
+    }
 
     /// <summary>The page at its design margins, before any is added to make the proportion.</summary>
     private static PixelSize BareSize(ContactSheet.Layout l) => PaddedSize(l, 0, 0);

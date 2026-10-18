@@ -1917,7 +1917,7 @@ public partial class MainViewModel
     /// <paramref name="thumbs"/> carries no extended set.</param>
     public async Task ExportContactSheetAsync(ContactThumbs thumbs, bool hdr, SheetStyle style,
                                               SheetAspect aspect, SheetOrientation orient,
-                                              string path)
+                                              SheetExportSize size, string path)
     {
         if (!CanExportProject()) return;
         if (!TryBeginLongTask(Loc.T("正在导出印样 …"), out var owner)) return;
@@ -1926,10 +1926,11 @@ public partial class MainViewModel
         {
             var notes = Notes.Clone();
             var opt = new SheetComposer.Options { Style = style, Aspect = aspect, Orientation = orient };
+            int gridLimit = SheetComposer.ExportGridLimit(thumbs.Sdr, opt, size);
             // Laid out at full width so the header, frame numbers and strip are rendered at
             // export resolution rather than upscaled from the dialog's cheap preview.
             SheetComposer.Grid grid = await Task.Run(
-                () => SheetComposer.BuildGrid(thumbs.Sdr, maxLong: 2048, opt));
+                () => SheetComposer.BuildGrid(thumbs.Sdr, gridLimit, opt));
 
             ct.ThrowIfCancellationRequested();
             using RenderTargetBitmap composed = SheetComposer.Compose(grid, notes, opt);

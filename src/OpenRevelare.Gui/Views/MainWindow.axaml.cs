@@ -2817,7 +2817,8 @@ public partial class MainWindow : Window
         });
         string? path = file?.TryGetLocalPath();
         if (path != null)
-            await Vm.ExportContactSheetAsync(thumbs, dlg.WriteHdr, dlg.Style, dlg.Aspect, dlg.Orientation, path);
+            await Vm.ExportContactSheetAsync(thumbs, dlg.WriteHdr, dlg.Style, dlg.Aspect, dlg.Orientation,
+                dlg.ExportSize, path);
     }
 
     private void OnResetClick(object? sender, RoutedEventArgs e)

@@ -17,6 +17,88 @@ namespace OpenRevelare.Tests;
 /// </summary>
 public class SheetAspectTests
 {
+    [Theory]
+    [InlineData(SheetExportSize.Small, 6_000_000)]
+    [InlineData(SheetExportSize.Medium, 12_000_000)]
+    [InlineData(SheetExportSize.Large, 24_000_000)]
+    public void Export_sizes_budget_the_whole_page_and_preserve_the_grid(
+        SheetExportSize size, int targetPixels)
+    {
+        foreach (int n in new[] { 1, 12, 37, 72 })
+        foreach (var (w, h) in new[] { (37, 35), (30, 20), (20, 30) })
+        foreach (SheetAspect aspect in Enum.GetValues<SheetAspect>())
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        {
+            var roll = Roll(n, w, h);
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            int limit = SheetComposer.ExportGridLimit(roll, opt, size);
+            Avalonia.PixelSize page = SheetComposer.SizeFor(roll, limit, opt);
+            double pixels = (double)page.Width * page.Height;
+            Assert.True(Math.Abs(pixels / targetPixels - 1) < 0.01,
+                $"{size} {aspect}/{orientation} n={n} {w}:{h}: {page.Width}x{page.Height}");
+            ContactSheet.Layout preview = SheetComposer.Plan(roll, 1000, opt);
+            ContactSheet.Layout export = SheetComposer.Plan(roll, limit, opt);
+            Assert.Equal((preview.Cols, preview.Rows), (export.Cols, export.Rows));
+        }
+    }
+
+    [Theory]
+    [InlineData(SheetAspect.Auto)]
+    [InlineData(SheetAspect.Square)]
+    [InlineData(SheetAspect.FourThree)]
+    [InlineData(SheetAspect.ThreeTwo)]
+    public void Preview_and_export_keep_the_same_grid(SheetAspect aspect)
+    {
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        foreach (int n in new[] { 12, 24, 36, 37 })
+        foreach (var (w, h) in new[]
+                 { (37, 35), (35, 37), (30, 20), (20, 30), (16, 9), (9, 16), (3, 1), (1, 3) })
+        {
+            var roll = Roll(n, w, h);
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            ContactSheet.Layout preview = SheetComposer.Plan(roll, 1000, opt);
+            foreach (int size in new[] { 640, 1200, 2048, 4096 })
+            {
+                ContactSheet.Layout export = SheetComposer.Plan(roll, size, opt);
+                Assert.True((preview.Cols, preview.Rows) == (export.Cols, export.Rows),
+                    $"{aspect}/{orientation} n={n} {w}:{h} @{size}: " +
+                    $"preview {preview.Cols}x{preview.Rows}, export {export.Cols}x{export.Rows}");
+            }
+        }
+    }
+
+    [Fact]
+    public void Unfilled_final_strip_does_not_count_as_surround()
+    {
+        var opt = new SheetComposer.Options
+        {
+            Aspect = SheetAspect.ThreeTwo, Orientation = SheetOrientation.Landscape,
+        };
+        for (int n = 37; n <= 45; n++)
+        {
+            ContactSheet.Layout layout = SheetComposer.Plan(Roll(n, 37, 35), 2048, opt);
+            Assert.Equal((9, 5), (layout.Cols, layout.Rows));
+        }
+    }
+
+    [Theory]
+    [InlineData(1000)]
+    [InlineData(2048)]
+    public void Nearly_square_37_frame_wide_sheet_keeps_nine_columns(int size)
+    {
+        var opt = new SheetComposer.Options
+        {
+            Aspect = SheetAspect.ThreeTwo, Orientation = SheetOrientation.Landscape,
+        };
+        // Include pixel rounding of real rendered thumbnails, rather than only an idealised ratio.
+        foreach (var (w, h) in new[] { (37, 35), (370, 351), (36, 36) })
+        {
+            ContactSheet.Layout layout = SheetComposer.Plan(Roll(37, w, h), size, opt);
+            Assert.True((layout.Cols, layout.Rows) == (9, 5),
+                $"{w}:{h} @{size}: expected 9x5, got {layout.Cols}x{layout.Rows}");
+        }
+    }
+
     private static List<ImageBuffer> Roll(int n, int w = 300, int h = 200)
     {
         var l = new List<ImageBuffer>(n);
@@ -99,10 +181,9 @@ public class SheetAspectTests
         }
     }
 
-    /// <summary>The classic sheet is not sacrificed to a rounder page: 36 frames stay on a full
-    /// 6×6 rather than being nudged to 7 columns with a gap in the last row.</summary>
+    /// <summary>For an automatic page, the compact surround still fits a classic roll at 6×6.</summary>
     [Fact]
-    public void Auto_prefers_a_full_grid_among_equally_good_shapes()
+    public void Auto_fits_a_classic_roll_with_compact_surround()
     {
         var opt = new SheetComposer.Options { Aspect = SheetAspect.Auto };
         ContactSheet.Layout l = SheetComposer.Plan(Roll(36), 2048, opt);
@@ -451,10 +532,10 @@ public class SheetAspectTests
         }
     }
 
-    /// <summary>A classic 36-frame roll should still read as six real strips, without the
-    /// numbering and enlarged lab record turning the selected 4:3 paper into side wings.</summary>
+    /// <summary>A 4:3 page uses seven columns for a tighter surround, even though the final
+    /// strip is incomplete. Completing the rectangle is not the layout objective.</summary>
     [Fact]
-    public void Classic_six_by_six_sheet_keeps_side_surround_compact()
+    public void Four_three_roll_prefers_compact_surround_over_a_complete_grid()
     {
         var roll = Roll(36);
         var opt = new SheetComposer.Options
@@ -466,7 +547,7 @@ public class SheetAspectTests
         Avalonia.PixelSize page = SheetComposer.SizeFor(roll, 2048, opt);
         double sideSurround = (double)(page.Width - l.Width) / page.Width;
 
-        Assert.Equal((6, 6), (l.Cols, l.Rows));
+        Assert.Equal((7, 6), (l.Cols, l.Rows));
         Assert.True(sideSurround <= 0.15,
                     $"side surround is {sideSurround:P1} of the page ({page.Width} vs grid {l.Width})");
     }

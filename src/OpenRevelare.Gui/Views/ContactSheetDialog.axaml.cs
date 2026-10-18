@@ -42,6 +42,8 @@ public partial class ContactSheetDialog : Window
     /// <summary>Which way round that proportion is read.</summary>
     public SheetOrientation Orientation { get; private set; } = Settings.Current.SheetOrientation;
 
+    public SheetExportSize ExportSize { get; private set; } = Settings.Current.SheetExportSize;
+
     /// <summary>
     /// Write the HDR sheet (D-031): the frames at the roll's HDR target, the paper at SDR white —
     /// a gain-map JPEG or a float32 TIFF. Its own switch rather than the roll's, because the sheet
@@ -70,6 +72,7 @@ public partial class ContactSheetDialog : Window
 
         if (Style == SheetStyle.Light) StyleLight.IsChecked = true; else StyleDark.IsChecked = true;
         AspectBox.SelectedIndex = (int)Aspect;
+        SizeBox.SelectedIndex = (int)ExportSize;
         if (Orientation == SheetOrientation.Landscape) OrientWide.IsChecked = true;
         else OrientTall.IsChecked = true;
         SyncOrientEnabled();
@@ -110,6 +113,15 @@ public partial class ContactSheetDialog : Window
         Settings.Current.SheetOrientation = Orientation;
         Settings.Save();
         Recompose();
+    }
+
+    private void OnSizeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready) return;
+        ExportSize = (SheetExportSize)Math.Max(0, SizeBox.SelectedIndex);
+        Settings.Current.SheetExportSize = ExportSize;
+        Settings.Save();
+        UpdateInfo();
     }
 
     private void OnHdrChanged(object? sender, RoutedEventArgs e)
@@ -153,9 +165,11 @@ public partial class ContactSheetDialog : Window
     {
         if (_grid is null || _gridOpt is null) return;
         // Report the size the export will be, not the preview's — planning only, no pixels.
-        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, 2048, _gridOpt);
+        int limit = SheetComposer.ExportGridLimit(_thumbs, _gridOpt, ExportSize);
+        Avalonia.PixelSize size = SheetComposer.SizeFor(_thumbs, limit, _gridOpt);
+        double megapixels = (double)size.Width * size.Height / 1_000_000;
         string text = Loc.F(
-            $"{_thumbs.Count} 帧 · {_grid.Layout.Cols}×{_grid.Layout.Rows} · 导出 {size.Width}×{size.Height}");
+            $"{_thumbs.Count} 帧 · {_grid.Layout.Cols}×{_grid.Layout.Rows} · 导出 {size.Width}×{size.Height} · {megapixels:F1} MP");
         if (WriteHdr) text += " · HDR";
         InfoLbl.Text = text;
     }

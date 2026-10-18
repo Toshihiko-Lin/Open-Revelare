@@ -39,7 +39,7 @@
                     <!-- The proportion of the WHOLE page, margins and strip included — not of the
                          thumbnail grid. The column count is solved backwards from it. -->
                     <TextBlock Text="{i18n:T '版面比例'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
-                    <TextBlock Classes="groupHint" Text="{i18n:T '自动选择照片占比最高的行列；所选页面比例保持不变。'}" />
+                    <TextBlock Classes="groupHint" Text="{i18n:T '自动减少网格四周留白，末行空位不计入；所选页面比例保持不变。'}" />
                     <ComboBox Name="AspectBox" HorizontalAlignment="Stretch" Margin="0,2,0,6"
                               SelectionChanged="OnAspectChanged">
                         <ComboBoxItem Content="{i18n:T '自动（1:1 ~ 4:3）'}" />
@@ -54,6 +54,16 @@
                         <RadioButton Name="OrientTall" GroupName="SheetOrient" Content="{i18n:T '竖'}"
                                      IsCheckedChanged="OnOrientChanged" />
                     </StackPanel>
+
+                    <TextBlock Text="{i18n:T '导出尺寸'}" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
+                    <ComboBox Name="SizeBox" HorizontalAlignment="Stretch" Margin="0,2,0,6"
+                              SelectionChanged="OnSizeChanged">
+                        <ComboBoxItem Content="{i18n:T '小 · 约 6 MP'}" />
+                        <ComboBoxItem Content="{i18n:T '中 · 约 12 MP'}" />
+                        <ComboBoxItem Content="{i18n:T '大 · 约 24 MP'}" />
+                    </ComboBox>
+                    <TextBlock Classes="groupHint" Margin="0,0,0,10"
+                               Text="{i18n:T '像素数包含整张印样；切换尺寸不改变排版。'}" />
 
                     <!-- Only shown for an HDR roll. The switch is about the FILE: the preview to
                          the left is an SDR surface and shows the SDR sheet either way (D-031). -->

@@ -13,6 +13,14 @@ public enum SheetStyle
     Light,
 }
 
+/// <summary>Approximate pixel count of the finished sheet, including its surround.</summary>
+public enum SheetExportSize
+{
+    Small,
+    Medium,
+    Large,
+}
+
 /// <summary>
 /// What proportion the FINISHED sheet — paper, header and info strip included, not just the
 /// thumbnail grid — should come out at. The column count is solved for the target rather than
@@ -21,7 +29,7 @@ public enum SheetStyle
 /// </summary>
 public enum SheetAspect
 {
-    /// <summary>Whatever lands inside the square…4:3 band with the fewest empty cells — the
+    /// <summary>Whatever lands inside the square…4:3 band with the least surrounding paper — the
     /// shape a sheet gets pinned to a wall or dropped into a post at.</summary>
     Auto,
 
