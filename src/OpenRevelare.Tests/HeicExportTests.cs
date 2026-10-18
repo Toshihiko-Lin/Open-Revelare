@@ -12,6 +12,31 @@ namespace OpenRevelare.Tests;
 public sealed class HeicExportTests
 {
     [Theory]
+    [InlineData(false, 33, 17)]
+    [InlineData(true, 33, 17)]
+    [InlineData(true, 1025, 1025)]
+    public void Prepared_pixels_match_full_frame_reference_across_scratch_boundaries(bool hdr, int width, int height)
+    {
+        var frame = Frame(hdr ? ColorSpaces.LinearExtendedSrgb : ColorSpaces.DisplayP3, hdr, width, height);
+        float[] input = frame.Pixels.Data;
+        for (int i = 0; i < input.Length; i += 193) input[i] = -0.25f;
+        input[0] = float.NaN;
+        input[7] = float.PositiveInfinity;
+        input[14] = float.NegativeInfinity;
+        var original = (float[])input.Clone();
+        float[] reference = hdr ? HdrGainMap.HdrInBaseGamut(frame, ColorSpaces.Rec2020) : input;
+        var expected = new ushort[reference.Length];
+        for (int i = 0; i < reference.Length; i++)
+        {
+            float v = float.IsFinite(reference[i]) ? reference[i] : 0f;
+            if (hdr) v = Pq.FromNits(v * OutputTarget.ReferenceWhiteNits);
+            expected[i] = (ushort)Math.Clamp((int)(Math.Clamp(v, 0f, 1f) * 1023f + 0.5f), 0, 1023);
+        }
+        Assert.Equal(expected, HeicIO.PreparePixels(frame));
+        Assert.Equal(original, input);
+    }
+
+    [Theory]
     [InlineData("sRGB")]
     [InlineData("AdobeRGB")]
     [InlineData("DisplayP3")]

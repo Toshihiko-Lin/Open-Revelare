@@ -63,15 +63,37 @@ public static class HeicIO
         ArgumentNullException.ThrowIfNull(frame);
         bool hdr = frame.Encoding.Range == NumericRange.Extended;
         Validate(frame, hdr);
-        float[] values = hdr ? HdrGainMap.HdrInBaseGamut(frame, ColorSpaces.Rec2020) : frame.Pixels.Data;
+        float[] values = frame.Pixels.Data;
         var result = new ushort[values.Length];
+        if (hdr)
+        {
+            // Avoid another full-resolution float RGB image (~960 MB at 80 MP).
+            // Each worker converts a small scratch buffer using the same gamut math.
+            ParallelSweep.OverPixels(frame.Pixels.PixelCount, (from, to) =>
+            {
+                const int chunkSamples = 65535; // RGB aligned; inner sweeps stay serial.
+                var scratch = new float[Math.Min(chunkSamples, to - from)];
+                for (int start = from; start < to; start += scratch.Length)
+                {
+                    int count = Math.Min(scratch.Length, to - start);
+                    values.AsSpan(start, count).CopyTo(scratch);
+                    HdrGainMap.ConvertHdrToBaseGamutInPlace(scratch, ColorSpaces.Rec2020);
+                    for (int i = 0; i < count; i++)
+                    {
+                        float v = float.IsFinite(scratch[i]) ? scratch[i] : 0f;
+                        v = Pq.FromNits(v * OutputTarget.ReferenceWhiteNits);
+                        result[start + i] = (ushort)Math.Clamp((int)(Math.Clamp(v, 0f, 1f) * 1023f + 0.5f), 0, 1023);
+                    }
+                }
+            });
+            return result;
+        }
         ParallelSweep.Over(values.Length, (from, to) =>
         {
             for (int i = from; i < to; i++)
             {
                 float v = values[i];
                 if (!float.IsFinite(v)) v = 0f;
-                if (hdr) v = Pq.FromNits(v * OutputTarget.ReferenceWhiteNits);
                 result[i] = (ushort)Math.Clamp((int)(Math.Clamp(v, 0f, 1f) * 1023f + 0.5f), 0, 1023);
             }
         });

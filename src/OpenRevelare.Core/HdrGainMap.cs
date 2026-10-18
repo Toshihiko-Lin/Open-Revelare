@@ -298,6 +298,13 @@ public sealed class HdrGainMap
         ArgumentNullException.ThrowIfNull(hdr);
         RequireHdr(hdr);
         float[] d = (float[])hdr.Pixels.Data.Clone();
+        ConvertHdrToBaseGamutInPlace(d, baseSpace);
+        return d;
+    }
+
+    // Shared by the whole-frame gain map and HEIC's bounded scratch buffers.
+    internal static void ConvertHdrToBaseGamutInPlace(float[] d, ColorSpaceDef baseSpace)
+    {
         if (!SharesPrimaries(ColorSpaces.LinearExtendedSrgb, baseSpace))
             OutputRender.Convert(d, ColorSpaces.LinearExtendedSrgb, baseSpace, GamutMapping.PreserveExtended);
         (float ly, float lg, float lb) = LuminanceWeights(baseSpace);
@@ -320,7 +327,6 @@ public sealed class HdrGainMap
                 d[p + 2] = Math.Max(y + t * (b - y), 0f);
             }
         });
-        return d;
     }
 
     /// <summary>The SDR template supplies tonal placement; the final HDR master supplies colour.

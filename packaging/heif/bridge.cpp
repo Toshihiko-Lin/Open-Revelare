@@ -47,7 +47,10 @@ OR_API int or_heif_encode_exif(const uint16_t* rgb, int width, int height, int q
         owned<heif_encoder, heif_encoder_release> encoder(raw_encoder, heif_encoder_release);
         check(heif_encoder_set_lossy_quality(encoder.get(), quality));
         check(heif_encoder_set_parameter_string(encoder.get(), "chroma", "420"));
-        check(heif_encoder_set_parameter_string(encoder.get(), "preset", "medium"));
+        // Still tiles have no inter-frame motion to search. Keep the requested CRF,
+        // 10-bit samples and compatibility profile while reducing intra search work.
+        check(heif_encoder_set_parameter_string(encoder.get(), "preset", "veryfast"));
+        check(heif_encoder_set_parameter_integer(encoder.get(), "tu-intra-depth", 1));
         check(heif_encoder_set_parameter_string(encoder.get(), "x265:log-level", "-1"));
         // libheif requests main10-intra and totalFrames=1, which x265 signals as
         // Range Extensions (profile_idc=4), NOT ordinary Main10. Phone hardware
