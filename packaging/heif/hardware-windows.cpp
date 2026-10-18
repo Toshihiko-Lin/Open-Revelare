@@ -19,7 +19,18 @@ namespace {
 void check(HRESULT hr, const char* operation) {
     if (FAILED(hr)) throw std::runtime_error(std::string(operation) + " (HRESULT " + std::to_string(uint32_t(hr)) + ")");
 }
+struct MediaFoundationLibrary {
+    HMODULE handle = nullptr;
+    MediaFoundationLibrary() {
+        handle = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!handle) check(HRESULT_FROM_WIN32(GetLastError()), "Media Foundation is unavailable");
+    }
+    ~MediaFoundationLibrary() { if (handle) FreeLibrary(handle); }
+};
 struct Runtime {
+    // mfplat is delay-loaded: Windows N without Media Feature Pack must still
+    // load this HEIC DLL and use x265, without a missing-DLL loader failure.
+    MediaFoundationLibrary library;
     bool com = false, mf = false;
     Runtime() {
         HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);

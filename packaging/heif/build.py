@@ -60,6 +60,10 @@ x265_cmake.write_text(text)
 common = ["-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"]
 if platform.system() == "Windows":
     common += ["-A", "x64"]
+elif platform.system() == "Darwin":
+    # Match the existing compute/presenter deployment floor; do not accidentally
+    # require the build runner's newer macOS just by linking VideoToolbox.
+    common += ["-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"]
 # One Main10 fallback serves SDR and PQ alike, without a system HEVC extension.
 # Windows/macOS also try their OS hardware encoder at runtime. Keep SIMD enabled; x265 dispatches at
 # runtime to the instruction set supported by the user's CPU.
