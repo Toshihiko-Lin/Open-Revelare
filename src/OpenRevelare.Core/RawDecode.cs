@@ -901,13 +901,54 @@ public static class RawDecode
 
     private static double[] RoiMeanFullLibRaw(string path, FbddMode fbdd)
     {
-        using Decoded decoded = Process(path, fbdd, halfSize: false);
+        // Matrix calibration consumes only the central 40–60% rectangle. Demosaic that
+        // rectangle with the same guard band as the sharp-patch path instead of spending
+        // AHD and a 16-bit output allocation on the other 96% of a high-resolution scan.
+        int fullW, fullH;
+        using (RawContext probe = RawContext.OpenFile(path))
+        {
+            var inset = CameraInsetCrop(probe);
+            fullW = inset?.Width ?? probe.Width;
+            fullH = inset?.Height ?? probe.Height;
+        }
+        int wantedX0 = (int)(fullW * 0.4), wantedX1 = (int)(fullW * 0.6);
+        int wantedY0 = (int)(fullH * 0.4), wantedY1 = (int)(fullH * 0.6);
+        int x0 = Math.Max(0, wantedX0 - RegionDemosaicMargin);
+        int y0 = Math.Max(0, wantedY0 - RegionDemosaicMargin);
+        int x1 = Math.Min(fullW, wantedX1 + RegionDemosaicMargin);
+        int y1 = Math.Min(fullH, wantedY1 + RegionDemosaicMargin);
+        // Retain the established full-image noise-reduction context when FBDD is requested.
+        bool canCrop = fbdd == FbddMode.Off && wantedX1 > wantedX0 && wantedY1 > wantedY0
+                       && (x1 - x0 < fullW || y1 - y0 < fullH);
+        Decoded? region = null;
+        if (canCrop)
+        {
+            try
+            {
+                region = Process(path, fbdd, halfSize: false,
+                    regionInFrame: new System.Drawing.Rectangle(x0, y0, x1 - x0, y1 - y0));
+            }
+            catch (LibRawException)
+            {
+                // A crop unsupported by this RAW layout must not make a valid full decode fail.
+            }
+        }
+        // Some RAW layouts do not honour a crop request. Keep the established full path
+        // when the decoder's geometry cannot prove these are the requested sensor pixels.
+        if (region is { } cropped && (cropped.Image.Width != x1 - x0 || cropped.Image.Height != y1 - y0))
+        {
+            cropped.Dispose();
+            region = null;
+        }
+        using Decoded decoded = region ?? Process(path, fbdd, halfSize: false);
         ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
         const float Inv = 1.0f / 65535.0f;
 
-        int r0 = (int)(h * 0.4), r1 = (int)(h * 0.6);
-        int c0 = (int)(w * 0.4), c1 = (int)(w * 0.6);
+        int r0 = region is not null ? wantedY0 - y0 : (int)(h * 0.4);
+        int r1 = region is not null ? wantedY1 - y0 : (int)(h * 0.6);
+        int c0 = region is not null ? wantedX0 - x0 : (int)(w * 0.4);
+        int c1 = region is not null ? wantedX1 - x0 : (int)(w * 0.6);
         if (r0 >= r1 || c0 >= c1) { r0 = 0; r1 = h; c0 = 0; c1 = w; }
 
         ReadOnlySpan<ushort> s = img.AsSpan<ushort>();

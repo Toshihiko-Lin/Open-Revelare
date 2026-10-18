@@ -66,26 +66,43 @@ public sealed class LibRawRuntimeTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(RawDecode.FbddMode.Off)]
+    [InlineData(RawDecode.FbddMode.Light)]
+    public void Calibration_roi_matches_full_decode_on_a_textured_sensor(RawDecode.FbddMode fbdd)
+    {
+        string path = Path.Combine(TestDataIsolation.Root, $"roi-{Guid.NewGuid():N}.dng");
+        try
+        {
+            WriteBayerDng(path, width: 1024, height: 768, textured: true);
+            ImageBuffer full = RawDecode.DecodeRaw(path, RawDecode.RawBackend.LibRaw, fbdd, out _);
+            double[] expected = DecoupleCalibration.RoiMean(full);
+            double[] actual = RawDecode.RoiMeanFull(path, RawDecode.RawBackend.LibRaw, fbdd);
+            Assert.Equal(expected, actual);
+        }
+        finally { File.Delete(path); }
+    }
+
     // Independent, minimal TIFF/DNG fixture: RGGB, constant per-channel sensor values,
     // deliberately non-unit as-shot WB, and a vendor crop smaller than the sensor.
-    private static void WriteBayerDng(string path)
+    private static void WriteBayerDng(string path, int width = 160, int height = 128, bool textured = false)
     {
         byte[] Shorts(params ushort[] values) => values.SelectMany(BitConverter.GetBytes).ToArray();
         byte[] Longs(params uint[] values) => values.SelectMany(BitConverter.GetBytes).ToArray();
         var entries = new List<(ushort Tag, ushort Type, uint Count, byte[] Data)>
         {
-            (256, 4, 1, Longs(160)), (257, 4, 1, Longs(128)),
+            (256, 4, 1, Longs((uint)width)), (257, 4, 1, Longs((uint)height)),
             (258, 3, 1, Shorts(16)), (259, 3, 1, Shorts(1)),
             (262, 3, 1, Shorts(32803)),
             (271, 2, 10, System.Text.Encoding.ASCII.GetBytes("Synthetic\0")),
             (272, 2, 6, System.Text.Encoding.ASCII.GetBytes("Bayer\0")),
             (273, 4, 1, Longs(0)), (277, 3, 1, Shorts(1)),
-            (278, 4, 1, Longs(128)), (279, 4, 1, Longs(160 * 128 * 2)),
+            (278, 4, 1, Longs((uint)height)), (279, 4, 1, Longs((uint)(width * height * 2))),
             (284, 3, 1, Shorts(1)), (33421, 3, 2, Shorts(2, 2)),
             (33422, 1, 4, new byte[] { 0, 1, 1, 2 }),
             (50706, 1, 4, new byte[] { 1, 4, 0, 0 }),
             (50717, 4, 1, Longs(65535)),
-            (50719, 4, 2, Longs(8, 6)), (50720, 4, 2, Longs(144, 116)),
+            (50719, 4, 2, Longs(8, 6)), (50720, 4, 2, Longs((uint)(width - 16), (uint)(height - 12))),
             (50721, 10, 9, Longs(1,1, 0,1, 0,1, 0,1, 1,1, 0,1, 0,1, 0,1, 1,1)),
             (50728, 5, 3, Longs(1,2, 1,1, 1,3)),
             (50778, 3, 1, Shorts(21)),
@@ -105,9 +122,10 @@ public sealed class LibRawRuntimeTests
         }
         writer.Write(0u);
         foreach (var e in entries.Where(e => e.Data.Length > 4)) writer.Write(e.Data);
-        for (int y = 0; y < 128; y++)
-            for (int x = 0; x < 160; x++)
-                writer.Write((ushort)((y % 2 == 0 ? x % 2 == 0 ? 1 : 2 : x % 2 == 0 ? 2 : 3) * 10000));
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                writer.Write((ushort)((y % 2 == 0 ? x % 2 == 0 ? 1 : 2 : x % 2 == 0 ? 2 : 3) * 10000
+                    + (textured ? (x * 17 + y * 29) % 1000 : 0)));
         File.WriteAllBytes(path, stream.ToArray());
     }
 }

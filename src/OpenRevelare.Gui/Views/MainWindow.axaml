@@ -1036,7 +1036,7 @@
                                         BorderThickness="1" BorderBrush="{DynamicResource BorderSoftBrush}">
                                     <TextBlock Classes="groupHint" TextWrapping="Wrap"
                                                Foreground="{DynamicResource WarnBrush}"
-                                               Text="{i18n:T '这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。'}" />
+                                               Text="{Binding RecalibrationNoticeText}" />
                                 </Border>
 
                                 <!-- ── 片型 ──────────────────────────────────────────

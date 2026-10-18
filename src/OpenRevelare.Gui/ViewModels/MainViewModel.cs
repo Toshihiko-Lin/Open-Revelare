@@ -997,7 +997,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _distortionK1;              // 畸变 k1（-0.5..0.5，负=修桶形）
     [ObservableProperty] private double _vignetteAmount;           // 暗角强度（-1..2，正=提亮四角）
     [ObservableProperty] private double _vignetteFalloff = 2.5;    // 暗角范围（1..6，大=只提最外圈）
-    partial void OnDistortionK1Changed(double value) => InvalidateOpticalCalibration();
+    // Distortion is geometric; Stage1Source deliberately does not apply it to calibration values.
+    partial void OnDistortionK1Changed(double value) => ScheduleRender();
     partial void OnVignetteAmountChanged(double value) => InvalidateOpticalCalibration();
     partial void OnVignetteFalloffChanged(double value) => InvalidateOpticalCalibration();
 
@@ -1009,7 +1010,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void InvalidateOpticalCalibration()
     {
-        if (_roll is not null && _paramsLoaded && !_configLoad)
+        if (_roll is not null && _paramsLoaded && !_configLoad && !_suppressRender && !_restoring)
         {
             NeedsRecalibration = true;
             if (_calibrationDiagnosticsRollWide)
@@ -1040,7 +1041,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnSprocketThresholdChanged(double value)
     {
         _sprocketOverlayDirty = true;
-        InvalidateOpticalCalibration();
+        // An inactive fill threshold is not a change to the calibration's sampling domain.
+        if (SprocketEnabled) InvalidateOpticalCalibration();
+        else ScheduleRender();
     }
     partial void OnShowSprocketMaskChanged(bool value)
     {
@@ -1443,11 +1446,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void SyncEndpointViews() => SyncScalarsFromEndpoints();
 
     /// <summary>
-    /// 这一卷的标定来自旧模型，载入后画面与保存时不同。旧的 d_max/scan_ev 与现在固定的输出
-    /// 范围不是同一量纲，静默折算实测在薄部偏 -18%、浓部 +53%（比不折算更糟），所以如实提示
-    /// 用户重跑标定。
+    /// Whether the endpoints need remeasurement. The reason is tracked separately: only a
+    /// loaded project missing the current endpoint representation is a legacy calibration;
+    /// an optical/mask edit must never be described as an old-model project.
     /// </summary>
-    [ObservableProperty] private bool _needsRecalibration;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RecalibrationNoticeText))]
+    private bool _needsRecalibration;
+    private bool _legacyCalibration;
+
+    public string RecalibrationNoticeText => _legacyCalibration
+        ? Loc.T("这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。")
+        : Loc.T("光学校正、遮罩或片型已更改，请运行【自动（整卷）】更新标定。");
 
     // ══ Stage 2 — 帧编辑 (SceneBase, positive domain, geomean-1 WB) ═════════════
     [ObservableProperty] private double _temp;                     // 色温（±250，log 空间）
@@ -2596,10 +2606,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task PrepareImportedRollAsync()
     {
+        RollFrame[] importedFrames = Frames.ToArray();
         // Off the UI thread: unlike every other estimator on this path, this one decodes a frame
         // at full resolution (see MeasureBoardCut), which is seconds rather than milliseconds on a
         // 100 MP scan. The chain it hands off to at the end is already async for the same reason.
-        double? threshold = await Task.Run(MeasureBoardCut);
+        ReportBackground(Loc.T("测量灯板阈值 …"));
+        double? threshold = await MeasureBoardCutAsync();
+        // A new import may have replaced this roll while the full-resolution decodes ran.
+        if (!Frames.SequenceEqual(importedFrames)) return;
+        ReportBackground("");
 
         SprocketEnabled = false;
         SprocketThreshold = threshold ?? 0.9;
@@ -2608,7 +2623,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             f.Params.SprocketEnabled = false;
             f.Params.SprocketThreshold = SprocketThreshold;
         }
-        AutoInvertOnImportRun();
+        AutoInvertOnImportRun(new BoardCutResult(threshold));
         UpdateSprocketOverlay();
     }
 
@@ -2623,9 +2638,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// this roll by hand, and silently seeding t_base both overwrites the starting point they
     /// wanted and hides that anything happened.
     /// </summary>
-    private void AutoInvertOnImportRun()
+    private void AutoInvertOnImportRun(BoardCutResult measuredBoardCut)
     {
-        if (_cfgAutoInvert) _ = AutoInvertRollAsync();
+        if (_cfgAutoInvert) _ = AutoInvertRollAsync(measuredBoardCut);
     }
 
     /// <summary>
@@ -2809,10 +2824,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         double? best = null;
         foreach (RollFrame frame in BoardCutSampleFrames(current))
         {
-            if (BoardCutOf(frame) is { } cut && (best is null || cut > best)) best = cut;
+            if (BoardCutMeasurement(frame)() is { } cut && (best is null || cut > best)) best = cut;
         }
         return best;
     }
+
+    // Snapshot every input before leaving the UI thread. The worker never reads live frame,
+    // crop or pipeline state, including when the user switches frames during a RAW decode.
+    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default)
+    {
+        Func<double?>[] samples = CurrentFrame is { } current
+            ? BoardCutSampleFrames(current).Select(BoardCutMeasurement).ToArray()
+            : Array.Empty<Func<double?>>();
+        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: Math.Min(2, ImageIo.PreviewWorkers));
+    }
+
+    // The wrapper distinguishes an already-measured "no board" from "not measured yet".
+    private sealed record BoardCutResult(double? Threshold);
 
     /// <summary>
     /// The frames <see cref="MeasureBoardCut"/> decodes: the current frame plus the middle and last
@@ -2834,7 +2862,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>One frame's board cut at full resolution, or null when it has no board.</summary>
-    private double? BoardCutOf(RollFrame frame)
+    private Func<double?> BoardCutMeasurement(RollFrame frame)
     {
         bool isCurrent = ReferenceEquals(frame, CurrentFrame);
 
@@ -2850,62 +2878,69 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ? AutoCrop
             : box is { } b && SplitRectOf(frame) is { } rect ? Relative(rect, b) : frame.Params.CropRect;
 
-        ImageBuffer region;
-        try
-        {
-            // A split cell decodes only its box: a TIFF window at full resolution is the same
-            // pixels as the whole decode cropped to the box, and holds only the cell — a third
-            // of a 190 MP Flextight strip instead of all 2.3 GB of it. A whole-file frame (no
-            // box) or a RAW still takes the full decode.
-            WorkingFrame? window = box is { } bx
-                ? ImageIo.LoadWorkingTiffRegionFull(
-                    frame.Path, bx, _colorPipelineVersion, ColorManagement, _tiffInputAssumption)
-                : null;
-            if (window is not null)
-            {
-                region = window.Pixels;
-            }
-            else
-            {
-                ImageBuffer full = ImageIo.LoadWorking(
-                    frame.Path,
-                    _colorPipelineVersion,
-                    ColorManagement,
-                    _tiffInputAssumption).Pixels;
-                region = box is { } bx2 ? Geometry.ApplyCrop(full, bx2) : full;
-            }
-        }
-        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException
-                                   or OutOfMemoryException)
-        {
-            // A file the full decoder cannot open is not a reason to lose the estimate entirely —
-            // for the current frame the preview is already in hand and its answer, while placed
-            // less well, is the one this code used to give. The other frames have no preview yet.
-            //
-            // OutOfMemory is in the list on purpose. This is the one decode on the import path
-            // that is allowed to be full resolution, and a 190 MP Flextight strip is 2.3 GB of
-            // float — on an 8 GB machine, with the thumbnail warm-up decoding alongside, it is
-            // exactly the allocation that fails. Letting it escape does not merely lose the cut:
-            // it escapes through PrepareImportedRollAsync BEFORE AutoInvertOnImportRun is reached,
-            // so the whole auto chain never starts and the roll sits on pipeline defaults
-            // (t_base 1, D_min 0, D_max 2 — a blown-white negative) with nothing to say why.
-            // The preview answer is second best; no answer at all was the bug.
-            return isCurrent ? PreviewBoardCut() : null;
-        }
-        if (crop is { } c) region = Geometry.ApplyCrop(region, c);
+        string path = frame.Path;
+        ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
+        TiffInputAssumption assumption = _tiffInputAssumption;
+        IColorManagementEngine colorManagement = ColorManagement;
+        ImageBuffer? preview = isCurrent ? _previewLinear : null;
+        SourceStamp stamp = SourceStamp.Capture(path);
 
-        double thr = Sprocket.EstimateSprocketThreshold(region);
-        return thr >= Sprocket.NoBoard ? null : thr;
-    }
+        return () =>
+        {
+            stamp.RequireCurrent();
 
-    /// <summary>The same measurement on the preview buffer — the fallback for a file the
-    /// full-resolution decoder cannot open. See <see cref="MeasureBoardCut"/> for why this is
-    /// second best rather than equivalent.</summary>
-    private double? PreviewBoardCut()
-    {
-        if (AutoRegion() is not { } raw) return null;
-        double thr = Sprocket.EstimateSprocketThreshold(raw);
-        return thr >= Sprocket.NoBoard ? null : thr;
+            ImageBuffer region;
+            try
+            {
+                // A split cell decodes only its box: a TIFF window at full resolution is the same
+                // pixels as the whole decode cropped to the box, and holds only the cell — a third
+                // of a 190 MP Flextight strip instead of all 2.3 GB of it. A whole-file frame (no
+                // box) or a RAW still takes the full decode.
+                WorkingFrame? window = box is { } bx
+                    ? ImageIo.LoadWorkingTiffRegionFull(
+                        path, bx, pipelineVersion, colorManagement, assumption)
+                    : null;
+                if (window is not null)
+                {
+                    region = window.Pixels;
+                }
+                else
+                {
+                    ImageBuffer full = ImageIo.LoadWorking(
+                        path,
+                        pipelineVersion,
+                        colorManagement,
+                        assumption).Pixels;
+                    region = box is { } bx2 ? Geometry.ApplyCrop(full, bx2) : full;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidOperationException
+                                       or OutOfMemoryException)
+            {
+                // A file the full decoder cannot open is not a reason to lose the estimate entirely —
+                // for the current frame the preview is already in hand and its answer, while placed
+                // less well, is the one this code used to give. The other frames have no preview yet.
+                //
+                // OutOfMemory is in the list on purpose. This is the one decode on the import path
+                // that is allowed to be full resolution, and a 190 MP Flextight strip is 2.3 GB of
+                // float — on an 8 GB machine, with the thumbnail warm-up decoding alongside, it is
+                // exactly the allocation that fails. Letting it escape does not merely lose the cut:
+                // it escapes through PrepareImportedRollAsync BEFORE AutoInvertOnImportRun is reached,
+                // so the whole auto chain never starts and the roll sits on pipeline defaults
+                // (t_base 1, D_min 0, D_max 2 — a blown-white negative) with nothing to say why.
+                // The preview answer is second best; no answer at all was the bug.
+                if (preview is null) return null;
+                stamp.RequireCurrent();
+                ImageBuffer fallback = crop is { } fallbackCrop ? Geometry.ApplyCrop(preview, fallbackCrop) : preview;
+                double fallbackThreshold = Sprocket.EstimateSprocketThreshold(fallback);
+                return fallbackThreshold >= Sprocket.NoBoard ? null : fallbackThreshold;
+            }
+            if (crop is { } c) region = Geometry.ApplyCrop(region, c);
+
+            double thr = Sprocket.EstimateSprocketThreshold(region);
+            stamp.RequireCurrent();
+            return thr >= Sprocket.NoBoard ? null : thr;
+        };
     }
 
     /// <summary>
@@ -2959,11 +2994,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// the user gets a usable picture immediately, and the roll-wide refinement lands after. The
     /// two-stage shape is why this is async and why the status line reports twice.
     /// </summary>
-    private async Task AutoInvertRollAsync()
+    private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null)
     {
         try
         {
-            await AutoInvertRollCoreAsync();
+            await AutoInvertRollCoreAsync(measuredBoardCut);
         }
         catch (OperationCanceledException)
         {
@@ -2981,7 +3016,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task AutoInvertRollCoreAsync()
+    private async Task AutoInvertRollCoreAsync(BoardCutResult? measuredBoardCut)
     {
         if (_previewLinear is null) return;
         _previewStamp?.RequireCurrent();
@@ -3006,7 +3041,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // frame with no highlight in its kept area — the whole strip is visibly off until stage 2
         // lands. That is why <see cref="RollAnalysisPending"/> exists: the provisional state is
         // announced rather than left to look like the finished result.
-        double? cut = AutoBoardCut();
+        double? cut = measuredBoardCut is { } measured ? measured.Threshold
+            : SprocketEnabled ? SprocketThreshold : await MeasureBoardCutAsync(ct);
         if (ct.IsCancellationRequested)
         {
             if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
@@ -3328,7 +3364,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // plain measurement here would silently overwrite the warning stage 1 just raised.
             UpdateCalibrationConfidence(baseEstimate, highlightEstimate, rollDMaxPerCh is null && rollWbHigh is not null);
             ApplyAutoChainToRoll();
-            NeedsRecalibration = false;   // 重跑过了，提示可以撤下
             FinishAutoInvert(cts, masks.Count, failed, failReason);
         }
         // Both failure paths clear the notice as well as the progress line. A cancelled or failed
@@ -3478,6 +3513,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void FinishAutoInvert(CancellationTokenSource owner, int voted = 1, int failed = 0,
                                   string? failReason = null)
     {
+        _legacyCalibration = false;
+        NeedsRecalibration = false;
         if (ReferenceEquals(_autoInvertCts, owner)) _autoInvertCts = null;
         // The roll-wide numbers are in: what is on screen is no longer provisional.
         RollAnalysisPending = false;
@@ -4511,6 +4548,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         NotifyRollBroadcastHints();
         OnPropertyChanged(nameof(SmartCastFeedbackText));
+        OnPropertyChanged(nameof(RecalibrationNoticeText));
         NotifyCalibrationInfo();
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
         if (!LccAvailable) LccStatus = Loc.T("未载入平场校正");

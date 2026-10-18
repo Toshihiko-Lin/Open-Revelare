@@ -394,7 +394,9 @@ public partial class MainViewModel
         _useRelativeProjectPaths = data.UseRelativePaths;
         SetTiffInputAssumption(incomingTiffInputAssumption);
         // 旧模型的工程载入后画面会变——面板顶部据此提示重跑标定。
+        _legacyCalibration = data.NeedsRecalibration;
         NeedsRecalibration = data.NeedsRecalibration;
+        OnPropertyChanged(nameof(RecalibrationNoticeText));
         _calSourceDir = incomingCalSourceDir;
         _declaredPathA = data.Meta.SourcePath == "A";
         _calRgbPaths = incomingCalRgbPaths;
@@ -536,6 +538,7 @@ public partial class MainViewModel
         double[,]? dm = null, cm = null;
         ImageBuffer? lccField = null; string lccName = "";
         string[]? calRgb = null;
+        var preparedPreviews = new List<(string Path, WorkingFrame Working, int Width, int Height, SourceStamp Stamp)>();
         try
         {
             await Task.Run(() =>
@@ -551,8 +554,15 @@ public partial class MainViewModel
                 if (cfg.PathA && !string.IsNullOrWhiteSpace(cfg.CalDir))
                 {
                     ReportBackground(Loc.T("识别 R/G/B 校正图 …"));
-                    var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(cfg.CalDir);
-                    calRgb = new[] { rp, gp, bp };
+                    string[] candidates = Directory.EnumerateFiles(cfg.CalDir)
+                        .Where(RawDecode.IsRawExtension).OrderBy(path => path, StringComparer.Ordinal).ToArray();
+                    bool identifyFromMeans = candidates.Length == 3;
+                    if (identifyFromMeans) calRgb = candidates;
+                    else
+                    {
+                        var (rp, gp, bp) = DecoupleCalibration.FindRgbCalFiles(cfg.CalDir);
+                        calRgb = new[] { rp, gp, bp };
+                    }
 
                     (dm, cm) = CalibratePathA(
                         calRgb,
@@ -560,7 +570,12 @@ public partial class MainViewModel
                         ColorPipelineVersion.ManagedV2,
                         cfg.TiffInputAssumption,
                         cachePreviews: false,
-                        lccField);
+                        lccField,
+                        previewReady: (path, working, width, height, stamp) =>
+                        {
+                            lock (preparedPreviews) preparedPreviews.Add((path, working, width, height, stamp));
+                        },
+                        identifyRgbFromMeans: identifyFromMeans);
                 }
                 ReportBackground("");
             });
@@ -607,6 +622,20 @@ public partial class MainViewModel
             ? Loc.T("已载入平场：") + lccName
             : Loc.T("未载入平场校正");
         SetTiffInputAssumption(cfg.TiffInputAssumption);
+        // Preparation must not populate the OUTGOING roll's live cache. Adopt its decoded
+        // samples only after success and cache retirement, so the first view/warm-up/analysis
+        // can reuse them instead of decoding up to six 80+ MP RAW files again.
+        long preparedGeneration = _previews.Generation;
+        foreach (var prepared in preparedPreviews)
+        {
+            prepared.Stamp.RequireCurrent();
+            string key = PreviewKey(prepared.Path, null, ColorPipelineVersion.ManagedV2, cfg.TiffInputAssumption);
+            DecodedSources.Track(prepared.Working, prepared.Stamp);
+            if (_previews.PutIfCurrent(key, prepared.Working, prepared.Width, prepared.Height,
+                preparedGeneration, prepared.Stamp))
+                CaptureTile(key, prepared.Working, preparedGeneration, prepared.Stamp);
+        }
+        preparedPreviews.Clear();
         IsBusy = false;
 
         _configLoad = true;
@@ -675,7 +704,9 @@ public partial class MainViewModel
         ColorPipelineVersion pipelineVersion,
         TiffInputAssumption tiffInputAssumption,
         bool cachePreviews,
-        ImageBuffer? lccField = null)
+        ImageBuffer? lccField = null,
+        Action<string, WorkingFrame, int, int, SourceStamp>? previewReady = null,
+        bool identifyRgbFromMeans = false)
     {
         int nF = Math.Min(6, paths.Count);
         string[] samplePaths = EvenlySpacedPaths(paths, nF);
@@ -702,9 +733,6 @@ public partial class MainViewModel
                     pipelineVersion,
                     ColorManagement,
                     tiffInputAssumption);
-                if (lccCentre is not null)
-                    for (int c = 0; c < 3; c++)
-                        roi[i][c] /= Math.Max(lccCentre[c], 1e-6);
             }
             else
             {
@@ -720,6 +748,8 @@ public partial class MainViewModel
                     tiffInputAssumption,
                     PreviewMaxEdge,
                     720);
+                stamp.RequireCurrent();
+                previewReady?.Invoke(samplePaths[fi], outs[0], srcW, srcH, stamp);
                 if (cachePreviews)
                 {
                     string previewKey = PreviewKey(
@@ -738,6 +768,20 @@ public partial class MainViewModel
         });
 
         ReportBackground(Loc.T("计算解耦矩阵与色度补偿 …"));
+        // For the normal three-reference import, the full-quality ROI means already contain
+        // everything the earlier half-size classification probe needed. Identify once from
+        // those same means, before LCC changes their per-channel scale, and retain RGB order
+        // for project persistence. Larger candidate folders keep the existing discovery path.
+        if (identifyRgbFromMeans)
+        {
+            var (r, g, b) = DecoupleCalibration.IdentifyRgbIndices(roi);
+            string[] orderedPaths = { calRgb[r], calRgb[g], calRgb[b] };
+            roi = new[] { roi[r], roi[g], roi[b] };
+            Array.Copy(orderedPaths, calRgb, 3);
+        }
+        if (lccCentre is not null)
+            foreach (double[] mean in roi)
+                for (int c = 0; c < 3; c++) mean[c] /= Math.Max(lccCentre[c], 1e-6);
         double[,] dm = DecoupleCalibration.DecoupleMatrixFromRoiMeans(roi[0], roi[1], roi[2]);
 
         // Keep the old total sampling budget (~200k pixels), but measure every selected frame on
@@ -855,6 +899,8 @@ public partial class MainViewModel
         ClearGreyCard();   // and its grey card — a measurement of that roll under that light
         FilmBaseText = "";
         HighlightConfidenceText = "";
+        _legacyCalibration = false;
+        NeedsRecalibration = false;
         _calibrationDiagnosticsRollWide = false;
         _rollBaseCalibration = null;
         _rollHighlightCalibration = null;

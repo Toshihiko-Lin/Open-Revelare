@@ -342,10 +342,11 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: 建 draft release
+      - name: 创建或更新 draft release
         env:
           GH_TOKEN: ${{ github.token }}
           V: ${{ needs.guard.outputs.version }}
@@ -353,8 +354,17 @@ jobs:
           find dist -type f | sort
           # 正文用 --notes-file 而不是 --notes：内容里有反引号、引号和换行，
           # 塞进命令行迟早被 shell 或 YAML 咬一口（已经咬过一次）。
-          cat > notes.md <<'MD'
-          见 `CHANGELOG.md`。macOS / Linux 为 **Beta**，欢迎回报问题。
+          awk -v heading="## v$V（" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "::error::CHANGELOG.md 缺少 v$V 的发布说明"; exit 1; }
+          cat >> notes.md <<'MD'
+
+          ---
+
+          macOS / Linux 为 **Beta**，欢迎回报问题。
 
           ### macOS 首次打开
 
@@ -367,6 +377,16 @@ jobs:
           （macOS 15 起「右键 → 打开」这个入口已被 Apple 取消，请用上面两条。）
           MD
           # draft：网盘镜像链接要人工补，version.json 也得等链接定了才能推。
-          gh release create "v$V" --repo "$GITHUB_REPOSITORY" --draft \
-            --title "OpenRevelare v$V" --notes-file notes.md \
-            $(find dist -type f | tr '\n' ' ')
+          mapfile -t assets < <(find dist -type f | sort)
+          existing=$(gh release view "v$V" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            [ "$existing" = "true" ] || {
+              echo "::error::v$V 已发布，不能用草稿构建覆盖"; exit 1; }
+            gh release upload "v$V" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+            gh release edit "v$V" --repo "$GITHUB_REPOSITORY" \
+              --title "OpenRevelare v$V" --notes-file notes.md
+          else
+            gh release create "v$V" --repo "$GITHUB_REPOSITORY" --draft \
+              --title "OpenRevelare v$V" --notes-file notes.md "${assets[@]}"
+          fi

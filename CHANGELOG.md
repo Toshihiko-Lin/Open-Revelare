@@ -4,23 +4,27 @@
 
 **修复**
 
-- **印样预览与导出保持相同排版。** 不再因预览和导出的像素尺寸不同而改变每行照片数；切换导出尺寸也保持行列一致。
-- **印样自动排版按四周留白选择行列。** 所有照片比例与页面比例均不再把末行未填满的位置算作留白，避免为填满末行而扩大网格四周的空白。37 张、37:35 比例照片在横向 3:2 页面中排为 9 列 × 5 行。
+- 修复新导入、裁切和成片调整后误提示“标定来自旧版模型”的问题。
+- 修复印样预览与导出排版不一致的问题。
+- 优化印样自动排版，减少四周留白，末行无需填满。
 
 **新增与改进**
 
-- **印样导出新增小、中、大三档尺寸。** 整张印样（含留白与信息栏）约为 6、12、24 MP，默认中档，并记住上次选择。窗口显示实际导出像素尺寸和像素数；SDR 与 HDR 印样均使用所选尺寸。
+- 高像素 RAW 导入与自动去色罩更快，减少等待和界面卡顿。
+- 印样导出新增小、中、大三档，约 6、12、24 MP，默认中档并记住选择。
 
 ---
 
 **Fixed**
 
-- **Consistent contact-sheet layouts in previews and exports.** Preview and export resolutions no longer change the number of photos per row. Switching export sizes also preserves the grid.
-- **Contact-sheet layout now minimizes the surround.** Across photo and page proportions, unfilled positions in the final row no longer count as surrounding whitespace. This avoids wider margins merely to complete the final row. A 37-frame roll of 37:35 photos uses 9 columns × 5 rows on a landscape 3:2 page.
+- Fixed incorrect old-model calibration warnings after importing, cropping or adjusting photos.
+- Fixed contact-sheet layout differences between previews and exports.
+- Improved automatic contact-sheet layout with smaller margins, allowing an incomplete final row.
 
 **Added and improved**
 
-- **Small, medium and large contact-sheet exports.** The finished sheet, including margins and the info strip, contains approximately 6, 12 or 24 MP. Medium is the default, and the last selection is remembered. The dialog shows actual export dimensions and megapixels; the selected size applies to both SDR and HDR sheets.
+- Faster high-resolution RAW import and automatic roll calibration, with less waiting and freezing.
+- Added small, medium and large contact-sheet exports at approximately 6, 12 and 24 MP. Defaults to medium and remembers your choice.
 
 ## v1.8.6（2026-10-18）
 

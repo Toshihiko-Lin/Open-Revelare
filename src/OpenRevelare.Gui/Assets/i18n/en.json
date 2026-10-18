@@ -229,6 +229,8 @@
   "版面比例": "Page proportion",
   "自动减少网格四周留白，末行空位不计入；所选页面比例保持不变。": "Automatically minimizes the surround, ignoring empty positions in the final row, while preserving the selected page proportion.",
   "导出尺寸": "Export size",
+  "测量灯板阈值 …": "Measuring light-board threshold …",
+  "光学校正、遮罩或片型已更改，请运行【自动（整卷）】更新标定。": "Optical correction, masking or film type has changed. Run Auto (whole roll) to update calibration.",
   "小 · 约 6 MP": "Small · approx. 6 MP",
   "中 · 约 12 MP": "Medium · approx. 12 MP",
   "大 · 约 24 MP": "Large · approx. 24 MP",
