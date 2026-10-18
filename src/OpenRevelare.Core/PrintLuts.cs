@@ -60,7 +60,7 @@ public static class PrintLuts
     /// <summary>
     /// The two stocks embedded in the assembly, keyed by the sentinel projects written before
     /// D-033 store. Kept so those projects open unchanged; new picks come from
-    /// <see cref="Bundled"/>, which offers the same files (and more) from the shipped folder.
+    /// <see cref="Bundled"/>, which combines these resources with the shipped folder.
     ///
     /// WHY A SENTINEL AND NOT A PATH. A built-in has no stable path: it lives inside the
     /// assembly, and the assembly moves with the install. Storing one would make a project
@@ -94,17 +94,22 @@ public static class PrintLuts
     public static readonly string BundledDir = Path.Combine(AppContext.BaseDirectory, "luts");
 
     /// <summary>
-    /// The shipped cubes, as (sentinel, display name) in name order. Never throws; an install
-    /// without the folder simply offers none.
+    /// The shipped cubes, as (sentinel, display name) in name order. The two embedded D65
+    /// stocks are offered even without the folder; they need no duplicate external files.
     /// </summary>
     public static IReadOnlyList<(string Id, string Name)> Bundled()
     {
-        var list = new List<(string, string)>();
+        var list = new List<(string Id, string Name)>();
+        foreach ((_, string name) in Builtins)
+            list.Add((BundledPrefix + name + ".cube", name));
         foreach (string file in InFolder(BundledDir))
         {
             string name = Path.GetFileName(file);
+            // Older installations/build directories may still contain the external copies.
+            if (FindEmbeddedBundled(name) is not null) continue;
             list.Add((BundledPrefix + name, Path.GetFileNameWithoutExtension(name)));
         }
+        list.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
         return list;
     }
 
@@ -125,6 +130,13 @@ public static class PrintLuts
         return null;
     }
 
+    private static string? FindEmbeddedBundled(string fileName)
+    {
+        foreach ((string id, string name) in Builtins)
+            if (fileName.Equals(name + ".cube", StringComparison.OrdinalIgnoreCase)) return id;
+        return null;
+    }
+
     /// <summary>
     /// Loads a built-in from the embedded resource named after its sentinel. Throws like
     /// <see cref="CubeLut.Load"/> does, so <see cref="Validate"/> can report a broken build the
@@ -133,8 +145,15 @@ public static class PrintLuts
     private static CubeLut LoadBuiltin(string id)
     {
         if (IsBundledSentinel(id))
-            return CubeLut.Load(Path.Combine(BundledDir, id[BundledPrefix.Length..]));
+        {
+            string fileName = id[BundledPrefix.Length..];
+            string? embeddedId = FindEmbeddedBundled(fileName);
+            if (embeddedId is null)
+                return CubeLut.Load(Path.Combine(BundledDir, fileName));
+            id = embeddedId;
+        }
 
+        id = FindBuiltin(id) ?? id;
         string name = $"OpenRevelare.Core.Assets.Luts.{id[1..]}.cube";
         var asm = typeof(PrintLuts).Assembly;
         using Stream? stream = asm.GetManifestResourceStream(name)

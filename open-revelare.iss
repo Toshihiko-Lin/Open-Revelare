@@ -74,6 +74,9 @@ Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\*.json"
 Type: filesandordirs; Name: "{app}\models"
 Type: filesandordirs; Name: "{app}\runtimes"
+; D65 LUT 现仅保留程序集中的一份；升级时清理旧安装留下的重复副本。
+Type: files; Name: "{app}\luts\Rec709 Kodak 2383 D65.cube"
+Type: files; Name: "{app}\luts\Rec709 Fujifilm 3513DI D65.cube"
 
 [Files]
 ; publish 目录整搬。排除调试符号与 onnxruntime 的导入库（链接期产物，运行时用不到）。

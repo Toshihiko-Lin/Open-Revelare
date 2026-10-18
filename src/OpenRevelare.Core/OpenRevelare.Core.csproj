@@ -31,11 +31,12 @@
     引用 Core 时一并带走），选片器把这个文件夹列在最前面，工程里存的是 :luts/<文件名> 这样的
     记号而不是本机绝对路径——换台机器打开照样渲染。见 PrintLuts.BundledDir / PrintLuts.Bundled。
 
-    两张 D65 同时仍嵌进程序集：D-033 之前的工程存的是 :kodak-2383 / :fujifilm-3513di，那两个
-    记号继续从资源里解析（PrintLuts.Builtins），旧工程不需要迁移。
+    两张 D65 只嵌进程序集，不再复制一份到 luts/。旧版 :kodak-2383 / :fujifilm-3513di
+    和新版 :luts/<文件名> 均解析到同一份资源，选片器仍列出全部六张 LUT。
   -->
   <ItemGroup>
     <None Include="Assets\Luts\*.cube" Link="luts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\Luts\Rec709 Kodak 2383 D65.cube;Assets\Luts\Rec709 Fujifilm 3513DI D65.cube" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <EmbeddedResource Include="Assets\Luts\Rec709 Kodak 2383 D65.cube" LogicalName="OpenRevelare.Core.Assets.Luts.kodak-2383.cube" />
     <EmbeddedResource Include="Assets\Luts\Rec709 Fujifilm 3513DI D65.cube" LogicalName="OpenRevelare.Core.Assets.Luts.fujifilm-3513di.cube" />
   </ItemGroup>

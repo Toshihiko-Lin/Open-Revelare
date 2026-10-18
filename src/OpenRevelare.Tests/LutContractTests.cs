@@ -400,12 +400,20 @@ public sealed class LutContractTests
         Assert.Equal(3, bundled.Count(b => b.Name.Contains("3513DI", StringComparison.Ordinal)));
     }
 
-    [Fact]
-    public void A_pre_D033_sentinel_still_resolves_to_the_same_table_as_its_shipped_file()
+    [Theory]
+    [InlineData(":kodak-2383", "Rec709 Kodak 2383 D65")]
+    [InlineData(":fujifilm-3513di", "Rec709 Fujifilm 3513DI D65")]
+    public void Legacy_and_bundled_D65_sentinels_resolve_to_the_same_embedded_table(string legacy, string name)
     {
-        CubeLut embedded = PrintLuts.Validate(":kodak-2383");
-        CubeLut shipped = PrintLuts.Validate(":luts/Rec709 Kodak 2383 D65.cube");
+        CubeLut embedded = PrintLuts.Validate(legacy);
+        CubeLut shipped = PrintLuts.Validate(PrintLuts.BundledPrefix + name + ".cube");
         Assert.Equal(embedded.ContentIdentity, shipped.ContentIdentity);
+        Assert.Equal(embedded.ContentIdentity, PrintLuts.Validate(legacy.ToUpperInvariant()).ContentIdentity);
+        Assert.Equal(embedded.ContentIdentity,
+            PrintLuts.Validate((PrintLuts.BundledPrefix + name + ".cube").ToUpperInvariant()).ContentIdentity);
+        // Older incremental build/install directories may still have external D65 copies;
+        // the picker must offer each stock once in either layout.
+        Assert.Single(PrintLuts.Bundled(), b => b.Name == name);
         Assert.False(PrintLuts.IsBuiltin(":luts/../escape.cube"));
         Assert.False(PrintLuts.IsBuiltin(":luts/"));
     }

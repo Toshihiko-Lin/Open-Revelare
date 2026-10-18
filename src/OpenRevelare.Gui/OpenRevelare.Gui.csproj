@@ -41,10 +41,9 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3">
-      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
-      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
-    </PackageReference>
+    <!-- Exclude the entire dependency graph from release builds, including the
+         devtools-only DataGrid, ColorPicker and Simple theme. -->
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <!-- Pinned to the EXACT version Avalonia.Skia 11.2.3 depends on. The preview draws through
          SkiaSharp directly (Interop/ColorManagedImage.cs) to get a colour space onto the bitmap,
