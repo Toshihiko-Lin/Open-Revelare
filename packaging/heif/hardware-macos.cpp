@@ -64,7 +64,14 @@ class MacEncoder final : public HardwareEncoder {
             e.received = true;
         } catch (const std::exception& ex) { e.callback_error = ex.what(); }
     }
-    void property(CFStringRef key, CFTypeRef value) { check(VTSessionSetProperty(session, key, value), "Configure hardware HEVC"); }
+    void property(CFStringRef key, CFTypeRef value) {
+        OSStatus status = VTSessionSetProperty(session, key, value);
+        if (status != noErr) {
+            char name[128]{};
+            CFStringGetCString(key, name, sizeof(name), kCFStringEncodingUTF8);
+            throw std::runtime_error(std::string("Configure hardware HEVC ") + name + " (OSStatus " + std::to_string(status) + ")");
+        }
+    }
     void color_properties(CVPixelBufferRef pixel = nullptr) {
         CFStringRef primaries = color.primaries == 9 ? kCVImageBufferColorPrimaries_ITU_R_2020 : nullptr;
         CFStringRef transfer = color.transfer == 16 ? kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ : nullptr;
@@ -89,11 +96,12 @@ public:
                 specification.value, nullptr, nullptr, callback, this, &session), "Create hardware Main10 encoder");
             property(kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_HEVC_Main10_AutoLevel);
             property(kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse);
-            int interval = 2, delay = 0;
+            int interval = 2;
             CF<CFNumberRef> key_interval(CFNumberCreate(nullptr, kCFNumberIntType, &interval));
-            CF<CFNumberRef> frame_delay(CFNumberCreate(nullptr, kCFNumberIntType, &delay));
             property(kVTCompressionPropertyKey_MaxKeyFrameInterval, key_interval.value);
-            property(kVTCompressionPropertyKey_MaxFrameDelayCount, frame_delay.value);
+            // HEVC hardware may reject MaxFrameDelayCount. Per-frame completion
+            // below already flushes the tile; forcing that optional property
+            // would needlessly disable otherwise supported Main10 hardware.
             float q = std::clamp(quality, 1, 100) / 100.f;
             CF<CFNumberRef> quality_value(CFNumberCreate(nullptr, kCFNumberFloatType, &q));
             property(kVTCompressionPropertyKey_Quality, quality_value.value);
