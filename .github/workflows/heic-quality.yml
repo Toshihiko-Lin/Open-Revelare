@@ -1,0 +1,20 @@
+name: heic-quality
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos-main10:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build-native
+      - name: Install independent HEIC decoder for acceptance testing
+        run: python -m pip install numpy pillow-heif
+      - name: Compare decoded SDR and HDR samples
+        run: python .github/scripts/heic_quality.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heic-quality-macos-arm64
+          path: heic-quality.json
+          if-no-files-found: error
