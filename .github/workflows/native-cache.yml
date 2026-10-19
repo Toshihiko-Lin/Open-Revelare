@@ -28,3 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/build-native
+      - name: Diagnose VideoToolbox hardware capabilities
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          clang++ -std=c++17 -mmacosx-version-min=11.0 packaging/ci/hevc-videotoolbox-probe.cpp \
+            -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework CoreFoundation \
+            -o "$RUNNER_TEMP/hevc-videotoolbox-probe"
+          "$RUNNER_TEMP/hevc-videotoolbox-probe"
