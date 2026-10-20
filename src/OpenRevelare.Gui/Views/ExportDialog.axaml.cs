@@ -162,6 +162,7 @@ public partial class ExportDialog : Window
             _ => 0,
         };
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
+        HeicHdrBox.SelectedIndex = saved.HeicAdaptiveHdr ? 1 : 0;
         HeicQualitySlider.Value = Math.Clamp(saved.HeicQuality, 40, 100);
         KeepExifChk.IsChecked = saved.KeepSourceExif;
         HdrBaseBox.SelectedIndex = Math.Max(0, ExportOptions.GainMapBaseSpaces.ToList()
@@ -222,7 +223,7 @@ public partial class ExportDialog : Window
     /// </summary>
     private ExportIccUiState ResolveIcc(bool jpeg, bool linear)
     {
-        bool gainMap = IsHdr && jpeg && !linear;
+        bool gainMap = IsHdr && (jpeg || (FmtHeic.IsChecked == true && HeicHdrBox.SelectedIndex == 1)) && !linear;
         bool hdrMaster = IsHdr && FmtTiff.IsChecked == true && !linear;
         return ExportIccUiPolicy.Resolve(
             gainMap ? SelectedHdrBaseSpace : _space,
@@ -321,6 +322,7 @@ public partial class ExportDialog : Window
             },
             JpegQuality = (int)QualitySlider.Value,
             HeicQuality = (int)HeicQualitySlider.Value,
+            HeicAdaptiveHdr = HeicHdrBox.SelectedIndex == 1,
             KeepSourceExif = KeepExifChk.IsChecked == true,
             FrameFilmCaptures = FilmInfoChk.IsChecked == true ? _filmEditor?.Snapshot() : null,
             FilmCapture = _filmEditor is null && FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
@@ -368,7 +370,7 @@ public partial class ExportDialog : Window
             || LongEdgeRow is null || PreviewRow is null
             || NamePresetBox is null || CustomNameRow is null || FmtHeic is null
             || HeicQualitySlider is null || HeicQualityLbl is null
-            || JpegQualityRow is null || HeicQualityRow is null
+            || JpegQualityRow is null || HeicQualityRow is null || HeicHdrBox is null || HeicHdrRow is null
             || JpegFormatDetail is null || HeicFormatDetail is null || TiffFormatDetail is null
             || KeepExifChk is null || FilmInfoChk is null || FilmEditorGroup is null
             || FilmCopyrightBox is null || ExifErrorLbl is null || FilmInfoEntry is null) return;
@@ -384,10 +386,11 @@ public partial class ExportDialog : Window
         JpegGroup.IsVisible = jpeg || heic;
         JpegQualityRow.IsVisible = jpeg;
         HeicQualityRow.IsVisible = heic;
+        HeicHdrRow.IsVisible = heic && IsHdr;
         if ((jpeg || dng || heic) && LinearChk.IsChecked == true) LinearChk.IsChecked = false;
         bool linear = LinearChk.IsChecked == true;
         JpegFormatDetail.Text = IsHdr ? Loc.T("HDR 增益图 · 兼容 SDR") : Loc.T("分享 · 广泛兼容");
-        HeicFormatDetail.Text = IsHdr ? Loc.T("HDR PQ · 10-bit 高效压缩") : Loc.T("10-bit · 高效压缩");
+        HeicFormatDetail.Text = IsHdr ? (HeicHdrBox.SelectedIndex == 1 ? Loc.T("Adaptive HDR · 兼容 SDR") : Loc.T("单层 HDR（PQ）· 10-bit")) : Loc.T("10-bit · 高效压缩");
         TiffFormatDetail.Text = IsHdr || linear ? Loc.T("32-bit float · 线性母版") : Loc.T("16-bit · 无损存档");
 
         // Every row below is shown or hidden, never greyed: the dialog shows the parameters of the
@@ -411,7 +414,7 @@ public partial class ExportDialog : Window
 
         // Scene-linear and every non-exact-sRGB display export require their exact ICC. Resolve
         // the effective value independently of the control so a stale false preset is harmless.
-        bool gainMap = IsHdr && jpeg && !linear;
+        bool gainMap = IsHdr && (jpeg || (FmtHeic.IsChecked == true && HeicHdrBox.SelectedIndex == 1)) && !linear;
         bool hdrMaster = IsHdr && FmtTiff.IsChecked == true && !linear;
         ExportIccUiState icc = ResolveIcc(jpeg, linear);
         // A DNG states its colour as ColorMatrix1 — the DNG way — so there is no ICC decision to
@@ -435,7 +438,7 @@ public partial class ExportDialog : Window
             ? Loc.T("在 Lightroom / Camera Raw 中继续调色；反相与帧编辑已烘焙，不含显示曲线。")
                 + (IsHdr ? " " + Loc.T("HDR 卷按 SDR 写出。") : "")
             : heic
-            ? (IsHdr ? Loc.T("保留 HDR 高光；需要支持 HDR HEIC 的查看器。")
+            ? (IsHdr ? (gainMap ? Loc.T("普通查看器显示 SDR，支持 ISO 增益图的 HEIC 查看器可还原 HDR。") : Loc.T("保留 HDR 高光；需要支持 HDR HEIC 的查看器。"))
                 : Loc.T("体积较小，适合支持 HEIC 的相册与设备。"))
             : jpeg
             ? (IsHdr ? Loc.T("普通查看器显示 SDR，支持增益图的 HDR 查看器可还原高光。")
@@ -458,7 +461,7 @@ public partial class ExportDialog : Window
                 ? Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签；HDR 卷按 SDR 导出，高光母版用 TIFF。")
                 : Loc.F($"{DisplayName(_space)} 原色写入 DNG 标签（ColorMatrix1）。"))
             : heic && IsHdr
-            ? Loc.T("BT.2020 PQ，参考白 203 nits；保留 HDR 高光。")
+            ? (gainMap ? Loc.T("SDR 主图与 ISO 21496-1 增益图；HDR 根据显示器亮度恢复。") : Loc.T("BT.2020 PQ，参考白 203 nits；保留 HDR 高光。"))
             : linear
             ? Loc.T("场景线性 ACEScg，输出空间不参与。")
             : hdrMaster

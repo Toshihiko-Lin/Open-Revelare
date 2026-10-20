@@ -536,7 +536,7 @@ HEIC (efficient compression), or **linear DNG**.
 **HEIC**: available for single frames and whole rolls, using 10-bit HEVC for both SDR and HDR.
 SDR embeds the current output space's exact ICC. HDR converts to BT.2020 PQ with a 203-nit
 reference white and retains highlight headroom. HDR HEIC is a direct PQ image without an SDR
-base or gain map; it requires an HDR HEIC viewer. Gain-map JPEG remains available for sharing.
+base or gain map; it requires an HDR HEIC viewer. Adaptive HDR is also available: an SDR primary (sRGB / Display P3) plus an ISO 21496-1 gain map, usually producing larger files. Ordinary HEIC readers show SDR; HDR restoration depends on OS and app support. Gain-map JPEG remains available for sharing.
 HEIC and JPEG remember separate quality settings and both support file-size limits, reducing
 quality first and resolution second.
 

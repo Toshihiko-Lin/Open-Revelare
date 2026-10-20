@@ -57,3 +57,18 @@ Licenses and corresponding source:
 - libheif: LGPL-3.0-or-later, https://github.com/strukturag/libheif/releases/tag/v1.21.2
 - x265: GPL-2.0-or-later, https://bitbucket.org/multicoreware/x265_git/src/4.1/
 - This bridge and build recipe are distributed with OpenRevelare under GPL-3.0-only.
+
+## Adaptive HDR option
+
+The GUI also offers Adaptive HDR; CLI uses `--heic-adaptive`. This packages an
+ICC-tagged SDR primary (sRGB or Display P3), a hidden HEVC gain map and a standard
+`tmap` derived image with ISO 21496-1 metadata. The `altr` group prefers the HDR
+alternate, while ordinary HEIC readers display SDR. The alternate is described as
+linear in the base primaries; the map itself has no ICC and no image transfer curve.
+Maps above a 1024-pixel long edge use half the long edge and quality capped at 75;
+smaller maps keep their resolution. This reduces auxiliary storage with some loss of
+fine local gain detail. File-size fitting includes the entire container.
+
+The container follows [libavif’s tmap syntax](https://github.com/AOMediaCodec/libavif/blob/main/src/write.c).
+Actual Adaptive HDR display still requires testing on Android and Apple devices;
+valid syntax and a correct SDR fallback do not guarantee every viewer restores HDR.

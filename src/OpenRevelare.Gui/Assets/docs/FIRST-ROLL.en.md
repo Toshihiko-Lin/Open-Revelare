@@ -40,7 +40,7 @@ Export a representative image with shadows, highlights and neutral areas. Check 
 
 Choose a format and size directly: JPEG for sharing, TIFF for further editing, or HEIC, linear DNG and scene-linear ACEScg TIFF when needed. Exports retain the roll's SDR/HDR and rendering space; P3 or Adobe RGB is not silently changed to sRGB. Open the side panel to add film capture details. Scene-linear TIFF excludes finishing adjustments and does not replace archiving originals, project and references.
 
-For SDR-reader compatibility, HDR JPEG includes an SDR primary with the final master's colour and an HDR gain map. HDR HEIC uses BT.2020/PQ; floating-point HDR TIFF is a linear master. Those formats still require a viewer that interprets their colour declarations correctly.
+For SDR-reader compatibility, HDR JPEG includes an SDR primary with the final master's colour and an HDR gain map. HDR HEIC defaults to BT.2020/PQ, with an optional Adaptive HDR SDR primary and ISO gain map; floating-point HDR TIFF is a linear master. Those formats still require a viewer that interprets their colour declarations correctly.
 
 **Done when:** the status reports completion and the output opens with the expected dimensions and colours. **Recover by:** checking folder permissions, free disk space and source availability; keep originals and project intact, fix the cause and retry.
 

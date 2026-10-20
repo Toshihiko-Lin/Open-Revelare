@@ -290,6 +290,16 @@
                                                VerticalAlignment="Center" HorizontalAlignment="Right" />
                                 </Grid>
                             </Grid>
+                            <Grid Name="HeicHdrRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="HDR" />
+                                <ComboBox Grid.Column="1" Name="HeicHdrBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnAnyChanged">
+                                    <ComboBoxItem Content="{i18n:T '单层 HDR（PQ）'}" />
+                                    <ComboBoxItem Content="{i18n:T 'Adaptive HDR（标准增益图）'}" />
+                                </ComboBox>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
+                                           Text="{i18n:T '单层 HDR 直接以 PQ 编码，不依赖增益图，通常体积较小；需要支持 PQ HDR HEIC 的查看器。Adaptive HDR 包含 SDR 主图与标准增益图，通常体积较大；HDR 支持取决于系统和应用。'}" />
+                            </Grid>
                             <Grid Name="HeicQualityRow" ColumnDefinitions="86,*">
                                 <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
                                 <Grid Grid.Column="1" ColumnDefinitions="*,Auto">

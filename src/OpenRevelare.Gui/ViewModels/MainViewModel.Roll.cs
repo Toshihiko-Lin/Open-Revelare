@@ -1450,8 +1450,8 @@ public partial class MainViewModel
         hdr.SdrRendition(baseSpace);
 
     /// <summary>
-    /// Renders and writes one export. A JPEG of an extended render is a gain-map JPEG and needs a
-    /// second, SDR render of the same frame; everything else is one render and one write.
+    /// Renders and writes one export. Gain-map JPEG and Adaptive HDR HEIC need a second,
+    /// SDR rendition of the same frame; direct HLG and other formats use one rendition.
     /// Returns what a size-limited JPEG/HEIC actually settled on, null for other exports.
     /// </summary>
     private JpegIO.JpegFit? RenderAndWriteExport(
@@ -1494,7 +1494,7 @@ public partial class MainViewModel
         ct.ThrowIfCancellationRequested();
         // Decided off the frame the render actually produced rather than the params: a LegacyV1
         // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
-        bool gainMap = opt.Format == ExportFormat.Jpeg && !opt.ExportLinear
+        bool gainMap = (opt.Format == ExportFormat.Jpeg || (opt.Format == ExportFormat.Heic && opt.HeicAdaptiveHdr)) && !opt.ExportLinear
             && rendered.Encoding.Range == NumericRange.Extended;
         sourceStamp.RequireCurrent();
         if (!gainMap) return WriteExport(rendered, path, opt, sourceExif);
@@ -1512,6 +1512,12 @@ public partial class MainViewModel
                 Resample.ToLongEdge(sdrBase.Pixels, opt.MaxLongEdge, opt.AllowUpscale));
             rendered = rendered.WithPixels(
                 Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale));
+        }
+        if (opt.Format == ExportFormat.Heic)
+        {
+            sourceStamp.RequireCurrent();
+            return HeicIO.ExportGainMapHeic(sdrBase, rendered, baseSpace, ep.ResolvedOutputTarget,
+                path, opt.HeicQuality, opt.MaxFileBytes, sourceExif);
         }
         if (opt.MaxFileBytes is { } gainMapCeiling)
         {

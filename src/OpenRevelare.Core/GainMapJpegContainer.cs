@@ -159,6 +159,9 @@ internal static class GainMapJpegContainer
 
     /// <summary>Numerator then denominator, both 32-bit big-endian; the numerator is written as a
     /// signed value, which is a no-op for the fields the standard declares unsigned.</summary>
+    internal static byte[] IsoMetadataPayload(GainMapMetadata metadata) =>
+        IsoMetadataSegment(metadata)[(4 + IsoNamespace.Length)..];
+
     private static int WriteRational(byte[] seg, int o, float value)
     {
         int numerator = (int)Math.Round((double)value * IsoDenominator);

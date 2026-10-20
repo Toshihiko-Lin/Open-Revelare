@@ -2649,7 +2649,7 @@ public partial class MainWindow : Window
                 dng
                     ? new FilePickerFileType(Loc.T("线性 DNG")) { Patterns = new[] { "*.dng" } }
                     : heic
-                    ? new FilePickerFileType(opt.IsHdr ? "HDR HEIC (10-bit PQ)" : "HEIC")
+                    ? new FilePickerFileType(opt.IsHdr ? (opt.HeicAdaptiveHdr ? "Adaptive HDR HEIC (ISO gain map)" : "HDR HEIC (10-bit PQ)") : "HEIC")
                         { Patterns = new[] { "*.heic", "*.heif" } }
                     : jpeg
                     ? new FilePickerFileType(opt.WritesGainMap ? Loc.T("HDR JPEG（增益图）") : "JPEG")

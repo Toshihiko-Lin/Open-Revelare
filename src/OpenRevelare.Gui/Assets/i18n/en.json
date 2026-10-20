@@ -1169,5 +1169,13 @@
   "镜头同步整卷": "Sync lens across roll",
   "正在读取源 EXIF …": "Reading source EXIF …",
   "数字化来源（当前帧）": "Digitization source (current frame)",
-  "未填项目留空，不沿用翻拍参数。曝光、日期等参数按张填写；取消同步可单独修改机身或镜头。": "Empty fields stay unknown. Set exposure and date per frame; turn off sync to override its camera or lens."
+  "未填项目留空，不沿用翻拍参数。曝光、日期等参数按张填写；取消同步可单独修改机身或镜头。": "Empty fields stay unknown. Set exposure and date per frame; turn off sync to override its camera or lens.",
+  "单层 HDR（PQ）": "Single-layer HDR (PQ)",
+  "单层 HDR（PQ）· 10-bit": "Single-layer HDR (PQ) · 10-bit",
+  "Adaptive HDR（标准增益图）": "Adaptive HDR (ISO gain map)",
+  "Adaptive HDR · 兼容 SDR": "Adaptive HDR · SDR compatible",
+  "Adaptive HDR +{0:0.0} 档 · ISO 增益图": "Adaptive HDR +{0:0.0} stops · ISO gain map",
+  "单层 HDR 直接以 PQ 编码，不依赖增益图，通常体积较小；需要支持 PQ HDR HEIC 的查看器。Adaptive HDR 包含 SDR 主图与标准增益图，通常体积较大；HDR 支持取决于系统和应用。": "Single-layer HDR uses PQ encoding without a gain map and usually produces smaller files; it requires a viewer supporting PQ HDR HEIC. Adaptive HDR includes an SDR primary and an ISO gain map and is usually larger; HDR support depends on the OS and app.",
+  "普通查看器显示 SDR，支持 ISO 增益图的 HEIC 查看器可还原 HDR。": "Standard HEIC viewers show SDR; viewers supporting ISO gain maps restore HDR.",
+  "SDR 主图与 ISO 21496-1 增益图；HDR 根据显示器亮度恢复。": "SDR primary with ISO 21496-1 gain map; HDR adapts to display headroom."
 }

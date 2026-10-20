@@ -15,6 +15,65 @@ public static class HeicIO
     /// <summary>The last completed encode, including any hardware fallback reason.</summary>
     public static string EncoderDiagnostics => Volatile.Read(ref _encoderDiagnostics);
 
+    /// <summary>ISO gain-map HEIC: SDR primary plus an Adaptive HDR alternate.</summary>
+    public static JpegIO.JpegFit? ExportGainMapHeic(
+        RenderedFrame sdrBase, RenderedFrame hdr, ColorSpaceDef baseSpace, OutputTarget target,
+        string path, int quality = 90, long? maxBytes = null, SourceExif? sourceExif = null)
+    {
+        if (baseSpace != ColorSpaces.Srgb && baseSpace != ColorSpaces.DisplayP3)
+            throw new NotSupportedException("Gain-map HEIC supports sRGB and Display P3 bases.");
+        HdrGainMap map = HdrGainMap.Compute(sdrBase, hdr, baseSpace, target,
+            GainMapChannels.PerChannel, useCommonChannelRange: true);
+        byte[]? profile = ExportColorPolicy.ResolveProfileBytes(sdrBase, ExportProfilePolicy.EmbedExact);
+        RenderedFrame scaledBase = sdrBase;
+        ImageBuffer gainImage = PrepareGainImage(map.Map);
+        ushort[] basePixels = PreparePixels(sdrBase), gainPixels = QuantizeGain(gainImage);
+        byte[] EncodePair(int q) => GainMapHeicContainer.Compose(
+            Encode(scaledBase, basePixels, false, q, profile, sourceExif),
+            Encode(scaledBase.WithPixels(gainImage), gainPixels, false, Math.Min(q, 75), null, null),
+            map.Metadata, baseSpace, scaledBase.Pixels.Width, scaledBase.Pixels.Height);
+        byte[] file;
+        JpegIO.JpegFit? result = null;
+        if (maxBytes is { } ceiling)
+        {
+            var fitted = JpegIO.FitToSize(sdrBase.Pixels.Width, sdrBase.Pixels.Height, quality, ceiling, (edge, q) =>
+            {
+                if (Math.Max(scaledBase.Pixels.Width, scaledBase.Pixels.Height) > edge)
+                {
+                    scaledBase = sdrBase.WithPixels(Resample.ToLongEdge(sdrBase.Pixels, edge, false));
+                    var scaledHdr = hdr.WithPixels(Resample.ToLongEdge(hdr.Pixels, edge, false));
+                    map = HdrGainMap.Compute(scaledBase, scaledHdr, baseSpace, target,
+                        GainMapChannels.PerChannel, useCommonChannelRange: true);
+                    basePixels = PreparePixels(scaledBase);
+                    gainImage = PrepareGainImage(map.Map);
+                    gainPixels = QuantizeGain(gainImage);
+                }
+                return EncodePair(q);
+            }, formatName: "HEIC");
+            file = fitted.File; result = fitted.Fit;
+        }
+        else file = EncodePair(quality);
+        ExportFile.Write(path, destination => File.WriteAllBytes(destination, file));
+        return result;
+    }
+
+    internal static ImageBuffer PrepareGainImage(ImageBuffer map)
+    {
+        int edge = Math.Max(map.Width, map.Height);
+        return edge <= 1024 ? map : Resample.ToLongEdge(map, (edge + 1) / 2, allowUpscale: false);
+    }
+
+    private static ushort[] QuantizeGain(ImageBuffer map)
+    {
+        var pixels = new ushort[map.Data.Length];
+        ParallelSweep.Over(pixels.Length, (from, to) =>
+        {
+            for (int i = from; i < to; i++)
+                pixels[i] = (ushort)Math.Clamp((int)(map.Data[i] * 1023f + 0.5f), 0, 1023);
+        });
+        return pixels;
+    }
+
     public static JpegIO.JpegFit? ExportHeic(
         RenderedFrame frame, string path, int quality = 90, long? maxBytes = null, SourceExif? sourceExif = null)
     {

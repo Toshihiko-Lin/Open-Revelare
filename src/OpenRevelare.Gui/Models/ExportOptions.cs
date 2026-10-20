@@ -19,7 +19,7 @@ public enum ExportFormat
     /// not include.
     /// </summary>
     Dng,
-    /// <summary>HEVC Main10: SDR with exact ICC, or BT.2020/PQ HDR.</summary>
+    /// <summary>HEVC Main10: SDR with exact ICC, or direct PQ / Adaptive HDR.</summary>
     Heic,
 }
 
@@ -85,6 +85,9 @@ public sealed class ExportOptions
     public int JpegQuality { get; set; } = 95;
 
     public int HeicQuality { get; set; } = 90;
+
+    /// <summary>Use ISO gain-map HEIC instead of direct PQ.</summary>
+    public bool HeicAdaptiveHdr { get; set; }
 
     /// <summary>Copy portable source capture EXIF; rendering/geometry tags are regenerated.</summary>
     public bool KeepSourceExif { get; set; } = true;
@@ -158,9 +161,9 @@ public sealed class ExportOptions
     [JsonIgnore]
     public bool IsHdr => HdrLimitStops > 0d;
 
-    /// <summary>A JPEG of an HDR roll: SDR base plus gain map (ISO 21496-1 / Adobe).</summary>
+    /// <summary>An HDR JPEG or Adaptive HDR HEIC: SDR base plus gain map.</summary>
     [JsonIgnore]
-    public bool WritesGainMap => IsHdr && Format == ExportFormat.Jpeg && !ExportLinear;
+    public bool WritesGainMap => IsHdr && (Format == ExportFormat.Jpeg || (Format == ExportFormat.Heic && HeicAdaptiveHdr)) && !ExportLinear;
 
     /// <summary>
     /// The colour space of a gain-map JPEG's SDR base, by name — the file's container primaries.
@@ -359,7 +362,8 @@ public sealed class ExportOptions
         {
             if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");
             string encoding = IsHdr
-                ? Loc.F($"HDR +{HdrLimitStops:0.0} 档 · BT.2020 PQ")
+                ? (HeicAdaptiveHdr ? Loc.F($"Adaptive HDR +{HdrLimitStops:0.0} 档 · ISO 增益图") + " · " + ResolvedHdrBaseSpace.Name
+                    : Loc.F($"HDR +{HdrLimitStops:0.0} 档 · BT.2020 PQ"))
                 : ResolvedColorSpace.Name + " · " + Loc.T("嵌入 ICC");
             return Loc.F($"10-bit HEIC 品质 {HeicQuality}") + $" · {size} · {encoding}";
         }

@@ -58,6 +58,7 @@ static int Run(string[] args)
             case "--quarter-turns": opts["quarter-turns"] = Next(args, ref i, a); break;
             case "--flip-h": flags.Add("flip-h"); break;
             case "--flip-v": flags.Add("flip-v"); break;
+            case "--heic-adaptive": flags.Add("heic-adaptive"); break;
             case "--no-source-exif": flags.Add("no-source-exif"); break;
             case "--quality": opts["quality"] = Next(args, ref i, a); break;
             case "--distortion": opts["distortion"] = Next(args, ref i, a); break;
@@ -636,7 +637,16 @@ static int Run(string[] args)
         else if (ext is ".heic" or ".heif")
         {
             int quality = opts.TryGetValue("quality", out var hq) ? int.Parse(hq) : 90;
-            HeicIO.ExportHeic(rendered, outPath, quality, sourceExif: sourceExif);
+            if (rendered.Encoding.Range == NumericRange.Extended && flags.Contains("heic-adaptive"))
+            {
+                var baseSpace = ColorSpaces.Srgb;
+                var sdrBase = Pipeline.RenderSdrRendition(working, cal, ManagedCliPipeline.PipelineVersion,
+                    colorManagement, baseSpace);
+                sdrBase = HdrGainMap.ColourMatchedSdrBase(sdrBase, rendered, baseSpace);
+                HeicIO.ExportGainMapHeic(sdrBase, rendered, baseSpace, cal.ResolvedOutputTarget,
+                    outPath, quality, sourceExif: sourceExif);
+            }
+            else HeicIO.ExportHeic(rendered, outPath, quality, sourceExif: sourceExif);
             Console.WriteLine($"wrote {outPath} (10-bit HEIC q{quality}) in {sw.Elapsed.TotalMilliseconds:F1} ms");
         }
         else
@@ -776,6 +786,7 @@ static void PrintUsage()
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
         "  -o, --output <path>         output TIFF, JPEG, or HEIC (.heic/.heif)\n" +
+        "  --heic-adaptive            ISO gain-map HDR HEIC instead of direct PQ\n" +
         "  --no-source-exif           omit source capture EXIF (preserved by default)\n" +
         "  --quality <1-100>           JPEG/HEIC quality (defaults: JPEG 95, HEIC 90)\n" +
         "  --input-linear              OVERRIDE the detected untagged/unusable-ICC input:\n" +
