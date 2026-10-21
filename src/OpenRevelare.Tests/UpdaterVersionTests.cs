@@ -28,7 +28,11 @@ public sealed class UpdaterVersionTests
     [Fact]
     public void Running_release_does_not_offer_itself_as_an_update()
     {
-        Assert.Equal("1.8.6.1", AppInfo.Version);
-        Assert.Equal(0, Updater.Compare("1.8.6.1", AppInfo.Version));
+        string release = typeof(AppInfo).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single()
+            .InformationalVersion.Split('+')[0];
+        Assert.Equal(release, AppInfo.Version);
+        Assert.Equal(0, Updater.Compare(release, AppInfo.Version));
     }
 }
