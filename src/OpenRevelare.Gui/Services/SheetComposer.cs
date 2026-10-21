@@ -20,6 +20,8 @@ namespace OpenRevelare.Gui.Services;
 public static class SheetComposer
 {
     private const double RefWidth = 2048.0;
+    // Automatic fitting may add paper, but never consume this base margin (scaled with the grid).
+    private const double MinimumMarginAtReference = 16;
 
     // Choose the design at the export's reference scale. Integer rounding in gaps,
     // cells and page padding can change near-tie scores; output resolution must never choose
@@ -65,8 +67,8 @@ public static class SheetComposer
     /// paper the grid does not know about, and at 12 frames they are enough to turn what looks
     /// like a square grid into a portrait page — then scored against the target.
     ///
-    /// Candidates are ranked by the grid's footprint on the finished page. An incomplete final
-    /// strip is part of that footprint: only paper around the grid counts as unused space.
+    /// Rank by the grid footprint first, with a smaller penalty for empty space in full mixed
+    /// rows. A short final row is intentional and never incurs a completeness penalty.
     /// </summary>
     public static ContactSheet.Layout Plan(IReadOnlyList<ImageBuffer> thumbs, int maxLong, Options opt)
     {
@@ -86,7 +88,7 @@ public static class SheetComposer
         for (int cols = 1; cols <= n; cols++)
         {
             // Rows are spaced wider than columns: the extra band is where the frame number goes.
-            // Both gaps are the design values and stay that way — see PadFor.
+            // GapY and the minimum GapX are design values; full mixed rows may justify GapX.
             ContactSheet.Layout l = ContactSheet.Plan(thumbs, LayoutReferenceSize, m.GapXi, m.GapYi, cols);
             (int padX, int padY) = PadFor(l, opt);
             PixelSize page = PaddedSize(l, padX, padY);
@@ -98,6 +100,24 @@ public static class SheetComposer
             // vertically when the grid footprint is comparable.
             double sidePadding = (double)(padX * 2) / page.Width;
             double visual = coverage - sidePadding * 0.25;
+            if (l.Cells is { } cells)
+            {
+                // Refine close footprint scores using only complete rows. This discourages
+                // excessive holes in mixed rows without favouring divisors of the frame count.
+                double pictureArea = 0, rowArea = 0;
+                for (int first = 0; first + cols <= n; first += cols)
+                {
+                    int rowTop = int.MaxValue;
+                    for (int i = first; i < first + cols; i++)
+                    {
+                        ContactSheet.Layout.Cell cell = cells[i];
+                        pictureArea += (double)cell.Width * cell.Height;
+                        rowTop = Math.Min(rowTop, cell.Y);
+                    }
+                    rowArea += (double)l.Width * (l.RowBottom(first / cols) - rowTop);
+                }
+                if (rowArea > 0) visual -= (1 - pictureArea / rowArea) * 0.08;
+            }
             if (best is null || visual > bestScore)
             {
                 best = l;
@@ -116,12 +136,10 @@ public static class SheetComposer
     /// (1.18), so a portrait 4:3 (0.75) and a portrait 3:2 (0.67) both had to settle for 5×8 and
     /// came out as literally the same file.
     ///
-    /// Spending the residual on the GAPS was the first answer and it was wrong twice over: the
-    /// gap between columns is the rebate between frames on a strip and must not move at all, and
-    /// stretching the ROW gap alone left visible holes between rows on the shapes it had to work
-    /// hardest for. Margin is the right place for it — the grid keeps the density it was designed
-    /// with, and, unlike a gap, margin can widen the page as well as heighten it, so a grid with
-    /// an extra ROW is usable too instead of only ever approaching from the wide side.
+    /// The requested page ratio never stretches the grid's gaps. Mixed rows may distribute a
+    /// small amount of spare width for justification, but the remaining page-ratio difference
+    /// belongs in the margins. Margin can widen the page as well as heighten it, so candidates
+    /// on either side of the target proportion remain usable.
     ///
     /// Because it works in both directions every column count can reach every target, so the
     /// search above is free to pick the largest grid footprint rather than merely the
@@ -226,7 +244,7 @@ public static class SheetComposer
     {
         Metrics m = Metrics.Of(l.Width);
         int w = l.Width + (int)Math.Round(m.Margin * 2) + padX * 2;
-        int h = (int)Math.Round(m.Margin + l.Height + m.Margin) + padY * 2
+        int h = (int)Math.Round(m.Margin + l.Height + m.NumberBand + m.Margin) + padY * 2
               + SheetInfoBar.HeightFor(w);
         return new PixelSize(w, h);
     }
@@ -296,10 +314,10 @@ public static class SheetComposer
         // the two agree exactly rather than to within a rounding step.
         for (int r = 0; r < l.Rows - 1; r++)
         {
-            double bandY = gridY + r * (l.ThumbH + l.GapY) + l.ThumbH;
+            double bandY = gridY + l.RowBottom(r);
             ctx.FillRectangle(theme.Paper, new Rect(gridX, bandY, l.Width, l.GapY));
         }
-        for (int i = l.Count; i < l.Rows * l.Cols; i++)
+        for (int i = l.Count; l.Cells is null && i < l.Rows * l.Cols; i++)
         {
             (int ex, int ey) = l.Origin(i);
             ctx.FillRectangle(theme.Paper, new Rect(gridX + ex, gridY + ey, l.ThumbW, l.ThumbH));
@@ -307,19 +325,19 @@ public static class SheetComposer
 
         for (int i = 0; i < l.Count; i++)
         {
-            (int cx, int cy) = l.Origin(i);
-            double x = gridX + cx, y = gridY + cy;
+            ContactSheet.Layout.Cell cell = l.Frame(i);
+            double x = gridX + cell.X, y = gridY + cell.Y;
 
             // Offset by half the stroke so the hairline sits just outside the frame rather than
             // straddling the edge and eating a pixel of the photo.
             double h = m.Hairline / 2;
-            ctx.DrawRectangle(null, pen, new Rect(x - h, y - h, l.ThumbW + m.Hairline,
-                                                  l.ThumbH + m.Hairline));
+            ctx.DrawRectangle(null, pen, new Rect(x - h, y - h, cell.Width + m.Hairline,
+                                                  cell.Height + m.Hairline));
 
             // Frame numbers are 1-based, like the edge printing on a roll.
             FormattedText num = Text((i + 1).ToString(), m.NumberSize, theme.FrameNumber,
                                      FontWeight.Medium);
-            ctx.DrawText(num, new Point(x, y + l.ThumbH + m.NumberGap));
+            ctx.DrawText(num, new Point(x, y + cell.Height + m.NumberGap));
         }
     }
 
@@ -380,7 +398,7 @@ public static class SheetComposer
 
         private Metrics(double s)
         {
-            Margin = Math.Round(16 * s);
+            Margin = Math.Max(1, Math.Round(MinimumMarginAtReference * s));
             Hairline = Math.Max(1, Math.Round(2 * s));
             GapX = Math.Round(8 * s);
             // Row gap = column gap plus the band the frame number sits in.
@@ -391,6 +409,10 @@ public static class SheetComposer
 
         public int GapXi => (int)GapX;
         public int GapYi => (int)(GapX + GapYExtra);
+
+        // The last row needs the same label clearance as the inter-row bands. Include font
+        // line-height rather than just em size, so CJK/fallback font metrics cannot hit the footer.
+        public int NumberBand => (int)Math.Ceiling(NumberGap + NumberSize * 1.5);
 
         public static Metrics Of(int width) => new(width / RefWidth);
     }

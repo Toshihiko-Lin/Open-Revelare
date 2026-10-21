@@ -18,6 +18,10 @@ public static class ContactSheet
     /// </summary>
     public sealed class Layout
     {
+        public readonly record struct Cell(int X, int Y, int Width, int Height);
+
+        /// <summary>Per-frame rectangles for a roll with mixed aspect ratios.</summary>
+        public IReadOnlyList<Cell>? Cells { get; init; }
         public required int Cols { get; init; }
         public required int Rows { get; init; }
         public required int ThumbW { get; init; }
@@ -26,13 +30,31 @@ public static class ContactSheet
         public required int GapY { get; init; }
         public required int Count { get; init; }
 
-        public int Width => Cols * ThumbW + GapX * (Cols - 1);
-        public int Height => Rows * ThumbH + GapY * (Rows - 1);
+        public int Width => Cells is { } cells ? cells.Max(c => c.X + c.Width)
+                                               : Cols * ThumbW + GapX * (Cols - 1);
+        public int Height => Cells is { } cells ? cells.Max(c => c.Y + c.Height)
+                                                : Rows * ThumbH + GapY * (Rows - 1);
+
+        public Cell Frame(int index)
+        {
+            if (Cells is { } cells) return cells[index];
+            return new Cell(index % Cols * (ThumbW + GapX), index / Cols * (ThumbH + GapY),
+                            ThumbW, ThumbH);
+        }
+
+        public int RowBottom(int row)
+        {
+            Cell first = Frame(row * Cols);
+            return first.Y + first.Height;
+        }
 
         /// <summary>Top-left of cell <paramref name="index"/> within the grid. Rows always begin
         /// at the left edge, as they do on a physical contact print.</summary>
-        public (int X, int Y) Origin(int index) =>
-            (index % Cols * (ThumbW + GapX), index / Cols * (ThumbH + GapY));
+        public (int X, int Y) Origin(int index)
+        {
+            Cell frame = Frame(index);
+            return (frame.X, frame.Y);
+        }
     }
 
     /// <summary>
@@ -53,6 +75,12 @@ public static class ContactSheet
         int c = cols ?? (int)Math.Ceiling(Math.Sqrt(n));
         c = Math.Clamp(c, 1, n);
         int rows = (int)Math.Ceiling((double)n / c);
+
+        // Uniform rolls retain their traditional grid. Mixed rolls need actual frame rectangles:
+        // a median aspect ratio cannot describe both a portrait and a landscape photograph.
+        if (images.Any(image => (long)image.Width * images[0].Height !=
+                                (long)images[0].Width * image.Height))
+            return PlanMixed(images, maxLong, gapX, gapY, c, rows);
 
         // Median aspect (W/H) → a uniform thumbnail shape.
         var aspects = new double[n];
@@ -82,6 +110,75 @@ public static class ContactSheet
             Cols = c, Rows = rows, ThumbW = thumbW, ThumbH = thumbH,
             GapX = gx, GapY = gy, Count = n,
         };
+    }
+
+    private static Layout PlanMixed(IReadOnlyList<ImageBuffer> images, int maxLong,
+                                    int gapX, int gapY, int cols, int rows)
+    {
+        int gx = FitGaps(gapX, cols, maxLong), gy = FitGaps(gapY, rows, maxLong);
+        // Give frames the same long edge, pack each row in source order, then align its bottoms.
+        // A single-column sheet uses a common width so every row also shares both edges.
+        // A short last row stays at the left; rows use only the height their pictures need.
+        Layout At(double edge)
+        {
+            var cells = new Layout.Cell[images.Count];
+            int top = 0, maxW = 0, maxH = 0;
+            for (int first = 0; first < images.Count; first += cols)
+            {
+                int end = Math.Min(first + cols, images.Count), x = 0, rowH = 0;
+                for (int i = first; i < end; i++)
+                {
+                    ImageBuffer image = images[i];
+                    double scale = edge / (cols == 1 ? image.Width : Math.Max(image.Width, image.Height));
+                    int w = Math.Max(1, (int)Math.Floor(image.Width * scale));
+                    int h = Math.Max(1, (int)Math.Floor(image.Height * scale));
+                    cells[i] = new Layout.Cell(x, top, w, h);
+                    x += w + gx;
+                    rowH = Math.Max(rowH, h);
+                    maxW = Math.Max(maxW, w);
+                    maxH = Math.Max(maxH, h);
+                }
+                for (int i = first; i < end; i++)
+                    cells[i] = cells[i] with { Y = top + rowH - cells[i].Height };
+                top += rowH + gy;
+            }
+            return new Layout
+            {
+                Cols = cols, Rows = rows, ThumbW = maxW, ThumbH = maxH,
+                GapX = gx, GapY = gy, Count = images.Count, Cells = cells,
+            };
+        }
+
+        // Solve using rounded rectangles too, so neither accumulated row sizes nor gaps can
+        // push the raster beyond its budget at preview or export resolution.
+        double lo = 0, hi = maxLong + 1.0;
+        for (int i = 0; i < 40; i++)
+        {
+            double mid = (lo + hi) / 2;
+            Layout candidate = At(mid);
+            if (candidate.Width <= maxLong && candidate.Height <= maxLong) lo = mid;
+            else hi = mid;
+        }
+        Layout result = At(lo);
+        if (cols > 1)
+        {
+            var cells = (Layout.Cell[])result.Cells!;
+            int width = result.Width;
+            // Justify full rows by spreading spare width across their gaps. The accumulated
+            // integer offset keeps both edges exact and gap differences within one pixel.
+            // Leave incomplete rows at the design gap rather than stretching a few frames apart.
+            for (int first = 0; first + cols <= images.Count; first += cols)
+            {
+                Layout.Cell last = cells[first + cols - 1];
+                int spare = width - (last.X + last.Width);
+                for (int col = 1; col < cols; col++)
+                {
+                    int i = first + col;
+                    cells[i] = cells[i] with { X = cells[i].X + (int)((long)spare * col / (cols - 1)) };
+                }
+            }
+        }
+        return result;
     }
 
     /// <summary>
@@ -134,8 +231,20 @@ public static class ContactSheet
             throw new ArgumentException("the grid does not fit inside the canvas at that origin");
         for (int idx = 0; idx < layout.Count; idx++)
         {
-            (int x0, int y0) = layout.Origin(idx);
-            BoxResizeInto(images[idx], canvas, gridX + x0, gridY + y0, layout.ThumbW, layout.ThumbH);
+            Layout.Cell cell = layout.Frame(idx);
+            if (layout.Cells is not null)
+            {
+                BoxResizeInto(images[idx], canvas, gridX + cell.X, gridY + cell.Y,
+                              cell.Width, cell.Height);
+                continue;
+            }
+            // Contain also protects callers supplying a manually constructed uniform layout.
+            double scale = Math.Min((double)cell.Width / images[idx].Width,
+                                    (double)cell.Height / images[idx].Height);
+            int w = Math.Clamp((int)Math.Round(images[idx].Width * scale), 1, cell.Width);
+            int h = Math.Clamp((int)Math.Round(images[idx].Height * scale), 1, cell.Height);
+            BoxResizeInto(images[idx], canvas, gridX + cell.X + (cell.Width - w) / 2,
+                          gridY + cell.Y + cell.Height - h, w, h);
         }
     }
 

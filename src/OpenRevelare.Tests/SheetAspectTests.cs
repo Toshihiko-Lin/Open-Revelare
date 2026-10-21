@@ -18,6 +18,146 @@ namespace OpenRevelare.Tests;
 public class SheetAspectTests
 {
     [Theory]
+    [InlineData(64)]
+    [InlineData(640)]
+    [InlineData(2048)]
+    [InlineData(4096)]
+    public void Automatic_layout_preserves_base_margins_on_all_sides(int size)
+    {
+        foreach (SheetAspect aspect in Enum.GetValues<SheetAspect>())
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        foreach (bool mixed in new[] { false, true })
+        {
+            var roll = Roll(17, 60, 40);
+            if (mixed) roll[0] = new ImageBuffer(40, 60);
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            var layout = SheetComposer.Plan(roll, size, opt);
+            var page = SheetComposer.SizeFor(roll, size, opt);
+            var (x, y) = SheetComposer.GridOrigin(layout, opt);
+            double scale = layout.Width / 2048.0;
+            int minimum = Math.Max(1, (int)Math.Round(16 * scale));
+            int numberBand = (int)Math.Ceiling(Math.Round(4 * scale) + 17 * scale * 1.5);
+            int footerTop = page.Height - SheetInfoBar.HeightFor(page.Width);
+            Assert.True(x >= minimum && y >= minimum);
+            Assert.True(page.Width - x - layout.Width >= minimum);
+            Assert.True(footerTop - y - layout.Height - numberBand >= minimum);
+        }
+    }
+
+    [Fact]
+    public void Mixed_roll_prefers_small_surround_even_with_an_incomplete_last_row()
+    {
+        var opt = new SheetComposer.Options
+        {
+            Aspect = SheetAspect.ThreeTwo, Orientation = SheetOrientation.Landscape,
+        };
+        for (int n = 37; n <= 45; n++)
+        {
+            var roll = Roll(n, 37, 35);
+            roll[0] = new ImageBuffer(38, 35);
+            var layout = SheetComposer.Plan(roll, 2048, opt);
+            var page = SheetComposer.SizeFor(roll, 2048, opt);
+            Assert.InRange(layout.Cols, 9, 10);
+            Assert.Equal(5, layout.Rows);
+            Assert.True((double)(page.Width - layout.Width) / page.Width < 0.1,
+                        $"n={n}: excessive side margins");
+        }
+    }
+
+    [Theory]
+    [InlineData(SheetAspect.Auto)]
+    [InlineData(SheetAspect.Square)]
+    [InlineData(SheetAspect.FourThree)]
+    [InlineData(SheetAspect.ThreeTwo)]
+    public void Extreme_mixed_aspects_fit_page_and_keep_preview_export_structure(SheetAspect aspect)
+    {
+        var roll = Enumerable.Range(0, 19).Select(i => (i % 5) switch
+        {
+            0 => new ImageBuffer(120, 10),
+            1 => new ImageBuffer(10, 120),
+            2 => new ImageBuffer(60, 40),
+            3 => new ImageBuffer(40, 60),
+            _ => new ImageBuffer(40, 40),
+        }).ToList();
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        {
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            var preview = SheetComposer.Plan(roll, 640, opt);
+            var export = SheetComposer.Plan(roll, 4096, opt);
+            Assert.Equal((preview.Cols, preview.Rows), (export.Cols, export.Rows));
+            Assert.InRange(export.Width, 1, 4096);
+            Assert.InRange(export.Height, 1, 4096);
+            Assert.Equal(roll.Count, export.Count);
+            var page = SheetComposer.SizeFor(roll, 4096, opt);
+            double ratio = (double)page.Width / page.Height;
+            double target = aspect switch
+            {
+                SheetAspect.FourThree => 4.0 / 3,
+                SheetAspect.ThreeTwo => 1.5,
+                _ => 1,
+            };
+            if (orientation == SheetOrientation.Portrait) target = 1 / target;
+            if (aspect != SheetAspect.Auto)
+                Assert.InRange(Math.Abs(Math.Log(ratio / target)), 0, Math.Log(1.02));
+            else if (orientation == SheetOrientation.Landscape)
+                Assert.InRange(ratio, 0.99, 1.35);
+            else Assert.InRange(ratio, 0.74, 1.01);
+        }
+    }
+
+    [Theory]
+    [InlineData(640)]
+    [InlineData(1000)]
+    [InlineData(2048)]
+    [InlineData(4096)]
+    public void Final_frame_numbers_have_clearance_above_footer(int size)
+    {
+        foreach (int n in new[] { 1, 5, 17, 36 })
+        foreach (SheetAspect aspect in Enum.GetValues<SheetAspect>())
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        foreach (bool mixed in new[] { false, true })
+        {
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            var roll = Roll(n);
+            if (mixed) roll[0] = new ImageBuffer(200, 300);
+            var layout = SheetComposer.Plan(roll, size, opt);
+            var page = SheetComposer.SizeFor(roll, size, opt);
+            var (_, gridY) = SheetComposer.GridOrigin(layout, opt);
+            double scale = layout.Width / 2048.0;
+            double labelBottom = gridY + layout.Height + Math.Round(4 * scale) + 17 * scale * 1.5;
+            int footerTop = page.Height - SheetInfoBar.HeightFor(page.Width);
+            Assert.True(labelBottom <= footerTop, $"{size}/{n}/{aspect}/{orientation}: label overlaps footer");
+        }
+    }
+
+    [Theory]
+    [InlineData(SheetAspect.Auto)]
+    [InlineData(SheetAspect.Square)]
+    [InlineData(SheetAspect.FourThree)]
+    [InlineData(SheetAspect.ThreeTwo)]
+    public void Mixed_roll_uses_same_compact_layout_in_preview_and_export(SheetAspect aspect)
+    {
+        var roll = Enumerable.Range(0, 17).Select(i => (i % 4) switch
+        {
+            0 => new ImageBuffer(60, 40),
+            1 => new ImageBuffer(40, 60),
+            2 => new ImageBuffer(80, 20),
+            _ => new ImageBuffer(40, 40),
+        }).ToList();
+        foreach (SheetOrientation orientation in Enum.GetValues<SheetOrientation>())
+        {
+            var opt = new SheetComposer.Options { Aspect = aspect, Orientation = orientation };
+            var preview = SheetComposer.Plan(roll, 640, opt);
+            var export = SheetComposer.Plan(roll, 4096, opt);
+            Assert.Equal((preview.Cols, preview.Rows), (export.Cols, export.Rows));
+            var page = SheetComposer.SizeFor(roll, 4096, opt);
+            double coverage = export.Cells!.Sum(c => (double)c.Width * c.Height) /
+                              ((double)page.Width * page.Height);
+            Assert.True(coverage > 0.4, $"{aspect}/{orientation}: photo coverage {coverage:P1}");
+        }
+    }
+
+    [Theory]
     [InlineData(SheetExportSize.Small, 6_000_000)]
     [InlineData(SheetExportSize.Medium, 12_000_000)]
     [InlineData(SheetExportSize.Large, 24_000_000)]
@@ -77,7 +217,10 @@ public class SheetAspectTests
         for (int n = 37; n <= 45; n++)
         {
             ContactSheet.Layout layout = SheetComposer.Plan(Roll(n, 37, 35), 2048, opt);
-            Assert.Equal((9, 5), (layout.Cols, layout.Rows));
+            // The final number band can favour ten columns near the end of this range.
+            // Both candidates keep five rows instead of buying a complete but taller grid.
+            Assert.InRange(layout.Cols, 9, 10);
+            Assert.Equal(5, layout.Rows);
         }
     }
 
