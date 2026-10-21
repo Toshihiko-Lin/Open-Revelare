@@ -19,9 +19,7 @@ namespace OpenRevelare.Gui.Services;
 /// </summary>
 public static class SheetComposer
 {
-    private const double RefWidth = 2048.0;
-    // Automatic fitting may add paper, but never consume this base margin (scaled with the grid).
-    private const double MinimumMarginAtReference = 16;
+    private const double RefWidth = SheetDesign.ReferenceWidth;
 
     // Choose the design at the export's reference scale. Integer rounding in gaps,
     // cells and page padding can change near-tie scores; output resolution must never choose
@@ -222,16 +220,22 @@ public static class SheetComposer
             _ => throw new ArgumentOutOfRangeException(nameof(size)),
         };
         int limit = LayoutReferenceSize;
+        int bestLimit = limit;
+        double bestError = double.PositiveInfinity;
         // Refine after rounding the actual cells, gaps and padding. No image allocation here.
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 8; i++)
         {
             PixelSize page = SizeFor(thumbs, limit, opt);
+            double pixels = (double)page.Width * page.Height;
+            double error = Math.Abs(pixels / targetPixels - 1);
+            if (error < bestError) { bestError = error; bestLimit = limit; }
+            if (error < 0.002) break;
             int next = Math.Max(1, (int)Math.Round(limit * Math.Sqrt(
-                targetPixels / ((double)page.Width * page.Height))));
+                targetPixels / pixels)));
             if (next == limit) break;
             limit = next;
         }
-        return limit;
+        return bestLimit;
     }
 
     /// <summary>The page at its design margins, before any is added to make the proportion.</summary>
@@ -398,9 +402,9 @@ public static class SheetComposer
 
         private Metrics(double s)
         {
-            Margin = Math.Max(1, Math.Round(MinimumMarginAtReference * s));
+            Margin = Math.Max(1, Math.Round(SheetDesign.PaperInset * s));
             Hairline = Math.Max(1, Math.Round(2 * s));
-            GapX = Math.Round(8 * s);
+            GapX = Math.Round(SheetDesign.SpacingUnit * s);
             // Row gap = column gap plus the band the frame number sits in.
             GapYExtra = Math.Round(18 * s);
             NumberSize = 17 * s;

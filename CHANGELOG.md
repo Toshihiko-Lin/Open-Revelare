@@ -10,7 +10,7 @@
 
 - HDR HEIC 导出新增 **Adaptive HDR（标准增益图）** 选项，可选择 sRGB 或 Display P3 基底；支持 HEIC 的普通查看器显示 SDR，支持标准增益图的 HDR 查看器可恢复高光，实际效果取决于系统和应用支持。
 - 默认保留直接 BT.2020 PQ 导出；导出界面提示直接 PQ 通常体积较小、Adaptive HDR 通常体积较大。大尺寸增益图采用较低分辨率并单独压缩，减少额外体积，同时支持完整文件大小限制。
-- 印样排版更规整、饱满：完整行两端与底端对齐，末行不足时左对齐；保留照片原比例、顺序和必要边距，减少多余留白。
+- 印样排版更规整、饱满：完整行两端与底端对齐，末行不足时左对齐；保留照片原比例和顺序，沿用新版模板的留白节奏，减少多余空白。
 
 ---
 
@@ -22,7 +22,7 @@
 
 - Added **Adaptive HDR (ISO gain map)** HEIC exports with an sRGB or Display P3 base. Standard HEIC viewers display SDR; HDR viewers supporting ISO gain maps can restore highlights. Actual HDR presentation depends on the OS and app.
 - Direct BT.2020 PQ remains the default. Export hints explain that PQ files are usually smaller than Adaptive HDR files. Large gain maps use a reduced resolution and separate compression to reduce overhead, with file-size limits covering the complete container.
-- More balanced, fuller contact sheets: full rows align at both sides and along the bottom, while an incomplete final row stays left-aligned. Preserves photo proportions, order and essential margins while reducing excess whitespace.
+- More balanced, fuller contact sheets: full rows align at both sides and along the bottom, while an incomplete final row stays left-aligned. Preserves photo proportions and order, with spacing consistent with the new template and less excess whitespace.
 
 ## v1.8.6.1（2026-10-18）
 

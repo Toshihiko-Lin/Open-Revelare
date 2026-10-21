@@ -18,7 +18,7 @@ namespace OpenRevelare.Gui.Services;
 /// </summary>
 public static class SheetInfoBar
 {
-    private const double RefWidth = 2048.0;
+    private const double RefWidth = SheetDesign.ReferenceWidth;
 
     // A restrained CJK serif gives the lab record an archival/editorial voice while keeping
     // Chinese, Latin letters and numerals in one family rather than mixing per-glyph fallbacks.
@@ -214,7 +214,7 @@ public static class SheetInfoBar
 
         private Metrics(double s)
         {
-            Pad = 32 * s;
+            Pad = SheetDesign.PaperInset * s;
             Hairline = Math.Max(1, Math.Round(2 * s));
             BarHeight = 248 * s;
             RowH = 60 * s;

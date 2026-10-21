@@ -35,7 +35,8 @@ public class SheetAspectTests
             var page = SheetComposer.SizeFor(roll, size, opt);
             var (x, y) = SheetComposer.GridOrigin(layout, opt);
             double scale = layout.Width / 2048.0;
-            int minimum = Math.Max(1, (int)Math.Round(16 * scale));
+            // The current template reserves four 8 px spacing units, matching its footer inset.
+            int minimum = Math.Max(1, (int)Math.Round(32 * scale));
             int numberBand = (int)Math.Ceiling(Math.Round(4 * scale) + 17 * scale * 1.5);
             int footerTop = page.Height - SheetInfoBar.HeightFor(page.Width);
             Assert.True(x >= minimum && y >= minimum);
@@ -59,7 +60,8 @@ public class SheetAspectTests
             var page = SheetComposer.SizeFor(roll, 2048, opt);
             Assert.InRange(layout.Cols, 9, 10);
             Assert.Equal(5, layout.Rows);
-            Assert.True((double)(page.Width - layout.Width) / page.Width < 0.1,
+            double designMargin = Math.Max(1, Math.Round(32 * layout.Width / 2048.0));
+            Assert.True((page.Width - layout.Width - 2 * designMargin) / page.Width < 0.1,
                         $"n={n}: excessive side margins");
         }
     }
@@ -153,7 +155,10 @@ public class SheetAspectTests
             var page = SheetComposer.SizeFor(roll, 4096, opt);
             double coverage = export.Cells!.Sum(c => (double)c.Width * c.Height) /
                               ((double)page.Width * page.Height);
-            Assert.True(coverage > 0.4, $"{aspect}/{orientation}: photo coverage {coverage:P1}");
+            // Mixed orientations leave space above shorter photos; designed paper margins are
+            // reserved in addition to that space. The image grid must still dominate the page.
+            Assert.True(coverage > 0.35, $"{aspect}/{orientation}: photo coverage {coverage:P1}");
+            Assert.True((double)export.Width * export.Height / ((double)page.Width * page.Height) > 0.6);
         }
     }
 
