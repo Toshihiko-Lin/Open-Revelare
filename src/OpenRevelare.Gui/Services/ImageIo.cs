@@ -570,11 +570,11 @@ public static class ImageIo
     {
         if (RawDecode.IsRawExtension(path))
         {
-            // RAW never reaches here today — only scanner TIFFs are split — but falling back to
-            // the whole-frame preview is correct rather than merely safe: the pipeline still
-            // applies the crop afterwards, so the frame is right, just softer.
-            var (outs, fw, fh) = LoadPreviews(path, maxEdge);
-            return (outs[0], fw, fh);
+            // Virtual copies with different crops use region previews for RAW too. The caller
+            // rebases its crop into this region, so returning the whole file here misframes it.
+            var settings = Settings.Current;
+            return RawDecode.DecodeRawRegionDownsampled(
+                path, settings.DecodeBackend, settings.FbddMode, rect, maxEdge);
         }
 
         ImageBuffer region = TiffIO.LoadTiffRegion(path, rect, inputIsSrgb: false, maxEdge);
@@ -608,19 +608,19 @@ public static class ImageIo
         if (RawDecode.IsRawExtension(path))
         {
             var settings = Settings.Current;
-            var (pixels, fullWidth, fullHeight) = RawDecode.DecodeRawDownsampled(
+            var (pixels, regionWidth, regionHeight) = RawDecode.DecodeRawRegionDownsampled(
                 path,
                 settings.DecodeBackend,
                 settings.FbddMode,
-                new[] { maxEdge },
-                RawDecode.Demosaic.Preview);
+                rect,
+                maxEdge);
             WorkingFrame working = RawDecode.AdmitRawWorking(
-                pixels[0],
+                pixels,
                 path,
                 settings.DecodeBackend.ToString(),
                 settings.FbddMode,
-                $"whole-frame preview fallback for requested region; max-edge={maxEdge}");
-            return (working, fullWidth, fullHeight);
+                $"region preview {rect}; max-edge={maxEdge}");
+            return (working, regionWidth, regionHeight);
         }
 
         var (fullW, fullH) = TiffIO.ReadTiffSize(path);

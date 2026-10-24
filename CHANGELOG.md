@@ -4,6 +4,7 @@
 
 **修复**
 
+- 修复同一 RAW 原片的母本与虚拟副本使用不同裁切时，重开工程后成片预览显示错误范围、与导出不一致的问题。预览现在正确读取各自的裁切区域；已有工程无需重新裁切。
 - 修复印样横竖照片混排时被拉伸、最后一行编号被底栏遮挡的问题。
 
 **新增与改进**
@@ -16,6 +17,7 @@
 
 **Fixed**
 
+- Fixed incorrect photo preview framing after reopening projects where an original RAW frame and its virtual copies have different crops. Previews now read each frame's crop region correctly and match exports; existing projects do not need to be cropped again.
 - Fixed stretched photos in contact sheets with mixed orientations and final-row frame numbers hidden by the footer.
 
 **Added and improved**

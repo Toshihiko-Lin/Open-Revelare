@@ -1,10 +1,105 @@
 using OpenRevelare.Core;
+using OpenRevelare.ColorManagement;
+using OpenRevelare.Gui.Services;
+using OpenRevelare.Gui.ViewModels;
+using System.Reflection;
 using Xunit;
 
 namespace OpenRevelare.Tests;
 
 public sealed class LibRawRuntimeTests
 {
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public async Task Reopened_half_frame_project_previews_both_parent_and_copy_at_the_saved_crop(
+        int quarterTurns, bool flipV)
+    {
+        string path = Path.Combine(TestDataIsolation.Root, $"reopen-half-frame-{Guid.NewGuid():N}.dng");
+        string projectPath = Path.ChangeExtension(path, ".ncproj");
+        try
+        {
+            WriteBayerDng(path, textured: true);
+            var frames = new List<Project.Frame>();
+            foreach (double x in new[] { 0.0, 0.5 })
+            {
+                var crop = (X: x, Y: 0.0, W: 0.5, H: 1.0);
+                for (int i = 0; i < quarterTurns; i++) crop = MainViewModel.RotateCropCw(crop);
+                if (flipV) crop = MainViewModel.FlipCropV(crop);
+                frames.Add(new Project.Frame
+                {
+                    SourcePath = path, IsVirtual = x > 0,
+                    Params = new FrameParams { CropRect = crop, QuarterTurns = quarterTurns, FlipV = flipV },
+                });
+            }
+            Project.Save(projectPath, new Project.Data { Meta = new() { InputType = "raw" }, Frames = frames });
+            var (whole, _, _) = ImageIo.LoadPreview(path, 1000);
+            const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+            // A fresh view model each time exercises closing and reopening, not just switching.
+            for (int reopen = 0; reopen < 2; reopen++)
+            {
+                using var vm = new MainViewModel { SplitMargin = 0 };
+                await vm.OpenProjectAsync(projectPath);
+                // Skip outgoing thumbnail publication: this test runs the real decode/load path
+                // without starting an Avalonia window or changing the saved parameters.
+                typeof(MainViewModel).GetField("_restoring", flags)!.SetValue(vm, true);
+                foreach (var frame in vm.Frames)
+                {
+                    for (int i = 0; i < 400 && vm.IsBusy; i++) await Task.Delay(25);
+                    Assert.False(vm.IsBusy);
+                    vm.CurrentFrame = frame;
+                    for (int i = 0; i < 400 && vm.IsBusy; i++) await Task.Delay(25);
+                    Assert.False(vm.IsBusy);
+                    Assert.True(vm.HasImage, vm.StatusText);
+                    var preview = (WorkingFrame)typeof(MainViewModel).GetField("_previewWorking", flags)!.GetValue(vm)!;
+                    var parameters = (FrameParams)typeof(MainViewModel).GetMethod("ForPreview", flags)!
+                        .Invoke(vm, new object[] { vm.RenderParamsForTest() })!;
+                    var actual = Geometry.ApplyCrop(
+                        Geometry.ApplyOrientation(preview.Pixels, parameters.QuarterTurns, parameters.FlipH, parameters.FlipV),
+                        parameters.CropRect!.Value);
+                    var expected = Geometry.ApplyCrop(
+                        Geometry.ApplyOrientation(whole, quarterTurns, false, flipV), frame.Params.CropRect!.Value);
+                    Assert.Equal((expected.Width, expected.Height), (actual.Width, actual.Height));
+                    Assert.Equal(expected.Data, actual.Data);
+                }
+            }
+        }
+        finally { File.Delete(projectPath); File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData(0.0, 0.0, 0.5, 1.0, 1000)]
+    [InlineData(0.5, 0.0, 0.5, 1.0, 1000)]
+    [InlineData(0.5, 0.0, 0.5, 1.0, 24)]
+    [InlineData(0.25, 0.25, 0.5, 0.5, 24)]
+    [InlineData(0.0, 0.0, 1.0, 1.0, 24)]
+    public void Raw_region_previews_return_the_requested_pixels_and_region_dimensions(
+        double x, double y, double w, double h, int maxEdge)
+    {
+        string path = Path.Combine(TestDataIsolation.Root, $"split-preview-{Guid.NewGuid():N}.dng");
+        try
+        {
+            WriteBayerDng(path, textured: true);
+            var rect = (X: x, Y: y, W: w, H: h);
+            var (whole, width, height) = ImageIo.LoadPreview(path, 1000);
+            ImageBuffer expected = Resample.Box(Geometry.ApplyCrop(whole, rect), maxEdge);
+            var (legacy, legacyWidth, legacyHeight) = ImageIo.LoadPreviewRegion(path, rect, maxEdge);
+            using var cmm = new LittleCmsEngine();
+            var (typed, typedWidth, typedHeight) = ImageIo.LoadWorkingPreviewRegion(
+                path, rect, maxEdge, ColorPipelineVersion.ManagedV2, cmm, TiffInputAssumption.Linear);
+
+            var expectedSource = ((int)Math.Round((x + w) * width) - (int)Math.Round(x * width),
+                                  (int)Math.Round((y + h) * height) - (int)Math.Round(y * height));
+            Assert.Equal(expectedSource, (legacyWidth, legacyHeight));
+            Assert.Equal(expectedSource, (typedWidth, typedHeight));
+            Assert.Equal((expected.Width, expected.Height), (legacy.Width, legacy.Height));
+            Assert.Equal((expected.Width, expected.Height), (typed.Pixels.Width, typed.Pixels.Height));
+            Assert.Equal(expected.Data, legacy.Data);
+            Assert.Equal(expected.Data, typed.Pixels.Data);
+        }
+        finally { File.Delete(path); }
+    }
+
     // Mandatory on every CI platform: a skipped decode must not conceal a missing/wrong DLL.
     [Fact]
     public void Loads_pinned_native_decoder() => Assert.Equal("0.22.2-Release", RawDecode.LibRawVersion);

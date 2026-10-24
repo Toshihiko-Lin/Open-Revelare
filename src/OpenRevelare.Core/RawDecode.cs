@@ -846,13 +846,47 @@ public static class RawDecode
         return (outs, decoded.FrameWidth, decoded.FrameHeight);
     }
 
+    /// <summary>Preview one file-space region, cropped before box averaging. Source dimensions
+    /// describe the region at full resolution, even when LibRaw uses half-size demosaicing.</summary>
+    public static (ImageBuffer Preview, int SourceWidth, int SourceHeight) DecodeRawRegionDownsampled(
+        string path, RawBackend backend, FbddMode fbdd,
+        (double X, double Y, double W, double H) rect, int maxEdge)
+        => WithBackend(path, backend, p => DecodeRawRegionPreview(p, fbdd, rect, maxEdge), out _);
+
+    private static (ImageBuffer Preview, int SourceWidth, int SourceHeight) DecodeRawRegionPreview(
+        string path, FbddMode fbdd, (double X, double Y, double W, double H) rect, int maxEdge)
+    {
+        using Decoded decoded = Process(path, fbdd, halfSize: false, Demosaic.Preview);
+        // Same rounded, half-open bounds as Geometry.ApplyCrop, in each resolution's axes.
+        System.Drawing.Rectangle Bounds(int w, int h)
+        {
+            int x0 = Math.Max(0, (int)Math.Round(rect.X * w));
+            int y0 = Math.Max(0, (int)Math.Round(rect.Y * h));
+            int x1 = Math.Min(w, (int)Math.Round((rect.X + rect.W) * w));
+            int y1 = Math.Min(h, (int)Math.Round((rect.Y + rect.H) * h));
+            if (x1 <= x0 || y1 <= y0)
+                throw new ArgumentException($"crop rect {rect} yields empty region for {w}×{h}");
+            return new(x0, y0, x1 - x0, y1 - y0);
+        }
+        ProcessedImage img = decoded.Image;
+        var region = Bounds(img.Width, img.Height);
+        var source = Bounds(decoded.FrameWidth, decoded.FrameHeight);
+        var preview = BoxFromRaw(img, img.Width, img.Height, img.Channels,
+            Resample.BoxFactor(region.Width, region.Height, maxEdge), decoded.SourceQuantisationStep, region);
+        return (preview, source.Width, source.Height);
+    }
+
     /// <summary>Box-average LibRaw's 16-bit output into a linear float buffer.</summary>
     private static ImageBuffer BoxFromRaw(
         ProcessedImage img, int w, int h, int ch, int factor,
-        double sourceQuantisationStep)
+        double sourceQuantisationStep, System.Drawing.Rectangle? region = null)
     {
         using var conversionTrace = Diagnostics.StartActivity("raw.preview-box");
         const float Inv = 1.0f / 65535.0f;
+        int strideWidth = w;
+        int x0 = region?.X ?? 0, y0 = region?.Y ?? 0;
+        w = region?.Width ?? w;
+        h = region?.Height ?? h;
         int ow = w / factor, oh = h / factor;
         var dst = new ImageBuffer(ow, oh)
         {
@@ -871,8 +905,8 @@ public static class RawDecode
                 float r = 0f, g = 0f, b = 0f;
                 for (int fy = 0; fy < factor; fy++)
                 {
-                    int sy = oy * factor + fy;
-                    int rowBase = (sy * w + ox * factor) * ch;
+                    int sy = y0 + oy * factor + fy;
+                    int rowBase = (sy * strideWidth + x0 + ox * factor) * ch;
                     for (int fx = 0; fx < factor; fx++)
                     {
                         int i = rowBase + fx * ch;
