@@ -108,10 +108,7 @@ public partial class MainWindow : Window
                     // next frame leaves a box sitting over a composition nobody chose it for, and
                     // the arriving frame's own crop stays suppressed while it does.
                     if (_mode == SampleMode.Crop) ExitMode();
-                    // Presets lock the editing draft, not the saved crop. Clear the previous
-                    // photo's selection so picking that ratio again raises SelectionChanged.
-                    _cropAspect = null;
-                    CropPresetCombo.SelectedIndex = 0;
+                    SyncCropPreset(vm);
                     ResetZoom();   // a new frame → back to fit
                 };
                 vm.RollImported += OnRollImported;
@@ -244,11 +241,25 @@ public partial class MainWindow : Window
     private bool _bannerHintDismissed;
 
     // Crop aspect presets (index-aligned with CropPresetCombo); null = free / no lock.
-    private static readonly double?[] CropAspects =
-    {
-        null, 3.0 / 2, 37.0 / 35, 3.0 / 4, 65.0 / 24, 4.0 / 3, 1.0, 7.0 / 6, 3.0 / 2, 2.0 / 1,
-    };
+    private static readonly double?[] CropAspects = OpenRevelare.Gui.Models.CropAspectPresets.Aspects;
     private double? _cropAspect;   // locked crop width/height ratio (screen w:h)
+    private bool _syncingCropPreset;
+
+    private void SyncCropPreset(MainViewModel vm)
+    {
+        var size = vm.CropFrameSize;
+        var crop = vm.CurrentCrop;
+        var match = OpenRevelare.Gui.Models.CropAspectPresets.Match(
+            (size?.W ?? 0) * (crop?.W ?? 1), (size?.H ?? 0) * (crop?.H ?? 1));
+        // Reflect saved geometry without arming the tool or changing the crop on load.
+        _syncingCropPreset = true;
+        try
+        {
+            CropPresetCombo.SelectedIndex = match.Index;
+            _cropAspect = match.Aspect; // retain portrait orientation of a landscape preset too
+        }
+        finally { _syncingCropPreset = false; }
+    }
 
     // ── Editable crop frame ─────────────────────────────────────────────────────
     //
@@ -1816,6 +1827,7 @@ public partial class MainWindow : Window
     /// <summary>Pick an aspect preset: lock the crop drag ratio and drop a centred crop of that ratio.</summary>
     private void OnCropPresetChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_syncingCropPreset) return;
         // Fires during XAML init before named fields exist — read the index off the sender.
         if (sender is not ComboBox combo) return;
         int idx = combo.SelectedIndex;

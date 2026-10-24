@@ -5,14 +5,14 @@
 **修复**
 
 - 修复同一 RAW 原片的母本与虚拟副本使用不同裁切时，重开工程后成片预览显示错误范围、与导出不一致的问题。预览现在正确读取各自的裁切区域；已有工程无需重新裁切。
-- 修复上一张照片的裁切预设被带入下一张、再次选择相同比例无响应的问题。载入照片后预设恢复为“自由”，保留该照片已有的裁切范围。
+- 修复上一张照片的裁切预设被带入下一张、再次选择相同比例无响应的问题。载入后按该照片的实际裁切比例显示匹配预设，支持横竖方向；自定义比例显示“自由”，保留已有裁切范围。
 
 ---
 
 **Fixed**
 
 - Fixed incorrect photo preview framing after reopening projects where an original RAW frame and its virtual copies have different crops. Previews now read each frame's crop region correctly and match exports; existing projects do not need to be cropped again.
-- Fixed crop presets carrying over from the previous photo and ignoring the same ratio when selected again. Loading a photo resets the preset to Free while preserving its saved crop.
+- Fixed crop presets carrying over from the previous photo and ignoring the same ratio when selected again. Loading a photo shows the preset matching its actual crop ratio in either orientation, or Free for a custom ratio, while preserving its saved crop.
 
 ## v1.8.6.3（2026-10-22）
 
