@@ -108,6 +108,10 @@ public partial class MainWindow : Window
                     // next frame leaves a box sitting over a composition nobody chose it for, and
                     // the arriving frame's own crop stays suppressed while it does.
                     if (_mode == SampleMode.Crop) ExitMode();
+                    // Presets lock the editing draft, not the saved crop. Clear the previous
+                    // photo's selection so picking that ratio again raises SelectionChanged.
+                    _cropAspect = null;
+                    CropPresetCombo.SelectedIndex = 0;
                     ResetZoom();   // a new frame → back to fit
                 };
                 vm.RollImported += OnRollImported;
