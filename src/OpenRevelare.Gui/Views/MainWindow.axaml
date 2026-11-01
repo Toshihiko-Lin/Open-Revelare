@@ -1579,6 +1579,20 @@
                             <!-- Crop and straightening controls. Orientation sync lives by the preview tools. -->
                             <Expander Header="{i18n:T '裁切'}">
                                 <StackPanel Spacing="6">
+                                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                               Text="{i18n:T '135 自动裁切：自动识别正片 / 负片并拉直；整卷统一尺度，无法可靠识别的帧保留原裁切。'}" />
+                                    <ComboBox Name="AutoCropModeCombo" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
+                                        <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
+                                    </ComboBox>
+                                    <Grid ColumnDefinitions="*,*">
+                                        <Button Grid.Column="0" Content="{i18n:T '自动裁切本帧'}" Click="OnAutoCropCurrentClick"
+                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Column="1" Content="{i18n:T '自动裁切选中 / 整卷'}" Click="OnAutoCropRollClick" Margin="6,0,0,0"
+                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
+                                                ToolTip.Tip="{i18n:T '有勾选时只处理勾选帧，否则处理整卷；相同源尺寸与方向使用统一裁切尺度。'}" />
+                                    </Grid>
+                                    <Button Content="{i18n:T '取消自动裁切'}" Click="OnCancelAutoCropClick" IsVisible="{Binding IsAutoCropping}" />
                                     <Button Click="OnApplyCropClick" IsEnabled="{Binding HasImage}"
                                             Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
                                             ToolTip.Tip="{i18n:T '把本帧的裁切应用到勾选帧，未勾选则整卷；会按各帧底片重定位'}" />

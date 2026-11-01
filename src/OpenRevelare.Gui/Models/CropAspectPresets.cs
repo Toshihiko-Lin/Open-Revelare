@@ -5,7 +5,7 @@ internal static class CropAspectPresets
     // Index-aligned with CropPresetCombo. Equivalent formats resolve to the first entry.
     internal static readonly double?[] Aspects =
     {
-        null, 3.0 / 2, 37.0 / 35, 3.0 / 4, 65.0 / 24, 4.0 / 3, 1.0, 7.0 / 6, 3.0 / 2, 2.0 / 1,
+        null, OpenRevelare.Core.FilmAutoCrop.ImageAspect, OpenRevelare.Core.FilmAutoCrop.SprocketAspect, 3.0 / 4, 65.0 / 24, 4.0 / 3, 1.0, 7.0 / 6, 3.0 / 2, 2.0 / 1,
     };
 
     internal static (int Index, double? Aspect) Match(double width, double height)

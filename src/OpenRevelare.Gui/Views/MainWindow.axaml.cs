@@ -1844,6 +1844,18 @@ public partial class MainWindow : Window
     // the in-progress draft and the locked ratio, so an edit in flight survives a 90° turn
     // instead of snapping back to the pre-turn shape.
     private void OnApplyGeometryClick(object? sender, RoutedEventArgs e) => Vm?.ApplyGeometryToFrames();
+    private async void OnAutoCropCurrentClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(false);
+    private async void OnAutoCropRollClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(true);
+    private void OnCancelAutoCropClick(object? sender, RoutedEventArgs e) => Vm?.CancelAutoCrop();
+    private async Task AutoCrop135Async(bool wholeRoll)
+    {
+        if (Vm is null) return;
+        ExitMode();
+        await Vm.AutoCrop135Async(AutoCropModeCombo.SelectedIndex == 1
+            ? FilmCropMode.WithSprockets : FilmCropMode.ImageArea, wholeRoll);
+        SyncCropPreset(Vm);
+    }
+
     private void OnApplyCropClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCropToFrames();
 
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)

@@ -3651,6 +3651,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void CancelRollAnalysis()
     {
+        CancelAutoCrop();
         _autoInvertCts?.Cancel();
         _autoInvertCts = null;
         _rollProgressOwner = null;
@@ -4782,6 +4783,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (_disposed) return;
         _disposed = true;
         DisposeScopeSubscriptions();
+        CancelAutoCrop();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
         RenderTrace.SaveSummary();

@@ -148,6 +148,7 @@ Changes are written automatically. The `.ncproj` is placed beside the source whe
 | Reversal | Cineon density-domain inversion, auto-calibration, narrow-band light decoupling (Path A), black-and-white negatives |
 | Colour | ACEScg workspace; sRGB, Display P3 and Adobe RGB output; exact ICC management; Stage 2 controls |
 | Pre-processing | LCC flat-field, offline Lensfun lens matching, distortion and vignetting correction, sprocket masking and geometry crop in linear light |
+| Auto crop | [135 positive / negative auto crop](docs/auto-crop-135.md): content 3:2 and 35 mm border 37:35 modes, small-angle straightening, one crop scale and pixel ratio across the roll |
 | Workflow | Roll management, roll sync, virtual copies, format presets, 80-step undo/redo, histogram and waveform |
 | Output | 16-bit TIFF, JPEG, 10-bit HEIC, linear DNG, 32-bit float scene-linear ACEScg TIFF and HDR gain-map JPEG; templates, scaling and sharpening |
 | Look / HDR | Cineon-input `.cube` print looks, SDR/HDR roll rendering, HDR limit in stops, HDR contact sheets; direct PQ or Adaptive HDR HEIC (viewer support required) |
