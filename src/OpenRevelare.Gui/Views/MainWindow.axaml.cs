@@ -1876,15 +1876,13 @@ public partial class MainWindow : Window
 
     private void OnFlipHClick(object? sender, RoutedEventArgs e)
     {
-        Vm?.FlipHorizontal();
-        ResyncCropDraft();
+        if (Vm is { } vm) _cropDraft = vm.FlipHorizontal(_cropDraft);
         RenderCropFrame();
     }
 
     private void OnFlipVClick(object? sender, RoutedEventArgs e)
     {
-        Vm?.FlipVertical();
-        ResyncCropDraft();
+        if (Vm is { } vm) _cropDraft = vm.FlipVertical(_cropDraft);
         RenderCropFrame();
     }
 
