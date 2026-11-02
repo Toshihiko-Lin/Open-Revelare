@@ -66,13 +66,31 @@ public sealed class FilmAutoCropRegressionTests
             new FilmAutoCrop.Detection(new(.21,.23,.505,.50),1,6000,4000) };
         var plan=FilmAutoCrop.Plan(detections,FilmCropMode.ImageArea);
         Assert.All(plan,r=>Assert.NotNull(r));
-        Assert.Single(plan.Select(r=>(r!.Value.W,r.Value.H)).Distinct());
+        Assert.Equal((plan[0]!.Value.W,plan[0]!.Value.H),(plan[2]!.Value.W,plan[2]!.Value.H));
+        Assert.True(plan[0]!.Value.W>=.5*.99);
         for(int i=0;i<plan.Count;i++)
         {
             var crop=plan[i]!.Value;var frame=detections[i].Image;
+            Assert.Equal(1.5,crop.W*6000/(crop.H*4000),10);
             Assert.True(crop.X>=frame.X-.5/6000 && crop.Y>=frame.Y-.5/4000);
             Assert.True(crop.X+crop.W<=frame.X+frame.W+.5/6000 && crop.Y+crop.H<=frame.Y+frame.H+.5/4000);
         }
+    }
+
+    [Fact]
+    public void Positive_and_negative_rolls_in_same_batch_use_separate_tight_content_sizes()
+    {
+        var detections=new[] {
+            new FilmAutoCrop.Detection(new(.2,.25,3384d/7008,2306d/4672),1,7008,4672){Polarity=FilmPolarity.Positive},
+            new FilmAutoCrop.Detection(new(.21,.25,3420d/7008,2288d/4672),1,7008,4672){Polarity=FilmPolarity.Positive},
+            new FilmAutoCrop.Detection(new(.19,.24,3444d/7008,2300d/4672),1,7008,4672){Polarity=FilmPolarity.Negative},
+            new FilmAutoCrop.Detection(new(.20,.24,3456d/7008,2312d/4672),1,7008,4672){Polarity=FilmPolarity.Negative} };
+        var plan=FilmAutoCrop.Plan(detections,FilmCropMode.ImageArea);
+        Assert.All(plan,r=>Assert.NotNull(r));
+        Assert.Equal(plan[0]!.Value.W,plan[1]!.Value.W);
+        Assert.Equal(plan[2]!.Value.W,plan[3]!.Value.W);
+        Assert.True(plan[2]!.Value.W>plan[0]!.Value.W);
+        Assert.True(plan[0]!.Value.W<=detections[0].Image.W && plan[0]!.Value.W>=detections[0].Image.W*.985);
     }
 
     [Fact]

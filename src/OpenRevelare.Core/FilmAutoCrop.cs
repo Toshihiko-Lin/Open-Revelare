@@ -34,7 +34,7 @@ public static class FilmAutoCrop
         (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? knownRuler = null)
     {
         if (source.Width < 64 || source.Height < 64) return null;
-        var image = Resample.Box(source, 640);
+        var image = Resample.Box(source, 1200);
         int w = image.Width, h = image.Height;
         var log = new double[w * h];
         for (int i = 0; i < log.Length; i++)
@@ -395,7 +395,8 @@ public static class FilmAutoCrop
                     if (run >= scale * .7 && run <= scale * 3.2) { gutter = true; break; }
                     run = 0;
                 }
-                double score = (gutter ? .5 : 1) * (Math.Min(rise, fall) + contrast) / (1 + .3 * Math.Pow(((a + b) / 2d - along / 2d) / (b - a), 2));
+                double lengthFit = 1 / (1 + .15 * Math.Pow((b - a) / scale - 36.1, 2));
+                double score = (gutter ? .5 : 1) * lengthFit * (Math.Min(rise, fall) + contrast) / (1 + .3 * Math.Pow(((a + b) / 2d - along / 2d) / (b - a), 2));
                 if (score <= best) continue;
                 best = score; start = a; end = b;
             }
@@ -422,7 +423,10 @@ public static class FilmAutoCrop
             return (position, peak);
         }
         var top = Boundary(low, 1); var bottom = Boundary(high, -1);
-        if (top.Score > .025 && bottom.Score > .025) { low = top.At; high = bottom.At; }
+        if (top.Score > .012 && bottom.Score > .012
+            && Math.Abs((top.At + bottom.At) / 2.0 - centre) <= acrossScale * .35
+            && bottom.At - top.At >= acrossScale * 23.6)
+        { low = top.At; high = bottom.At; }
         double signedTone = 0; for (int a = start; a < end; a++) signedTone += tone[a];
         double frameBaseLinear = 0;
         for (int c = 0; c < 3; c++)
@@ -521,7 +525,7 @@ public static class FilmAutoCrop
             && d.Confidence >= .12 && d.Image.X >= 0 && d.Image.Y >= 0 && d.Image.W > 0 && d.Image.H > 0
             && d.Image.X + d.Image.W <= 1 && d.Image.Y + d.Image.H <= 1;
         foreach (var group in Enumerable.Range(0, frames.Count).Where(i => Valid(frames[i]))
-                     .GroupBy(i => (frames[i]!.Width, frames[i]!.Height,
+                     .GroupBy(i => (frames[i]!.Width, frames[i]!.Height, frames[i]!.Polarity,
                          Landscape: frames[i]!.Image.W * frames[i]!.Width >= frames[i]!.Image.H * frames[i]!.Height)))
         {
             var ids = group.ToArray();
@@ -532,12 +536,16 @@ public static class FilmAutoCrop
             double median = Median(ids.Select(i => Scale(frames[i]!)));
             var reliable = ids.Where(i => Math.Abs(Scale(frames[i]!) / median - 1) <= 0.08).ToArray();
             if (reliable.Length == 0) continue;
-            // The common content window must fit the smallest reliable exposure. A median
-            // window silently skipped slightly smaller frames, despite a valid location. Scale
-            // outliers were rejected above; never resize individual frames to hide this drift.
-            double scale = (mode == FilmCropMode.ImageArea
-                ? reliable.Min(i => Scale(frames[i]!)) * .975
-                : Median(reliable.Select(i => Scale(frames[i]!))));
+            // Fit inside all full-gate frames (>= 97.5% of median scale) with a 0.8% optical
+            // inset (~0.14 mm per side) so normal frames share one crisp 3:2 size without leaking
+            // film base, while a dark partial-gate exposure crops to its own 3:2 gate instead of
+            // shrinking the whole roll or getting skipped.
+            const double contentInset = .992;
+            var fullGate = reliable.Where(i => Scale(frames[i]!) >= median * .975).ToArray();
+            if (fullGate.Length == 0) fullGate = reliable;
+            double scale = mode == FilmCropMode.ImageArea
+                ? fullGate.Min(i => Scale(frames[i]!)) * contentInset
+                : Median(reliable.Select(i => Scale(frames[i]!)));
             double longSide = mode == FilmCropMode.ImageArea ? 36 : 37;
             // Integer multiples of 3×2 / 37×35 make export dimensions identical across the
             // group, including the one-pixel rounding drift of independently placed rectangles.
@@ -553,15 +561,20 @@ public static class FilmAutoCrop
             foreach (int i in reliable)
             {
                 Rect r = frames[i]!.Image;
-                double x = Math.Round((r.X + r.W / 2 - rw / 2) * group.Key.Width) / group.Key.Width;
-                double y = Math.Round((r.Y + r.H / 2 - rh / 2) * group.Key.Height) / group.Key.Height;
+                double fw = rw, fh = rh;
+                if (mode == FilmCropMode.ImageArea && (fw > r.W + 1.0 / group.Key.Width || fh > r.H + 1.0 / group.Key.Height))
+                {
+                    int frameUnit = (int)Math.Floor(longSide * Scale(frames[i]!) * contentInset / numerator);
+                    if (frameUnit < 1) continue;
+                    fw = (double)((group.Key.Landscape ? numerator : denominator) * frameUnit) / group.Key.Width;
+                    fh = (double)((group.Key.Landscape ? denominator : numerator) * frameUnit) / group.Key.Height;
+                }
+                double x = Math.Round((r.X + r.W / 2 - fw / 2) * group.Key.Width) / group.Key.Width;
+                double y = Math.Round((r.Y + r.H / 2 - fh / 2) * group.Key.Height) / group.Key.Height;
                 // Moving a sprocket crop back into bounds would lose the film edge on one side.
                 // Refuse that frame rather than silently shrinking its zoom or cutting its holes.
-                if (x < 0 || y < 0 || x + rw > 1 || y + rh > 1) continue;
-                if (mode == FilmCropMode.ImageArea &&
-                    (x < r.X - .5 / group.Key.Width || y < r.Y - .5 / group.Key.Height
-                    || x + rw > r.X + r.W + .5 / group.Key.Width || y + rh > r.Y + r.H + .5 / group.Key.Height)) continue;
-                result[i] = new Rect(x, y, rw, rh);
+                if (x < 0 || y < 0 || x + fw > 1 || y + fh > 1) continue;
+                result[i] = new Rect(x, y, fw, fh);
             }
         }
         return result;
