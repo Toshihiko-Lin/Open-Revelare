@@ -209,6 +209,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before development. Calibration experime
 
 The code is licensed under **GPL-3.0-only**; see [LICENSE](LICENSE).
 
+Deep-WB is an optional download: accept the license when first using Smart Cast Correction, or run `OpenRevelare.Cli --install-deep-wb`. Default packages do not include model weights. Downloads automatically fall back to the [Gitee mirror](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx) if GitHub fails; offline installation is also supported. The ONNX runtime remains bundled.
+
 `models/net_awb.onnx` is the Deep White-Balance Editing model, distributed under **CC BY-NC-SA 4.0** and outside this project's GPL scope. See [models/README.md](models/README.md) and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 References include [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple), [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) and darktable `negadoctor`.

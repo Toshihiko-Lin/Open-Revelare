@@ -2,6 +2,12 @@
 
 ## 未发布 / Unreleased
 
+- 未安装 Deep-WB 时，智能色偏修正按钮置灰并叠加半透明下载图标，显示模型大小；点击可查看许可并选择 GitHub 或 Gitee 下载，安装后恢复使用。GitHub 模型迁入独立模型仓库的固定 Release。
+- Uninstalled Deep-WB shows a greyed-out smart correction button with a translucent download icon and model size. Click to review the license and install from GitHub or Gitee. GitHub models are served from a fixed release in the dedicated model repository.
+
+- Deep-WB 模型改为可选下载安装：默认安装包不含权重，首次使用智能色偏修正时确认许可后下载，GitHub 失败时自动尝试 Gitee 国内镜像。支持取消、完整性校验与离线安装，模型保存到用户数据目录并在升级后保留；ONNX 推理运行库仍随包提供。
+- Deep-WB weights are now an optional download rather than bundled in default packages. First use offers license acceptance and installation, with automatic Gitee fallback if GitHub fails, cancellation, integrity checks and offline installation. Models persist in the user data directory across upgrades; the ONNX runtime remains bundled.
+
 - 改进内置除尘修复：扩大纹理候选搜索，避开其他已标记灰尘，按蒙版外的干净边界匹配颜色与明暗渐变，平滑融合边缘。修复保留浮点源图的负值与超白值，最小笔刷遮罩与实际修改范围一致，局部放大与整图使用一致的纹理上下文。无需额外组件或模型。
 - Improved built-in dust repair with a wider clean-texture search, exclusion of other marked defects, clean-boundary color and shading matching, and smooth feathering. Preserves extended floating-point source values, aligns the smallest brush mask with its actual footprint, and retains matching context for regional and full-frame rendering. No additional components or models are required.
 - 来源致谢：内置除尘的部分改进参考了 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 的设计思路，由 OpenRevelare 独立实现。

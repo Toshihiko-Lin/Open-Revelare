@@ -83,6 +83,22 @@ public partial class MainWindow : Window
                         vm.StatusText = Loc.T("色彩引擎不可用，预览已回退：") + ex.Message;
                     }
                 }
+                vm.ConfirmDeepWbDownload = async () =>
+                {
+                    bool accepted = false;
+                    vm.PreferDeepWbMirror = false;
+                    await new InfoDialog(Loc.T("安装可选 Deep-WB 模型"),
+                        Loc.T("智能色偏修正需要另行下载 Deep-WB 模型（约 17.5 MB），由 Mahmoud Afifi 等人提供，采用 CC BY-NC-SA 4.0 许可，仅限非商业用途。下载来源：本项目 GitHub 仓库；失败时自动尝试 Gitee 国内镜像。模型保存在用户数据目录，升级后保留。")
+                        + "\nhttps://creativecommons.org/licenses/by-nc-sa/4.0/\n\n" + OpenRevelare.DeepWb.Onnx.DeepWbModel.InstalledPath)
+                        .WithAction(Loc.T("同意许可并下载安装"), Loc.T("取消"), () => accepted = true, isDefault: false)
+                        .WithSecondaryAction(Loc.T("同意许可并从国内镜像下载"), () =>
+                        {
+                            vm.PreferDeepWbMirror = true;
+                            accepted = true;
+                        })
+                        .ShowDialog(this);
+                    return accepted;
+                };
                 vm.AskRelinkFolder = AskRelinkFolderAsync;
                 vm.ConfirmUnverifiedRelink = async count =>
                 {
@@ -138,7 +154,7 @@ public partial class MainWindow : Window
         // percentage both go stale unless the transform is recomputed.
         ViewPort.SizeChanged += (_, _) => ApplyTransform();
         WindowsPreview.NativePointerMoved += OnNativePreviewPointerMoved;
-        Activated += (_, _) => RequestDustAnimationFrame();
+        Activated += (_, _) => { Vm?.RefreshDeepWbAvailability(); RequestDustAnimationFrame(); };
         Deactivated += (_, _) =>
         {
             DustBrushRing.IsVisible = false;
@@ -1467,6 +1483,8 @@ public partial class MainWindow : Window
 
     private void OnAutoFilmBaseClick(object? sender, RoutedEventArgs e) => Vm?.AutoFilmBase();
     private void OnAutoWbHighClick(object? sender, RoutedEventArgs e) => Vm?.AutoWbHigh();
+    private async void OnInstallDeepWbClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.InstallDeepWbAsync(); }
+
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
     private void OnApplyCalToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToRoll();
     private void OnApplySceneToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplySceneToRoll();

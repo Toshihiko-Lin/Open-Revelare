@@ -67,7 +67,7 @@ jobs:
           test -f /tmp/pub/liblcms2.so.2          || { echo "缺 app-owned Little CMS"; exit 1; }
           test -f /tmp/pub/liblcms2.so            || { echo "缺 Little CMS loader alias"; exit 1; }
           test -f /tmp/pub/lcms2.manifest.json    || { echo "缺 Little CMS manifest"; exit 1; }
-          test -f /tmp/pub/models/net_awb.onnx    || { echo "缺 Deep-WB 模型"; exit 1; }
+          python3 packaging/ci/verify-optional-models.py /tmp/pub --rid linux-x64
           for file in OpenRevelare.dll OpenRevelare.Core.dll Avalonia.Base.dll \
                       OpenRevelare.deps.json OpenRevelare.runtimeconfig.json \
                       System.Private.CoreLib.dll libcoreclr.so libhostfxr.so libhostpolicy.so; do
@@ -131,6 +131,8 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $pub "lcms2.manifest.json"))) { throw "缺 Little CMS manifest" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub $presenterDll))) { throw "缺 Win32 presenter" }
           if (-not (Test-Path -LiteralPath (Join-Path $pub $presenterManifest))) { throw "缺 Win32 presenter manifest" }
+          python packaging/ci/verify-optional-models.py $pub --rid win-x64
+          if ($LASTEXITCODE -ne 0) { throw "可选模型发布检查失败" }
           $sourceHash = (Get-FileHash -LiteralPath native/win-x64/lcms2.dll -Algorithm SHA256).Hash
           $publishHash = (Get-FileHash -LiteralPath (Join-Path $pub "lcms2.dll") -Algorithm SHA256).Hash
           if ($sourceHash -ne $publishHash) { throw "publish 中的 lcms2.dll 与 app-owned 构建不一致" }
@@ -199,7 +201,7 @@ jobs:
           test -f /tmp/pub/lcms2.manifest.json  || { echo "缺 Little CMS manifest"; exit 1; }
           cmp -s native/osx-arm64/liblcms2.2.dylib /tmp/pub/liblcms2.2.dylib
           test -f /tmp/pub/libOpenRevelare.Presentation.MacOS.Native.dylib || { echo "缺 macOS presenter 垫片 —— 没有它 HDR/EDR 预览静默退回 SDR 位图"; exit 1; }
-          test -f /tmp/pub/models/net_awb.onnx  || { echo "缺 Deep-WB 模型"; exit 1; }
+          python3 packaging/ci/verify-optional-models.py /tmp/pub --rid osx-arm64
           for file in OpenRevelare.dll OpenRevelare.Core.dll Avalonia.Base.dll \
                       OpenRevelare.deps.json OpenRevelare.runtimeconfig.json \
                       System.Private.CoreLib.dll libcoreclr.dylib libhostfxr.dylib libhostpolicy.dylib; do

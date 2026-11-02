@@ -84,6 +84,7 @@ static int Run(string[] args)
             case "--print-wb-calib": flags.Add("print-wb-calib"); break;
             case "--print-trc-calib": flags.Add("print-trc-calib"); break;
             case "--auto-wb": flags.Add("auto-wb"); break;
+            case "--install-deep-wb": flags.Add("install-deep-wb"); break;
             case "--awb-model": opts["awb-model"] = Next(args, ref i, a); break;
             case "--print-awb": flags.Add("print-awb"); break;
             case "--dump-preinv": flags.Add("dump-preinv"); break;
@@ -99,6 +100,22 @@ static int Run(string[] args)
                 PrintUsage();
                 return 2;
         }
+    }
+
+    if (flags.Contains("install-deep-wb"))
+    {
+        Console.WriteLine("Deep-WB by Mahmoud Afifi et al., CVPR 2020; CC BY-NC-SA 4.0 (non-commercial).\nhttps://creativecommons.org/licenses/by-nc-sa/4.0/");
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+        Console.CancelKeyPress += cancel;
+        try
+        {
+            OpenRevelare.DeepWb.Onnx.DeepWbModel.InstallAsync(cancellationToken: cancellation.Token).GetAwaiter().GetResult();
+            Console.WriteLine("Installed: " + OpenRevelare.DeepWb.Onnx.DeepWbModel.InstalledPath);
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine("Deep-WB installation failed: " + ex.Message); return 1; }
+        finally { Console.CancelKeyPress -= cancel; }
     }
 
     if (!opts.ContainsKey("input") || !opts.ContainsKey("output"))
@@ -784,6 +801,8 @@ static void PrintUsage()
 {
     Console.WriteLine(
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
+        "  --install-deep-wb          install optional CC BY-NC-SA 4.0 model (non-commercial); no input/output needed\n" +
+        "  --awb-model <path>         use an offline model for --print-awb\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +
         "  -o, --output <path>         output TIFF, JPEG, or HEIC (.heic/.heif)\n" +
         "  --heic-adaptive            ISO gain-map HDR HEIC instead of direct PQ\n" +

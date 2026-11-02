@@ -121,9 +121,11 @@ and bridge sources; see licenses/raw/ in the distribution for license texts.
                Michael S. Brown
     Paper    : "Deep White-Balance Editing", CVPR 2020
     Source   : https://github.com/mahmoudnafifi/Deep_White_Balance
+    Distribution: Optional model download from OpenRevelare GitHub / Gitee.
+    Notice   : models/DeepWB-NOTICE.txt (also provided as a Gitee attachment).
 
-    These weights are a third-party asset shipped alongside OpenRevelare, not
-    a part of it. OpenRevelare's own GPL-3.0 grant does not extend to this
+    These weights are an optional third-party download, excluded from default
+    OpenRevelare packages. OpenRevelare's own GPL-3.0 grant does not extend to this
     file and could not: the copyright is the authors', and the terms above
     are theirs. OpenRevelare is distributed free of charge, with no sale,
     subscription or in-app purchase, so the distribution itself is not for
@@ -132,7 +134,7 @@ and bridge sources; see licenses/raw/ in the distribution for license texts.
     Whoever receives this file is bound by CC BY-NC-SA 4.0 independently of
     the GPL-3.0 rights they hold over the program's source code. In
     particular, the GPL-3.0 right to redistribute OpenRevelare commercially
-    does NOT extend to these weights — delete the models/ directory first.
+    does NOT extend to these weights — do not add them to commercial packages.
     Everything except 智能色偏修正 works without it. The authors also ask that
     the paper above be cited.
 

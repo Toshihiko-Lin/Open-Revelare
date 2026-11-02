@@ -238,6 +238,20 @@ Path A 能把 CFA 通道串扰精确标定并分离出去，代价是要多拍�
 | **灰卡采样 · Cineon 470** | 手动 | 框画面里拍到的灰卡，它即 Cineon 标准灰：三通道都落在码值 470 |
 | **智能色偏修正（Beta）** | 自动 | Deep-WB 神经网络推断，不需要画面中有中性物 |
 
+**首次使用需安装可选模型。** 默认安装包不含 Deep-WB 权重，ONNX 推理运行库仍随程序提供。
+未安装时「智能色偏修正」按钮置灰，并叠加半透明下载图标及模型大小提示。点击下载图标，
+阅读许可并选择「同意许可并下载安装」，下载约 17.5 MB 的模型；也可选择「同意许可并从国内镜像下载」直接使用 Gitee。
+GitHub 下载失败时自动尝试 Gitee 国内镜像。状态栏及按钮下方显示进度，可取消；安装成功后按钮恢复正常，再次点击即可分析。
+模型采用 **CC BY-NC-SA 4.0** 单独许可，仅限非商业用途，不属于程序的 GPL-3.0 授权范围。
+取消安装不影响其他功能。下载会校验大小和 SHA-256，失败后可再次点击重试。
+
+离线安装可从 [Gitee 国内地址](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx) 手动下载 `net_awb.onnx`，
+放入 Windows 的 `%LOCALAPPDATA%/OpenRevelare/models/`，或 Linux/macOS 的
+`${XDG_DATA_HOME:-~/.local/share}/OpenRevelare/models/`，也可放入可执行文件旁的 `models/`。
+`OPENREVELARE_DATA_DIR` 可覆盖用户数据目录；用户目录中的模型升级后保留，删除该文件即可卸载。
+CLI 用户可运行 `OpenRevelare.Cli --install-deep-wb`；许可与校验值见随包的 `models/README.md`
+及 `models/DeepWB-NOTICE.txt`。
+
 两个入口解的是同一个量：灰卡是测量，智能色偏修正是推测，有灰卡时用灰卡。拍了灰卡的卷框画面
 里的灰卡，它即 Cineon 标准灰，三通道都落在码值 **470**，色偏和曝光位置一起定下；状态栏报亮度
 较整卷标定动了几档——标定本来就把灰卡放在 470 附近时这个数接近 0，画面几乎不变是预期的。

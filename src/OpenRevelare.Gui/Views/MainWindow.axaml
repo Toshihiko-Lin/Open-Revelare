@@ -1190,7 +1190,7 @@
                                     <StackPanel Spacing="2">
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
                                             <ToggleButton Name="GreyBtn" Grid.Column="0" Grid.ColumnSpan="{Binding GreyCardSpan}"
-                                                          Classes="sampling" Margin="0,0,3,0"
+                                                          Classes="sampling" Margin="0,0,3,0" VerticalAlignment="Top"
                                                           Click="OnSampleNeutralGreyClick" IsEnabled="{Binding HasImage}"
                                                           ToolTip.Tip="{i18n:T '框选画面中拍到的灰卡，将其定为 Cineon 标准灰：三通道落在码值 470，色偏与曝光位置一同确定。与高光采样互为替代，后执行者生效。'}">
                                                 <Grid ColumnDefinitions="Auto,*">
@@ -1198,15 +1198,36 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '灰卡采样'}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </ToggleButton>
-                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
-                                                    IsVisible="{Binding IsColourRoll}"
-                                                    Click="OnAutoWbAiClick" IsEnabled="{Binding HasImage}"
-                                                    ToolTip.Tip="{i18n:T '不需要灰卡。建议先裁掉齿孔和片边；结果可以撤销。'}">
-                                                <Grid ColumnDefinitions="Auto,*">
-                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '智能色偏修正（Beta）'}" VerticalAlignment="Center" />
-                                                </Grid>
-                                            </Button>
+                                            <Grid Grid.Column="1" Margin="3,0,0,0" RowDefinitions="Auto,Auto"
+                                                  IsVisible="{Binding IsColourRoll}" IsEnabled="{Binding !HasLongTask}">
+                                                <Button Name="SmartCastButton" HorizontalAlignment="Stretch"
+                                                        Click="OnAutoWbAiClick"
+                                                        ToolTip.Tip="{i18n:T '不需要灰卡。建议先裁掉齿孔和片边；结果可以撤销。'}">
+                                                    <Button.IsEnabled>
+                                                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                            <Binding Path="HasImage" />
+                                                            <Binding Path="IsDeepWbInstalled" />
+                                                        </MultiBinding>
+                                                    </Button.IsEnabled>
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
+                                                        <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '智能色偏修正（Beta）'}" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Button>
+                                                <!-- A real button keeps the download reachable by keyboard while the feature is disabled. -->
+                                                <Button Name="DeepWbDownloadButton" IsVisible="{Binding NeedsDeepWbModel}"
+                                                        Background="Transparent" BorderThickness="0" HorizontalAlignment="Stretch"
+                                                        HorizontalContentAlignment="Left" Padding="5" Click="OnInstallDeepWbClick"
+                                                        AutomationProperties.Name="{i18n:T '下载 Deep-WB 模型'}"
+                                                        ToolTip.Tip="{i18n:T '点击下载安装可选模型，安装后启用智能色偏修正。GitHub 不可用时自动尝试 Gitee 国内镜像。'}">
+                                                    <Border Background="{DynamicResource PanelBrush}" CornerRadius="5" Padding="4" Opacity="0.85">
+                                                        <ctl:Icon Data="{StaticResource IcoDownload}" />
+                                                    </Border>
+                                                </Button>
+                                                <TextBlock Grid.Row="1" Classes="groupHint" Margin="0,4,0,0"
+                                                           IsVisible="{Binding NeedsDeepWbModel}" Text="{Binding DeepWbInstallHint}"
+                                                           TextWrapping="Wrap" />
+                                            </Grid>
                                         </Grid>
                                         <Border Classes="smartFeedback" Classes.warning="{Binding SmartCastNeedsReview}"
                                                 IsVisible="{Binding HasSmartCastFeedback}">

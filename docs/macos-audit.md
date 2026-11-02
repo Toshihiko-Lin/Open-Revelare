@@ -355,6 +355,9 @@ CI 那一步的 shell 逻辑也在本机用假 `sysctl` 跑过：正常路径 EX
 **守**：托管代码在 `osx-arm64` RID 下编不编得过（带 `-warnaserror`），
 以及 publish 的产物齐不齐——主程序、`libraw.23.dylib`、`net_awb.onnx`。
 
+> 2026-11-02 更新：上述模型随包检查为历史行为。Deep-WB 权重现为可选下载，
+> 当前 CI 检查默认 publish 产物不含 `models/net_awb.onnx`；ONNX 推理运行库仍随包提供。
+
 最后一条正是 v1.0.0 栽过好几次的地方：dylib 的复制条件如果写在 `Core` 里，
 `$(RuntimeIdentifier)` 是空的，条件永不成立 → **编译不报错、包照打**，
 直到 mac 上导入 RAW 才 `DllNotFoundException`。这一格能在几十秒内拦住它。

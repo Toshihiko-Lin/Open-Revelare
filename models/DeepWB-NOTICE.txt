@@ -1,0 +1,19 @@
+Deep White-Balance Editing — optional model / 可选模型
+
+File / 文件: net_awb.onnx
+Authors / 作者: Mahmoud Afifi, Konstantinos G. Derpanis, Björn Ommer, Michael S. Brown
+Paper / 论文: Deep White-Balance Editing, CVPR 2020
+Original project / 原项目: https://github.com/mahmoudnafifi/Deep_White_Balance
+License / 许可: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
+Full license / 许可全文: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+Upstream license / 上游许可: https://github.com/mahmoudnafifi/Deep_White_Balance/blob/master/LICENSE.md
+
+Upstream states: "This software is provided for research purposes only and CAN NOT be used for commercial purposes."
+仅供研究及非商业用途。再分发须保留署名及许可；修改后的衍生物须以相同许可发布。
+These third-party weights are outside OpenRevelare's GPL-3.0 license. Default application packages do not include them.
+本模型权重不属于 OpenRevelare 的 GPL-3.0 授权范围，默认程序安装包不包含该模型。
+
+ONNX copy / ONNX 文件来源:
+https://raw.githubusercontent.com/Toshihiko-Lin/Open-Revelare/ff7e379b27614fdad850ae5f09e3e5f26a99f48b/models/net_awb.onnx
+Size / 大小: 17480341 bytes
+SHA-256: 50503B7F6CFB0663EBA0D0D61CBC68E8E93E56581DB3143B203BAB163F7C9F54

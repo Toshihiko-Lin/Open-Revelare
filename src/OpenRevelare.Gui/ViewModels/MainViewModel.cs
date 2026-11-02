@@ -3876,8 +3876,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // This is OpenRevelare.DeepWb.Onnx's corrector — the SAME one the CLI's --print-awb parity
     // harness drives. The GUI used to have a private copy that resized with plain bilinear and
     // skipped the uint8 quantisation, so the pixels the net judged here were not the pixels the
-    // reference was checked against. The model is a loose file beside the app (the backend's
-    // Content item), not an embedded resource: onnxruntime maps it directly instead of the GUI
+    // reference was checked against. The optional model is installed in the user data directory,
+    // or supplied beside the app for offline use: onnxruntime maps it directly instead of the GUI
     // inflating it through a MemoryStream into a 17 MB managed array first.
     private OpenRevelare.DeepWb.Onnx.OnnxDeepWbCorrector? _deepWb;
 
@@ -3944,6 +3944,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SmartCastFeedbackText));
     }
 
+    public Func<Task<bool>>? ConfirmDeepWbDownload;
+
     /// <summary>
     /// Smart white balance (Beta) — the Deep-WB net closed over the per-channel HIGHLIGHT
     /// ENDPOINT. Descends from the source worker (gui/main_window.py _AutoWBAffineWorker +
@@ -3968,6 +3970,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task AutoWbAiAsync()
     {
+        RefreshDeepWbAvailability();
+        if (!IsDeepWbInstalled && !await InstallDeepWbAsync()) return;
         if (_previewWorking is null) return;
         SourceStamp? analysisSource = _previewStamp;
         long analysisGeneration = _previews.Generation;
@@ -4549,6 +4553,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         NotifyRollBroadcastHints();
         OnPropertyChanged(nameof(SmartCastFeedbackText));
+        OnPropertyChanged(nameof(DeepWbInstallHint));
         OnPropertyChanged(nameof(RecalibrationNoticeText));
         NotifyCalibrationInfo();
         if (Frames.Count == 0) StatusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");

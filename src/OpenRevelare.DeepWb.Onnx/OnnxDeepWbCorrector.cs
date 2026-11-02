@@ -30,9 +30,8 @@ public sealed class OnnxDeepWbCorrector : IDeepWbCorrector, IDisposable
     private readonly string _outputName;
     private readonly int _maxSize;
 
-    /// <summary>Default model location: next to the app, as the csproj copies it.</summary>
-    public static string DefaultModelPath =>
-        Path.Combine(AppContext.BaseDirectory, "models", "net_awb.onnx");
+    /// <summary>Per-user optional model, with support for an offline model beside the app.</summary>
+    public static string DefaultModelPath => DeepWbModel.DefaultPath;
 
     /// <param name="modelPath">net_awb.onnx; null → <see cref="DefaultModelPath"/>.</param>
     /// <param name="maxSize">Inference long edge. The corrections are per-channel
@@ -40,12 +39,10 @@ public sealed class OnnxDeepWbCorrector : IDeepWbCorrector, IDisposable
     public OnnxDeepWbCorrector(string? modelPath = null, int maxSize = 656)
     {
         modelPath ??= DefaultModelPath;
-        // 正常安装里这个文件是在的。缺失通常意味着有人为了商业再分发主动删掉了
-        // models/（那正是 models/README.md 指明的做法），所以这里给的是一句人话而不是断言。
         if (!File.Exists(modelPath))
             throw new FileNotFoundException(
-                $"未找到 Deep-WB 模型 net_awb.onnx（应在 {modelPath}）。" +
-                "「智能色偏修正」需要它，其余功能不受影响；说明见 models/README.md。",
+                $"未安装 Deep-WB 模型 net_awb.onnx（可放在 {modelPath}）。" +
+                "请在界面点击「智能色偏修正」下载安装，或运行 CLI --install-deep-wb；也可用 --awb-model 指定离线模型。",
                 modelPath);
 
         _session = new InferenceSession(modelPath);

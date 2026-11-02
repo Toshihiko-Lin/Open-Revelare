@@ -78,7 +78,7 @@
     <ProjectReference Include="..\OpenRevelare.Presentation\OpenRevelare.Presentation.csproj" />
     <ProjectReference Include="..\OpenRevelare.Presentation.Win32\OpenRevelare.Presentation.Win32.csproj" />
     <ProjectReference Include="..\OpenRevelare.Presentation.MacOS\OpenRevelare.Presentation.MacOS.csproj" />
-    <!-- Deep-WB backend. Brings onnxruntime (and the net_awb.onnx Content item) with it, so the
+    <!-- Deep-WB backend. Brings onnxruntime with it; model weights are installed on demand, so the
          GUI no longer names the package or the model itself: there is ONE implementation of
          IDeepWbCorrector and ONE copy of the weights. The GUI used to carry a private second
          corrector plus its own embedded copy of the 17 MB model — which also meant the CLI's

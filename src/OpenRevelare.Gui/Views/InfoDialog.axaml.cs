@@ -139,5 +139,5 @@ public partial class InfoDialog : Window
         // OpenRevelare.app/Contents/Resources）。这一行是指路牌，别删。
         "完整第三方声明见随附的 THIRD_PARTY_NOTICES.txt。\n\n" +
         "「智能色偏修正」用到的 net_awb.onnx 权重（Deep White-Balance Editing,\n" +
-        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。")).WithLogo();
+        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。默认安装包不含模型权重，首次使用时确认许可后从 GitHub／Gitee 另行下载；ONNX 推理运行库仍随包提供。")).WithLogo();
 }

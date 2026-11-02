@@ -93,6 +93,9 @@ jobs:
           if (-not (Test-Path -LiteralPath publish/win-x64/lcms2.manifest.json)) { throw "缺 Little CMS manifest" }
           if (-not (Test-Path -LiteralPath (Join-Path publish/win-x64 $presenterDll))) { throw "缺 Win32 presenter" }
           if (-not (Test-Path -LiteralPath (Join-Path publish/win-x64 $presenterManifest))) { throw "缺 Win32 presenter manifest" }
+      - name: 验证可选模型发布内容
+        shell: pwsh
+        run: python packaging/ci/verify-optional-models.py publish/win-x64 --rid win-x64
       - name: Inno Setup
         shell: pwsh
         run: |
@@ -121,6 +124,8 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $installed "OpenRevelare.exe"))) { throw "Installed app executable is missing" }
           if (-not (Test-Path -LiteralPath (Join-Path $installed "lcms2.dll"))) { throw "Installed Little CMS is missing" }
           if (-not (Test-Path -LiteralPath (Join-Path $installed "lcms2.manifest.json"))) { throw "Installed Little CMS manifest is missing" }
+          python packaging/ci/verify-optional-models.py $installed --rid win-x64
+          if ($LASTEXITCODE -ne 0) { throw "安装包可选模型检查失败" }
           $uninstaller = Join-Path $installed "unins000.exe"
           if (-not (Test-Path -LiteralPath $uninstaller)) { throw "Installed uninstaller is missing" }
           $unins = Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
@@ -156,10 +161,13 @@ jobs:
           install -m 0755 native/linux-x64/liblcms2.so publish/linux-x64/liblcms2.so
           install -m 0644 native/linux-x64/lcms2.manifest.json publish/linux-x64/lcms2.manifest.json
           cmp -s native/linux-x64/liblcms2.so.2 publish/linux-x64/liblcms2.so.2
+      - name: 验证可选模型发布内容
+        run: python3 packaging/ci/verify-optional-models.py publish/linux-x64 --rid linux-x64
       - name: 打 AppImage
         run: ./packaging/linux/build-appimage.sh --no-publish
       - name: AppImage 装配自检
         run: |
+          python3 packaging/ci/verify-optional-models.py publish/OpenRevelare.AppDir/usr/bin --rid linux-x64
           test -f publish/OpenRevelare.AppDir/usr/bin/liblcms2.so.2 || { echo "AppImage 缺 app-owned Little CMS"; exit 1; }
           test -f publish/OpenRevelare.AppDir/usr/bin/liblcms2.so || { echo "AppImage 缺 Little CMS loader alias"; exit 1; }
           test -f publish/OpenRevelare.AppDir/usr/bin/lcms2.manifest.json || { echo "AppImage 缺 Little CMS manifest"; exit 1; }
@@ -217,6 +225,8 @@ jobs:
           cmp -s "native/$RID/liblcms2.2.dylib" "publish/$RID/liblcms2.2.dylib"
           cmp "native/$RID/libOpenRevelare.Presentation.MacOS.Native.dylib" \
               "publish/$RID/libOpenRevelare.Presentation.MacOS.Native.dylib"
+      - name: 验证可选模型发布内容
+        run: python3 packaging/ci/verify-optional-models.py publish/${{ matrix.rid }} --rid ${{ matrix.rid }}
       - name: 打 .app / .dmg（ad-hoc 签名）
         # ad-hoc 是**定下来的路线**，不是临时凑合：用户 2026-08-04 决定不买 Apple
         # Developer Program（99 美元/年）。代价是用户首次打开要自己绕 Gatekeeper，
@@ -225,6 +235,7 @@ jobs:
         run: ./packaging/macos/build-app.sh --no-publish --dmg
       - name: .app 装配自检
         run: |
+          python3 packaging/ci/verify-optional-models.py publish/OpenRevelare.app/Contents/MacOS --rid ${{ matrix.rid }}
           test -f publish/OpenRevelare.app/Contents/MacOS/liblcms2.2.dylib || { echo ".app 缺 app-owned Little CMS"; exit 1; }
           test -f publish/OpenRevelare.app/Contents/MacOS/liblcms2.dylib || { echo ".app 缺 Little CMS loader alias"; exit 1; }
           test -f publish/OpenRevelare.app/Contents/MacOS/lcms2.manifest.json || { echo ".app 缺 Little CMS manifest"; exit 1; }

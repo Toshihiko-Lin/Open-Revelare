@@ -347,6 +347,21 @@ of white balance; that is the warmth of the scene's light, and lives in the Disp
 | **Grey card · Cineon 470** | Manual | Select the grey card in the picture; it is the Cineon standard grey, so all three channels land on code 470 |
 | **Smart cast correction (beta)** | Automatic | Neural inference; needs nothing neutral in the picture |
 
+**Install the optional model on first use.** Default packages exclude Deep-WB weights; the ONNX
+runtime remains bundled. Until installed, Smart cast correction is greyed out with a translucent download icon and model size. Click the icon, review the license and choose Accept license
+and install to download about 17.5 MB. If GitHub fails, the download automatically tries the Gitee
+mirror. Choose Accept license and use Gitee mirror to start with the domestic source instead. The status bar and button hint show progress and allow cancellation. Installation restores the button; click it again to analyse.
+The model has a separate **CC BY-NC-SA 4.0** license for non-commercial use, outside the program's
+GPL-3.0 license. Other features work without it. Size and SHA-256 are verified; click again to retry
+if the download fails.
+
+For offline installation, download `net_awb.onnx` from the [Gitee mirror](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx)
+and place it in `%LOCALAPPDATA%/OpenRevelare/models/` on Windows, or
+`${XDG_DATA_HOME:-~/.local/share}/OpenRevelare/models/` on Linux/macOS, or in `models/` beside the executable.
+`OPENREVELARE_DATA_DIR` overrides the user data directory. The user copy survives upgrades; delete
+the file to uninstall it. CLI users can run `OpenRevelare.Cli --install-deep-wb`. See the bundled
+`models/README.md` and `models/DeepWB-NOTICE.txt` for license details and the checksum.
+
 Both solve the same quantity: the card is a measurement, smart cast correction a guess — with a card
 in the roll, use the card. Box the card in the picture; it is the Cineon standard grey, so all three
 channels land on code **470**, which sets cast and placement together. The status bar reports how

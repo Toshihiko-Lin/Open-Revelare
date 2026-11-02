@@ -19,15 +19,12 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
   </ItemGroup>
 
-  <!-- Deep-WB 权重。⚠ 这个文件**不在本项目的 GPL-3.0 授权范围内** —— 它按原作者的
-       CC BY-NC-SA 4.0 分发，见 models/README.md 与 THIRD_PARTY_NOTICES.txt 第 13 条。
-       条件判断是为了让「把模型删掉」仍然能编：只有「智能白平衡」一个功能会因此报错。 -->
-  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../../models/net_awb.onnx')">
-    <Content Include="..\..\models\net_awb.onnx" Link="models\net_awb.onnx"
-             CopyToOutputDirectory="PreserveNewest" />
-    <!-- 许可声明必须跟着权重走到每一个产物里，否则装机的人手上只有一个没有出处的 .onnx。 -->
+  <!-- Weights are installed on demand, never included in the default build/publish. -->
+  <ItemGroup>
+    <Content Include="..\..\models\DeepWB-NOTICE.txt" Link="models\DeepWB-NOTICE.txt"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\models\README.md" Link="models\README.md"
-             CopyToOutputDirectory="PreserveNewest" />
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
