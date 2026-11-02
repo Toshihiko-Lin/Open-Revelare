@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -2747,6 +2747,16 @@ public partial class MainWindow : Window
         });
         string? path = file?.TryGetLocalPath();
         if (path != null) await Vm.ExportAsync(path, opt);
+    }
+
+    private async void OnAutoLensCorrectionCurrentClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) await vm.AutoLensCorrectionAsync(wholeRoll: false);
+    }
+
+    private async void OnAutoLensCorrectionRollClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) await vm.AutoLensCorrectionAsync(wholeRoll: true);
     }
 
     private async void OnLoadLccClick(object? sender, RoutedEventArgs e)
