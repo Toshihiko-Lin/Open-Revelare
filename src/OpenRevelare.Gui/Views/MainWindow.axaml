@@ -1014,6 +1014,14 @@
                                         <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
                                         <TextBlock Classes="groupHint" TextWrapping="Wrap"
                                                    Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />
+                                        <Grid ColumnDefinitions="*,*" Margin="0,4,0,2">
+                                            <Button Grid.Column="0" Content="{i18n:T '自动读取镜头校正'}" Click="OnAutoLensCorrectionCurrentClick"
+                                                    HorizontalAlignment="Stretch" Margin="0,0,3,0" IsEnabled="{Binding HasImage}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '应用到整卷'}" Click="OnAutoLensCorrectionRollClick"
+                                                    HorizontalAlignment="Stretch" Margin="3,0,0,0" IsEnabled="{Binding HasImage}" />
+                                        </Grid>
+                                        <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap" Margin="0,2,0,2"
+                                                   IsVisible="{Binding HasLensCorrectionStatus}" />
                                         <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />

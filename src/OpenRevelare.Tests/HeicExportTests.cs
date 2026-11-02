@@ -164,7 +164,7 @@ public sealed class HeicExportTests
             {
                 Assert.Equal(2, config.Data[1] & 31);
                 Assert.Equal(2, config.Data[17] & 7);
-                Assert.InRange(config.Data[12], (byte)1, (byte)120); // at most Level 4 per tile
+                Assert.InRange(config.Data[12], (byte)1, (byte)153); // at most Level 5.1 per tile (VideoToolbox hardware HEVC encoder)
             });
             Assert.Contains(properties, p => p.Type == "ispe"
                 && BinaryPrimitives.ReadUInt32BigEndian(p.Data.AsSpan(4)) == 1024
