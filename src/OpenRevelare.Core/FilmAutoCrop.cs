@@ -6,6 +6,9 @@ public enum FilmPolarity { Negative, Positive }
 /// <summary>135 frame detection in uncropped, oriented, linear pixels. No render or mask is used.</summary>
 public static class FilmAutoCrop
 {
+    // SMPTE ST 93 / ISO 491: lateral displacement between the two perforation rows.
+    // 29.5 mm was not the row spacing and biased the transverse ruler and base samples.
+    private const double PerforationRowSpacing = 28.17;
     public const double ImageAspect = 3.0 / 2;
     public const double SprocketAspect = 37.0 / 35;
     public readonly record struct Rect(double X, double Y, double W, double H);
@@ -13,12 +16,22 @@ public static class FilmAutoCrop
     {
         public double RotationCorrection { get; init; }
         public FilmPolarity Polarity { get; init; }
+        public bool HasPerforationRuler { get; init; }
+    }
+
+    /// <summary>Use the same geometric domain as the displayed/exported crop. White rotation
+    /// fill is a display convention, not sensor light: it must not become the hole threshold.</summary>
+    public static ImageBuffer Prepare(ImageBuffer source, FrameParams parameters)
+    {
+        var image = parameters.DistortionK1 == 0 ? source : LensCorrections.ApplyDistortion(source, parameters.DistortionK1);
+        image = Geometry.ApplyOrientation(image, parameters.QuarterTurns, parameters.FlipH, parameters.FlipV);
+        return Geometry.ApplyRotation(image, parameters.Rotation, fill: 0);
     }
 
     public static Detection? Detect(ImageBuffer source) => DetectCore(source, straighten: true);
 
     private static Detection? DetectCore(ImageBuffer source, bool straighten,
-        (bool Horizontal, double Scale, double Centre, double Angle)? knownRuler = null)
+        (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? knownRuler = null)
     {
         if (source.Width < 64 || source.Height < 64) return null;
         var image = Resample.Box(source, 640);
@@ -72,13 +85,15 @@ public static class FilmAutoCrop
                 double correction = -ruler.Angle;
                 // Rotation can join a clipped hole to the board or split an edge component.
                 // The measured ruler is already known; do not rediscover it after resampling.
-                var aligned = DetectCore(Geometry.ApplyRotation(source, correction), straighten: false,
-                    (ruler.Horizontal, ruler.Scale, ruler.Centre, 0));
+                var aligned = DetectCore(Geometry.ApplyRotation(source, correction, fill: 0), straighten: false,
+                    (ruler.Horizontal, ruler.Scale, ruler.Centre, 0, ruler.AcrossScale));
                 return aligned is null ? null : aligned with { RotationCorrection = correction };
             }
+            if (FindFrameGutters(image, ruler.Horizontal, ruler.Scale, ruler.AcrossScale, ruler.Centre, out var stableBase, out var shoulderTone, out bool darkBase) is { } gutterFrame)
+                return gutterFrame with { Width = source.Width, Height = source.Height };
             bool horizontal = ruler.Horizontal;
             int along = horizontal ? w : h, across = horizontal ? h : w;
-            int length = (int)Math.Round(36 * ruler.Scale), height = (int)Math.Round(24 * ruler.Scale);
+            int length = (int)Math.Round(36 * ruler.Scale), height = (int)Math.Round(24 * ruler.AcrossScale);
             double bestHoleScore = 0;
             Rect holeFrame = default;
             FilmPolarity holePolarity = FilmPolarity.Negative;
@@ -90,19 +105,21 @@ public static class FilmAutoCrop
             for (int at = along / 10; at < along * 9 / 10; at++)
             {
                 double Value(int q) => log[horizontal ? q * w + at : at * w + q];
-                double baseTone = (Value(nominalLow - step) + Value(nominalHigh + step)) / 2;
                 double interior = 0;
                 int count = 0;
                 for (int q = nominalLow + height / 4; q < nominalHigh - height / 4; q++)
                 { interior += Value(q); count++; }
-                double difference = baseTone - interior / count;
+                double difference = shoulderTone[at] - interior / count;
                 if (Math.Abs(difference) > .04) toneVotes.Add(difference);
             }
             if (toneVotes.Count < along / 10) return null;
             toneVotes.Sort();
             // Decide from the exposed area's relation to its base across many columns, not
             // the winning rectangle: a night scene can otherwise win with the wrong polarity.
+            // A Dmax-black reversal base cannot be brighter than a real negative exposure;
+            // positive votes there are perforation halation against unexposed black sky.
             int sign = toneVotes[toneVotes.Count / 2] > 0 ? 1 : -1;
+            if (darkBase && sign > 0) return null;
             for (int cy = (int)ruler.Centre - margin; cy <= ruler.Centre + margin; cy++)
             {
                 int low = cy - height / 2, high = low + height;
@@ -110,6 +127,7 @@ public static class FilmAutoCrop
                 for (int start = step; start + length < along - step; start++)
                 {
                     int end = start + length, m = height / 8, lm = length / 8;
+                    if (!stableBase(start,end)) continue;
                     double a = Edge(horizontal, start, low + m, high - m, sign);
                     double b = Edge(horizontal, end, low + m, high - m, -sign);
                     if (Math.Min(a, b) < 0.025) continue;
@@ -149,7 +167,7 @@ public static class FilmAutoCrop
                         : new Rect((double)low / w, (double)start / h, (double)height / w, (double)length / h);
                 }
             }
-            return bestHoleScore < 0.12 ? null : new Detection(holeFrame, bestHoleScore, source.Width, source.Height) { Polarity = holePolarity };
+            return bestHoleScore < 0.12 ? null : new Detection(holeFrame, bestHoleScore, source.Width, source.Height) { Polarity = holePolarity, HasPerforationRuler = true };
         }
         double best = 0;
         Rect found = default;
@@ -189,13 +207,251 @@ public static class FilmAutoCrop
         return nested ?? new Detection(found, best, source.Width, source.Height) { Polarity = polarity };
     }
 
-    private static (bool Horizontal, double Scale, double Centre, double Angle)? PerforationRuler(ImageBuffer image)
+    private static Detection? FindFrameGutters(ImageBuffer image, bool horizontal, double scale, double acrossScale, double centre,
+        out Func<int, int, bool> stableBase, out double[] shoulderTone, out bool darkBase)
+    {
+        stableBase = (_, _) => true;
+        shoulderTone = Array.Empty<double>();
+        darkBase = false;
+        int w = image.Width, h = image.Height, along = horizontal ? w : h, across = horizontal ? h : w;
+        int low = (int)Math.Round(centre - 12 * acrossScale), high = (int)Math.Round(centre + 12 * acrossScale);
+        if (low < 2 || high >= across - 2) return null;
+        var baseColour = new double[along * 3];
+        shoulderTone = new double[along];
+        double LightAt(int a, int q)
+        {
+            int p = (horizontal ? q * w + a : a * w + q) * 3;
+            return (image.Data[p] + image.Data[p + 1] + image.Data[p + 2]) / 3d;
+        }
+        double LogAt(int a, int q, int c) => Math.Log(Math.Max(1e-6,
+            image.Data[(horizontal ? q * w + a : a * w + q) * 3 + c]));
+        for (int a = 0; a < along; a++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                var values = new double[6];
+                // The unexposed shoulder is only ~0.69 mm wide: outside the 24 mm picture,
+                // inside the nearest perforation edge at ~12.69 mm from the strip centre.
+                for (int j = 0; j < 3; j++)
+                {
+                    int offset = (int)Math.Round((12.20 + .15 * j) * acrossScale);
+                    values[j] = LogAt(a, Math.Clamp((int)Math.Round(centre) - offset, 0, across - 1), c);
+                    values[j + 3] = LogAt(a, Math.Clamp((int)Math.Round(centre) + offset, 0, across - 1), c);
+                }
+                Array.Sort(values); baseColour[a * 3 + c] = (values[2] + values[3]) / 2;
+            }
+            shoulderTone[a] = (baseColour[a * 3] + baseColour[a * 3 + 1] + baseColour[a * 3 + 2]) / 3;
+        }
+        double Distance(int a, int q)
+        {
+            double value = 0;
+            for (int c = 0; c < 3; c++) value += Math.Min(2.5, Math.Abs(LogAt(a, q, c) - baseColour[a * 3 + c]));
+            return value / 3;
+        }
+        var profile = new double[along]; var tone = new double[along];
+        var upperProfile = new double[along]; var lowerProfile = new double[along];
+        int sampleStep = Math.Max(1, (high - low) / 48), samples = 0, upperSamples = 0, lowerSamples = 0, midQ = (low + high) / 2;
+        for (int q = low + 1; q < high - 1; q += sampleStep)
+        {
+            samples++;
+            if (q < midQ) upperSamples++; else lowerSamples++;
+        }
+        for (int a = 0; a < along; a++)
+        {
+            for (int q = low + 1; q < high - 1; q += sampleStep)
+            {
+                double dist = Distance(a, q);
+                profile[a] += dist;
+                if (q < midQ) upperProfile[a] += dist; else lowerProfile[a] += dist;
+                for (int c = 0; c < 3; c++) tone[a] += (baseColour[a * 3 + c] - LogAt(a, q, c)) / 3;
+            }
+            profile[a] /= samples; tone[a] /= samples;
+            upperProfile[a] /= Math.Max(1, upperSamples);
+            lowerProfile[a] /= Math.Max(1, lowerSamples);
+        }
+        static void Smooth3(double[] data)
+        {
+            var copy = (double[])data.Clone();
+            for (int i = 1; i < data.Length - 1; i++) data[i] = (copy[i - 1] + 2 * copy[i] + copy[i + 1]) / 4;
+        }
+        Smooth3(profile); Smooth3(upperProfile); Smooth3(lowerProfile);
+        var prefix = new double[along + 1];
+        for (int a = 0; a < along; a++) prefix[a + 1] = prefix[a] + profile[a];
+        double Mean(int a, int b) => (prefix[b] - prefix[a]) / Math.Max(1, b - a);
+        int edge = Math.Max(2, (int)Math.Round(scale * .35));
+        var sampledLight = new List<double>();
+        for (int i = 0; i < image.Data.Length; i += 12) sampledLight.Add((image.Data[i] + image.Data[i + 1] + image.Data[i + 2]) / 3d);
+        sampledLight.Sort(); double referenceWhite = Math.Max(1e-6, sampledLight[(int)(sampledLight.Count * .99)]);
+        var stripBaseLinear = new List<double>();
+        for (int a = along / 10; a < along * 9 / 10; a++)
+            stripBaseLinear.Add((Math.Exp(baseColour[a * 3]) + Math.Exp(baseColour[a * 3 + 1]) + Math.Exp(baseColour[a * 3 + 2])) / 3);
+        if (stripBaseLinear.Count > 0) { stripBaseLinear.Sort(); darkBase = stripBaseLinear[stripBaseLinear.Count / 2] < referenceWhite * .06; }
+
+        // A black film-holder mask occluding a bright neighbour looks dark in the image channel,
+        // but it also hides both perforation rows. Real strip borders keep perforations or backlight.
+        int rowLow = Math.Clamp((int)Math.Round(centre - PerforationRowSpacing / 2 * acrossScale), 0, across - 1);
+        int rowHigh = Math.Clamp((int)Math.Round(centre + PerforationRowSpacing / 2 * acrossScale), 0, across - 1);
+        int pitch = Math.Max(4, (int)Math.Round(4.75 * scale));
+        var leftVisible = new bool[along]; var rightVisible = new bool[along];
+        bool RowsLit(int x0, int x1)
+        {
+            double maxLow = 0, maxHigh = 0;
+            for (int x = Math.Max(0, x0); x <= Math.Min(along - 1, x1); x++)
+            {
+                maxLow = Math.Max(maxLow, LightAt(x, rowLow));
+                maxHigh = Math.Max(maxHigh, LightAt(x, rowHigh));
+            }
+            return Math.Min(maxLow, maxHigh) >= referenceWhite * .35;
+        }
+        for (int a = 0; a < along; a++)
+        {
+            leftVisible[a] = RowsLit(a - pitch, a - edge);
+            rightVisible[a] = RowsLit(a + edge, a + pitch);
+        }
+
+        var basePrefix = new double[(along + 1) * 3];
+        for (int a = 0; a < along; a++) for (int c = 0; c < 3; c++) basePrefix[(a + 1) * 3 + c] = basePrefix[a * 3 + c] + baseColour[a * 3 + c];
+        // Burned leaders can combine clear and dark bases inside a nominal frame. Check both
+        // local steps and quarter-frame averages so gradual optical burn transitions cannot slip by.
+        bool HasStableBase(int a, int b)
+        {
+            if (!leftVisible[a] || !rightVisible[b]) return false;
+            for (int x = a + 2 * edge; x < b - 2 * edge; x += edge)
+            {
+                double jump = 0, linearShift = 0;
+                for (int c = 0; c < 3; c++)
+                {
+                    double left = (basePrefix[x * 3 + c] - basePrefix[(x - edge) * 3 + c]) / edge;
+                    double right = (basePrefix[(x + edge) * 3 + c] - basePrefix[x * 3 + c]) / edge;
+                    jump += Math.Abs(right - left); linearShift += Math.Abs(Math.Exp(right) - Math.Exp(left));
+                }
+                // Black slide-base read noise can be huge in log units but negligible light.
+                // A burned leader requires a substantial change in both domains.
+                if (jump / 3 > .45 && linearShift / 3 > referenceWhite * .18) return false;
+            }
+            int span0 = a + edge, span1 = b - edge;
+            if (span1 - span0 >= 8)
+            {
+                Span<double> quarters = stackalloc double[12];
+                for (int q = 0; q < 4; q++)
+                {
+                    int q0 = span0 + (span1 - span0) * q / 4, q1 = span0 + (span1 - span0) * (q + 1) / 4;
+                    for (int c = 0; c < 3; c++)
+                        quarters[q * 3 + c] = (basePrefix[q1 * 3 + c] - basePrefix[q0 * 3 + c]) / Math.Max(1, q1 - q0);
+                }
+                for (int q0 = 0; q0 < 4; q0++) for (int q1 = q0 + 1; q1 < 4; q1++)
+                {
+                    double jump = 0, linearShift = 0;
+                    for (int c = 0; c < 3; c++)
+                    {
+                        jump += Math.Abs(quarters[q1 * 3 + c] - quarters[q0 * 3 + c]);
+                        linearShift += Math.Abs(Math.Exp(quarters[q1 * 3 + c]) - Math.Exp(quarters[q0 * 3 + c]));
+                    }
+                    if (jump / 3 > 1.5 && linearShift / 3 > referenceWhite * .18) return false;
+                }
+            }
+            return true;
+        }
+        stableBase = HasStableBase;
+        int minLength = (int)Math.Round(34.5 * scale), maxLength = (int)Math.Round(36.8 * scale);
+        double best = 0; int start = 0, end = 0;
+        for (int a = edge * 2; a + minLength < along - edge * 2; a++)
+        {
+            double rise = profile[a + edge] - profile[a - edge];
+            if (rise < .015 || !leftVisible[a]) continue;
+            for (int b = a + minLength; b <= a + maxLength && b < along - edge * 2; b++)
+            {
+                double fall = profile[b - edge] - profile[b + edge];
+                if (fall < .015 || !rightVisible[b]) continue;
+                if (!HasStableBase(a, b)) continue;
+                double outside = Math.Max(Mean(a - 2 * edge, a - edge), Mean(b + edge, b + 2 * edge));
+                double inside = Mean(a + 2 * edge, b - 2 * edge), contrast = inside - outside;
+                if (contrast < .025 || outside > inside * .4 + .03) continue;
+                // Two 18x24 mm half-frames separated by an unexposed septum fit a 36 mm span,
+                // with full-height gate edges on both sides of the central gap. Dark subject
+                // pillars inside a single C400 frame do not form a full-height central gate.
+                double gutterFloor = Math.Min(Mean(a - 2 * edge, a - edge), Mean(b + edge, b + 2 * edge));
+                double centralLimit = gutterFloor + contrast * .12;
+                bool splitFrames = false; int cRun = 0;
+                int cStart = a + (b - a) * 3 / 8, cEnd = b - (b - a) * 3 / 8;
+                for (int x = cStart; x <= cEnd; x++)
+                {
+                    if (x < cEnd && profile[x] < centralLimit) { cRun++; continue; }
+                    if (cRun >= scale * .6 && cRun <= scale * 3.2)
+                    {
+                        int g0 = x - cRun, g1 = x, gm = g0 + cRun / 2;
+                        if (g0 - edge >= a && g1 + edge <= b
+                            && Math.Min(upperProfile[g0 - edge] - upperProfile[gm], lowerProfile[g0 - edge] - lowerProfile[gm]) >= .025
+                            && Math.Min(upperProfile[g1 + edge] - upperProfile[gm], lowerProfile[g1 + edge] - lowerProfile[gm]) >= .025)
+                        { splitFrames = true; break; }
+                    }
+                    cRun = 0;
+                }
+                if (splitFrames) continue;
+                int run = 0; bool gutter = false; double limit = outside + contrast * .08;
+                for (int x = a + (b - a) / 6; x < b - (b - a) / 6; x++)
+                {
+                    if (profile[x] < limit) { run++; continue; }
+                    if (run >= scale * .7 && run <= scale * 3.2) { gutter = true; break; }
+                    run = 0;
+                }
+                double score = (gutter ? .5 : 1) * (Math.Min(rise, fall) + contrast) / (1 + .3 * Math.Pow(((a + b) / 2d - along / 2d) / (b - a), 2));
+                if (score <= best) continue;
+                best = score; start = a; end = b;
+            }
+        }
+        if (best == 0) return null;
+        // The ruler provides the transverse bounds even when a dark scene touches its base.
+        // Refine both only when there is real boundary evidence; an internal horizon alone
+        // must not drag the frame away from its two perforation rows.
+        double NormalProfile(int q)
+        {
+            double sum = 0; int count = 0, dx = Math.Max(1, (end - start) / 48);
+            for (int a = start + (end - start) / 8; a < end - (end - start) / 8; a += dx) { sum += Distance(a, q); count++; }
+            return sum / Math.Max(1, count);
+        }
+        int radius = Math.Max(2, (int)Math.Round(acrossScale * .8)), normalStep = Math.Max(1, (int)Math.Round(acrossScale * .25));
+        (int At, double Score) Boundary(int at, int sign)
+        {
+            int position = at; double peak = 0;
+            for (int q = Math.Max(normalStep, at - radius); q <= Math.Min(across - normalStep - 1, at + radius); q++)
+            {
+                double value = sign * (NormalProfile(q + normalStep) - NormalProfile(q - normalStep));
+                if (value > peak) { peak = value; position = q; }
+            }
+            return (position, peak);
+        }
+        var top = Boundary(low, 1); var bottom = Boundary(high, -1);
+        if (top.Score > .025 && bottom.Score > .025) { low = top.At; high = bottom.At; }
+        double signedTone = 0; for (int a = start; a < end; a++) signedTone += tone[a];
+        double frameBaseLinear = 0;
+        for (int c = 0; c < 3; c++)
+            frameBaseLinear += Math.Exp((basePrefix[end * 3 + c] - basePrefix[start * 3 + c]) / Math.Max(1, end - start)) / 3;
+        var polarity = frameBaseLinear < referenceWhite * .06
+            ? FilmPolarity.Positive
+            : signedTone >= 0 ? FilmPolarity.Negative : FilmPolarity.Positive;
+        var rect = horizontal ? new Rect(start / (double)w, low / (double)h, (end - start) / (double)w, (high - low) / (double)h)
+            : new Rect(low / (double)w, start / (double)h, (high - low) / (double)w, (end - start) / (double)h);
+        return new Detection(rect, Math.Max(.12, best * 2), image.Width, image.Height)
+            { Polarity = polarity, HasPerforationRuler = true };
+    }
+
+    private static (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? PerforationRuler(ImageBuffer image)
+    {
+        // A thin negative can be almost as bright as its holes; a fixed low threshold merges
+        // them into the film base. Each threshold must independently recover both periodic rows.
+        foreach (double fraction in new[] { .72, .84, .92, .97, .60 })
+            if (PerforationRulerAtThreshold(image, fraction) is { } ruler) return ruler;
+        return null;
+    }
+
+    private static (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? PerforationRulerAtThreshold(ImageBuffer image, double fraction)
     {
         int w = image.Width, h = image.Height;
         var light = new double[w * h];
         for (int i = 0; i < light.Length; i++) light[i] = (image.Data[3 * i] + image.Data[3 * i + 1] + image.Data[3 * i + 2]) / 3;
         var sorted = light.Order().ToArray();
-        double cut = sorted[(int)(sorted.Length * 0.99)] * 0.72;
+        double cut = sorted[(int)(sorted.Length * 0.99)] * fraction;
         var seen = new bool[light.Length];
         var points = new List<(double X, double Y)>();
         var queue = new Queue<int>();
@@ -245,10 +501,10 @@ public static class FilmAutoCrop
             foreach (var a in rows.OrderByDescending(r => r.Count)) foreach (var b in rows.OrderByDescending(r => r.Count))
             {
                 double distance = b.Centre - a.Centre, scale = (a.Pitch + b.Pitch) / 2 / 4.75;
-                if (distance < across * .25 || Math.Abs(distance / (scale * 29.5) - 1) > .12
+                if (distance < across * .25 || Math.Abs(distance / (scale * PerforationRowSpacing) - 1) > .12
                     || Math.Abs(a.Pitch / b.Pitch - 1) > .10 || Math.Abs(a.Slope - b.Slope) > .025) continue;
                 double angle = Math.Atan((a.Slope + b.Slope) / 2) * 180 / Math.PI * (horizontal ? 1 : -1);
-                return (horizontal, scale, (a.Centre + b.Centre) / 2, angle);
+                return (horizontal, scale, (a.Centre + b.Centre) / 2, angle, distance / PerforationRowSpacing);
             }
         }
         return null;
@@ -276,9 +532,12 @@ public static class FilmAutoCrop
             double median = Median(ids.Select(i => Scale(frames[i]!)));
             var reliable = ids.Where(i => Math.Abs(Scale(frames[i]!) / median - 1) <= 0.08).ToArray();
             if (reliable.Length == 0) continue;
-            // The inset absorbs grain, boundary rounding and small alignment errors; never
-            // independently fit each frame to its scene, which makes a roll breathe on playback.
-            double scale = Median(reliable.Select(i => Scale(frames[i]!))) * (mode == FilmCropMode.ImageArea ? 0.975 : 1);
+            // The common content window must fit the smallest reliable exposure. A median
+            // window silently skipped slightly smaller frames, despite a valid location. Scale
+            // outliers were rejected above; never resize individual frames to hide this drift.
+            double scale = (mode == FilmCropMode.ImageArea
+                ? reliable.Min(i => Scale(frames[i]!)) * .975
+                : Median(reliable.Select(i => Scale(frames[i]!))));
             double longSide = mode == FilmCropMode.ImageArea ? 36 : 37;
             // Integer multiples of 3×2 / 37×35 make export dimensions identical across the
             // group, including the one-pixel rounding drift of independently placed rectangles.

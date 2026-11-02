@@ -3,24 +3,33 @@ using OpenRevelare.Core;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-if (args.Length != 2)
+if (args.Length < 2)
 {
-    Console.Error.WriteLine("Usage: dotnet run --project benchmarks/OpenRevelare.AutoCropVerification -- <RAW directory> <output directory>");
+    Console.Error.WriteLine("Usage: dotnet run --project benchmarks/OpenRevelare.AutoCropVerification -- <RAW directory> <output directory> [--project=<ncproj>] [--preview-edge=<px>]");
     return 2;
 }
 string input = Path.GetFullPath(args[0]), output = Path.GetFullPath(args[1]);
 if (input == output) throw new ArgumentException("Choose a separate output directory.");
 Directory.CreateDirectory(output);
 string[] paths = Directory.GetFiles(input).Where(RawDecode.IsRawExtension).Order(StringComparer.Ordinal).ToArray();
+string? projectPath = args.FirstOrDefault(a => a.StartsWith("--project="))?[10..];
+string? edgeArg = args.FirstOrDefault(a => a.StartsWith("--preview-edge="))?[15..];
+int previewEdge = edgeArg is null ? 1600 : int.Parse(edgeArg);
+var project = projectPath is null ? null : Project.Load(projectPath);
+var initial = new List<FrameParams>();
 var detections = new FilmAutoCrop.Detection?[paths.Length];
 var previews = new List<ImageBuffer>();
 for (int i = 0; i < paths.Length; i++)
 {
     var (images, width, height) = RawDecode.DecodeRawDownsampled(paths[i], RawDecode.FbddMode.Off,
-        new[] { 900 }, RawDecode.Demosaic.Preview);
-    var d = FilmAutoCrop.Detect(images[0]);
-    detections[i] = d is null ? null : d with { Width = width, Height = height };
-    previews.Add(Geometry.ApplyRotation(images[0], d?.RotationCorrection ?? 0));
+        new[] { previewEdge }, RawDecode.Demosaic.Preview);
+    var p = project?.Frames.FirstOrDefault(f => Path.GetFileName(f.SourcePath) == Path.GetFileName(paths[i]))?.Params.Clone() ?? new FrameParams();
+    initial.Add(p);
+    var prepared = FilmAutoCrop.Prepare(images[0], p);
+    var d = FilmAutoCrop.Detect(prepared);
+    bool swap = ((p.QuarterTurns % 2) + 2) % 2 == 1;
+    detections[i] = d is null ? null : d with { Width = swap ? height : width, Height = swap ? width : height };
+    previews.Add(Geometry.ApplyRotation(prepared, d?.RotationCorrection ?? 0, fill: 0));
     Console.WriteLine($"{i + 1}/{paths.Length} {Path.GetFileName(paths[i])}: {(d is null ? "review" : d.Polarity.ToString())}");
 }
 var content = FilmAutoCrop.Plan(detections, FilmCropMode.ImageArea);
@@ -44,7 +53,7 @@ for (int i = 0; i < paths.Length; i++)
     for (int y = 0; y < 240; y++) for (int x = 0; x < 360; x++)
         overview[(i % 4) * 360 + x, (i / 4) * 240 + y] = view[x * view.Width / 360, y * view.Height / 240];
     var d = detections[i];
-    rows.Add(new { File = Path.GetFileName(paths[i]), Detection = d, Content = content[i], Sprockets = sprockets[i],
+    rows.Add(new { File = Path.GetFileName(paths[i]), InitialRotation=initial[i].Rotation, initial[i].DistortionK1, initial[i].VignetteAmount, initial[i].FlipH, initial[i].FlipV, initial[i].QuarterTurns, Detection = d, Content = content[i], Sprockets = sprockets[i],
         ContentPixels = Size(content[i], d), SprocketPixels = Size(sprockets[i], d) });
 
     void Draw(FilmAutoCrop.Rect? rect, Rgb24 color)

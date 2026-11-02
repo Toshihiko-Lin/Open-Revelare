@@ -43,8 +43,7 @@ public partial class MainViewModel
                     var entry = await PreviewAsync(frame.Path, null).WaitAsync(cts.Token);
                     detections[i] = await Task.Run(() =>
                     {
-                        var pixels = Geometry.ApplyOrientation(entry.Preview, p.QuarterTurns, p.FlipH, p.FlipV);
-                        pixels = Geometry.ApplyRotation(pixels, p.Rotation);
+                        var pixels = FilmAutoCrop.Prepare(entry.Preview, p);
                         var d = FilmAutoCrop.Detect(pixels);
                         bool swap = ((p.QuarterTurns % 2) + 2) % 2 == 1;
                         return d is null || Math.Abs(p.Rotation + d.RotationCorrection) > StraightenLimit ? null : d with

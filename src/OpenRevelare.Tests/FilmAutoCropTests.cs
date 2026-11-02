@@ -51,7 +51,8 @@ public sealed class FilmAutoCropTests
                 var crop = crops[i]!.Value;
                 Assert.Equal(crops[0]!.Value.W, crop.W);
                 Assert.Equal(crops[0]!.Value.H, crop.H);
-                Assert.InRange(Math.Abs(frames[i]!.Image.X + frames[i]!.Image.W / 2 - crop.X - crop.W / 2), 0, .5 / frames[i]!.Width);
+                // An exactly half-pixel centre can round a few double ULPs above the bound.
+                Assert.InRange(Math.Abs(frames[i]!.Image.X + frames[i]!.Image.W / 2 - crop.X - crop.W / 2), 0, .5 / frames[i]!.Width + 1e-12);
                 int width = (int)(Math.Round((crop.X + crop.W) * 6000) - Math.Round(crop.X * 6000));
                 int height = (int)(Math.Round((crop.Y + crop.H) * 4000) - Math.Round(crop.Y * 4000));
                 Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35, (double)width / height, 10);
@@ -107,7 +108,8 @@ public sealed class FilmAutoCropTests
             int i = (y * 640 + x) * 3;
             image.Data[i] = value; image.Data[i + 1] = value * .6f; image.Data[i + 2] = value * .25f;
         }
-        for (int hole = 0; hole < 13; hole++) foreach (double centre in new[] { 92.5, 387.5 })
+        // 28.17 mm row separation at 10 px/mm; the old 29.5 mm fixture masked the bug.
+        for (int hole = 0; hole < 13; hole++) foreach (double centre in new[] { 99.15, 380.85 })
         {
             int cx = (int)Math.Round(32 + hole * 47.5), cy = (int)Math.Round(centre);
             for (int y = cy - 14; y < cy + 14; y++) for (int x = cx - 10; x < cx + 10 && x < 640; x++)
