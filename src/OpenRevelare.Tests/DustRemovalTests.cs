@@ -112,6 +112,127 @@ public sealed class DustRemovalTests
         Assert.Equal(fromFull.Image.Data, fromSlice.Image.Data);
     }
 
+    [Fact]
+    public void A_defect_filling_the_brush_does_not_contaminate_the_colour_match()
+    {
+        var image = new ImageBuffer(128, 128);
+        for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++) for (int c = 0; c < 3; c++)
+            image.Data[(y * 128 + x) * 3 + c] = 0.3f + x * 0.001f + y * 0.0008f + c * 0.03f;
+        float[] clean = (float[])image.Data.Clone();
+        PaintDefect(image, 64, 64, 11.4, 0.001f);
+        DustRemoval.Apply(image, [SpotAt(128, 128, 64, 64, 12)]);
+        for (int c = 0; c < 3; c++)
+            Assert.InRange(Math.Abs(image.Data[(64 * 128 + 64) * 3 + c] - clean[(64 * 128 + 64) * 3 + c]), 0, 0.003f);
+    }
+
+    [Fact]
+    public void A_neighbouring_marked_defect_is_never_used_as_the_texture_donor()
+    {
+        var image = new ImageBuffer(200, 160, Enumerable.Repeat(0.6f, 200 * 160 * 3).ToArray());
+        PaintDefect(image, 100, 80, 5, 0.01f);
+        PaintDefect(image, 114, 80, 5, 0.01f);
+        DustRemoval.Apply(image, [SpotAt(200, 160, 100, 80, 6), SpotAt(200, 160, 114, 80, 6)]);
+        Assert.InRange(image.Data[(80 * 200 + 100) * 3], 0.59f, 0.61f);
+        Assert.InRange(image.Data[(80 * 200 + 114) * 3], 0.59f, 0.61f);
+    }
+
+    [Fact]
+    public void A_real_edge_continues_through_the_repair()
+    {
+        var image = new ImageBuffer(160, 120);
+        for (int y = 0; y < 120; y++) for (int x = 0; x < 160; x++) for (int c = 0; c < 3; c++)
+            image.Data[(y * 160 + x) * 3 + c] = x < 80 ? 0.2f : 0.8f;
+        PaintDefect(image, 80, 60, 6, 0.01f);
+        DustRemoval.Apply(image, [SpotAt(160, 120, 80, 60, 8)]);
+        Assert.InRange(image.Data[(60 * 160 + 78) * 3], 0.18f, 0.22f);
+        Assert.InRange(image.Data[(60 * 160 + 82) * 3], 0.78f, 0.82f);
+    }
+
+    [Fact]
+    public void Repair_keeps_extended_float_values_and_never_touches_pixels_outside_the_mask()
+    {
+        var image = new ImageBuffer(100, 80);
+        for (int i = 0; i < image.PixelCount; i++)
+        { image.Data[i * 3] = -0.2f; image.Data[i * 3 + 1] = 1.3f; image.Data[i * 3 + 2] = 0.4f; }
+        PaintDefect(image, 50, 40, 3, 0.01f);
+        float[] before = (float[])image.Data.Clone();
+        DustSpot spot = SpotAt(100, 80, 50, 40, 7);
+        bool[] mask = DustRemoval.MakeMask(100, 80, [spot]);
+        DustRemoval.Apply(image, [spot]);
+        Assert.InRange(image.Data[(40 * 100 + 50) * 3], -0.201f, -0.199f);
+        Assert.InRange(image.Data[(40 * 100 + 50) * 3 + 1], 1.299f, 1.301f);
+        for (int i = 0; i < mask.Length; i++) if (!mask[i])
+            for (int c = 0; c < 3; c++) Assert.Equal(before[i * 3 + c], image.Data[i * 3 + c]);
+    }
+
+    [Fact]
+    public void The_smallest_brush_overlay_covers_every_modified_pixel()
+    {
+        ImageBuffer image = Texture(100, 80);
+        DustSpot spot = new(50.7 / 100, 40.7 / 80, 0.00025);
+        PaintDefect(image, 50, 40, 1, 0.01f);
+        float[] before = (float[])image.Data.Clone();
+        bool[] mask = DustRemoval.MakeMask(100, 80, [spot]);
+        DustRemoval.Apply(image, [spot]);
+        Assert.NotEqual(before, image.Data);
+        for (int i = 0; i < mask.Length; i++) if (!mask[i])
+            for (int c = 0; c < 3; c++) Assert.Equal(before[i * 3 + c], image.Data[i * 3 + c]);
+    }
+
+    [Fact]
+    public void Odd_offset_regional_decode_chooses_the_same_donor_as_the_full_image()
+    {
+        ImageBuffer original = Texture(640, 480);
+        DustSpot[] spots = [SpotAt(640, 480, 213.5, 187.5, 6), SpotAt(640, 480, 235, 187, 5)];
+        PaintDefect(original, 214, 188, 3, 0.01f);
+        var full = new ImageBuffer(640, 480, (float[])original.Data.Clone());
+        int halo = DustRemoval.RequiredHalo(spots, 640, 480);
+        var bounds = (X0: 205 - halo, Y0: 180 - halo, X1: 221 + halo, Y1: 195 + halo);
+        ImageBuffer slice = Slice(original, bounds);
+        DustRemoval.Apply(full, spots);
+        DustRemoval.Apply(slice, spots, 640, 480, bounds.X0, bounds.Y0);
+        for (int y = 180; y < 195; y++) for (int x = 205; x < 221; x++) for (int c = 0; c < 3; c++)
+            Assert.Equal(full.Data[(y * 640 + x) * 3 + c],
+                slice.Data[((y - bounds.Y0) * slice.Width + x - bounds.X0) * 3 + c]);
+    }
+
+    [Fact]
+    public void A_continuous_overlapping_stroke_uses_clean_texture_beside_the_stroke()
+    {
+        var image = new ImageBuffer(160, 120, Enumerable.Repeat(0.6f, 160 * 120 * 3).ToArray());
+        var spots = new List<DustSpot>();
+        for (int x = 48; x <= 112; x += 8)
+        {
+            spots.Add(SpotAt(160, 120, x, 60, 6));
+            PaintDefect(image, x, 60, 3, 0.01f);
+        }
+        DustRemoval.Apply(image, spots);
+        for (int x = 48; x <= 112; x += 8)
+            Assert.InRange(image.Data[(60 * 160 + x) * 3], 0.59f, 0.61f);
+    }
+
+    [Fact]
+    public void A_fully_marked_neighbourhood_is_left_intact_without_a_clean_donor()
+    {
+        ImageBuffer image = Texture(48, 48);
+        var spots = new List<DustSpot>();
+        for (int y = 0; y < 48; y += 3) for (int x = 0; x < 48; x += 3)
+            spots.Add(SpotAt(48, 48, x, y, 3.84));
+        float[] before = (float[])image.Data.Clone();
+        DustRemoval.Apply(image, spots);
+        Assert.Equal(before, image.Data);
+    }
+
+    private static DustSpot SpotAt(int width, int height, double x, double y, double radius) =>
+        new((x + 0.5) / width, (y + 0.5) / height, radius / Math.Min(width, height));
+
+    private static void PaintDefect(ImageBuffer image, double cx, double cy, double radius, float value)
+    {
+        for (int y = 0; y < image.Height; y++) for (int x = 0; x < image.Width; x++)
+            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) < radius * radius)
+                for (int c = 0; c < 3; c++) image.Data[(y * image.Width + x) * 3 + c] = value;
+    }
+
     private static ImageBuffer Texture(int width, int height)
     {
         var image = new ImageBuffer(width, height);
