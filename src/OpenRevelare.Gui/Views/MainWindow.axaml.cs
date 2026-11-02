@@ -1850,9 +1850,14 @@ public partial class MainWindow : Window
     private async Task AutoCrop135Async(bool wholeRoll)
     {
         if (Vm is null) return;
+        var mode = OpenRevelare.Gui.Models.CropAspectPresets.AutoMode(CropPresetCombo.SelectedIndex);
+        if (mode is null)
+        {
+            Vm.StatusText = Loc.T("135 自动裁切请选择内容 (3:2) 或含边框 (37:35)；其他比例可使用拖框裁切。");
+            return;
+        }
         ExitMode();
-        await Vm.AutoCrop135Async(AutoCropModeCombo.SelectedIndex == 1
-            ? FilmCropMode.WithSprockets : FilmCropMode.ImageArea, wholeRoll);
+        await Vm.AutoCrop135Async(mode.Value, wholeRoll);
         SyncCropPreset(Vm);
     }
 

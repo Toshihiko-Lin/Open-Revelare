@@ -8,6 +8,16 @@ internal static class CropAspectPresets
         null, OpenRevelare.Core.FilmAutoCrop.ImageAspect, OpenRevelare.Core.FilmAutoCrop.SprocketAspect, 3.0 / 4, 65.0 / 24, 4.0 / 3, 1.0, 7.0 / 6, 3.0 / 2, 2.0 / 1,
     };
 
+    internal static OpenRevelare.Core.FilmCropMode? AutoMode(int index)
+    {
+        if (index < 0 || index >= Aspects.Length) return null;
+        // Free has no manual lock; automatic 135 framing still needs its physical 3:2 format.
+        if (Aspects[index] is null || Aspects[index] == OpenRevelare.Core.FilmAutoCrop.ImageAspect)
+            return OpenRevelare.Core.FilmCropMode.ImageArea;
+        return Aspects[index] == OpenRevelare.Core.FilmAutoCrop.SprocketAspect
+            ? OpenRevelare.Core.FilmCropMode.WithSprockets : null;
+    }
+
     internal static (int Index, double? Aspect) Match(double width, double height)
     {
         if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
