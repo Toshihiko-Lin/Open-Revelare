@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>OpenRevelare.Gui.Preview</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/OpenRevelare.Gui/OpenRevelare.Gui.csproj" />
+    <PackageReference Include="Avalonia.Headless" Version="11.2.3" />
+  </ItemGroup>
+</Project>

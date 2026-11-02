@@ -1,0 +1,12 @@
+{
+  "name": "revelare-workbench-study",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node pack.mjs"
+  },
+  "dependencies": { "react": "18.3.1", "react-dom": "18.3.1", "lucide-react": "0.468.0" },
+  "devDependencies": { "@types/react": "18.3.12", "@types/react-dom": "18.3.1", "@vitejs/plugin-react": "4.7.0", "vite": "6.4.5", "typescript": "5.6.3", "playwright-core": "1.48.2" }
+}

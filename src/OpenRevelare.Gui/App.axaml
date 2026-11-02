@@ -17,15 +17,15 @@
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Shared type, spacing and corner scales. -->
-            <x:Double x:Key="FontXxs">12</x:Double>
-            <x:Double x:Key="FontXs">13</x:Double>
-            <x:Double x:Key="FontSm">14</x:Double>
-            <x:Double x:Key="FontMd">15</x:Double>
-            <x:Double x:Key="FontLg">22</x:Double>
+            <x:Double x:Key="FontXxs">11</x:Double>
+            <x:Double x:Key="FontXs">12</x:Double>
+            <x:Double x:Key="FontSm">13</x:Double>
+            <x:Double x:Key="FontMd">14</x:Double>
+            <x:Double x:Key="FontLg">20</x:Double>
 
-            <CornerRadius x:Key="RadiusSm">5</CornerRadius>
-            <CornerRadius x:Key="RadiusMd">8</CornerRadius>
-            <CornerRadius x:Key="RadiusLg">12</CornerRadius>
+            <CornerRadius x:Key="RadiusSm">4</CornerRadius>
+            <CornerRadius x:Key="RadiusMd">6</CornerRadius>
+            <CornerRadius x:Key="RadiusLg">10</CornerRadius>
 
             <x:Double x:Key="Space1">4</x:Double>
             <x:Double x:Key="Space2">6</x:Double>
@@ -40,26 +40,6 @@
                  for the longest English label the rows carry (「Exposure」), since a
                  width that fits 「曝光」 clips it. -->
             <x:Double x:Key="LabelColumn">62</x:Double>
-
-            <!-- The gutter the Cineon steps' numerals HANG IN — outside the panel's
-                 left margin, not inside it. Everything that is content starts on one
-                 line: a section's caption, a section's controls, and a control that
-                 belongs to no section at all (「应用 Cineon 标定到整卷」, the HDR row
-                 above the tabs). Only the numerals are left of it.
-
-                 Getting this wrong is invisible in a mock-up and obvious in the
-                 window: with the gutter INSIDE the margin, everything inside a section
-                 sat 26 px right of everything that was not, and the panel had two left
-                 edges. Hence the Expander's negative margin below — it reaches back out
-                 through the panel's margin so its caption lands on the same line as its
-                 own controls.
-
-                 18, not 24, and the panel's own margin is 22 rather than 40. In a
-                 370 px column every pixel of left margin is a pixel off the end of
-                 every slider in it, and a slider that is 10% shorter is 10% coarser to
-                 drag — the one place where "generous margins" is not a matter of taste
-                 but of how precisely the user can set a number. -->
-            <x:Double x:Key="StepGutter">18</x:Double>
 
             <!-- Neutral surfaces protect colour judgement; blue marks actions and selection. -->
             <ResourceDictionary.ThemeDictionaries>
@@ -82,7 +62,7 @@
                     <SolidColorBrush x:Key="TextMuteBrush">#9A9A9A</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderBrush2">#3E3E3E</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderSoftBrush">#313131</SolidColorBrush>
-                    <SolidColorBrush x:Key="GrooveBrush">#0E0E0E</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#1C1C1C</SolidColorBrush>
                     <!-- Instrument grey: sliders and meters read as measurement, not decoration. -->
                     <SolidColorBrush x:Key="TrackFillBrush">#808080</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentBrush">#8AAED1</SolidColorBrush>
@@ -162,7 +142,7 @@
                     <SolidColorBrush x:Key="TextMuteBrush">#646464</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderBrush2">#CACACA</SolidColorBrush>
                     <SolidColorBrush x:Key="BorderSoftBrush">#DADADA</SolidColorBrush>
-                    <SolidColorBrush x:Key="GrooveBrush">#D2D2D2</SolidColorBrush>
+                    <SolidColorBrush x:Key="GrooveBrush">#EDEDED</SolidColorBrush>
                     <SolidColorBrush x:Key="TrackFillBrush">#6E6E6E</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentBrush">#47698A</SolidColorBrush>
                     <SolidColorBrush x:Key="AccentHoverBrush">#587C9F</SolidColorBrush>
@@ -301,7 +281,7 @@
                 </Style>
             </ControlTheme>
 
-            <!-- Parameter groups use filled surfaces with a clear header and no outline. -->
+            <!-- Continuous parameter groups share an alignment edge without nested cards. -->
             <ControlTheme x:Key="SectionHeader" TargetType="ToggleButton">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -317,24 +297,13 @@
                      12,6 padding) onto every section caption. -->
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border x:Name="face" Background="Transparent" Padding="8,3" CornerRadius="8">
+                        <Border x:Name="face" Background="Transparent" Padding="0,4" CornerRadius="4">
                             <Border.Transitions>
                                 <Transitions>
                                     <BrushTransition Property="Background" Duration="0:0:0.12" />
                                 </Transitions>
                             </Border.Transitions>
-                            <Grid ColumnDefinitions="18,*,Auto" MinHeight="26">
-                                <!-- Step badge: the Expander's Tag, shown only when set. The
-                                     Cineon tab numbers its three calibration steps with it.
-                                     The COLUMN is fixed whether or not the badge is in it. -->
-                                <Border Grid.Column="0" Width="15" Height="15" CornerRadius="7.5"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center"
-                                        Background="{DynamicResource AccentSoftBrush}"
-                                        IsVisible="{TemplateBinding Tag, Converter={x:Static ObjectConverters.IsNotNull}}">
-                                    <TextBlock Text="{TemplateBinding Tag}" FontSize="{DynamicResource FontXs}" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource AccentBrush}"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
+                            <Grid ColumnDefinitions="*,Auto" MinHeight="26">
                                 <!-- A rubric, not a title: one step DOWN in size from the
                                      controls it labels, tracked out, and at full contrast.
                                      Small and dark, not big and dark (that is a page of
@@ -342,7 +311,7 @@
                                      first cut, and it left every heading fainter than its own
                                      content. Tracking is what keeps it legible at 11 px, and
                                      it is the device Chinese type has in place of small caps. -->
-                                <TextBlock Grid.Column="1" Text="{TemplateBinding Content}"
+                                <TextBlock Grid.Column="0" Text="{TemplateBinding Content}"
                                            VerticalAlignment="Center"
                                            FontWeight="SemiBold" FontSize="{DynamicResource FontXs}"
                                            LetterSpacing="0.3"
@@ -354,7 +323,7 @@
                                      transition below interpolates BETWEEN transforms, and
                                      there is nothing to interpolate from if the start state
                                      is unset — the chevron would snap as it always did. -->
-                                <ctl:Icon x:Name="chev" Grid.Column="2" Width="16" Height="16"
+                                <ctl:Icon x:Name="chev" Grid.Column="1" Width="16" Height="16"
                                           Data="{StaticResource IcoChevron}" StrokeThickness="1.6"
                                           Foreground="{DynamicResource TextMuteBrush}"
                                           VerticalAlignment="Center" RenderTransformOrigin="50%,50%"
@@ -387,7 +356,7 @@
             <ControlTheme x:Key="{x:Type Expander}" TargetType="Expander">
                 <Setter Property="Template">
                     <ControlTemplate>
-                        <Border Background="{TemplateBinding Background}" CornerRadius="8" Padding="4">
+                        <Border Name="SectionSurface" Background="{TemplateBinding Background}" CornerRadius="0" Padding="0">
                             <StackPanel>
                                 <ToggleButton x:Name="PART_toggle" Theme="{StaticResource SectionHeader}"
                                               IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
@@ -396,7 +365,7 @@
                                 <ContentPresenter x:Name="PART_ContentPresenter"
                                                   IsVisible="{TemplateBinding IsExpanded}"
                                                   Content="{TemplateBinding Content}"
-                                                  Margin="18,4,8,6" />
+                                                  Margin="0,4,0,8" />
                             </StackPanel>
                         </Border>
                     </ControlTemplate>
@@ -490,7 +459,7 @@
              group at this type size — at 26 the panel was mostly air and the sections
              drifted apart rather than reading as parts of one thing. -->
         <Style Selector="Expander">
-            <Setter Property="Margin" Value="-10,8,0,0" />
+            <Setter Property="Margin" Value="0,8,0,8" />
         </Style>
 
         <!-- ══ Menu bar ═══════════════════════════════════════════════════════ -->
@@ -999,5 +968,6 @@
             <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
         </Style>
         <StyleInclude Source="avares://OpenRevelare/Styles/Workspace.axaml" />
+        <StyleInclude Source="avares://OpenRevelare/Styles/Dialogs.axaml" />
     </Application.Styles>
 </Application>

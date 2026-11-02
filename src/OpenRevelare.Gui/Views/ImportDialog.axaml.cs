@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using OpenRevelare.Core;
@@ -15,12 +16,6 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public partial class ImportDialog : Window
 {
-    /// <summary>What "add folder" picks up: every RAW the decoder accepts, plus TIFF. Derived
-    /// from <see cref="RawDecode.RawExtensions"/> rather than restated — a RAW the decoder can
-    /// read but this set omits would be silently skipped on import.</summary>
-    private static readonly HashSet<string> RawTiffExt =
-        new(RawDecode.RawExtensions.Concat(new[] { ".tif", ".tiff" }), StringComparer.OrdinalIgnoreCase);
-
     /// <summary>Scanner output — the inputs that may hold several negatives in one file and so
     /// go through the split pre-pass. Camera RAW is one frame per file and skips it.</summary>
     private static readonly HashSet<string> ScanExt = new(StringComparer.OrdinalIgnoreCase)
@@ -53,10 +48,13 @@ public partial class ImportDialog : Window
 
     public ObservableCollection<string> Files { get; } = new();
     public ImportConfig? Result { get; private set; }
+    public bool AddToCurrent => CurrentRollChoice.IsChecked == true;
     private bool _calValid;
     private bool _calChecking;
 
-    public ImportDialog()
+    public ImportDialog() : this(Array.Empty<string>(), false) { }
+
+    public ImportDialog(IEnumerable<string> initialPaths, bool canAddToCurrent)
     {
         InitializeComponent();
         FileList.ItemsSource = Files;
@@ -69,6 +67,44 @@ public partial class ImportDialog : Window
             CountLbl.Text = Loc.F($"{Files.Count} 张");
             UpdateReadyUi();
         };
+        DestinationRow.IsVisible = canAddToCurrent;
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            e.DragEffects = e.Data.Contains(DataFormats.Files) ? DragDropEffects.Copy : DragDropEffects.None;
+            FileList.Opacity = e.DragEffects == DragDropEffects.Copy ? 0.65 : 1;
+            e.Handled = true;
+        });
+        AddHandler(DragDrop.DragLeaveEvent, (_, _) => FileList.Opacity = 1);
+        AddHandler(DragDrop.DropEvent, async (_, e) =>
+        {
+            e.Handled = true;
+            FileList.Opacity = 1;
+            var paths = e.Data.GetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToArray() ?? Array.Empty<string>();
+            await AddPathsAsync(paths);
+        });
+        foreach (string path in initialPaths) Files.Add(path);
+    }
+
+    private void OnDestinationChanged(object? sender, RoutedEventArgs e)
+    {
+        if (AdvancedImportSettings is null || AutoImportOptions is null) return;
+        AdvancedImportSettings.IsVisible = AutoImportOptions.IsVisible = !AddToCurrent;
+        UpdateReadyUi();
+    }
+
+    private async Task AddPathsAsync(IEnumerable<string> paths)
+    {
+        var selection = await Task.Run(() => ImportFiles.Collect(paths));
+        var existing = new HashSet<string>(Files, OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (string path in selection.Images)
+            if (existing.Add(path)) Files.Add(path);
+        if (selection.Rejected.Length + selection.Projects.Length > 0)
+            await new InfoDialog(Loc.T("部分文件未加入"),
+                Loc.T("请选择 RAW 或 TIFF；工程请在主窗口打开。") + "\n\n" +
+                string.Join("\n", selection.Rejected.Concat(selection.Projects).Select(System.IO.Path.GetFileName)))
+                .ShowDialog(this);
     }
 
     private async void OnAddFiles(object? sender, RoutedEventArgs e)
@@ -83,16 +119,14 @@ public partial class ImportDialog : Window
                 new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
-        foreach (var f in picked)
-            if (f.TryGetLocalPath() is { } p && !Files.Contains(p)) Files.Add(p);
+        await AddPathsAsync(picked.Select(f => f.TryGetLocalPath()).OfType<string>());
     }
 
     private async void OnAddFolder(object? sender, RoutedEventArgs e)
     {
         var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("添加文件夹（扫描 RAW/TIFF）") });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
-        foreach (string p in Directory.EnumerateFiles(dir).Where(f => RawTiffExt.Contains(Path.GetExtension(f))).OrderBy(f => f))
-            if (!Files.Contains(p)) Files.Add(p);
+        await AddPathsAsync(new[] { dir });
     }
 
     private void OnRemoveSelected(object? sender, RoutedEventArgs e)
@@ -111,7 +145,7 @@ public partial class ImportDialog : Window
     private void UpdateReadyUi()
     {
         if (OkBtn is null || ReadyHint is null) return;
-        string issue = MissingReference(SrcA.IsChecked == true, _calValid, _calChecking,
+        string issue = AddToCurrent ? "" : MissingReference(SrcA.IsChecked == true, _calValid, _calChecking,
             LccChk.IsChecked == true, LccEdit.Text);
         OkBtn.IsEnabled = Files.Count > 0 && issue.Length == 0;
         ReadyHint.Text = issue;
@@ -204,8 +238,8 @@ public partial class ImportDialog : Window
             // Left at Unspecified on purpose: that is now "detect", not "unanswered".
         };
         // The dialog's choices become the new defaults, so the next import opens on them.
-        if (Settings.Current.AutoInvertOnImport != cfg.AutoInvert
-            || Settings.Current.SplitStripsOnImport != cfg.SplitStrips)
+        if (!AddToCurrent && (Settings.Current.AutoInvertOnImport != cfg.AutoInvert
+            || Settings.Current.SplitStripsOnImport != cfg.SplitStrips))
         {
             Settings.Current.AutoInvertOnImport = cfg.AutoInvert;
             Settings.Current.SplitStripsOnImport = cfg.SplitStrips;

@@ -177,7 +177,7 @@
                                     <MenuItem Header="{i18n:T '重命名…'}" Click="OnRenameClick" />
                                     <MenuItem Header="{i18n:T '卷信息…'}" Click="OnInfoClick"
                                               ToolTip.Tip="{i18n:T '相机 / 胶卷 / 卷号 / 冲洗 …，会烧在印样标识条上'}" />
-                                    <MenuItem Header="{i18n:T '导出印样…'}" Click="OnExportSheetClick"
+                                    <MenuItem Header="{i18n:T '保存封面印样副本…'}" Click="OnExportSheetClick"
                                               ToolTip.Tip="{i18n:T '另存这一卷的印样封面（不需要重新解码整卷）'}" />
                                     <MenuItem Header="{i18n:T '重新定位工程…'}" Click="OnRelocateClick"
                                               ToolTip.Tip="{i18n:T '工程文件被移动过时，指向它的新位置'}" />

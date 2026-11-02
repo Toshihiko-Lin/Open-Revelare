@@ -4,16 +4,16 @@
         x:Class="OpenRevelare.Gui.Views.ExportDialog"
         Width="600" MinWidth="460" MinHeight="360" SizeToContent="Height" MaxHeight="780"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PanelBrush}"
         Title="{i18n:T '导出选项'}">
     <!-- Labels share an 86 px column, including English. Body scrolls; actions stay visible. -->
     <Window.Styles>
         <Style Selector="Border.section">
-            <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
-            <Setter Property="Padding" Value="12,10,12,11" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="0,0,0,16" />
         </Style>
         <Style Selector="TextBlock.sectionHead">
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -32,7 +32,7 @@
             <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
             <Setter Property="Padding" Value="12,10" />
-            <Setter Property="MinHeight" Value="76" />
+            <Setter Property="MinHeight" Value="64" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Name="FormatCard" Background="{TemplateBinding Background}"
@@ -53,7 +53,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         </Style>
         <Style Selector="RadioButton.exportFormat:focus-visible /template/ Border#FormatCard">
-            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
         </Style>
         <Style Selector="TextBlock.formatTitle">
             <Setter Property="FontWeight" Value="SemiBold" />

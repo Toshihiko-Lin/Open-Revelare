@@ -9,7 +9,7 @@
          520 是照着它们定的;后来色彩管线迁移这类三四行的短文案也用它,于是文字只占顶部约
          110 px,中间一大片空白才到按钮。固定高度对长文是对的,对短文就是个空盒子。
          上限保留 520:长文的观感一字不变,短文自己收到该有的大小。 -->
-    <DockPanel Margin="16">
+    <DockPanel Margin="20">
         <!-- Header. The mark only shows on 关于 (see InfoDialog.About) — 快捷键 and the
              notices are reading material, not a brand page. -->
         <Grid Name="Header" DockPanel.Dock="Top" ColumnDefinitions="Auto,*"
@@ -33,7 +33,7 @@
             <Button Name="CloseButton" Content="{i18n:T '关闭'}" IsCancel="True"
                     Click="OnCloseClick" />
             <Button Name="SecondaryActionButton" IsVisible="False" Click="OnSecondaryActionClick" Margin="6,0,0,6" />
-            <Button Name="ActionButton" IsVisible="False" Click="OnActionClick" Margin="6,0,0,6" />
+            <Button Name="ActionButton" Classes="primary" IsVisible="False" Click="OnActionClick" Margin="6,0,0,6" />
         </WrapPanel>
         <ScrollViewer>
             <SelectableTextBlock Name="BodyText" TextWrapping="Wrap" LineHeight="20" />

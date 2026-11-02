@@ -18,6 +18,7 @@ namespace OpenRevelare.Gui.Views;
 /// </summary>
 public sealed class RollInfoDialog : Window
 {
+    private readonly RollNotes _initial;
     private readonly TextBox _camera = new(), _film = new(), _number = new();
     private readonly TextBox _lab = new(), _date = new(), _place = new();
     private readonly TextBox _note = new() { AcceptsReturn = true, Height = 66, TextWrapping = TextWrapping.Wrap };
@@ -25,6 +26,7 @@ public sealed class RollInfoDialog : Window
 
     public RollInfoDialog(string rollTitle, RollNotes initial)
     {
+        _initial = initial.Clone();
         Title = Loc.T("卷信息");
         Width = 420;
         SizeToContent = SizeToContent.Height;
@@ -62,39 +64,23 @@ public sealed class RollInfoDialog : Window
             grid.Children.Add(boxes[i]);
         }
 
-        var ok = new Button { Content = Loc.T("保存"), IsDefault = true, Margin = new Thickness(0, 0, 6, 0) };
+        var ok = new Button { Content = Loc.T("保存"), IsDefault = true, Classes = { "primary" } };
         var cancel = new Button { Content = Loc.T("取消"), IsCancel = true };
         ok.Click += (_, _) => Close(Collect());
         cancel.Click += (_, _) => Close(null);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 14, 0, 0),
-        };
-        buttons.Children.Add(ok);
-        buttons.Children.Add(cancel);
-
-        var panel = new StackPanel { Margin = new Thickness(18), Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = rollTitle, FontSize = 15, FontWeight = FontWeight.Bold });
-        panel.Children.Add(new TextBlock
-        {
-            Text = Loc.T("这些信息会烧在该卷印样底部的标识条上，并作为图库卡片的副标题。"),
-            FontSize = 11, Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 8),
-        });
+        var panel = new StackPanel { Spacing = 4 };
+        panel.Children.Add(new TextBlock { Text = rollTitle, Classes = { "dialogTitle" } });
         panel.Children.Add(grid);
         panel.Children.Add(new TextBlock { Text = Loc.T("备注"), Margin = new Thickness(0, 8, 0, 3) });
         panel.Children.Add(_note);
-        panel.Children.Add(buttons);
-        Content = new ScrollViewer { Content = panel };
+        Content = DialogLayout.Compose(panel, DialogLayout.Actions(cancel, ok));
 
         Opened += (_, _) => { _camera.Focus(); };
         KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(null); };
     }
 
-    private RollNotes Collect() => new()
+    private RollNotes Collect() => MergeVisibleFields(_initial, new()
     {
         CameraBody = _camera.Text ?? "", FilmStock = _film.Text ?? "",
         RollNumber = _number.Text ?? "",
@@ -102,5 +88,16 @@ public sealed class RollInfoDialog : Window
         DevDate = _date.Text ?? "", Location = _place.Text ?? "",
         RollNote = _note.Text ?? "",
         Format = _format.Text ?? "",
-    };
+    });
+
+    // A partial editor must not blank metadata entered from the contact-sheet editor (D13).
+    internal static RollNotes MergeVisibleFields(RollNotes initial, RollNotes edited)
+    {
+        var result = initial.Clone();
+        result.CameraBody = edited.CameraBody; result.FilmStock = edited.FilmStock;
+        result.RollNumber = edited.RollNumber; result.DevLab = edited.DevLab;
+        result.DevDate = edited.DevDate; result.Location = edited.Location;
+        result.RollNote = edited.RollNote; result.Format = edited.Format;
+        return result;
+    }
 }

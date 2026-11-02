@@ -28,10 +28,10 @@ public sealed class DocDialog : Window
         tabs.Items.Add(new TabItem { Header = Loc.T("操作指南"), Content = DocPane("GUIDE.md") });
         tabs.Items.Add(new TabItem { Header = Loc.T("技术原理"), Content = DocPane("THEORY.md") });
 
-        var close = new Button { Content = Loc.T("关闭"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        var close = new Button { Content = Loc.T("关闭"), IsCancel = true, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
         close.Click += (_, _) => Close();
 
-        var root = new DockPanel { Margin = new Thickness(12) };
+        var root = new DockPanel { Margin = new Thickness(20) };
         DockPanel.SetDock(close, Dock.Bottom);
         root.Children.Add(close);
         root.Children.Add(tabs);

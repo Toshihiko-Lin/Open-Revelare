@@ -85,7 +85,7 @@
                         <Separator />
                         <MenuItem Header="{i18n:T '复制（按当前面板）'}" InputGesture="{i18n:Accel 'C'}"
                                   Click="OnCopyActiveClick" IsEnabled="{Binding HasImage}"
-                                  ToolTip.Tip="{i18n:T '整卷校准面板 → 复制 Cineon 标定；帧编辑面板 → 复制 Display 参数'}">
+                                  ToolTip.Tip="{i18n:T '整卷校准面板 → 复制底片校准；帧编辑面板 → 复制成片调整'}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoCopy}" />
                             </MenuItem.Icon>
@@ -97,37 +97,37 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <Separator />
-                        <MenuItem Header="{i18n:T '标定（Stage 1）'}" IsEnabled="{Binding HasImage}">
-                            <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
+                        <MenuItem Header="{i18n:T '底片校准'}" IsEnabled="{Binding HasImage}">
+                            <MenuItem Header="{i18n:T '复制底片校准'}" Click="OnCopyCalClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴底片校准到本帧'}" Click="OnPasteCalToCurrentClick"
                                       IsEnabled="{Binding HasCalClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '应用 Cineon 标定到勾选帧'}" Click="OnPasteCalClick"
+                            <MenuItem Header="{i18n:T '应用底片校准到勾选帧'}" Click="OnPasteCalClick"
                                       IsEnabled="{Binding HasCalClipboard}" />
-                            <MenuItem Header="{i18n:T '应用 Cineon 标定到整卷'}" Click="OnApplyCalToRollClick" />
+                            <MenuItem Header="{i18n:T '应用底片校准到整卷'}" Click="OnApplyCalToRollClick" />
                         </MenuItem>
-                        <MenuItem Header="{i18n:T '场景（Stage 2）'}" IsEnabled="{Binding HasImage}">
-                            <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick">
+                        <MenuItem Header="{i18n:T '成片调整'}" IsEnabled="{Binding HasImage}">
+                            <MenuItem Header="{i18n:T '复制成片调整'}" Click="OnCopySceneClick">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCopy}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
+                            <MenuItem Header="{i18n:T '粘贴成片调整到本帧'}" Click="OnPasteSceneToCurrentClick"
                                       IsEnabled="{Binding HasSceneClipboard}">
                                 <MenuItem.Icon>
                                     <ctl:Icon Data="{StaticResource IcoCheck}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '应用 Display 参数到勾选帧'}" Click="OnPasteSceneClick"
+                            <MenuItem Header="{i18n:T '应用成片调整到勾选帧'}" Click="OnPasteSceneClick"
                                       IsEnabled="{Binding HasSceneClipboard}" />
-                            <MenuItem Header="{i18n:T '应用 Display 参数到整卷'}" Click="OnApplySceneToRollClick" />
+                            <MenuItem Header="{i18n:T '应用成片调整到整卷'}" Click="OnApplySceneToRollClick" />
                         </MenuItem>
                         <Separator />
                         <MenuItem Header="{i18n:T '选择色彩同步项…'}" Click="OnSyncOptionsClick" IsEnabled="{Binding HasImage}" />
@@ -264,6 +264,11 @@
             </Grid>
         </Border>
 
+        <Border Name="DropNotice" DockPanel.Dock="Top" IsVisible="False"
+                Background="{DynamicResource AccentSoftBrush}" Padding="16,8">
+            <TextBlock Text="{i18n:T '放下以导入'}" HorizontalAlignment="Center" />
+        </Border>
+
         <!-- ── Status bar ──────────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Bottom" Padding="10,4" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
@@ -353,24 +358,24 @@
                             </MenuItem>
                             <Separator />
                             <MenuItem Header="{i18n:T '同步底片 · Cineon'}">
-                                <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
+                                <MenuItem Header="{i18n:T '复制底片校准'}" Click="OnCopyCalClick">
                                     <MenuItem.Icon><ctl:Icon Data="{StaticResource IcoCopy}" /></MenuItem.Icon>
                                 </MenuItem>
-                                <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                                <MenuItem Header="{i18n:T '粘贴底片校准到本帧'}" Click="OnPasteCalToCurrentClick"
                                           IsEnabled="{Binding HasCalClipboard}">
                                     <MenuItem.Icon><ctl:Icon Data="{StaticResource IcoCheck}" /></MenuItem.Icon>
                                 </MenuItem>
-                                <MenuItem Header="{i18n:T '应用 Cineon 标定到勾选帧'}" Click="OnPasteCalClick"
+                                <MenuItem Header="{i18n:T '应用底片校准到勾选帧'}" Click="OnPasteCalClick"
                                           IsEnabled="{Binding HasCalClipboard}" />
-                                <MenuItem Header="{i18n:T '应用 Cineon 标定到整卷'}" Click="OnApplyCalToRollClick" />
+                                <MenuItem Header="{i18n:T '应用底片校准到整卷'}" Click="OnApplyCalToRollClick" />
                             </MenuItem>
                             <MenuItem Header="{i18n:T '同步观感 · Display'}">
-                                <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick" />
-                                <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
+                                <MenuItem Header="{i18n:T '复制成片调整'}" Click="OnCopySceneClick" />
+                                <MenuItem Header="{i18n:T '粘贴成片调整到本帧'}" Click="OnPasteSceneToCurrentClick"
                                           IsEnabled="{Binding HasSceneClipboard}" />
-                                <MenuItem Header="{i18n:T '应用 Display 参数到勾选帧'}" Click="OnPasteSceneClick"
+                                <MenuItem Header="{i18n:T '应用成片调整到勾选帧'}" Click="OnPasteSceneClick"
                                           IsEnabled="{Binding HasSceneClipboard}" />
-                                <MenuItem Header="{i18n:T '应用 Display 参数到整卷'}" Click="OnApplySceneToRollClick" />
+                                <MenuItem Header="{i18n:T '应用成片调整到整卷'}" Click="OnApplySceneToRollClick" />
                             </MenuItem>
                             <MenuItem Header="{i18n:T '同步构图'}">
                                 <MenuItem Header="{i18n:T '同步旋转 / 翻转 / 拉直'}" Click="OnApplyGeometryClick"
@@ -488,8 +493,8 @@
                                     </Button>
                                     <Button Classes="icon" Click="OnApplyGeometryClick" IsEnabled="{Binding HasImage}"
                                             Margin="8,0,0,0"
-                                            AutomationProperties.Name="{i18n:T '同步旋转 / 翻转 / 拉直'}"
-                                            ToolTip.Tip="{i18n:T '把本帧的旋转、翻转和拉直应用到勾选帧，未勾选则整卷；不含裁切'}">
+                                            AutomationProperties.Name="{Binding GeometrySyncLabel}"
+                                            ToolTip.Tip="{Binding GeometrySyncLabel}">
                                         <ctl:Icon Data="{StaticResource IcoBroadcast}" />
                                     </Button>
                                 </StackPanel>
@@ -644,15 +649,15 @@
                                  right-hand panel (clear crop, straighten, sprocket mask) or in
                                  the 视图 menu (background colour) is NOT repeated here. -->
                             <MenuItem Header="{i18n:T '复制 / 粘贴参数'}">
-                                <MenuItem Header="{i18n:T '复制 Cineon 标定'}" Click="OnCopyCalClick">
+                                <MenuItem Header="{i18n:T '复制底片校准'}" Click="OnCopyCalClick">
                                     <MenuItem.Icon><ctl:Icon Data="{StaticResource IcoCopy}" /></MenuItem.Icon>
                                 </MenuItem>
-                                <MenuItem Header="{i18n:T '粘贴 Cineon 标定到本帧'}" Click="OnPasteCalToCurrentClick"
+                                <MenuItem Header="{i18n:T '粘贴底片校准到本帧'}" Click="OnPasteCalToCurrentClick"
                                           IsEnabled="{Binding HasCalClipboard}">
                                     <MenuItem.Icon><ctl:Icon Data="{StaticResource IcoCheck}" /></MenuItem.Icon>
                                 </MenuItem>
-                                <MenuItem Header="{i18n:T '复制 Display 参数'}" Click="OnCopySceneClick" />
-                                <MenuItem Header="{i18n:T '粘贴 Display 参数到本帧'}" Click="OnPasteSceneToCurrentClick"
+                                <MenuItem Header="{i18n:T '复制成片调整'}" Click="OnCopySceneClick" />
+                                <MenuItem Header="{i18n:T '粘贴成片调整到本帧'}" Click="OnPasteSceneToCurrentClick"
                                           IsEnabled="{Binding HasSceneClipboard}" />
                             </MenuItem>
                             <MenuItem Header="{i18n:T 'Ctrl+C / Ctrl+V 复制 / 粘贴当前打开标签的那一组'}"
@@ -915,10 +920,18 @@
                  long. They are still "通用" in the sense that mattered — present whichever
                  tab is open — and the panel now has ONE scrollbar where it used to nest
                  two, which is the other half of the problem this fixes. -->
-            <Grid Name="InspectorWorkspace" Grid.Column="4" RowDefinitions="Auto,*" Background="{DynamicResource PanelBrush}" Margin="8,0,0,0">
-                <Border Grid.Row="0" Padding="22,8,14,6" Background="{DynamicResource Panel2Brush}"
+            <Grid Name="InspectorWorkspace" Grid.Column="4" RowDefinitions="Auto,Auto,*,Auto" Background="{DynamicResource PanelBrush}" Margin="8,0,0,0">
+                <Border Grid.Row="0" Padding="16,12,16,8" Background="{DynamicResource PanelBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
                     <StackPanel Spacing="4">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                            <TextBlock Text="{Binding CurrentFrameIdentity}" TextTrimming="CharacterEllipsis"
+                                       ToolTip.Tip="{Binding CurrentFrameIdentity}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="1" Text="{Binding CurrentFramePosition}" Margin="12,0,0,0"
+                                       FontSize="12" Foreground="{DynamicResource TextDimBrush}" />
+                        </Grid>
+                        <TextBlock Text="{Binding SelectionContext}" FontSize="12" Foreground="{DynamicResource TextDimBrush}"
+                                   IsVisible="{Binding SelectionContext, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <!-- One slot, two readings of it. They are not shown together: both answer
                              "how is this frame exposed", and stacking them spent twice the height of
                              the pinned block on one question. The switch sits under the plot, right
@@ -975,7 +988,24 @@
                     </StackPanel>
                 </Border>
 
-                <Panel Grid.Row="1">
+                <Border Grid.Row="1" Margin="16,10,16,12" Padding="3" CornerRadius="6"
+                        Background="{DynamicResource Panel2Brush}">
+                    <TabStrip Name="InspectorTabs" Classes="inspectorTabs" KeyDown="OnInspectorTabKeyDown"
+                              KeyboardNavigation.TabNavigation="Once" SelectedIndex="{Binding #PanelTabs.SelectedIndex, Mode=TwoWay}">
+                        <TabStrip.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate></TabStrip.ItemsPanel>
+                        <TabStripItem Content="{i18n:T '底片校准'}" />
+                        <TabStripItem Content="{i18n:T '成片调整'}" />
+                    </TabStrip>
+                </Border>
+                <Border Grid.Row="3" Padding="16,12" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+                    <Panel>
+                        <Button Name="CalibrationSyncFooter" Classes="scopeAction" Content="{Binding CalibrationApplyLabel}" Click="OnApplyCalToRollClick"
+                                HorizontalAlignment="Stretch" IsEnabled="{Binding HasOtherFrames}" ToolTip.Tip="{Binding CalibrationBroadcastHint}" />
+                        <Button Name="SceneSyncFooter" Classes="scopeAction" Content="{Binding SceneApplyLabel}" Click="OnApplySceneToRollClick"
+                                HorizontalAlignment="Stretch" IsVisible="False" IsEnabled="{Binding CanApplySceneToRoll}" ToolTip.Tip="{Binding SceneBroadcastHint}" />
+                    </Panel>
+                </Border>
+                <Panel Grid.Row="2">
                 <ScrollViewer Name="PanelScroll" HorizontalScrollBarVisibility="Disabled"
                               AllowAutoHide="False">
                 <StackPanel>
@@ -983,6 +1013,18 @@
                      Stage-1 标定, 帧编辑 → Stage-2 场景. -->
                 <Panel>
                 <TabControl Name="PanelTabs" Padding="0">
+                    <TabControl.Template>
+                        <ControlTemplate>
+                            <Grid RowDefinitions="0,Auto">
+                                <!-- TabControl needs its presenter to realise TabItem containers.
+                                     The visible, keyboard-accessible strip is pinned above the scroller. -->
+                                <ItemsPresenter Name="PART_ItemsPresenter" Grid.Row="0" IsHitTestVisible="False"
+                                                ClipToBounds="True" KeyboardNavigation.TabNavigation="None" />
+                                <ContentPresenter Name="PART_SelectedContentHost" Grid.Row="1" Content="{TemplateBinding SelectedContent}"
+                                                  ContentTemplate="{TemplateBinding SelectedContentTemplate}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </TabControl.Template>
                     <!-- Two stages, half the strip each — see the Tabs block in App.axaml. -->
                     <TabControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -994,40 +1036,13 @@
                         <TabItem.Header>
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,5,0" VerticalAlignment="Center" Data="{StaticResource IcoFilm}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '01 底片校准'}" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '底片校准'}" />
                             </Grid>
                         </TabItem.Header>
                         <!-- No scroller of its own: the panel scrolls as one column (see PanelScroll). -->
                         <Border Classes="calibrationStage">
-                            <StackPanel Spacing="0" Margin="22,4,14,12">
-                                <Expander Header="{i18n:T '输入与校正详情'}" Margin="0,0,0,8">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Classes="groupHint" Text="{Binding InputCharacterizationText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionSourceText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionSourceText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionScopeText}" TextWrapping="Wrap" />
-                                        <Button Content="{i18n:T '查看本帧校准依据…'}" Click="OnFrameReportClick"
-                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch" />
-                                        <Separator Margin="0,6" />
-                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
-                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />
-                                        <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
-                                        <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
-                                        <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
-                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T 'LCC 平场校正：用平场参考图逐像素修正翻拍镜头的暗角/角落偏色（比公式暗角更准）。'}" />
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <Button Grid.Column="0" Content="{i18n:T '载入 LCC 平场…'}" Click="OnLoadLccClick"
-                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0" IsEnabled="{Binding HasImage}" />
-                                            <CheckBox Grid.Column="1" Content="{i18n:T '启用'}" IsChecked="{Binding LccEnabled}"
-                                                      IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
-                                        </Grid>
-                                        <TextBlock Classes="groupHint" Text="{Binding LccStatus}" Margin="0,4,0,0" />
-                                    </StackPanel>
-                                </Expander>
+                            <StackPanel Spacing="0" Margin="16,4,16,12">
+
                                 <!-- 旧模型存的 d_max / scan_ev 与现在固定的输出范围不是同一
                                      量纲，静默折算实测在薄部偏 -18%、浓部 +53%（比不折算更糟），
                                      所以如实提示重跑，而不是假装画面没变。-->
@@ -1084,7 +1099,7 @@
                                      「亮度」「反差」「色温」都是这六个数的派生读数，不另立字段。-->
 
                                 <!-- D_min：暗端 -->
-                                <Expander Header="{i18n:T 'D_min（黑端）'}" IsExpanded="True" Tag="1"
+                                <Expander Header="{i18n:T '黑端'}" IsExpanded="True" Tag="1"
                                           ToolTip.Tip="{i18n:T '每个通道读作黑的密度（相对完全透光 T=1）。C-41 橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。'}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_min" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
@@ -1127,7 +1142,7 @@
                                 </Expander>
 
                                 <!-- D_max：亮端 -->
-                                <Expander Header="{i18n:T 'D_max（白端）'}" IsExpanded="True" Tag="2"
+                                <Expander Header="{i18n:T '白端'}" IsExpanded="True" Tag="2"
                                           ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。'}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
@@ -1180,7 +1195,7 @@
                                                           ToolTip.Tip="{i18n:T '框选画面中拍到的灰卡，将其定为 Cineon 标准灰：三通道落在码值 470，色偏与曝光位置一同确定。与高光采样互为替代，后执行者生效。'}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '灰卡采样 · Cineon 470'}" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '灰卡采样'}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
@@ -1204,18 +1219,34 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- Broadcast. 复制 / 应用到勾选帧 / 色彩同步项 moved to 编辑 菜单
-                                     and the film-strip right-click; only the roll-wide action
-                                     (the one this whole tab exists for) stays on-screen. -->
-                                <Button Click="OnApplyCalToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
-                                        IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{Binding CalibrationBroadcastHint}"
-                                        AutomationProperties.HelpText="{Binding CalibrationBroadcastHint}">
-                                    <Grid ColumnDefinitions="Auto,*">
-                                        <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCheck}" />
-                                        <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '应用 Cineon 标定到整卷'}" VerticalAlignment="Center" />
-                                    </Grid>
-                                </Button>
+                                <Expander Header="{i18n:T '输入与校正详情'}" Margin="0,0,0,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="groupHint" Text="{Binding InputCharacterizationText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionSourceText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionSourceText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionScopeText}" TextWrapping="Wrap" />
+                                        <Button Content="{i18n:T '查看本帧校准依据…'}" Click="OnFrameReportClick"
+                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch" />
+                                        <Separator Margin="0,6" />
+                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />
+                                        <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
+                                        <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
+                                        <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{i18n:T 'LCC 平场校正：用平场参考图逐像素修正翻拍镜头的暗角/角落偏色（比公式暗角更准）。'}" />
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <Button Grid.Column="0" Content="{i18n:T '载入 LCC 平场…'}" Click="OnLoadLccClick"
+                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0" IsEnabled="{Binding HasImage}" />
+                                            <CheckBox Grid.Column="1" Content="{i18n:T '启用'}" IsChecked="{Binding LccEnabled}"
+                                                      IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
+                                        </Grid>
+                                        <TextBlock Classes="groupHint" Text="{Binding LccStatus}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Expander>
                             </StackPanel>
                         </Border>
                     </TabItem>
@@ -1225,11 +1256,11 @@
                         <TabItem.Header>
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,5,0" VerticalAlignment="Center" Data="{StaticResource IcoLayers}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '02 成片调整'}" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '成片调整'}" />
                             </Grid>
                         </TabItem.Header>
                         <Border Classes="finishingStage">
-                            <StackPanel Spacing="0" Margin="22,4,14,12">
+                            <StackPanel Spacing="0" Margin="16,4,16,12">
                                 <!-- 白平衡属于这里，不属于标定。标定阶段解的是【色偏】——胶片、扫描、片基
                                      留在两端上的偏差，写在 D_min / D_max 里，没有"白平衡"的概念；白平衡是
                                      场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
@@ -1303,15 +1334,6 @@
                                     <ctl:CurveEditor Name="Curves" />
                                 </Expander>
 
-                                <Button Click="OnApplySceneToRollClick" HorizontalAlignment="Stretch" Margin="0,14,0,0"
-                                        IsEnabled="{Binding HasImage}"
-                                        ToolTip.Tip="{Binding SceneBroadcastHint}"
-                                        AutomationProperties.HelpText="{Binding SceneBroadcastHint}">
-                                    <Grid ColumnDefinitions="Auto,*">
-                                        <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCheck}" />
-                                        <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '应用 Display 参数到整卷'}" VerticalAlignment="Center" />
-                                    </Grid>
-                                </Button>
                             </StackPanel>
                         </Border>
                     </TabItem>
@@ -1338,12 +1360,16 @@
                 <Grid Classes="repairStage" RowDefinitions="Auto,Auto">
                     <!-- Header bar doubles as the divider: a full-width groove plus a rubric,
                          so it reads as its own region rather than the tail of the open tab. -->
-                    <Border Grid.Row="0" Padding="22,6,14,6" Background="{DynamicResource Panel2Brush}"
+                    <Border Grid.Row="0" Padding="16,8" Background="{DynamicResource PanelBrush}"
                             BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                        <TextBlock Classes="fieldLabel" Text="{i18n:T '构图与修复'}" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Classes="fieldLabel" Text="{i18n:T '构图与修复'}" />
+                            <TextBlock Grid.Column="1" Text="{Binding CompositionTargetLabel}" FontSize="12"
+                                       Foreground="{DynamicResource TextDimBrush}" IsVisible="{Binding HasImage}" />
+                        </Grid>
                     </Border>
                     <Border Grid.Row="1">
-                        <StackPanel Spacing="0" Margin="22,0,14,14">
+                        <StackPanel Spacing="0" Margin="16,0,16,16">
                             <!-- 齿孔遮罩 -->
                             <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
                                 <CheckBox Grid.Column="0" Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
@@ -1351,8 +1377,8 @@
                                           ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
                                 <Button Grid.Column="1" Classes="icon" Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}"
                                         Width="26" Height="26" MinHeight="26" Padding="4" Margin="6,0,0,0" VerticalAlignment="Center"
-                                        AutomationProperties.Name="{i18n:T '同步齿孔遮罩'}"
-                                        ToolTip.Tip="{i18n:T '把本帧的齿孔遮罩启用状态和阈值应用到勾选帧，未勾选则整卷；不改动色彩和构图'}">
+                                        AutomationProperties.Name="{Binding SprocketSyncLabel}"
+                                        ToolTip.Tip="{Binding SprocketSyncLabel}">
                                     <ctl:Icon Width="16" Height="16" Data="{StaticResource IcoBroadcast}" />
                                 </Button>
                             </Grid>
@@ -1394,7 +1420,7 @@
                             <Expander Header="{i18n:T '裁切'}">
                                 <StackPanel Spacing="6">
                                     <Button Click="OnApplyCropClick" IsEnabled="{Binding HasImage}"
-                                            Content="{i18n:T '同步裁切'}" HorizontalAlignment="Stretch"
+                                            Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
                                             ToolTip.Tip="{i18n:T '把本帧的裁切应用到勾选帧，未勾选则整卷；会按各帧底片重定位'}" />
                                     <Grid ColumnDefinitions="Auto,*">
                                         <TextBlock Grid.Column="0" Classes="fieldLabel spine" Text="{i18n:T '预设'}" />

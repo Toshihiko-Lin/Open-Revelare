@@ -23,6 +23,7 @@ namespace OpenRevelare.Gui.Views;
 /// the user's in-progress, not-yet-saved choices across the rebuild.</summary>
 public sealed class PreferencesDialog : Window
 {
+    private bool _accepted;
     private ComboBox _backend = new();
     private ComboBox _fbdd = new();
     private ComboBox _theme = new();
@@ -51,9 +52,11 @@ public sealed class PreferencesDialog : Window
 
     public PreferencesDialog()
     {
-        Width = 460;
-        Height = 700;   // grew when the roll-cover and language sections landed; still scrolls
+        Width = 600; MinWidth = 480; MinHeight = 360;
+        Height = 720;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        // Title-bar close, Escape and Cancel all discard the same preview (D08).
+        Closed += (_, _) => { if (!_accepted) { App.ApplyTheme(); Loc.Apply(); } };
 
         Settings.Model s = Settings.Current;
         int cb = Array.IndexOf(CacheBudgets, s.CacheBudgetGb);
@@ -117,8 +120,8 @@ public sealed class PreferencesDialog : Window
         _autoInvert = new CheckBox { Content = Loc.T("导入后自动整卷分析去色罩"), IsChecked = v.AutoInvert };
         _cacheOn = new CheckBox { Content = Loc.T("启用 DNG 转换磁盘缓存"), IsChecked = v.CacheOn };
         _cachePersist = new CheckBox { Content = Loc.T("跨会话保留（退出不删除，下次启动直接命中）"), IsChecked = v.CachePersist };
-        _cacheDir = new TextBox { Watermark = Loc.T("留空 = 和源文件同目录"), MinWidth = 250, Text = v.CacheDir };
-        _sheetDir = new TextBox { Watermark = Loc.T(@"留空 = %LOCALAPPDATA%\OpenRevelare\sheets"), MinWidth = 250, Text = v.SheetDir };
+        _cacheDir = new TextBox { Watermark = Loc.T("留空 = 和源文件同目录"), Text = v.CacheDir };
+        _sheetDir = new TextBox { Watermark = Loc.T(@"留空 = %LOCALAPPDATA%\OpenRevelare\sheets"), Text = v.SheetDir };
 
         _dngNote.Text = RawDecode.IsDngConverterAvailable()
             ? Loc.T("已检测到 Adobe DNG Converter。")
@@ -135,13 +138,13 @@ public sealed class PreferencesDialog : Window
         UpdateCacheNote();
         UpdateSheetNote();
 
-        var panel = new StackPanel { Margin = new Thickness(18), Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), FontSize = 18, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 0, 0, 8) });
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), Classes = { "dialogTitle" } });
         panel.Children.Add(Row(Loc.T("RAW 解码后端"), _backend));
         panel.Children.Add(_dngNote);
         panel.Children.Add(Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd));
         panel.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
-        panel.Children.Add(_concurrencyNote);
+        panel.Children.Add(Details(Loc.T("解码资源详情"), _concurrencyNote));
         panel.Children.Add(Row(Loc.T("GPU 加速"), _gpu));
         panel.Children.Add(new TextBlock {
             Text = Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。"),
@@ -156,15 +159,12 @@ public sealed class PreferencesDialog : Window
         };
         var clear = new Button { Content = Loc.T("恢复默认"), Margin = new Thickness(6, 0, 0, 0) };
         clear.Click += (_, _) => { _cacheDir.Text = ""; UpdateCacheNote(); };
-        var dirRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-        dirRow.Children.Add(_cacheDir); dirRow.Children.Add(browse); dirRow.Children.Add(clear);
+        var dirRow = DirectoryRow(_cacheDir, browse, clear);
 
         panel.Children.Add(new TextBlock { Text = Loc.T("导入"), FontWeight = FontWeight.SemiBold,
                                            Margin = new Thickness(0, 14, 0, 2) });
         panel.Children.Add(_autoInvert);
-        panel.Children.Add(new TextBlock {
-            Text = Loc.T("这里设的是导入弹窗里那个勾选框的默认值，实际是否执行以每次导入时的选择为准。不勾选则导入时完全不做自动测量，所有参数保持默认。这四步之后都能在「整卷校准」里各自单独重来。"),
-            TextWrapping = TextWrapping.Wrap, Opacity = 0.7, Margin = new Thickness(0, 2, 0, 0) });
+        _autoInvert.SetValue(ToolTip.TipProperty, Loc.T("设置下次导入的默认选项；每次仍可在导入窗口修改。"));
 
         panel.Children.Add(new TextBlock { Text = Loc.T("磁盘缓存"), FontWeight = FontWeight.SemiBold,
                                            Margin = new Thickness(0, 14, 0, 2) });
@@ -172,7 +172,7 @@ public sealed class PreferencesDialog : Window
         panel.Children.Add(_cachePersist);
         panel.Children.Add(dirRow);
         panel.Children.Add(Row(Loc.T("缓存上限"), _cacheBudget));
-        panel.Children.Add(_cacheNote);
+        panel.Children.Add(Details(Loc.T("缓存位置与占用"), _cacheNote));
 
         var sheetBrowse = new Button { Content = Loc.T("浏览…"), Margin = new Thickness(6, 0, 0, 0) };
         sheetBrowse.Click += async (_, _) =>
@@ -183,26 +183,25 @@ public sealed class PreferencesDialog : Window
         };
         var sheetClear = new Button { Content = Loc.T("恢复默认"), Margin = new Thickness(6, 0, 0, 0) };
         sheetClear.Click += (_, _) => { _sheetDir.Text = ""; UpdateSheetNote(); };
-        var sheetRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-        sheetRow.Children.Add(_sheetDir); sheetRow.Children.Add(sheetBrowse); sheetRow.Children.Add(sheetClear);
+        var sheetRow = DirectoryRow(_sheetDir, sheetBrowse, sheetClear);
 
         panel.Children.Add(new TextBlock { Text = Loc.T("卷目录缩略图（印样）"), FontWeight = FontWeight.SemiBold,
                                            Margin = new Thickness(0, 14, 0, 2) });
         panel.Children.Add(sheetRow);
         panel.Children.Add(Row(Loc.T("存放上限"), _sheetBudget));
-        panel.Children.Add(_sheetNote);
+        panel.Children.Add(Details(Loc.T("印样缓存详情"), _sheetNote));
 
         panel.Children.Add(Row(Loc.T("界面主题"), _theme));
         // Deliberately bilingual and NOT translated: this is the row you have to find when the
         // UI is in a language you cannot read.
         panel.Children.Add(Row("界面语言 / Language", _language));
 
-        var save = new Button { Content = Loc.T("保存"), Margin = new Thickness(0, 14, 6, 0) };
-        var cancel = new Button { Content = Loc.T("取消"), Margin = new Thickness(0, 14, 0, 0) };
-        save.Click += (_, _) => { Persist(); Close(); };
+        var save = new Button { Content = Loc.T("保存"), IsDefault = true, Classes = { "primary" } };
+        var cancel = new Button { Content = Loc.T("取消"), IsCancel = true };
+        save.Click += (_, _) => { Persist(); _accepted = true; Close(); };
         // Cancel puts the previewed theme AND language back to what is on disk — otherwise
         // "取消" would leave the app in the state the user just backed out of.
-        cancel.Click += (_, _) => { App.ApplyTheme(); Loc.Apply(); Close(); };
+        cancel.Click += (_, _) => Close();
         // Live theme preview as the user picks.
         _theme.SelectionChanged += (_, _) => App.ApplyTheme(_theme.SelectedIndex == 1 ? "light" : "dark");
         // …and the same for language. Everything already on screen re-labels itself; this dialog
@@ -213,19 +212,26 @@ public sealed class PreferencesDialog : Window
             Build(Snapshot());
         };
 
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        buttons.Children.Add(save);
-        buttons.Children.Add(cancel);
-        panel.Children.Add(buttons);
-
-        Content = new ScrollViewer { Content = panel };
+        Content = DialogLayout.Compose(panel, DialogLayout.Actions(cancel, save));
     }
 
     private static ComboBox Combo(string[] items, int index) =>
         new() { ItemsSource = items, SelectedIndex = Math.Clamp(index, 0, items.Length - 1) };
 
-    private static TextBlock Note() =>
-        new() { Foreground = Brushes.Gray, FontSize = 11, TextWrapping = TextWrapping.Wrap };
+    private static TextBlock Note() => new() { Classes = { "dialogNote" } };
+
+    private static Expander Details(string title, Control content) => new()
+    {
+        Header = title, Content = content, Margin = new Thickness(0, 0, 0, 8),
+    };
+
+    private static Grid DirectoryRow(Control path, Button browse, Button clear)
+    {
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
+        Grid.SetColumn(browse, 1); Grid.SetColumn(clear, 2);
+        row.Children.Add(path); row.Children.Add(browse); row.Children.Add(clear);
+        return row;
+    }
 
     /// <summary>Show what the current choice actually means — for 自动 that is a live number,
     /// and without it the setting is a black box the user has no way to sanity-check.</summary>
@@ -296,14 +302,15 @@ public sealed class PreferencesDialog : Window
 
     private static Control Row(string label, Control control)
     {
-        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 6, 0, 0) };
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("152,*"), Margin = new Thickness(0, 6, 0, 0) };
         // Wraps: an English label ("FBDD chroma noise reduction (pre-demosaic)") is three times
         // the width of its Chinese original, and this column is what is left of 460px after the
         // control's 220.
         var t = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center,
                                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 8, 0) };
         Grid.SetColumn(t, 0);
-        control.MinWidth = 220;
+        control.MinWidth = 0;
+        control.HorizontalAlignment = HorizontalAlignment.Stretch;
         Grid.SetColumn(control, 1);
         g.Children.Add(t);
         g.Children.Add(control);

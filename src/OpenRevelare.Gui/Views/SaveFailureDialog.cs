@@ -27,6 +27,8 @@ internal sealed class SaveFailureDialog : Window
             var button = new Button { Content = label, Margin = new Thickness(0, 8, 8, 0) };
             button.IsCancel = choice == SaveFailureChoice.Cancel;
             button.IsDefault = choice == SaveFailureChoice.Retry;
+            if (choice == SaveFailureChoice.Retry) button.Classes.Add("primary");
+            if (choice == SaveFailureChoice.Discard) button.Classes.Add("destructive");
             button.Click += (_, _) => Close(choice);
             actions.Children.Add(button);
         }
@@ -35,6 +37,7 @@ internal sealed class SaveFailureDialog : Window
             Spacing = 12,
             Children =
             {
+                new TextBlock { Text = Title, Classes = { "dialogTitle" } },
                 new TextBlock { Text = Loc.T("保存失败，修改仍保留在内存中。请重试或另存恢复副本。"), TextWrapping = Avalonia.Media.TextWrapping.Wrap },
                 new SelectableTextBlock { Text = detail, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
             },

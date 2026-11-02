@@ -1,0 +1,52 @@
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Shared with the editing workbench. Native window chrome remains platform owned. -->
+    <Style Selector="Window.dialog">
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="Window.dialog Button, Window.dialog ToggleButton">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="12,5" />
+    </Style>
+    <Style Selector="Window.dialog TextBox, Window.dialog ComboBox, Window.dialog AutoCompleteBox">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="Window.dialog CheckBox, Window.dialog RadioButton">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="MinHeight" Value="28" />
+    </Style>
+    <Style Selector="Window.dialog TextBlock.dialogTitle">
+        <Setter Property="FontSize" Value="18" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0,0,0,16" />
+    </Style>
+    <Style Selector="Window.dialog TextBlock.dialogNote">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="Window.dialog TextBlock.sectionHead">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Window.dialog Button.destructive">
+        <Setter Property="Foreground" Value="{DynamicResource WarnBrush}" />
+    </Style>
+    <Style Selector="CheckBox:checked /template/ Border#NormalRectangle">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="CheckBox:checked /template/ Path#CheckGlyph">
+        <Setter Property="Fill" Value="{DynamicResource AccentFgBrush}" />
+    </Style>
+    <Style Selector="RadioButton:checked /template/ Ellipse#CheckOuterEllipse">
+        <Setter Property="Fill" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="RadioButton:checked /template/ Ellipse#CheckGlyph">
+        <Setter Property="Fill" Value="{DynamicResource AccentFgBrush}" />
+    </Style>
+</Styles>

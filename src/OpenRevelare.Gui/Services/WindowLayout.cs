@@ -8,7 +8,10 @@ namespace OpenRevelare.Gui.Services;
 internal static class WindowLayout
 {
     public static void Register() => Window.WindowOpenedEvent.AddClassHandler<Window>((window, _) =>
-        Dispatcher.UIThread.Post(() => FitToScreen(window), DispatcherPriority.Loaded));
+    {
+        if (window is not Views.MainWindow) window.Classes.Add("dialog");
+        Dispatcher.UIThread.Post(() => FitToScreen(window), DispatcherPriority.Loaded);
+    });
 
     private static void FitToScreen(Window window)
     {

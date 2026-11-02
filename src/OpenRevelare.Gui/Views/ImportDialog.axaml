@@ -2,16 +2,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ImportDialog"
-        Width="600" Height="600" MinWidth="480" MinHeight="380"
+        Width="600" SizeToContent="Height" MinWidth="480" MinHeight="400" MaxHeight="760"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource BgBrush}"
+        Background="{DynamicResource PanelBrush}"
         Title="{i18n:T '新建项目 / 导入'}">
-    <DockPanel Margin="16">
+    <DockPanel Margin="20">
         <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,12,0,0">
+            <StackPanel Name="DestinationRow" Orientation="Horizontal" Spacing="16" IsVisible="False">
+                <RadioButton Name="NewRollChoice" GroupName="destination" Content="{i18n:T '新建卷'}" IsChecked="True" />
+                <RadioButton Name="CurrentRollChoice" GroupName="destination" Content="{i18n:T '添加到当前卷'}" IsCheckedChanged="OnDestinationChanged" />
+            </StackPanel>
             <TextBlock Name="ReadyHint" Classes="groupHint" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="{i18n:T '取消'}" Click="OnCancelClick" />
-                <Button Name="OkBtn" Content="{i18n:T '导入 →'}" Click="OnAcceptClick" IsEnabled="False" />
+                <Button Content="{i18n:T '取消'}" IsCancel="True" Click="OnCancelClick" />
+                <Button Name="OkBtn" Classes="primary" Content="{i18n:T '导入'}" IsDefault="True" Click="OnAcceptClick" IsEnabled="False" />
             </StackPanel>
         </StackPanel>
 
@@ -19,7 +23,7 @@
             <StackPanel Spacing="12">
                 <!-- ── 文件 ─────────────────────────────────────────── -->
                 <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '底片文件'}" FontWeight="SemiBold"
+                    <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold"
                                ToolTip.Tip="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
                     <ListBox Name="FileList" Height="140" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
@@ -79,14 +83,10 @@
                 </Expander>
 
                 <!-- ── 自动整卷分析去色罩 ───────────────────────────── -->
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '自动处理整卷底片'}" FontWeight="SemiBold" />
+                <StackPanel Name="AutoImportOptions" Spacing="4">
                     <CheckBox Name="AutoInvertChk" Content="{i18n:T '导入后自动分析整卷（推荐）'}"
                               IsChecked="True"
-                              ToolTip.Tip="{i18n:T '按顺序自动完成：片基 T_base、白平衡、D-max、黑白场。之后可手动重调任何一项。'}" />
-                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '后台分析完成后，画面可能更新。'}"
-                               ToolTip.Tip="{i18n:T '先显示当前帧，后台再统一分析整卷；完成前画面和缩略图可能更新。关闭后需手动标定。'}" />
+                              ToolTip.Tip="{i18n:T '分析整卷的片基与高光代理，统一标定端点；完成后刷新预览。'}" />
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

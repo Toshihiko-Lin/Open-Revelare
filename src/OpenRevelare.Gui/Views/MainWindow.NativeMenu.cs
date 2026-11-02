@@ -123,10 +123,10 @@ public partial class MainWindow
         {
             Items =
             {
-                Item(Loc.T("复制 Cineon 标定"), OnCopyCalClick),
-                Bind(Item(Loc.T("粘贴 Cineon 标定到本帧"), OnPasteCalToCurrentClick), nameof(Vm.HasCalClipboard)),
-                Bind(Item(Loc.T("应用 Cineon 标定到勾选帧"), OnPasteCalClick), nameof(Vm.HasCalClipboard)),
-                Item(Loc.T("应用 Cineon 标定到整卷"), OnApplyCalToRollClick),
+                Item(Loc.T("复制底片校准"), OnCopyCalClick),
+                Bind(Item(Loc.T("粘贴底片校准到本帧"), OnPasteCalToCurrentClick), nameof(Vm.HasCalClipboard)),
+                Bind(Item(Loc.T("应用底片校准到勾选帧"), OnPasteCalClick), nameof(Vm.HasCalClipboard)),
+                Item(Loc.T("应用底片校准到整卷"), OnApplyCalToRollClick),
             },
         };
 
@@ -134,10 +134,10 @@ public partial class MainWindow
         {
             Items =
             {
-                Item(Loc.T("复制 Display 参数"), OnCopySceneClick),
-                Bind(Item(Loc.T("粘贴 Display 参数到本帧"), OnPasteSceneToCurrentClick), nameof(Vm.HasSceneClipboard)),
-                Bind(Item(Loc.T("应用 Display 参数到勾选帧"), OnPasteSceneClick), nameof(Vm.HasSceneClipboard)),
-                Item(Loc.T("应用 Display 参数到整卷"), OnApplySceneToRollClick),
+                Item(Loc.T("复制成片调整"), OnCopySceneClick),
+                Bind(Item(Loc.T("粘贴成片调整到本帧"), OnPasteSceneToCurrentClick), nameof(Vm.HasSceneClipboard)),
+                Bind(Item(Loc.T("应用成片调整到勾选帧"), OnPasteSceneClick), nameof(Vm.HasSceneClipboard)),
+                Item(Loc.T("应用成片调整到整卷"), OnApplySceneToRollClick),
             },
         };
 
@@ -162,8 +162,8 @@ public partial class MainWindow
                 Bind(Item(Loc.T("复制（按当前面板）"), OnCopyActiveClick, gesture: "C"), nameof(Vm.HasImage)),
                 Bind(Item(Loc.T("粘贴到本帧（按当前面板）"), OnPasteActiveClick, gesture: "V"), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
-                Bind(Sub(Loc.T("标定（Stage 1）"), cal), nameof(Vm.HasImage)),
-                Bind(Sub(Loc.T("场景（Stage 2）"), scene), nameof(Vm.HasImage)),
+                Bind(Sub(Loc.T("底片校准"), cal), nameof(Vm.HasImage)),
+                Bind(Sub(Loc.T("成片调整"), scene), nameof(Vm.HasImage)),
                 Bind(Sub(Loc.T("构图"), composition), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("选择色彩同步项…"), OnSyncOptionsClick), nameof(Vm.HasImage)),
@@ -196,6 +196,7 @@ public partial class MainWindow
             {
                 Item(Loc.T("操作指引 / 技术原理…"), OnDocsClick),
                 Item(Loc.T("快捷键…"), OnHelpClick),
+                Item(Loc.T("打开 LUT 文件夹"), OnOpenLutFolderClick),
                 new NativeMenuItemSeparator(),
                 Item(Loc.T("检查更新…"), OnCheckUpdateClick),
                 // 「与窗口内菜单逐条对齐」这条约定在这一项上断过：【复制色彩诊断】只加进了

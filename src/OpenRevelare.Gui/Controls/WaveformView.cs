@@ -113,12 +113,16 @@ public sealed class WaveformData
 /// </summary>
 public sealed class WaveformView : Control
 {
+    public static readonly StyledProperty<IBrush> BackgroundProperty = HistogramView.BackgroundProperty.AddOwner<WaveformView>();
+    public static readonly StyledProperty<IBrush> GridBrushProperty = HistogramView.GridBrushProperty.AddOwner<WaveformView>();
+    public IBrush Background { get => GetValue(BackgroundProperty); set => SetValue(BackgroundProperty, value); }
+    public IBrush GridBrush { get => GetValue(GridBrushProperty); set => SetValue(GridBrushProperty, value); }
     public static readonly StyledProperty<WaveformData?> DataProperty =
         AvaloniaProperty.Register<WaveformView, WaveformData?>(nameof(Data));
 
     public WaveformData? Data { get => GetValue(DataProperty); set => SetValue(DataProperty, value); }
 
-    static WaveformView() => AffectsRender<WaveformView>(DataProperty);
+    static WaveformView() => AffectsRender<WaveformView>(DataProperty, BackgroundProperty, GridBrushProperty);
 
     private WriteableBitmap? _bitmap;
     private int _bitmapColumns, _bitmapLevels;
@@ -135,7 +139,7 @@ public sealed class WaveformView : Control
     public override void Render(DrawingContext ctx)
     {
         double w = Bounds.Width, h = Bounds.Height;
-        ctx.FillRectangle(new SolidColorBrush(Color.FromRgb(21, 23, 26)), new Rect(0, 0, w, h));
+        ctx.FillRectangle(Background, new Rect(0, 0, w, h));
         if (w < 2 || h < 2) return;
 
         WaveformData? d = Data;
@@ -145,7 +149,7 @@ public sealed class WaveformView : Control
 
         // The quarters of the range, as a ruler behind nothing: a waveform is read against levels,
         // and without them "how high is that sky" has no answer.
-        var grid = new Pen(new SolidColorBrush(Color.FromArgb(70, 120, 126, 134)), 1);
+        var grid = new Pen(GridBrush, 1);
         for (int q = 1; q < 4; q++)
         {
             double y = h * q / 4d;
@@ -157,6 +161,7 @@ public sealed class WaveformView : Control
     /// shape, so a drag does not allocate one per frame.</summary>
     private WriteableBitmap? Paint(WaveformData d)
     {
+        bool light = ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
         if (_bitmap is null || _bitmapColumns != d.Columns || _bitmapLevels != d.Levels)
         {
             _bitmap?.Dispose();
@@ -186,9 +191,11 @@ public sealed class WaveformView : Control
                     byte a = Math.Max(r, Math.Max(g, b));
                     // Premultiplied: the channels ARE the colour, and the strongest of them is how
                     // opaque the cell is, so a cell lit in one channel only reads as that colour.
-                    line[column * 4 + 0] = b;
-                    line[column * 4 + 1] = g;
-                    line[column * 4 + 2] = r;
+                    // On a light panel, neutral traces need darker ink. Keep the density alpha
+                    // and channel ratios unchanged; only the presentation ink changes.
+                    line[column * 4 + 0] = light ? (byte)(b * 0.55f) : b;
+                    line[column * 4 + 1] = light ? (byte)(g * 0.55f) : g;
+                    line[column * 4 + 2] = light ? (byte)(r * 0.55f) : r;
                     line[column * 4 + 3] = a;
                 }
             }

@@ -4497,7 +4497,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _previewAvailableBytes = previewAvailableBytes ?? (() =>
             SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
         _preparedPreviews = new PreparedPreviewCache(availableBytes: _previewAvailableBytes);
-        Frames.CollectionChanged += (_, _) => NotifyRollBroadcastHints();
+        Frames.CollectionChanged += (_, _) => { RefreshScopeSubscriptions(); NotifyRollBroadcastHints(); };
         Sync.PropertyChanged += (_, _) => NotifyRollBroadcastHints();
         _presentationRevisions.Published += revision => PresentationRevision = revision;
         _autoSave = new RollAutoSave(AutoSaveAsync);
@@ -4519,6 +4519,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        DisposeScopeSubscriptions();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
         RenderTrace.SaveSummary();

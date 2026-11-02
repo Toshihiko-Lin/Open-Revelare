@@ -175,6 +175,21 @@ public sealed class HistogramData
 /// </summary>
 public sealed class HistogramView : Control
 {
+    public static readonly StyledProperty<IBrush> BackgroundProperty =
+        AvaloniaProperty.Register<HistogramView, IBrush>(nameof(Background), Brushes.Transparent);
+    public static readonly StyledProperty<IBrush> GridBrushProperty =
+        AvaloniaProperty.Register<HistogramView, IBrush>(nameof(GridBrush), Brushes.Gray);
+    public static readonly StyledProperty<IBrush> AxisBrushProperty =
+        AvaloniaProperty.Register<HistogramView, IBrush>(nameof(AxisBrush), Brushes.Gray);
+    public static readonly StyledProperty<IBrush> WhiteMarkerBrushProperty =
+        AvaloniaProperty.Register<HistogramView, IBrush>(nameof(WhiteMarkerBrush), Brushes.Goldenrod);
+    public static readonly StyledProperty<IBrush> ClipMarkerBrushProperty =
+        AvaloniaProperty.Register<HistogramView, IBrush>(nameof(ClipMarkerBrush), Brushes.IndianRed);
+    public IBrush Background { get => GetValue(BackgroundProperty); set => SetValue(BackgroundProperty, value); }
+    public IBrush GridBrush { get => GetValue(GridBrushProperty); set => SetValue(GridBrushProperty, value); }
+    public IBrush AxisBrush { get => GetValue(AxisBrushProperty); set => SetValue(AxisBrushProperty, value); }
+    public IBrush WhiteMarkerBrush { get => GetValue(WhiteMarkerBrushProperty); set => SetValue(WhiteMarkerBrushProperty, value); }
+    public IBrush ClipMarkerBrush { get => GetValue(ClipMarkerBrushProperty); set => SetValue(ClipMarkerBrushProperty, value); }
     public static readonly StyledProperty<HistogramData?> DataProperty =
         AvaloniaProperty.Register<HistogramView, HistogramData?>(nameof(Data));
 
@@ -198,6 +213,7 @@ public sealed class HistogramView : Control
     {
         AffectsRender<HistogramView>(DataProperty);
         AffectsRender<HistogramView>(DisplayHeadroomProperty);
+        AffectsRender<HistogramView>(BackgroundProperty, GridBrushProperty, AxisBrushProperty, WhiteMarkerBrushProperty, ClipMarkerBrushProperty);
     }
 
     private static readonly (Color Fill, Color Stroke)[] Channels =
@@ -219,7 +235,7 @@ public sealed class HistogramView : Control
     public override void Render(DrawingContext ctx)
     {
         double w = Bounds.Width, h = Bounds.Height;
-        ctx.FillRectangle(new SolidColorBrush(Color.FromRgb(21, 23, 26)), new Rect(0, 0, w, h));
+        ctx.FillRectangle(Background, new Rect(0, 0, w, h));
         if (w < 2 || h < RulerHeight + 2) return;
 
         double ph = h - RulerHeight;   // plot height; the ruler sits below
@@ -234,7 +250,7 @@ public sealed class HistogramView : Control
         if (d is { IsExtended: true }) DrawExtendedMarkers(ctx, d, w, ph);
 
         // Zero baseline doubles as the ruler's top edge.
-        ctx.DrawLine(new Pen(new SolidColorBrush(Color.FromRgb(52, 55, 60)), 1),
+        ctx.DrawLine(new Pen(GridBrush, 1),
                      new Point(0, ph - 0.5), new Point(w, ph - 0.5));
 
         if (d is { IsExtended: true }) DrawExtendedRuler(ctx, d, w, ph, h);
@@ -269,28 +285,24 @@ public sealed class HistogramView : Control
     private void DrawExtendedMarkers(DrawingContext ctx, HistogramData d, double w, double h)
     {
         double x0 = SdrWhiteX(d, w);
-        ctx.DrawLine(new Pen(WhiteTickBrush, 1.5), new Point(x0, 0), new Point(x0, h - 1));
+        ctx.DrawLine(new Pen(WhiteMarkerBrush, 1.5), new Point(x0, 0), new Point(x0, h - 1));
 
         if (ClipX(d, w) is not { } xClip) return;
-        var dashed = new Pen(ClipTickBrush, 1.5) { DashStyle = new DashStyle(new double[] { 3d, 3d }, 0d) };
+        var dashed = new Pen(ClipMarkerBrush, 1.5) { DashStyle = new DashStyle(new double[] { 3d, 3d }, 0d) };
         ctx.DrawLine(dashed, new Point(xClip, 0), new Point(xClip, h - 1));
         ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 80, 60)), new Rect(xClip, 0, w - xClip, h));
     }
 
-    private static readonly IBrush TickBrush = new SolidColorBrush(Color.FromArgb(120, 255, 255, 255));
-    private static readonly IBrush LabelBrush = new SolidColorBrush(Color.FromArgb(150, 255, 255, 255));
-    private static readonly IBrush WhiteTickBrush = new SolidColorBrush(Color.FromArgb(220, 255, 230, 160));
-    private static readonly IBrush ClipTickBrush = new SolidColorBrush(Color.FromArgb(230, 255, 120, 90));
     private const double LabelSize = 9d;
 
     /// <summary>Encoded value 0–1, quarter ticks, labelled at 0 / 0.5 / 1.</summary>
-    private static void DrawSdrRuler(DrawingContext ctx, double w, double top, double bottom)
+    private void DrawSdrRuler(DrawingContext ctx, double w, double top, double bottom)
     {
         for (int q = 0; q <= 4; q++)
         {
             double x = Math.Clamp(w * q / 4d, 0.5, w - 0.5);
             bool major = q % 2 == 0;
-            Tick(ctx, TickBrush, x, top, major ? 5 : 3);
+            Tick(ctx, AxisBrush, x, top, major ? 5 : 3);
             if (major) Label(ctx, q == 0 ? "0" : q == 4 ? "1" : "0.5", x, top, bottom, w);
         }
     }
@@ -305,33 +317,33 @@ public sealed class HistogramView : Control
         double x0 = SdrWhiteX(d, w);
         ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(34, 255, 210, 120)), new Rect(x0, top, w - x0, bottom - top));
 
-        Tick(ctx, TickBrush, 0.5, top, 5);
+        Tick(ctx, AxisBrush, 0.5, top, 5);
         Label(ctx, "0", 0.5, top, bottom, w);
-        Tick(ctx, TickBrush, x0 / 2d, top, 3);
-        Tick(ctx, WhiteTickBrush, x0, top, 7);
+        Tick(ctx, AxisBrush, x0 / 2d, top, 3);
+        Tick(ctx, WhiteMarkerBrush, x0, top, 7);
         Label(ctx, "1", x0, top, bottom, w);
 
         int stops = (int)d.ExtendedStops;
         for (int stop = 1; stop <= stops; stop++)
         {
             double x = Math.Min(x0 + (w - x0) * stop / d.ExtendedStops, w - 0.5);
-            Tick(ctx, TickBrush, x, top, 5);
+            Tick(ctx, AxisBrush, x, top, 5);
             Label(ctx, "+" + stop, x, top, bottom, w);
         }
 
         if (ClipX(d, w) is not { } xClip) return;
         ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(70, 255, 80, 60)), new Rect(xClip, top, w - xClip, bottom - top));
-        ctx.DrawLine(new Pen(ClipTickBrush, 2), new Point(xClip, top), new Point(xClip, bottom));
+        ctx.DrawLine(new Pen(ClipMarkerBrush, 2), new Point(xClip, top), new Point(xClip, bottom));
     }
 
     private static void Tick(DrawingContext ctx, IBrush brush, double x, double top, double length)
         => ctx.DrawLine(new Pen(brush, 1), new Point(x, top), new Point(x, top + length));
 
     /// <summary>A label centred under its tick, pulled inside the edges at either end.</summary>
-    private static void Label(DrawingContext ctx, string text, double x, double top, double bottom, double w)
+    private void Label(DrawingContext ctx, string text, double x, double top, double bottom, double w)
     {
         var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                                   Typeface.Default, LabelSize, LabelBrush);
+                                   Typeface.Default, LabelSize, AxisBrush);
         double left = Math.Clamp(x - ft.Width / 2d, 1d, Math.Max(1d, w - ft.Width - 1d));
         ctx.DrawText(ft, new Point(left, bottom - ft.Height - 0.5));
     }

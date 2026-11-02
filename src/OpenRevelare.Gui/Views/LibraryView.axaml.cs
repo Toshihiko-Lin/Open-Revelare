@@ -139,7 +139,7 @@ public partial class LibraryView : UserControl
         }
         var file = await Root().StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = Loc.T("导出印样"),
+            Title = Loc.T("保存封面印样副本"),
             DefaultExtension = "jpg",
             SuggestedFileName = card.Title,
             FileTypeChoices = new[] { new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } } },

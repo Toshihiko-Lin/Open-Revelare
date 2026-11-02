@@ -46,6 +46,10 @@ public partial class MainViewModel
     {
         OnPropertyChanged(nameof(CalibrationBroadcastHint));
         OnPropertyChanged(nameof(SceneBroadcastHint));
+        foreach (string property in new[] { nameof(CurrentFrameIdentity), nameof(CurrentFramePosition),
+            nameof(SelectionContext), nameof(HasOtherFrames), nameof(CanApplySceneToRoll),
+            nameof(CalibrationApplyLabel), nameof(SceneApplyLabel), nameof(CompositionTargetLabel),
+            nameof(CropSyncLabel), nameof(GeometrySyncLabel), nameof(SprocketSyncLabel) }) OnPropertyChanged(property);
     }
     private bool HasSceneSyncGroups => Sync.SceneWb || Sync.SceneExposure || Sync.SceneTone || Sync.SceneCurves;
     private bool CheckSceneSyncGroups(bool scene)
@@ -67,8 +71,7 @@ public partial class MainViewModel
         if (CurrentFrame is null) return;
         bool hadSelection = Frames.Any(f => f.IsSelected);
         FrameParams source = CurrentParamsForStorage();
-        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
-                                        && (!hadSelection || f.IsSelected)).ToList();
+        var targets = FrameScope.OtherFrames(Frames, CurrentFrame, hadSelection);
         if (!TryApplyBatch(targets, d =>
         {
             d.SprocketEnabled = source.SprocketEnabled;
@@ -81,8 +84,8 @@ public partial class MainViewModel
         RestartThumbnails();
     }
 
-    public void CopyCalibration() { _calClipboard = CurrentParamsForStorage(); HasCalClipboard = true; StatusText = Loc.T("已复制 Cineon 标定"); }
-    public void CopyScene() { _sceneClipboard = CurrentParamsForStorage(); HasSceneClipboard = true; StatusText = Loc.T("已复制 Display 参数"); }
+    public void CopyCalibration() { _calClipboard = CurrentParamsForStorage(); HasCalClipboard = true; StatusText = Loc.T("已复制底片校准"); }
+    public void CopyScene() { _sceneClipboard = CurrentParamsForStorage(); HasSceneClipboard = true; StatusText = Loc.T("已复制成片调整"); }
 
     /// <summary>Paste the copied calibration onto the ticked frames.</summary>
     public void PasteCalibrationToSelected() => Paste(_calClipboard, cal: true, scene: false, Loc.T("标定"));
@@ -142,8 +145,7 @@ public partial class MainViewModel
         // render, and stored (here, and on every target) that null would erase it.
         FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
         bool onlySelected = hadSelection;
-        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
-                                        && (!onlySelected || f.IsSelected)).ToList();
+        var targets = FrameScope.OtherFrames(Frames, CurrentFrame, onlySelected);
         if (!TryApplyBatch(targets, d =>
         {
             d.QuarterTurns = src.QuarterTurns; d.FlipH = src.FlipH; d.FlipV = src.FlipV;
@@ -163,8 +165,7 @@ public partial class MainViewModel
         if (CurrentFrame is null) return;
         bool hadSelection = Frames.Any(f => f.IsSelected);
         FrameParams source = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
-        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
-                                        && (!hadSelection || f.IsSelected)).ToList();
+        var targets = FrameScope.OtherFrames(Frames, CurrentFrame, hadSelection);
         if (!TryApplyBatch(targets, d => d.CropRect = RebaseCrop(source, d), CurrentFrame)) return;
         if (hadSelection) ClearStripSelection();
         StatusText = hadSelection
@@ -178,8 +179,7 @@ public partial class MainViewModel
         if (CurrentFrame is null) return;
         if (!CheckSceneSyncGroups(scene)) return;
         FrameParams src = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);   // never store a suppressed crop
-        var targets = Frames.Where(f => !ReferenceEquals(f, CurrentFrame)
-                                        && (!onlySelected || f.IsSelected)).ToList();
+        var targets = FrameScope.OtherFrames(Frames, CurrentFrame, onlySelected);
         if (!TryApplyBatch(targets, d => CopyGroups(src, d, cal, scene), CurrentFrame)) return;
         int n = targets.Count;
         StatusText = onlySelected ? Loc.F($"已把{what}应用到选中 {n} 帧") : Loc.F($"已应用{what}到整卷（{n} 帧）");
@@ -190,7 +190,7 @@ public partial class MainViewModel
     {
         if (clip is null) { StatusText = Loc.F($"尚未复制{what}"); return; }
         if (!CheckSceneSyncGroups(scene)) return;
-        var targets = Frames.Where(f => f.IsSelected && !ReferenceEquals(f, CurrentFrame)).ToList();
+        var targets = FrameScope.OtherFrames(Frames, CurrentFrame, selectedOnly: true);
         if (!TryApplyBatch(targets, d => CopyGroups(clip, d, cal, scene))) return;
         int n = targets.Count;
         StatusText = n == 0 ? Loc.F($"没有选中的目标帧（在胶片条勾选帧）") : Loc.F($"已把{what}粘贴到 {n} 帧");

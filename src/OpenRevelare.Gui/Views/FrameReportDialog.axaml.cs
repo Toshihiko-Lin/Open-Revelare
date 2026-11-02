@@ -41,7 +41,7 @@ public sealed class FrameReportDialog : Window
             if (Clipboard is { } clipboard) await clipboard.SetTextAsync(report);
         };
 
-        var close = new Button { Content = Loc.T("关闭") };
+        var close = new Button { Content = Loc.T("关闭"), IsCancel = true };
         close.Click += (_, _) => Close();
 
         var buttons = new StackPanel
@@ -54,7 +54,7 @@ public sealed class FrameReportDialog : Window
         buttons.Children.Add(copy);
         buttons.Children.Add(close);
 
-        var root = new DockPanel { Margin = new Thickness(12) };
+        var root = new DockPanel { Margin = new Thickness(20) };
         DockPanel.SetDock(buttons, Dock.Bottom);
         root.Children.Add(buttons);
         root.Children.Add(new ScrollViewer

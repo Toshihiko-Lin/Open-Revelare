@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SetUpDropImport();
         SizeChanged += (_, _) => UpdateWorkspaceLayout();
         PreviewWorkspace.SizeChanged += (_, _) =>
             PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
@@ -44,8 +45,12 @@ public partial class MainWindow : Window
         // hidden past the fold without any obvious sign.
         // One scroller for the whole panel now, so one thing to watch.
         WireMoreBelowHint(PanelScroll, TabsMoreHint);
-        PanelTabs.SelectionChanged += (_, _) => Dispatcher.UIThread.Post(() =>
-            TabsMoreHint.IsVisible = HasMoreBelow(PanelScroll));
+        PanelTabs.SelectionChanged += (_, _) =>
+        {
+            CalibrationSyncFooter.IsVisible = PanelTabs.SelectedIndex == 0;
+            SceneSyncFooter.IsVisible = PanelTabs.SelectedIndex == 1;
+            Dispatcher.UIThread.Post(() => TabsMoreHint.IsVisible = HasMoreBelow(PanelScroll));
+        };
         // Drag mode for every parameter control in the window. SliderRow's events bubble, so one
         // subscription here covers all of them — including rows added later.
         AddHandler(SliderRow.InteractionStartedEvent, (_, _) => Vm?.BeginInteractive());
@@ -1096,12 +1101,11 @@ public partial class MainWindow : Window
     {
         bool show = !_bannerHintDismissed;
         BannerText.IsVisible = show;
-        Banner.IsVisible = show;
+        Banner.IsVisible = show || crop;
         BannerCloseBtn.IsVisible = show;
-        // The buttons live inside the banner, so they follow it. Enter/Esc remain wired in
-        // OnKeyDown and are what the hint pointed at.
-        CropApplyBtn.IsVisible = crop && show;
-        CropCancelBtn.IsVisible = crop && show;
+        // Dismissing help must not dismiss the crop transaction's mouse actions (D07).
+        CropApplyBtn.IsVisible = crop;
+        CropCancelBtn.IsVisible = crop;
         // Unchanged rule: the banner itself is hit-testable only for crop, so the strip never eats
         // a sampling drag. The × is a sibling, not a child, so it stays clickable regardless.
         Banner.IsHitTestVisible = crop;
@@ -1136,9 +1140,7 @@ public partial class MainWindow : Window
     {
         _bannerHintDismissed = true;
         ApplyBannerVisibility(_mode == SampleMode.Crop);
-        // The crop tool drives its shortcuts off the overlay, and the banner that had focus just
-        // disappeared — without this, Enter/Esc (now the ONLY way to apply or cancel) would go
-        // nowhere.
+        // Keep the active tool's keyboard focus after dismissing its explanation.
         if (_mode == SampleMode.Crop) Overlay.Focus();
     }
 
@@ -2307,6 +2309,13 @@ public partial class MainWindow : Window
                 if (!dlg.Files.Contains(path)) dlg.Files.Add(path);
         bool ok = await dlg.ShowDialog<bool>(this);
         if (!ok || dlg.Result is not { } cfg) return;
+
+        await ImportConfigurationAsync(cfg);
+    }
+
+    private async Task ImportConfigurationAsync(Models.ImportConfig cfg)
+    {
+        if (Vm is null) return;
 
         // Importing a folder that already has a roll is nearly always a re-open, not a second
         // roll — and making a second one silently would strand the first roll's adjustments.

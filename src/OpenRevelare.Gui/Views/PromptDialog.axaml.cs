@@ -26,26 +26,16 @@ public sealed class PromptDialog : Window
 
         _input.Text = initial;
 
-        var ok = new Button { Content = Loc.T("确定"), IsDefault = true, Margin = new Thickness(0, 0, 6, 0) };
+        var ok = new Button { Content = Loc.T("确定"), IsDefault = true, Classes = { "primary" } };
         var cancel = new Button { Content = Loc.T("取消"), IsCancel = true };
         ok.Click += (_, _) => { _result = _input.Text; Close(_result); };
         cancel.Click += (_, _) => Close(null);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 14, 0, 0),
-        };
-        buttons.Children.Add(ok);
-        buttons.Children.Add(cancel);
-
-        var panel = new StackPanel { Margin = new Thickness(18), Spacing = 6 };
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.Bold });
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = title, Classes = { "dialogTitle" } });
         panel.Children.Add(new TextBlock { Text = label, FontSize = 12, Margin = new Thickness(0, 6, 0, 0) });
         panel.Children.Add(_input);
-        panel.Children.Add(buttons);
-        Content = panel;
+        Content = DialogLayout.Compose(panel, DialogLayout.Actions(cancel, ok));
 
         // Land in the box with the current name selected: renaming is usually replacing.
         Opened += (_, _) => { _input.Focus(); _input.SelectAll(); };

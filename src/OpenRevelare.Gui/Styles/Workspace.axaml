@@ -1,6 +1,66 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctl="using:OpenRevelare.Gui.Controls">
+    <Styles.Resources>
+        <!-- Keep TabStrip's selection and arrow-key semantics; own its entire visual surface. -->
+        <ControlTheme x:Key="InspectorTabTheme" TargetType="TabStripItem">
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="FocusAdorner" Value="{x:Null}" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Name="TabFace" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4">
+                        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                                          Padding="{TemplateBinding Padding}"
+                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+            <Style Selector="^:pointerover">
+                <Setter Property="Background" Value="{DynamicResource HoverSoftBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            </Style>
+            <Style Selector="^:selected">
+                <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+            <Style Selector="^:selected:pointerover">
+                <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            </Style>
+            <Style Selector="^:pressed">
+                <Setter Property="Background" Value="{DynamicResource PressSoftBrush}" />
+            </Style>
+            <Style Selector="^:focus-visible">
+                <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+            </Style>
+            <Style Selector="^:disabled">
+                <Setter Property="Opacity" Value="0.4" />
+            </Style>
+        </ControlTheme>
+    </Styles.Resources>
+    <Style Selector="ctl|HistogramView">
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="GridBrush" Value="{DynamicResource BorderSoftBrush}" />
+        <Setter Property="AxisBrush" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="WhiteMarkerBrush" Value="{DynamicResource WarnBrush}" />
+        <Setter Property="ClipMarkerBrush" Value="#C65E49" />
+    </Style>
+    <Style Selector="ctl|WaveformView">
+        <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+        <Setter Property="GridBrush" Value="{DynamicResource BorderSoftBrush}" />
+    </Style>
     <!-- Surface hierarchy replaces repeated outlines; focus keeps an explicit edge. -->
     <Style Selector="Button, ToggleButton">
         <Setter Property="BorderBrush" Value="Transparent" />
@@ -77,23 +137,42 @@
         <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
     </Style>
     <Style Selector="Expander">
-        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
     </Style>
+    <Style Selector="Grid#InspectorWorkspace Expander">
+        <Setter Property="Margin" Value="0,8,0,0" />
+    </Style>
+    <Style Selector="Grid#InspectorWorkspace Expander /template/ Border#SectionSurface">
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+        <Setter Property="Padding" Value="0,8,0,2" />
+    </Style>
+    <Style Selector="Grid#InspectorWorkspace Grid.pairedActions > Button, Grid#InspectorWorkspace Grid.pairedActions > ToggleButton">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Grid#InspectorWorkspace Grid.pairedActions > Button.primary">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="Button.scopeAction">
+        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+    </Style>
     <Style Selector="Border.calibrationStage Expander">
-        <Setter Property="Background" Value="{DynamicResource CalibrationTintBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource CalibrationAccentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
     </Style>
     <Style Selector="Border.finishingStage Expander">
-        <Setter Property="Background" Value="{DynamicResource FinishingTintBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource FinishingAccentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
     </Style>
     <Style Selector="Grid.repairStage Expander">
-        <Setter Property="Background" Value="{DynamicResource RepairTintBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource RepairAccentBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
     </Style>
     <Style Selector="TabItem.calibrationTab:selected">
@@ -115,7 +194,14 @@
         <Setter Property="Background" Value="{DynamicResource FinishingAccentBrush}" />
     </Style>
     <Style Selector="Border.calibrationStage Button.primary">
-        <Setter Property="Background" Value="{DynamicResource CalibrationAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="TabStrip.inspectorTabs">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="TabStrip.inspectorTabs TabStripItem">
+        <Setter Property="Theme" Value="{StaticResource InspectorTabTheme}" />
     </Style>
     <Style Selector="Border.orientationTools Button.icon">
         <Setter Property="Width" Value="26" />
