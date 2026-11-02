@@ -11,14 +11,15 @@
 
 ## 识别和整卷稳定性
 
-- 优先识别两排周期性齿孔，用孔距估计胶片尺度；正负片按片基与画面的明暗关系分别检测边界。
+- 检测前通过 `FilmAutoCrop.Prepare` 统一应用当前帧的镜头畸变校正（`DistortionK1`）、90° 旋转/翻转与已有拉直角度，旋转空白角使用纯黑 `0` 填充，避免暗 RAW 中白角污染高分位齿孔阈值。
+- 优先识别两排周期性齿孔，按标准横向排距 `28.17 mm` 与孔距 `4.75 mm` 分别估计横向与沿片像素尺度；在 log-RGB 空间比较画面与齿孔内侧片基肩部的曝光距离（匹配 `34.5–36.8 mm` 全幅画格），校验边框外侧齿孔排可见性，并根据高密度黑片基自动约束反转片极性。
 - 齿孔排布提供小角度拉直信息，可靠时自动修正，裁切框位于拉直后的坐标中。自动修正限于约 ±5°，并遵守原有拉直控制的 ±15° 总上限。
-- 同一处理范围内，相同源尺寸、相同横竖方向使用检测尺度的中位数，逐帧只改变位置。明显偏离该尺度的帧跳过，不独立放大。
+- 同一处理范围内，相同源尺寸、相同横竖方向先剔除相对中位尺度偏离超过 8% 的离群项：内容模式使用最小可靠尺度 × `0.975` 作为共享框大小（避免略窄画格被整卷框跳过），含齿孔模式使用可靠尺度中位数，逐帧只改变位置。
 - 裁切大小使用 3×2 或 37×35 的整数倍，位置也落在源像素边界上，因此同组帧导出尺寸及宽高比完全一致，不受逐帧四舍五入影响。内容框无法放入检测画面时跳过该帧。
-- 不能可靠识别、原片缺失或含边框区域超出输入范围时，保留该帧原裁切。状态栏报告应用和跳过的数量。请检查这些帧，而不是将「跳过」视为成功裁切。
+- 不能可靠识别、过曝片头（含光学渐变漏光片头）、双半格合并候选、片夹黑边伪边界、原片缺失或含边框区域超出输入范围时，保留该帧原裁切。状态栏报告应用和跳过的数量。请检查这些帧，而不是将「跳过」视为成功裁切。
 - 所有检测完成后一次性应用；支持取消、撤销、重做和 `.ncproj` 保存。检测期间编辑参数或更换胶卷时不应用过期结果。
 
-适用于一张翻拍照片包含一个完整 135 全幅画格的情况，可以含相邻部分画格。半格、XPan、没有完整画格的片头，以及同一扫描源已拆分出的多个虚拟画格，不属于该自动模式；仍使用现有手动预设 / 拖框裁切。夜景正片、过薄负片等画格与片基接近时可能跳过。识别不校正镜头畸变；明显畸变的边界需要手动检查。输入中已经缺失的齿孔或片边不会被补画。
+适用于一张翻拍照片包含一个完整 135 全幅画格的情况，可以含相邻部分画格。半格、XPan、没有完整画格的片头，以及同一扫描源已拆分出的多个虚拟画格，不属于该自动模式；仍使用现有手动预设 / 拖框裁切。夜景正片（如四周纯黑无画格边界的烟花）、过薄或半幅欠曝至片基的负片在画格边界与片基无法区分时会安全跳过。输入中已经缺失的齿孔或片边不会被补画。
 
 ## 本地启动
 
@@ -41,16 +42,16 @@ NUGET_PACKAGES="$PWD/scratch/nuget" ./scratch/dotnet/dotnet run --project src/Op
 核心测试覆盖：横竖和翻转、正片 / 负片、倾斜齿孔拉直、低信息输入、尺度离群、缺失片边、混合分辨率以及像素级比例。工作流测试通过真实 TIFF 工程检查两种模式的整卷 / 选中帧应用、撤销重做、取消、工程保存和源文件 SHA-256 不变。
 
 ```bash
-dotnet test src/OpenRevelare.Tests -c Release --filter 'FullyQualifiedName~FilmAutoCropTests|FullyQualifiedName~AutoCropWorkflowTests'
+dotnet test src/OpenRevelare.Tests -c Release --filter 'FullyQualifiedName~FilmAutoCrop|FullyQualifiedName~CropAspectPreset|FullyQualifiedName~AutoCropWorkflow'
 ```
 
-提供了独立的实拍检查工具，仅读取输入目录中的 RAW，生成逐帧裁切框预览、整卷概览和 `report.json`。绿色框为内容裁切，青色框为含齿孔裁切；没有框的图需要人工检查。报告列出实际导出的像素尺寸，并检查比例没有漂移。
+提供了独立的实拍检查工具（默认解码长边 `1600`，与 GUI `PreviewMaxEdge` 一致；支持 `--project=<工程.ncproj>` 复现已保存旋转/翻转/畸变及 `--preview-edge=<px>`），仅读取输入目录中的 RAW，生成逐帧裁切框预览、整卷概览和 `report.json`。绿色框为内容裁切，青色框为含齿孔裁切；没有框的图需要人工检查。报告列出实际导出的像素尺寸，并检查比例没有漂移。
 
 ```bash
-dotnet run --project benchmarks/OpenRevelare.AutoCropVerification -c Release -- <RAW目录> <独立输出目录>
+dotnet run --project benchmarks/OpenRevelare.AutoCropVerification -c Release -- <RAW目录> <独立输出目录> [--project=<工程.ncproj>] [--preview-edge=1600]
 ```
 
-本次实拍验证使用复制到 `scratch/test-roll/RAW/` 的 28 张 C400 ARW，以及 `scratch/test-slide/261101_Film 5294/` 中的 81 张 ARW。后一个目录含正片与负片；工具逐帧判断，未仅按文件夹名称假定类型。结果保存在 `scratch/verification-negative/`、`scratch/verification-positive/`，未改动桌面原件，也未将样片加入 Git。
+本次实拍验证使用复制到 `scratch/test-roll/RAW/` 的 28 张 C400 ARW（配合用户实际几何工程副本 `scratch/c400-manual-test.ncproj`，`27/28` 准确定位并导出统一 `3276×2184` 内容 / `3478×3290` 含齿孔尺寸，仅半幅欠曝无左边界的 `DSC01936` 安全跳过），以及 `scratch/test-slide/261101_Film 5294/` 中的 81 张 ARW（含反转正片与黑白负片，1600px 与 900px 均稳定定位全部 `74/81` 有效全幅画格，准确跳过过曝片头 `DSC02015`/`02051`、纯黑夜空无边界烟花 `02033`/`02034`、全透片基 `02059` 及空白未曝光帧 `02088`/`02096`）。未改动桌面原件，也未将样片加入 Git。
 
 全量构建和测试记录分别位于 `scratch/build.log`、`scratch/tests.log`。在当前原生依赖环境中，上游已有的 `HeicExportTests.Large_photo_is_a_bounded_main10_grid_with_exact_dimensions_and_color` 两种 HDR 参数用例失败：编码的 HEVC level 为 150，而测试要求不超过 120。在未修改的上游提交 `0e638380d6a8d953ef8b970c6bce903a2410a19e` 上复现了相同失败，见 `scratch/baseline-heic-tests.log`。本次未修改 HEIC 编码代码或测试基线。
 

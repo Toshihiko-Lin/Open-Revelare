@@ -173,3 +173,19 @@ bash scratch/manualpack/build-app.sh --no-publish
 ```
 
 本轮尚未写最终定位说明、未提交定位代码、未构建新测试包。后续完成一个独立任务再 commit，保留用户要求的整洁提交历史。不要为清理工作区而把未验收逻辑直接提交为完成。
+
+---
+
+## 接手完成记录（2026-11-02 后续验收与收尾）
+
+1. **验证工具对齐 GUI 预览长边**：`benchmarks/OpenRevelare.AutoCropVerification` 默认解码长边改为 `1600`（对齐 `MainViewModel.PreviewMaxEdge = 1600`），并新增 `--preview-edge=<px>` 参数，分别完成了 `1600` 与 `900` 双分辨率复核。
+2. **核明 `DSC02051` 及 5294 边界疑点并补齐物理约束**：
+   - 逐帧放大核对确认 5294 样片全部为标准 8 孔 `36×24 mm` 全幅，不存在半格片；`DSC02051` 与 `DSC02015` 均为装片漏光造成的过曝片头（约 45% 画格被曝光冲透，呈约 4 mm 光学渐变过渡）。
+   - `HasStableBase` 新增候选画格四等分区间片基均值稳定性校验（`jump / 3 > 1.5 && linearShift / 3 > referenceWhite * 0.18`），在不影响带显影水痕黑白负片（`DSC02060`/`02061`/`02064`）的前提下拦截光学渐变漏光片头（1600px 与 900px 下 `DSC02051` 均安全跳过）。
+   - 候选左右边界外侧 `[a - pitch, a - edge]` 与 `[b + edge, b + pitch]` 强制校验两排齿孔（或裁断端灯箱）可见性，消除黑片夹遮挡邻帧造成的伪边界，`DSC02043` 与 `DSC02044` 均从跨片夹误检恢复为左侧真实夜景 8 孔画格精确定位。
+   - 针对高密度黑片基反转片（片基肩部 `< 0.06 * referenceWhite`）约束极性为 `Positive`，并将 `holeFallback` 片基采样对齐至 `shoulderTone`，消除齿孔边缘晕光把黑夜空烟花（`DSC02033`/`02034`）误判为负片画格及 `DSC02035` 极性反转的问题。
+   - 新增上下半幅同步全高门框中缝硬拒绝，防止两张相邻 `18×24 mm` 半格被合并为单张全幅，同时不误伤 C400 室内暗场（如 `DSC01916`）。
+3. **测试、视觉复核与独立测试包**：
+   - `FilmAutoCropRegressionTests` 扩展至 17 个用例，自动裁切相关测试 44/44 全部通过；全量构建 `0 Warning / 0 Error`，全量测试 `OpenRevelare.Tests` 1196 通过（仅剩 2 项已知上游 HEIC level 150 基线差异）、`MacOS.Tests` 25 通过、`Win32.Tests` 40 通过。
+   - 视觉逐帧复核：`scratch/crop-c400-edge1600-final/`（27/28 准确定位，仅 `DSC01936` 安全跳过）与 `scratch/crop-5294-edge1600-final/`、`scratch/crop-5294-edge900-final/`（均为 74/81 准确定位、7 张非完整/未曝光帧安全跳过，0 误检）。
+   - 按独立任务提交代码与文档，并产出独立测试包 `publish/OpenRevelare-AutoCrop-Test.app`（保留原 `publish/OpenRevelare.app` 未覆盖）。
