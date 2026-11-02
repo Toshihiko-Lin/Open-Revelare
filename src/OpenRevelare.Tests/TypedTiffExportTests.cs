@@ -9,6 +9,33 @@ namespace OpenRevelare.Tests;
 
 public sealed class TypedTiffExportTests
 {
+    [Theory]
+    [InlineData(TiffIO.CompressionMode.None)]
+    [InlineData(TiffIO.CompressionMode.Lzw)]
+    [InlineData(TiffIO.CompressionMode.Deflate)]
+    public void Integer_export_preserves_scalar_quantization_across_strips(TiffIO.CompressionMode mode)
+    {
+        var image = new ImageBuffer(257, 177);
+        for (int i = 0; i < image.Data.Length; i++)
+            image.Data[i] = ((i * 31337L % 131071) - 32768) / 65535f;
+        WithTempTiff(path =>
+        {
+            TiffIO.ExportTiff16(image, path, mode);
+            using Tiff tif = Assert.IsType<Tiff>(Tiff.Open(path, "r"));
+            byte[] row = new byte[tif.ScanlineSize()];
+            for (int y = 0; y < image.Height; y++)
+            {
+                Assert.True(tif.ReadScanline(row, y));
+                for (int s = 0; s < image.Width * 3; s++)
+                {
+                    float v = image.Data[y * image.Width * 3 + s];
+                    ushort expected = (ushort)(Math.Clamp(v, 0f, 1f) * 65535f + 0.5f);
+                    Assert.Equal(expected, BitConverter.ToUInt16(row, s * 2));
+                }
+            }
+        });
+    }
+
     [Fact]
     public void Extended_scene_linear_export_uses_float32_and_preserves_exact_icc_and_range()
     {

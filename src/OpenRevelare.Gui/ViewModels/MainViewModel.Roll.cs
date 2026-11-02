@@ -1863,22 +1863,38 @@ public partial class MainViewModel
             var cellParams = new FrameParams[total];
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
-            // Warm previews first, on the shared decode path — this used to re-decode the entire
-            // roll at full resolution just to shrink each frame to 900 px.
-            for (int i = 0; i < total; i++)
+            // Group split TIFF/FFF cells by source, then bound each batch to four preview
+            // buffers. RAW files retain the existing backend path and memory admission rules.
+            foreach (var group in Enumerable.Range(0, total).GroupBy(i => frames[i].Path,
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
             {
                 ct.ThrowIfCancellationRequested();
-                // Each frame's OWN region: on a split scan the bare path would give every cell the
-                // strip's first negative. The region is the frame plus its margin, so the crop
-                // still runs below — against the box rather than the whole scan.
-                var pre = frames[i].Box;
-                sources[i] = (await PreviewAsync(
-                    frames[i].Path,
-                    pre,
-                    pipelineVersion,
-                    tiffInputAssumption).WaitAsync(ct)).Working;
-                cellParams[i] = frames[i].Params;
-                ReportLongTask(Loc.F($"印样 {++done}/{total} …"));
+                int[] indices = group.ToArray();
+                if (indices.Length > 1 && !RawDecode.IsRawExtension(group.Key))
+                {
+                    foreach (int[] batch in indices.Chunk(4))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var entries = await PreviewTiffBatchAsync(group.Key, batch.Select(i => frames[i].Box).ToArray(),
+                            pipelineVersion, tiffInputAssumption).WaitAsync(ct);
+                        for (int k = 0; k < batch.Length; k++)
+                        {
+                            int i = batch[k];
+                            sources[i] = entries[k].Working;
+                            cellParams[i] = frames[i].Params;
+                            ReportLongTask(Loc.F($"印样 {++done}/{total} …"));
+                        }
+                    }
+                }
+                else
+                    foreach (int i in indices)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        sources[i] = (await PreviewAsync(frames[i].Path, frames[i].Box,
+                            pipelineVersion, tiffInputAssumption).WaitAsync(ct)).Working;
+                        cellParams[i] = frames[i].Params;
+                        ReportLongTask(Loc.F($"印样 {++done}/{total} …"));
+                    }
             }
 
             // The roll's target, off the params the cells are rendered with. A LegacyV1 roll

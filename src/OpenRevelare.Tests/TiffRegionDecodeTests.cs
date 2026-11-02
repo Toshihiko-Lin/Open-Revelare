@@ -37,6 +37,25 @@ public sealed class TiffRegionDecodeTests
 
     private static readonly int[] MaxEdges = { 0, 5, 9, 100 };
 
+    [Theory]
+    [InlineData(Compression.LZW)]
+    [InlineData(Compression.DEFLATE)]
+    public void Legacy_region_can_start_inside_a_compressed_strip(Compression compression)
+    {
+        string path = WriteTiff(16, false, Width, Height, compression, rowsPerStrip: Height);
+        try
+        {
+            ImageBuffer full = TiffIO.LoadTiff(path, inputIsSrgb: false);
+            var rect = (X: 0.1, Y: 0.3, W: 0.6, H: 0.4);
+            ImageBuffer expected = Geometry.ApplyCrop(full, rect);
+            ImageBuffer actual = TiffIO.LoadTiffRegion(path, rect, inputIsSrgb: false, maxEdge: 0);
+            Assert.Equal(expected.Width, actual.Width);
+            Assert.Equal(expected.Height, actual.Height);
+            AssertFloatBitsEqual(expected.Data, actual.Data);
+        }
+        finally { File.Delete(path); }
+    }
+
     public static IEnumerable<object[]> ManagedRoutes()
     {
         foreach (int bps in new[] { 8, 16 })
@@ -51,6 +70,70 @@ public sealed class TiffRegionDecodeTests
         yield return new object[] { "IEEE float, embedded ICC", 32, true, false, TiffInputAssumption.Unspecified };
         yield return new object[] { "Flextight vendor gamma", 16, false, true, TiffInputAssumption.Unspecified };
         yield return new object[] { "Flextight vendor gamma, explicit linear", 16, false, true, TiffInputAssumption.Linear };
+    }
+
+    [Theory]
+    [MemberData(nameof(ManagedRoutes))]
+    public void Independent_crops_share_a_pass_without_changing_pixels_or_descriptors(
+        string route, int bitsPerSample, bool embedIcc, bool flextight, TiffInputAssumption assumption)
+    {
+        string path = flextight ? WriteFlextightTiff() : WriteTiff(bitsPerSample, embedIcc);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            var requests = Rects.Reverse().Select((rect, i) =>
+                new TiffIO.RegionRequest(rect, i % 2 == 0 ? new[] { 5, 0, 9 } : new[] { 9 })).ToArray();
+            foreach (ColorPipelineVersion version in new[] { ColorPipelineVersion.LegacyV1, ColorPipelineVersion.ManagedV2 })
+            foreach (TransformPrecision precision in new[] { TransformPrecision.Exact, TransformPrecision.Preview })
+            {
+                WorkingFrame[] actual = TiffIO.LoadWorkingRegionBatch(path, requests, assumption, version, engine, precision);
+                int k = 0;
+                foreach (var request in requests)
+                foreach (int edge in request.MaxEdges)
+                {
+                    WorkingFrame expected = TiffIO.LoadWorkingRegion(path, request.Rect, edge, assumption, version, engine, precision);
+                    Assert.Equal(expected.Space, actual[k].Space);
+                    Assert.Equal(expected.Admission, actual[k].Admission);
+                    Assert.Equal(expected.Source.DecodeRecipe, actual[k].Source.DecodeRecipe);
+                    Assert.Equal(expected.Pixels.SourceQuantisationStep, actual[k].Pixels.SourceQuantisationStep);
+                    Assert.Equal((expected.Pixels.Width, expected.Pixels.Height), (actual[k].Pixels.Width, actual[k].Pixels.Height));
+                    AssertFloatBitsEqual(expected.Pixels.Data, actual[k++].Pixels.Data, route);
+                }
+                Assert.Equal(actual.Length, k);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData(Compression.NONE, 8)]
+    [InlineData(Compression.LZW, 8)]
+    [InlineData(Compression.LZW, 1500)]
+    [InlineData(Compression.DEFLATE, 8)]
+    public void Batch_handles_different_box_origins_overlaps_and_gaps_in_tall_files(Compression compression, int rowsPerStrip)
+    {
+        string path = WriteTiff(16, true, 61, 1500, compression, rowsPerStrip);
+        try
+        {
+            using var engine = new LittleCmsEngine();
+            var requests = new[]
+            {
+                new TiffIO.RegionRequest((0.1, 0.7, 0.7, 0.3), 45),
+                new TiffIO.RegionRequest((0, 0.001, 1, 0.35), new[] { 55, 29 }),
+                new TiffIO.RegionRequest((0.2, 0.05, 0.6, 0.3), 41),
+            };
+            WorkingFrame[] actual = TiffIO.LoadWorkingRegionBatch(path, requests, TiffInputAssumption.Unspecified,
+                ColorPipelineVersion.ManagedV2, engine);
+            int k = 0;
+            foreach (var request in requests)
+            foreach (int edge in request.MaxEdges)
+            {
+                WorkingFrame expected = TiffIO.LoadWorkingRegion(path, request.Rect, edge, TiffInputAssumption.Unspecified,
+                    ColorPipelineVersion.ManagedV2, engine);
+                AssertFloatBitsEqual(expected.Pixels.Data, actual[k++].Pixels.Data);
+            }
+        }
+        finally { File.Delete(path); }
     }
 
     [Theory]

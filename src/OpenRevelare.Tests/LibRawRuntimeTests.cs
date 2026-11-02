@@ -178,6 +178,29 @@ public sealed class LibRawRuntimeTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(RawDecode.Demosaic.Full)]
+    [InlineData(RawDecode.Demosaic.Preview)]
+    public void Several_raw_preview_sizes_match_independent_decodes_and_remain_independent_buffers(RawDecode.Demosaic demosaic)
+    {
+        string path = Path.Combine(TestDataIsolation.Root, $"multi-preview-{Guid.NewGuid():N}.dng");
+        try
+        {
+            WriteBayerDng(path, width: 1024, height: 768, textured: true);
+            int[] edges = { 340, 170, 340, 1024 };
+            var actual = RawDecode.DecodeRawDownsampled(path, RawDecode.FbddMode.Off, edges, demosaic);
+            for (int k = 0; k < edges.Length; k++)
+            {
+                var expected = RawDecode.DecodeRawDownsampled(path, RawDecode.FbddMode.Off, new[] { edges[k] }, demosaic);
+                Assert.Equal((expected.SourceWidth, expected.SourceHeight), (actual.SourceWidth, actual.SourceHeight));
+                Assert.Equal(expected.Previews[0].Data, actual.Previews[k].Data);
+                Assert.Equal(expected.Previews[0].SourceQuantisationStep, actual.Previews[k].SourceQuantisationStep);
+            }
+            Assert.NotSame(actual.Previews[0].Data, actual.Previews[2].Data);
+        }
+        finally { File.Delete(path); }
+    }
+
     // Independent, minimal TIFF/DNG fixture: RGGB, constant per-channel sensor values,
     // deliberately non-unit as-shot WB, and a vendor crop smaller than the sensor.
     private static void WriteBayerDng(string path, int width = 160, int height = 128, bool textured = false)

@@ -68,6 +68,30 @@ public class FffRoutingTests
         try { body(path); } finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Non_scalar_photometric_tag_falls_back_to_raw(bool bigEndian)
+        => With(WriteTiff(".fff", 2, 3, bigEndian), p =>
+        {
+            byte[] bytes = File.ReadAllBytes(p);
+            // The fifth entry is PhotometricInterpretation. Its inline slot must not be
+            // interpreted as RGB when count says that the slot actually holds an offset.
+            int countOffset = 10 + 4 * 12 + 4;
+            bytes[countOffset + (bigEndian ? 3 : 0)] = 2;
+            File.WriteAllBytes(p, bytes);
+            Assert.True(RawDecode.IsRawExtension(p));
+        });
+
+    [Fact]
+    public void Truncated_directory_falls_back_to_raw()
+        => With(WriteTiff(".fff", 2, 3), p =>
+        {
+            byte[] bytes = File.ReadAllBytes(p);
+            File.WriteAllBytes(p, bytes[..^1]);
+            Assert.True(RawDecode.IsRawExtension(p));
+        });
+
     /// <summary>A Flextight scanner .fff — full RGB — must go to TiffIO, not LibRaw.</summary>
     [Fact]
     public void Scanner_fff_routes_to_tiff()

@@ -95,6 +95,8 @@ public sealed class ExportOptimizationTests
     [InlineData(TiffIO.CompressionMode.Lzw, true, 1021, 193)]
     [InlineData(TiffIO.CompressionMode.Deflate, false, 1021, 193)]
     [InlineData(TiffIO.CompressionMode.Deflate, true, 1021, 193)]
+    [InlineData(TiffIO.CompressionMode.Deflate, false, 1021, 593)]
+    [InlineData(TiffIO.CompressionMode.Deflate, true, 1021, 593)]
     [InlineData(TiffIO.CompressionMode.Deflate, false, 1, 17)]
     [InlineData(TiffIO.CompressionMode.Deflate, true, 1, 17)]
     public void Tiff_strips_preserve_every_sample_across_rows_partial_strips_and_batches(

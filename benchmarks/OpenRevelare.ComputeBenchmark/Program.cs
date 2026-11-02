@@ -2,6 +2,24 @@ using System.Diagnostics;
 using System.Text.Json;
 using OpenRevelare.Core;
 
+if (args.FirstOrDefault() == "--raw-previews")
+{
+    RawPreviewBenchmark.Run();
+    return;
+}
+
+if (args.FirstOrDefault() == "--tiff-regions")
+{
+    TiffRegionBenchmark.Run();
+    return;
+}
+
+if (args.FirstOrDefault() == "--sample-conversion")
+{
+    SampleConversionBenchmark.Run();
+    return;
+}
+
 if (args.FirstOrDefault() == "--workflow")
 {
     WorkflowBenchmark.Run(args.ElementAtOrDefault(1));

@@ -639,6 +639,53 @@ public static class ImageIo
         return (preview, sourceWidth, sourceHeight);
     });
 
+    /// <summary>Several TIFF/FFF cells share decoding and colour conversion. The memory gate
+    /// accounts for every output, including narrow crops that cannot be box-reduced.</summary>
+    internal static (WorkingFrame Preview, int SourceWidth, int SourceHeight)[] LoadWorkingTiffPreviewBatch(
+        string path,
+        (double X, double Y, double W, double H)?[] rects,
+        int maxEdge,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        ArgumentNullException.ThrowIfNull(rects);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        RequirePipelineVersion(pipelineVersion);
+        if (maxEdge <= 0) throw new ArgumentOutOfRangeException(nameof(maxEdge));
+        if (rects.Length == 0) throw new ArgumentException("At least one crop is required.", nameof(rects));
+        if (RawDecode.IsRawExtension(path)) throw new NotSupportedException("TIFF batches require a raster source.");
+        return SourceStamp.ReadStable(path, () =>
+        {
+            var (width, height) = TiffIO.ReadTiffSize(path);
+            var requests = new TiffIO.RegionRequest[rects.Length];
+            long bytes = 64L << 20;
+            for (int i = 0; i < rects.Length; i++)
+            {
+                var rect = rects[i] ?? (0, 0, 1, 1);
+                int w = Math.Min(width, (int)Math.Round((rect.X + rect.W) * width)) - Math.Max(0, (int)Math.Round(rect.X * width));
+                int h = Math.Min(height, (int)Math.Round((rect.Y + rect.H) * height)) - Math.Max(0, (int)Math.Round(rect.Y * height));
+                if (w <= 0 || h <= 0) throw new ArgumentException("A crop is empty.", nameof(rects));
+                int factor = Resample.BoxFactor(w, h, maxEdge);
+                bytes = checked(bytes + (long)(w / factor) * (h / factor) * 12);
+                requests[i] = new TiffIO.RegionRequest(rect, maxEdge);
+            }
+            return Gated(bytes, () =>
+            {
+                WorkingFrame[] frames = TiffIO.LoadWorkingRegionBatch(path, requests, tiffInputAssumption,
+                    pipelineVersion, colorManagement, TransformPrecision.Preview);
+                var result = new (WorkingFrame, int, int)[frames.Length];
+                for (int i = 0; i < frames.Length; i++)
+                {
+                    var rect = requests[i].Rect;
+                    result[i] = (frames[i], Math.Max(1, (int)Math.Round(rect.W * width)),
+                        Math.Max(1, (int)Math.Round(rect.H * height)));
+                }
+                return result;
+            });
+        });
+    }
+
     /// <summary>
     /// One rectangle of a TIFF at FULL resolution, typed — what <see cref="LoadWorking"/> then
     /// <see cref="Geometry.ApplyCrop"/> would give, pixel for pixel, holding only the rectangle.

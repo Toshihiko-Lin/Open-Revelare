@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
 using OpenRevelare.ColorManagement;
 
@@ -250,13 +252,18 @@ public static class TiffIO
 
         public static SampleWindow Whole(int width, int height) => new(0, 0, width, height, 1);
 
-        /// <summary>One window per requested edge, all on the same crop; the whole frame at
-        /// full resolution when there is no request.</summary>
-        public static SampleWindow[] Resolve(int width, int height, RegionRequest? region)
+        /// <summary>One window per requested crop and edge, in request order; the whole frame
+        /// at full resolution when there is no request.</summary>
+        public static SampleWindow[] Resolve(int width, int height, RegionRequest[]? region)
         {
-            if (region is not { } r) return new[] { Whole(width, height) };
+            if (region is null) return new[] { Whole(width, height) };
+            return region.SelectMany(r => ResolveOne(width, height, r)).ToArray();
+        }
+
+        private static SampleWindow[] ResolveOne(int width, int height, RegionRequest r)
+        {
             if (r.MaxEdges is not { Length: > 0 })
-                throw new ArgumentException("a region request needs at least one edge", nameof(region));
+                throw new ArgumentException("a region request needs at least one edge", nameof(r));
             var rect = r.Rect;
             // Geometry.ApplyCrop, verbatim — including its refusal of an empty crop.
             int x0 = Math.Max(0, (int)Math.Round(rect.X * width));
@@ -300,14 +307,14 @@ public static class TiffIO
     /// so the result is bit-identical to boxing a full decode — that identity is what lets a
     /// split scan or a preview be decoded WITHOUT the full frame ever existing.
     ///
-    /// Several windows share ONE pass so that a caller wanting two preview sizes of the same crop
-    /// (the roll's opening frames want the editor size and the strip size) pays for the file and
-    /// the colour transform once; all windows must share the crop and differ only in factor.
+    /// Several windows share one pass, including independent or overlapping crops and multiple
+    /// sizes of each. A scanline is decoded and its active crop span is colour-converted once,
+    /// then distributed to each window's accumulator.
     ///
     /// IN PARALLEL, by bands of rows, when the file lets rows be reached without decoding
     /// everything above them (<see cref="ParallelBands"/>). Each band has its own LibTiff handle
     /// (a <see cref="Tiff"/> is not thread-safe) and its own <see cref="RowStage"/> (a LittleCMS
-    /// lease is thread-affine). The bands are cut on multiples of every window's factor, so each
+    /// lease is thread-affine). Band boundaries respect every active window's box grid, so each
     /// output row's sum is formed by exactly one band from exactly its own input rows, in the
     /// same order as before — the identity above survives the parallelism untouched, and the
     /// tests that pin it are the regression suite for this loop. Measured on a 12-core machine:
@@ -330,19 +337,14 @@ public static class TiffIO
         RowStageFactory? stage)
     {
         if (windows.Length == 0) throw new ArgumentException("at least one window", nameof(windows));
-        SampleWindow crop = windows[0];
-        foreach (SampleWindow w in windows)
-            if (w.X0 != crop.X0 || w.X1 != crop.X1 || w.Y0 != crop.Y0 || w.Y1 != crop.Y1)
-                throw new ArgumentException("windows sharing one pass must share the crop", nameof(windows));
-
+        int firstRow = windows.Min(w => w.Y0);
+        int lastRow = firstRow;
         var outputs = new float[windows.Length][];
-        int lastRow = crop.Y0;   // exclusive: the first row no window needs
-        int unit = 1;            // band boundaries must be ≡ Y0 modulo every factor
         for (int k = 0; k < windows.Length; k++)
         {
-            outputs[k] = new float[checked(windows[k].OutWidth * windows[k].OutHeight * 3)];
-            lastRow = Math.Max(lastRow, crop.Y0 + windows[k].OutHeight * windows[k].Factor);
-            unit = Lcm(unit, windows[k].Factor);
+            SampleWindow w = windows[k];
+            outputs[k] = new float[checked(w.OutWidth * w.OutHeight * 3)];
+            lastRow = Math.Max(lastRow, w.Y0 + w.OutHeight * w.Factor);
         }
 
         // A compressed strip can only be read from its first row (the codec has no random
@@ -352,21 +354,18 @@ public static class TiffIO
         bool compressed = CompressionOf(tif) != BitMiracle.LibTiff.Classic.Compression.NONE;
         int SeekBase(int y) => compressed ? y / rowsPerStrip * rowsPerStrip : y;
 
-        int rows = lastRow - crop.Y0;
-        int bands = ParallelBands(rows, unit, compressed, rowsPerStrip);
-        if (bands <= 1)
+        int rows = lastRow - firstRow;
+        int bands = ParallelBands(rows, compressed, rowsPerStrip);
+        var boundaries = BandBoundaries(windows, firstRow, lastRow, bands);
+        if (boundaries.Count == 2)
         {
-            ReadBand(tif, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(crop.Y0), crop.Y0, lastRow);
+            ReadBand(tif, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(firstRow), firstRow, lastRow);
         }
         else
         {
-            int bandRows = (rows + bands - 1) / bands;
-            bandRows = (bandRows + unit - 1) / unit * unit;
-            int bandCount = (rows + bandRows - 1) / bandRows;
-            Parallel.For(0, bandCount, band =>
+            Parallel.For(0, boundaries.Count - 1, band =>
             {
-                int y0 = crop.Y0 + band * bandRows;
-                int y1 = Math.Min(lastRow, y0 + bandRows);
+                int y0 = boundaries[band], y1 = boundaries[band + 1];
                 using Tiff own = Tiff.Open(path, "r")
                     ?? throw new IOException($"could not open TIFF: {path}");
                 ReadBand(own, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(y0), y0, y1);
@@ -401,9 +400,8 @@ public static class TiffIO
         int yFrom,
         int yTo)
     {
-        SampleWindow crop = windows[0];
-        int segW = crop.X1 - crop.X0;
-        var row = new float[checked(segW * 3)];
+        int maxWidth = windows.Max(w => w.X1) - windows.Min(w => w.X0);
+        var row = new float[checked(maxWidth * 3)];
         byte[] scanline = new byte[tif.ScanlineSize()];
         RowStage rowStage = stage?.Invoke() ?? default;
         try
@@ -413,40 +411,62 @@ public static class TiffIO
                 if (!tif.ReadScanline(scanline, y))
                     throw new IOException($"failed reading TIFF scanline {y} from '{Path.GetFileName(path)}'");
                 if (y < yFrom) continue;
-
-                for (int x = 0; x < segW; x++)
-                {
-                    int sx = (crop.X0 + x) * spp, d = x * 3;
-                    if (spp >= 3)
+                int xFrom = int.MaxValue, xTo = 0;
+                foreach (SampleWindow window in windows)
+                    if (y >= window.Y0 && y < window.Y0 + window.OutHeight * window.Factor)
                     {
-                        row[d] = Sample(scanline, sx, bps) * sampleScale;
-                        row[d + 1] = Sample(scanline, sx + 1, bps) * sampleScale;
-                        row[d + 2] = Sample(scanline, sx + 2, bps) * sampleScale;
+                        xFrom = Math.Min(xFrom, window.X0);
+                        xTo = Math.Max(xTo, window.X1);
                     }
-                    else
+                if (xFrom == int.MaxValue) continue;
+                int segW = xTo - xFrom;
+
+                if (spp == 3 && bps == 16)
+                {
+                    var words = MemoryMarshal.Cast<byte, ushort>(scanline.AsSpan());
+                    SampleConversion.ToFloat(words.Slice(xFrom * 3, segW * 3), row, sampleScale);
+                }
+                else if (spp == 3 && bps == 32)
+                {
+                    MemoryMarshal.Cast<byte, float>(scanline.AsSpan()).Slice(xFrom * 3, segW * 3).CopyTo(row);
+                }
+                else
+                {
+                    for (int x = 0; x < segW; x++)
                     {
-                        float grey = Sample(scanline, sx, bps) * sampleScale;   // grey -> replicate
-                        row[d] = grey; row[d + 1] = grey; row[d + 2] = grey;
+                        int sx = (xFrom + x) * spp, d = x * 3;
+                        if (spp >= 3)
+                        {
+                            row[d] = Sample(scanline, sx, bps) * sampleScale;
+                            row[d + 1] = Sample(scanline, sx + 1, bps) * sampleScale;
+                            row[d + 2] = Sample(scanline, sx + 2, bps) * sampleScale;
+                        }
+                        else
+                        {
+                            float grey = Sample(scanline, sx, bps) * sampleScale;   // grey -> replicate
+                            row[d] = grey; row[d + 1] = grey; row[d + 2] = grey;
+                        }
                     }
                 }
-                rowStage.Transform?.Invoke(row, segW);
+                rowStage.Transform?.Invoke(row.AsSpan(0, segW * 3), segW);
 
                 for (int k = 0; k < windows.Length; k++)
                 {
                     SampleWindow win = windows[k];
                     int factor = win.Factor, outW = win.OutWidth;
-                    int oy = (y - crop.Y0) / factor;
+                    if (y < win.Y0) continue;
+                    int oy = (y - win.Y0) / factor;
                     if (oy >= win.OutHeight) continue;          // trailing rows outside this box
                     float[] data = outputs[k];
                     if (factor == 1)
                     {
-                        Array.Copy(row, 0, data, oy * outW * 3, outW * 3);
+                        Array.Copy(row, (win.X0 - xFrom) * 3, data, oy * outW * 3, outW * 3);
                         continue;
                     }
                     int rowBase = oy * outW * 3;
                     for (int ox = 0; ox < outW; ox++)
                     {
-                        int di = rowBase + ox * 3, si = ox * factor * 3;
+                        int di = rowBase + ox * 3, si = (win.X0 - xFrom + ox * factor) * 3;
                         float r = data[di], g = data[di + 1], b = data[di + 2];
                         for (int fx = 0; fx < factor; fx++, si += 3)
                         {
@@ -473,16 +493,16 @@ public static class TiffIO
     /// while strips are small against the band and ruinous when the whole image is one strip —
     /// every band would decode from row 0. So compressed files parallelise only when a strip is
     /// at most a quarter of a band, and a single-strip LZW/Deflate scan stays sequential, as it
-    /// always was. Never more bands than cores or than <paramref name="unit"/>-sized pieces.
+    /// always was. Never more bands than cores or than minimum-sized pieces; box-grid alignment is applied afterwards.
     /// </summary>
-    private static int ParallelBands(int rows, int unit, bool compressed, int rowsPerStrip)
+    private static int ParallelBands(int rows, bool compressed, int rowsPerStrip)
     {
         int cores = Environment.ProcessorCount;
-        int maxByRows = Math.Max(1, rows / Math.Max(unit, MinBandRows));
+        int maxByRows = Math.Max(1, rows / MinBandRows);
         int bands = Math.Min(cores, maxByRows);
         if (bands <= 1 || !compressed) return bands;
         int bandRows = (rows + bands - 1) / bands;
-        return rowsPerStrip * 4 <= bandRows ? bands : 1;
+        return (long)rowsPerStrip * 4 <= bandRows ? bands : 1;
     }
 
     private static Compression CompressionOf(Tiff tif)
@@ -503,11 +523,28 @@ public static class TiffIO
     /// <summary>A band shorter than this is not worth a thread and a file handle.</summary>
     private const int MinBandRows = 64;
 
-    private static int Lcm(int a, int b)
+    private static List<int> BandBoundaries(SampleWindow[] windows, int first, int last, int bands)
     {
-        int x = a, y = b;
-        while (y != 0) (x, y) = (y, x % y);
-        return checked(a / x * b);
+        var boundaries = new List<int> { first };
+        int bandRows = (last - first + bands - 1) / bands;
+        int target = first + bandRows;
+        for (int y = target; y < last; y++)
+        {
+            bool safe = true;
+            foreach (SampleWindow w in windows)
+                if (y > w.Y0 && y < w.Y0 + w.OutHeight * w.Factor && (y - w.Y0) % w.Factor != 0)
+                {
+                    safe = false;
+                    break;
+                }
+            if (!safe) continue;
+            boundaries.Add(y);
+            if (last - y <= bandRows) break;
+            target = y + bandRows;
+            y = target - 1;
+        }
+        boundaries.Add(last);
+        return boundaries;
     }
 
     /// <summary>
@@ -555,7 +592,7 @@ public static class TiffIO
 
     /// <summary>One frame per window of <paramref name="region"/> (one, the whole frame, when
     /// there is no request); every frame carries the same descriptor and admission.</summary>
-    private static WorkingFrame[] LoadWorkingFrame(string path, bool inputIsSrgb, RegionRequest? region)
+    private static WorkingFrame[] LoadWorkingFrame(string path, bool inputIsSrgb, RegionRequest[]? region)
     {
         SuppressLibTiffWarnings();
         string stableId = FrameSourceIds.ForPath(path);
@@ -736,14 +773,36 @@ public static class TiffIO
         IColorManagementEngine colorManagement,
         TransformPrecision precision = TransformPrecision.Exact)
     {
+        ArgumentNullException.ThrowIfNull(maxEdges);
+        return LoadWorkingRegionBatch(path, new[] { new RegionRequest(rect, maxEdges) },
+            inputAssumption, pipelineVersion, colorManagement, precision);
+    }
+
+    /// <summary>Decode several independent crops in one streamed pass. Results are flattened
+    /// in request order, then edge order. Crops may overlap and use different box factors;
+    /// their pixels and colour descriptors match independent region decodes exactly.</summary>
+    public static WorkingFrame[] LoadWorkingRegionBatch(
+        string path,
+        IReadOnlyList<RegionRequest> requests,
+        TiffInputAssumption inputAssumption,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement,
+        TransformPrecision precision = TransformPrecision.Exact)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        if (requests.Count == 0) throw new ArgumentException("At least one region is required.", nameof(requests));
         if (!Enum.IsDefined(inputAssumption))
             throw new ArgumentOutOfRangeException(nameof(inputAssumption), inputAssumption, null);
         if (!Enum.IsDefined(precision))
             throw new ArgumentOutOfRangeException(nameof(precision), precision, null);
-        ArgumentNullException.ThrowIfNull(maxEdges);
-        if (maxEdges.Length == 0)
-            throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
-        var region = new RegionRequest(rect, (int[])maxEdges.Clone());
+        var region = new RegionRequest[requests.Count];
+        for (int i = 0; i < requests.Count; i++)
+        {
+            RegionRequest request = requests[i];
+            if (request.MaxEdges is not { Length: > 0 })
+                throw new ArgumentException("Each region needs at least one preview edge.", nameof(requests));
+            region[i] = new RegionRequest(request.Rect, (int[])request.MaxEdges.Clone());
+        }
         if (pipelineVersion == ColorPipelineVersion.LegacyV1)
             return LoadWorkingFrame(path, inputIsSrgb: inputAssumption == TiffInputAssumption.Srgb, region);
         if (pipelineVersion != ColorPipelineVersion.ManagedV2)
@@ -757,7 +816,7 @@ public static class TiffIO
         string path,
         TiffInputAssumption inputAssumption,
         IColorManagementEngine colorManagement,
-        RegionRequest? region,
+        RegionRequest[]? region,
         TransformPrecision precision)
     {
         SuppressLibTiffWarnings();
@@ -855,7 +914,7 @@ public static class TiffIO
         string stableId,
         string? fallbackDiagnostic,
         IColorManagementEngine colorManagement,
-        RegionRequest? region,
+        RegionRequest[]? region,
         TransformPrecision precision)
     {
         // This route is reached only after no embedded profile existed or one failed admission.
@@ -913,7 +972,7 @@ public static class TiffIO
         string stableId,
         string prefix,
         IColorManagementEngine colorManagement,
-        RegionRequest? region,
+        RegionRequest[]? region,
         TransformPrecision precision)
     {
         return DecodeManagedWithProfile(
@@ -931,7 +990,7 @@ public static class TiffIO
         string path,
         string stableId,
         string prefix,
-        RegionRequest? region)
+        RegionRequest[]? region)
     {
         using Tiff tif = Tiff.Open(path, "r")
             ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
@@ -972,7 +1031,7 @@ public static class TiffIO
         return buffers;
     }
 
-    private static WorkingFrame[] LoadManagedCompatibility(string path, string prefix, RegionRequest? region)
+    private static WorkingFrame[] LoadManagedCompatibility(string path, string prefix, RegionRequest[]? region)
     {
         WorkingFrame[] legacy = LoadWorkingFrame(path, inputIsSrgb: false, region);
         var source = new SourceDescriptor(
@@ -1015,7 +1074,7 @@ public static class TiffIO
         ColorReference sourceReference,
         string decodeRecipe,
         IColorManagementEngine colorManagement,
-        RegionRequest? region,
+        RegionRequest[]? region,
         TransformPrecision precision)
     {
         ColorProfileRef workingProfile = BuiltInColorProfiles.LinearAcesCg(ProfileRole.Working);
@@ -1206,7 +1265,7 @@ public static class TiffIO
     /// by that window.
     /// </summary>
     private static (SampleWindow[] Windows, int BitsPerSample, float[][] Encoded, float CodeStep, NumericRange Range)
-        ReadTiffSamples(Tiff tif, string path, RegionRequest? region, RowStageFactory? stage)
+        ReadTiffSamples(Tiff tif, string path, RegionRequest[]? region, RowStageFactory? stage)
     {
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
         int h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
@@ -1315,7 +1374,7 @@ public static class TiffIO
         // SampleWindow rounds rect × size back to the nearest integer; x/W × W lands within an ulp
         // or two of x, so the window is exactly the pixels asked for.
         var rect = ((double)px.X / w, (double)px.Y / h, (double)px.W / w, (double)px.H / h);
-        return LoadTiff(path, inputIsSrgb, new RegionRequest(rect, 0))[0];
+        return LoadTiff(path, inputIsSrgb, new[] { new RegionRequest(rect, 0) })[0];
     }
 
     /// <summary>
@@ -1328,7 +1387,7 @@ public static class TiffIO
         ArgumentNullException.ThrowIfNull(maxEdges);
         if (maxEdges.Length == 0)
             throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
-        return LoadTiff(path, inputIsSrgb, new RegionRequest((0, 0, 1, 1), (int[])maxEdges.Clone()));
+        return LoadTiff(path, inputIsSrgb, new[] { new RegionRequest((0, 0, 1, 1), (int[])maxEdges.Clone()) });
     }
 
     /// <summary>
@@ -1337,7 +1396,7 @@ public static class TiffIO
     /// decode would give, pixel for pixel — see <see cref="ReadWindow"/> — without the whole
     /// decode.
     /// </summary>
-    private static ImageBuffer[] LoadTiff(string path, bool inputIsSrgb, RegionRequest? region)
+    private static ImageBuffer[] LoadTiff(string path, bool inputIsSrgb, RegionRequest[]? region)
     {
         SuppressLibTiffWarnings();
         using Tiff tif = Tiff.Open(path, "r")
@@ -1411,8 +1470,8 @@ public static class TiffIO
     ///
     /// Only the rows the rectangle covers are read, and each is folded into the accumulator as it
     /// arrives, so peak memory is the OUTPUT plus one scanline rather than the whole image.
-    /// Reading is still sequential from row 0 because a TIFF's strips are not randomly
-    /// addressable in general; the skipped rows are decoded but never converted or kept.
+    /// Compressed input starts at the containing strip's first row; skipped rows are decoded
+    /// without being converted or retained. Uncompressed input starts directly at the crop.
     /// </summary>
     /// <param name="rect">(x, y, w, h) in [0,1] of the full image, origin top-left.</param>
     /// <param name="maxEdge">Long edge of the result. 0 or less means no downsampling.</param>
@@ -1456,10 +1515,13 @@ public static class TiffIO
         float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
         float codeStep = isFloat ? 0.0f : inv;
 
-        for (int y = y0; y < y1; y++)
+        int readFrom = CompressionOf(tif) == Compression.NONE ? y0 : y0 / RowsPerStrip(tif) * RowsPerStrip(tif);
+        for (int y = readFrom; y < y1; y++)
         {
             if (!tif.ReadScanline(buf, y))
                 throw new IOException($"failed reading TIFF scanline {y}");
+
+            if (y < y0) continue;
 
             int oy = (y - y0) / factor;
             if (oy >= outH) continue;          // trailing rows outside the integer box
@@ -1687,7 +1749,8 @@ public static class TiffIO
             int samples = checked(Math.Min(rowsPerStrip, h - y) * w * 3);
             ParallelSweep.Over(samples, (from, to) =>
             {
-                for (int i = from; i < to; i++) WriteU16(strip, i, To16(src[offset + i]));
+                SampleConversion.ToUInt16(src.AsSpan(offset + from, to - from),
+                    MemoryMarshal.Cast<byte, ushort>(strip.AsSpan()).Slice(from, to - from));
             });
             // LibTiff's predictor may modify this buffer, so every strip is prepared afresh.
             if (tif.WriteEncodedStrip(y / rowsPerStrip, strip, samples * sizeof(ushort)) < 0)
@@ -1780,14 +1843,8 @@ public static class TiffIO
         {
             if (bytesPerSample == sizeof(ushort))
             {
-                int offset = y * samples;
-                for (int x = 0; x < width; x++)
-                {
-                    int j = offset + x * 3;
-                    WriteU16(row, x * 3, To16(source[j]));
-                    WriteU16(row, x * 3 + 1, To16(source[j + 1]));
-                    WriteU16(row, x * 3 + 2, To16(source[j + 2]));
-                }
+                SampleConversion.ToUInt16(source.AsSpan(y * samples, samples),
+                    MemoryMarshal.Cast<byte, ushort>(row.AsSpan()));
             }
             else Buffer.BlockCopy(source, checked(y * row.Length), row, 0, row.Length);
             if (!tif.WriteScanline(row, y)) throw new IOException($"failed writing LZW TIFF scanline {y}");
@@ -1801,44 +1858,75 @@ public static class TiffIO
         int rowSamples = checked(image.Width * 3);
         int strips = (image.Height + rowsPerStrip - 1) / rowsPerStrip;
         int workers = Math.Min(strips, Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
-        var completed = new (byte[] Bytes, int Count)[workers];
+        int stripBytes = checked(Math.Min(rowsPerStrip, image.Height) * rowSamples * bytesPerSample);
+        var buffers = new DeflateStripBuffer[workers];
         var options = new ParallelOptions { MaxDegreeOfParallelism = workers };
-        for (int first = 0; first < strips; first += workers)
+        try
         {
-            int count = Math.Min(workers, strips - first);
-            Parallel.For(0, count, options, i =>
+            for (int i = 0; i < workers; i++) buffers[i] = new DeflateStripBuffer(stripBytes);
+            for (int first = 0; first < strips; first += workers)
             {
-                int y = (first + i) * rowsPerStrip;
-                int rows = Math.Min(rowsPerStrip, image.Height - y);
-                int samples = checked(rows * rowSamples);
-                byte[] raw = new byte[checked(samples * bytesPerSample)];
-                if (bytesPerSample == sizeof(ushort))
+                int count = Math.Min(workers, strips - first);
+                Parallel.For(0, count, options, i =>
                 {
-                    int offset = y * rowSamples;
-                    for (int s = 0; s < samples; s++) WriteU16(raw, s, To16(image.Data[offset + s]));
-                    // TIFF horizontal prediction subtracts the PREVIOUS PIXEL's same
-                    // channel, modulo 2^16, resetting at every row. Work backwards so
-                    // every subtraction still reads the unmodified predecessor.
-                    var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ushort>(raw.AsSpan());
-                    for (int row = 0; row < rows; row++)
-                        for (int s = (row + 1) * rowSamples - 1; s >= row * rowSamples + 3; s--)
-                            words[s] = unchecked((ushort)(words[s] - words[s - 3]));
-                }
-                else Buffer.BlockCopy(image.Data, checked(y * rowSamples * sizeof(float)), raw, 0, raw.Length);
+                    int y = (first + i) * rowsPerStrip;
+                    int rows = Math.Min(rowsPerStrip, image.Height - y);
+                    int samples = checked(rows * rowSamples);
+                    int bytes = checked(samples * bytesPerSample);
+                    DeflateStripBuffer buffer = buffers[i];
+                    byte[] raw = buffer.Raw;
+                    if (bytesPerSample == sizeof(ushort))
+                    {
+                        int offset = y * rowSamples;
+                        var words = MemoryMarshal.Cast<byte, ushort>(raw.AsSpan(0, bytes));
+                        SampleConversion.ToUInt16(image.Data.AsSpan(offset, samples), words);
+                        TiffPredictor.ApplyHorizontal(words, rowSamples);
+                    }
+                    else Buffer.BlockCopy(image.Data, checked(y * rowSamples * sizeof(float)), raw, 0, bytes);
 
-                using var packed = new MemoryStream(raw.Length);
-                using (var zip = new System.IO.Compression.ZLibStream(packed,
-                    System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
-                    zip.Write(raw);
-                completed[i] = (packed.GetBuffer(), checked((int)packed.Length));
-            });
-            for (int i = 0; i < count; i++)
-            {
-                var packed = completed[i];
-                if (tif.WriteRawStrip(first + i, packed.Bytes, packed.Count) < 0)
-                    throw new IOException($"failed writing Deflate TIFF strip {first + i}");
-                completed[i] = default; // release this batch before preparing the next
+                    MemoryStream packed = buffer.Packed;
+                    packed.SetLength(0);
+                    packed.Position = 0;
+                    using (var zip = new System.IO.Compression.ZLibStream(packed,
+                        System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+                        zip.Write(raw.AsSpan(0, bytes));
+                });
+                for (int i = 0; i < count; i++)
+                {
+                    MemoryStream packed = buffers[i].Packed;
+                    if (tif.WriteRawStrip(first + i, packed.GetBuffer(), checked((int)packed.Length)) < 0)
+                        throw new IOException($"failed writing Deflate TIFF strip {first + i}");
+                }
             }
+        }
+        finally
+        {
+            // Parallel.For joins every worker before returning or throwing. No rented memory
+            // is returned while a compressor or the TIFF writer can still reference it.
+            foreach (DeflateStripBuffer? buffer in buffers) buffer?.Dispose();
+        }
+    }
+
+    private sealed class DeflateStripBuffer : IDisposable
+    {
+        public byte[] Raw { get; }
+        public MemoryStream Packed { get; }
+
+        public DeflateStripBuffer(int capacity)
+        {
+            Raw = ArrayPool<byte>.Shared.Rent(capacity);
+            try { Packed = new MemoryStream(capacity); }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(Raw);
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            Packed.Dispose();
+            ArrayPool<byte>.Shared.Return(Raw);
         }
     }
 
@@ -1868,16 +1956,4 @@ public static class TiffIO
         return sb.ToString();
     }
 
-    private static void WriteU16(byte[] buf, int sampleIndex, ushort v)
-    {
-        int b = sampleIndex * 2;
-        buf[b] = (byte)(v & 0xFF);
-        buf[b + 1] = (byte)(v >> 8);
-    }
-
-    private static ushort To16(float v)
-    {
-        float c = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-        return (ushort)(c * 65535.0f + 0.5f);
-    }
 }

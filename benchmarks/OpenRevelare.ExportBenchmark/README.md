@@ -26,7 +26,12 @@ Deflate strips are independently compressed by the runtime's
 [ZLibStream](https://learn.microsoft.com/en-us/dotnet/api/system.io.compression.zlibstream?view=net-8.0)
 in batches of up to four workers. Only the owner touches the TIFF handle, writing finished
 strips with [WriteRawStrip](https://bitmiracle.github.io/libtiff.net/help/api/BitMiracle.LibTiff.Classic.Tiff.html).
-The uint16 horizontal predictor resets at every row and wraps modulo 65536; float32 stores
+Each worker rents one raw strip buffer and reuses one compression output stream throughout
+an export. Only the active bytes are quantized, predicted, compressed and written, including
+the final partial strip. Rented buffers are returned even after failures, once all workers
+have joined. This bounds large temporary allocations by worker count rather than strip count.
+The uint16 horizontal predictor uses backwards SIMD subtraction with a scalar fallback,
+resets at every row and wraps modulo 65536; float32 stores
 the original bits without prediction. TIFF compressed bytes/layout can change, while decoded
 samples, bit depth, profiles and metadata must remain unchanged.
 

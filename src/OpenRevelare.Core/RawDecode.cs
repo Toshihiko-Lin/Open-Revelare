@@ -116,6 +116,7 @@ public static class RawDecode
             int count = ReadU16(buf[..2], big);
             if (count is <= 0 or > 512) return false;
 
+            if (fs.Length - fs.Position < count * 12L + 4) return false;
             int photometric = -1, samples = -1;
             for (int i = 0; i < count; i++)
             {
@@ -125,6 +126,7 @@ public static class RawDecode
 
                 // Both are SHORT(3) or LONG(4), count 1, so the value sits inline in the last
                 // four bytes — left-aligned, hence the leading two bytes for a SHORT.
+                if (ReadU32(buf[4..8], big) != 1) return false;
                 int type = ReadU16(buf[2..4], big);
                 int v = type switch
                 {
@@ -133,7 +135,6 @@ public static class RawDecode
                     _ => -1,
                 };
                 if (tag == 262) photometric = v; else samples = v;
-                if (photometric >= 0 && samples >= 0) break;
             }
 
             return photometric == 2 && samples == 3;
@@ -697,38 +698,45 @@ public static class RawDecode
         using Decoded decoded = Process(path, fbdd, halfSize);
         using var conversionTrace = Diagnostics.StartActivity("raw.rgb-float");
         ProcessedImage img = decoded.Image;
-        int w = img.Width, h = img.Height, ch = img.Channels;
+        int w = img.Width, h = img.Height;
 
-        ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
-        var data = new float[w * h * 3];
-        const float inv = 1.0f / 65535.0f;
-
-        for (int y = 0; y < h; y++)
-        {
-            int srcRow = y * w * ch;
-            int dstRow = y * w * 3;
-            for (int x = 0; x < w; x++)
-            {
-                int s = srcRow + x * ch;
-                int dst = dstRow + x * 3;
-                switch (ch)
-                {
-                    case 1: // monochrome — replicate
-                        data[dst] = data[dst + 1] = data[dst + 2] = span[s] * inv;
-                        break;
-                    default: // 3 (RGB) or 4 (RGBG/RGBA) — take first three
-                        data[dst] = span[s] * inv;
-                        data[dst + 1] = span[s + 1] * inv;
-                        data[dst + 2] = span[s + 2] * inv;
-                        break;
-                }
-            }
-        }
+        float[] data = ConvertRawPixels(img);
 
         return new ImageBuffer(w, h, data)
         {
             SourceQuantisationStep = decoded.SourceQuantisationStep,
         };
+    }
+
+    private static float[] ConvertRawPixels(ProcessedImage image)
+    {
+        int pixels = checked(image.Width * image.Height);
+        int channels = image.Channels;
+        var data = new float[checked(pixels * 3)];
+        const float scale = 1f / 65535f;
+        ParallelSweep.Over(pixels, (from, to) =>
+        {
+            ReadOnlySpan<ushort> source = image.AsSpan<ushort>();
+            if (channels == 3)
+            {
+                SampleConversion.ToFloat(source.Slice(from * 3, (to - from) * 3),
+                    data.AsSpan(from * 3, (to - from) * 3), scale);
+                return;
+            }
+            for (int p = from; p < to; p++)
+            {
+                int si = p * channels, di = p * 3;
+                if (channels == 1)
+                    data[di] = data[di + 1] = data[di + 2] = source[si] * scale;
+                else
+                {
+                    data[di] = source[si] * scale;
+                    data[di + 1] = source[si + 1] * scale;
+                    data[di + 2] = source[si + 2] * scale;
+                }
+            }
+        });
+        return data;
     }
 
     /// <summary>
@@ -788,24 +796,11 @@ public static class RawDecode
                                         new System.Drawing.Rectangle(x0, y0, x1 - x0, y1 - y0));
         using var conversionTrace = Diagnostics.StartActivity("raw.region-rgb-float");
         ProcessedImage img = decoded.Image;
-        int w = img.Width, h = img.Height, ch = img.Channels;
-        ReadOnlySpan<ushort> span = img.AsSpan<ushort>();
-        var buf = new ImageBuffer(w, h)
+        int w = img.Width, h = img.Height;
+        var buf = new ImageBuffer(w, h, ConvertRawPixels(img))
         {
             SourceQuantisationStep = decoded.SourceQuantisationStep,
         };
-        float[] d = buf.Data;
-        const float Inv = 1.0f / 65535.0f;
-        for (int yy = 0; yy < h; yy++)
-        {
-            int s = yy * w * ch, o = yy * w * 3;
-            for (int xx = 0; xx < w; xx++)
-            {
-                int si = s + xx * ch, oi = o + xx * 3;
-                if (ch == 1) { float v = span[si] * Inv; d[oi] = d[oi + 1] = d[oi + 2] = v; }
-                else { d[oi] = span[si] * Inv; d[oi + 1] = span[si + 1] * Inv; d[oi + 2] = span[si + 2] * Inv; }
-            }
-        }
         return (buf, x0, y0);
     }
 
@@ -825,8 +820,9 @@ public static class RawDecode
     /// still taken on the same pixels.
     ///
     /// Several edges in one call because the import needs two sizes of the same frame (the cached
-    /// preview and a smaller chroma-measurement buffer) and decoding twice would cost more than
-    /// the buffer we are avoiding.
+    /// preview and a smaller chroma-measurement buffer). RGB16 output shares conversion and
+    /// box accumulation in cache-sized tiles when all box grids permit parallel bands; other
+    /// layouts and incompatible grids keep independent output-row-parallel boxing.
     /// </summary>
     /// <returns>One buffer per entry of <paramref name="maxEdges"/>, plus the FULL-RESOLUTION
     /// frame dimensions — what a full decode would produce, whatever size the buffer LibRaw
@@ -834,14 +830,25 @@ public static class RawDecode
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) DecodeRawDownsampled(
         string path, FbddMode fbdd, IReadOnlyList<int> maxEdges, Demosaic demosaic = Demosaic.Full)
     {
+        ArgumentNullException.ThrowIfNull(maxEdges);
+        if (maxEdges.Count == 0) throw new ArgumentException("At least one preview edge is required.", nameof(maxEdges));
+        if (maxEdges.Any(edge => edge <= 0)) throw new ArgumentOutOfRangeException(nameof(maxEdges), "Preview edges must be positive.");
         using Decoded decoded = Process(path, fbdd, halfSize: false, demosaic);
         ProcessedImage img = decoded.Image;
         int w = img.Width, h = img.Height, ch = img.Channels;
 
+        int[] factors = maxEdges.Select(edge => Resample.BoxFactor(w, h, edge)).ToArray();
+        if (factors.Length > 1)
+        {
+            using var trace = Diagnostics.StartActivity("raw.preview-box-shared");
+            ImageBuffer[]? shared = RawPreviewResampler.TryBoxMany(img.AsSpan<ushort>, w, h, ch,
+                factors, decoded.SourceQuantisationStep);
+            if (shared is not null) return (shared, decoded.FrameWidth, decoded.FrameHeight);
+        }
         var outs = new ImageBuffer[maxEdges.Count];
         for (int e = 0; e < maxEdges.Count; e++)
             outs[e] = BoxFromRaw(
-                img, w, h, ch, Resample.BoxFactor(w, h, maxEdges[e]),
+                img, w, h, ch, factors[e],
                 decoded.SourceQuantisationStep);
         return (outs, decoded.FrameWidth, decoded.FrameHeight);
     }
@@ -900,6 +907,12 @@ public static class RawDecode
             // Re-acquired per row: a span cannot be hoisted into a lambda, and the view is a
             // pointer + length over LibRaw's unmanaged buffer, so this is free.
             ReadOnlySpan<ushort> s = img.AsSpan<ushort>();
+            if (factor == 1 && ch == 3)
+            {
+                SampleConversion.ToFloat(s.Slice(((y0 + oy) * strideWidth + x0) * 3, ow * 3),
+                    d.AsSpan(oy * ow * 3, ow * 3), Inv);
+                return;
+            }
             for (int ox = 0; ox < ow; ox++)
             {
                 float r = 0f, g = 0f, b = 0f;

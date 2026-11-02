@@ -507,6 +507,78 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Called with bounded groups by the contact-sheet loader. Every cell is registered in
+    // _decoding before work begins, so foreground preview requests join the same batch.
+    private Task<PreviewCache.Entry[]> PreviewTiffBatchAsync(
+        string path,
+        (double X, double Y, double W, double H)?[] rects,
+        ColorPipelineVersion pipelineVersion,
+        TiffInputAssumption inputAssumption)
+    {
+        SourceStamp stamp;
+        try { stamp = SourceStamp.Capture(path); }
+        catch (Exception ex) { return Task.FromException<PreviewCache.Entry[]>(ex); }
+        long generation = _previews.Generation;
+        var tasks = new Task<PreviewCache.Entry>[rects.Length];
+        var pending = new List<(string Key, (double X, double Y, double W, double H)? Rect,
+            TaskCompletionSource<PreviewCache.Entry> Completion)>();
+        lock (_decoding)
+        {
+            for (int i = 0; i < rects.Length; i++)
+            {
+                string key = PreviewKey(path, rects[i], pipelineVersion, inputAssumption, stamp);
+                if (_previews.Get(key) is { } hit)
+                {
+                    CaptureTile(key, hit.Working, generation, stamp);
+                    tasks[i] = Task.FromResult(hit);
+                }
+                else if (_decoding.TryGetValue(key, out var running) && running.Generation == generation)
+                    tasks[i] = running.Task;
+                else
+                {
+                    var completion = new TaskCompletionSource<PreviewCache.Entry>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    tasks[i] = completion.Task;
+                    pending.Add((key, rects[i], completion));
+                    _decoding[key] = (generation, completion.Task);
+                }
+            }
+            if (pending.Count > 0)
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        using var trace = RenderTrace.Scope("decode.preview.tiff-batch");
+                        var decoded = ImageIo.LoadWorkingTiffPreviewBatch(path, pending.Select(p => p.Rect).ToArray(),
+                            PreviewMaxEdge, pipelineVersion, ColorManagement, inputAssumption);
+                        stamp.RequireCurrent();
+                        for (int i = 0; i < pending.Count; i++)
+                        {
+                            var item = pending[i];
+                            var (working, width, height) = decoded[i];
+                            DecodedSources.Track(working, stamp);
+                            var entry = new PreviewCache.Entry(working, width, height) { Source = stamp };
+                            if (_previews.PutIfCurrent(item.Key, working, width, height, generation, stamp))
+                                CaptureTile(item.Key, working, generation, stamp);
+                            item.Completion.TrySetResult(entry);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        foreach (var item in pending) item.Completion.TrySetException(ex);
+                    }
+                    finally
+                    {
+                        lock (_decoding)
+                            foreach (var item in pending)
+                                if (_decoding.TryGetValue(item.Key, out var current)
+                                    && ReferenceEquals(current.Task, item.Completion.Task))
+                                    _decoding.Remove(item.Key);
+                    }
+                });
+        }
+        return Task.WhenAll(tasks);
+    }
+
     // ── Sheet tiles: one small LINEAR negative per source file, resident for the whole roll ─────
     //
     // The roll's cover contact sheet has to stay current as frames are edited, and re-deriving it

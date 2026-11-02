@@ -2,6 +2,18 @@
 
 ## 未发布 / Unreleased
 
+- RAW 多尺寸预览可共享 RGB16 样本转换，按小块并行累加，避免为每个预览尺寸重复转换整份输出。保留原始浮点累加顺序与量化信息；单通道、四通道、无 SIMD 或采样网格不适合共享时沿用独立缩小路径。
+- RAW previews at several sizes can share RGB16 sample conversion and accumulate in parallel cache-sized tiles. Float summation order and source quantization metadata are preserved; monochrome, four-channel, non-SIMD and incompatible-grid cases retain independent box reduction.
+
+- 降低 Deflate TIFF 连续导出的临时内存分配：并行工作槽复用原始条带与压缩输出缓冲区，16 位水平预测支持 SIMD；尾部条带仅处理有效数据，导出失败时归还租用缓冲区。
+- Reduced temporary allocations during repeated Deflate TIFF exports by reusing raw strip and compression output buffers per worker, with SIMD for the 16-bit horizontal predictor. Partial strips process only valid bytes, and rented buffers are returned on failure.
+
+- 印样生成支持同一 TIFF／FFF 的多个裁切共享流式解码与颜色转换；按批控制预览内存，并与单张预览复用缓存和进行中的解码。不同裁切与缩小倍率保持独立解码的像素结果。
+- Contact sheets now share streamed TIFF/FFF decoding and colour conversion across source crops, with bounded preview batches and shared cache/in-flight entries. Different crops and reduction factors retain the pixels of independent region decodes.
+
+- 优化 RAW 与扫描 TIFF／FFF 的样本转换，以及无压缩、LZW、Deflate TIFF 的 16 位导出量化；支持 SIMD 加速与无硬件加速时的回退。修复压缩 TIFF 区域读取从条带中间开始时可能失败的问题，并加强 FFF 内容识别的标签与目录完整性校验。
+- Optimized RAW and scanner TIFF/FFF sample conversion and 16-bit quantization for uncompressed, LZW and Deflate TIFF exports, with SIMD acceleration and a scalar fallback. Fixed compressed TIFF region reads starting inside a strip and tightened FFF tag and directory validation.
+
 - 未安装 Deep-WB 时，智能色偏修正按钮置灰并叠加半透明下载图标，显示模型大小；点击可查看许可并选择 GitHub 或 Gitee 下载，安装后恢复使用。GitHub 模型迁入独立模型仓库的固定 Release。
 - Uninstalled Deep-WB shows a greyed-out smart correction button with a translucent download icon and model size. Click to review the license and install from GitHub or Gitee. GitHub models are served from a fixed release in the dedicated model repository.
 
