@@ -4,6 +4,8 @@
 
 - 改进内置除尘修复：扩大纹理候选搜索，避开其他已标记灰尘，按蒙版外的干净边界匹配颜色与明暗渐变，平滑融合边缘。修复保留浮点源图的负值与超白值，最小笔刷遮罩与实际修改范围一致，局部放大与整图使用一致的纹理上下文。无需额外组件或模型。
 - Improved built-in dust repair with a wider clean-texture search, exclusion of other marked defects, clean-boundary color and shading matching, and smooth feathering. Preserves extended floating-point source values, aligns the smallest brush mask with its actual footprint, and retains matching context for regional and full-frame rendering. No additional components or models are required.
+- 来源致谢：内置除尘的部分改进参考了 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 的设计思路，由 OpenRevelare 独立实现。
+- Acknowledgement: some built-in dust repair improvements were inspired by the design of [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) and independently implemented by OpenRevelare.
 
 ## v1.8.6.4（2026-10-24）
 

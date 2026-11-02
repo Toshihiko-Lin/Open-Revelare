@@ -20,6 +20,12 @@ public readonly record struct DustSpot(
 /// Texture-preserving, non-destructive dust repair. Dust locations are deliberately user-selected:
 /// single-frame automatic detection cannot reliably distinguish film detail from dust.
 /// </summary>
+/// <remarks>
+/// Some repair improvements were inspired by the design of Film Dust Cleaner
+/// (https://gitee.com/filmdust/film-dust-cleaner, MIT; reviewed commit
+/// 130340ccd803238a1466554654e1f0b6e8430abd). Independently implemented in C# by
+/// OpenRevelare; this is an acknowledgement of design ideas, not a code port or runtime dependency.
+/// </remarks>
 public static class DustRemoval
 {
     /// <summary>
