@@ -8,11 +8,22 @@ public partial class MainViewModel
     private readonly HashSet<RollFrame> _scopeFrames = new();
     public string CurrentFrameIdentity => CurrentFrame?.Label ?? Loc.T("未选择底片");
     public string CurrentFramePosition => CurrentFrame is { } frame ? $"{Frames.IndexOf(frame) + 1:00} / {Frames.Count:00}" : "";
-    public string SelectionContext => Frames.Count(f => f.IsSelected) is > 0 and var n ? Loc.F($"勾选 {n} 帧") : "";
+    public int SelectedFrameCount => Frames.Count(f => f.IsSelected);
+    public bool HasFrameSelection => SelectedFrameCount > 0;
+    public string SelectionContext => HasFrameSelection ? Loc.F($"勾选 {SelectedFrameCount} 帧") : "";
+    public string FrameSelectionSummary => HasFrameSelection
+        ? Loc.F($"已选 {SelectedFrameCount} / {Frames.Count} 帧")
+        : Loc.F($"共 {Frames.Count} 帧");
     public bool HasOtherFrames => CurrentFrame is not null && Frames.Count > 1;
     public bool CanApplySceneToRoll => HasOtherFrames && HasSceneSyncGroups;
-    public string CalibrationApplyLabel => Loc.F($"同步标定到其余 {FrameScope.OtherFrames(Frames, CurrentFrame, false).Count} 帧");
-    public string SceneApplyLabel => Loc.F($"同步成片到其余 {FrameScope.OtherFrames(Frames, CurrentFrame, false).Count} 帧");
+    public int ContextTargetCount => FrameScope.OtherFrames(Frames, CurrentFrame, HasFrameSelection).Count;
+    public bool CanApplyContextTargets => ContextTargetCount > 0;
+    public string BroadcastSourceText => CurrentFrame is { } source ? Loc.F($"来源：{source.FileName}") : "";
+    public string BroadcastTargetText => HasFrameSelection
+        ? Loc.F($"目标：勾选 {ContextTargetCount} 帧")
+        : Loc.F($"目标：其余 {ContextTargetCount} 帧");
+    public string CalibrationApplyLabel => Loc.F($"应用底片校准到 {ContextTargetCount} 帧");
+    public string SceneApplyLabel => Loc.F($"应用成片调整到 {ContextTargetCount} 帧");
     public string CompositionTargetLabel => Frames.Any(f => f.IsSelected)
         ? Loc.F($"勾选 {FrameScope.OtherFrames(Frames, CurrentFrame, true).Count} 帧")
         : Loc.F($"其余 {FrameScope.OtherFrames(Frames, CurrentFrame, false).Count} 帧");
@@ -30,7 +41,11 @@ public partial class MainViewModel
 
     private void OnScopeFrameChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(RollFrame.IsSelected)) NotifyRollBroadcastHints();
+        if (e.PropertyName == nameof(RollFrame.IsSelected)
+            || e.PropertyName == nameof(RollFrame.Params)
+            || e.PropertyName == nameof(RollFrame.HasCalibration)
+            || e.PropertyName == nameof(RollFrame.HasSceneEdits))
+            NotifyRollBroadcastHints();
     }
 
     private void DisposeScopeSubscriptions()

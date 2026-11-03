@@ -40,6 +40,8 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(SaveNeedsAttention));
         OnPropertyChanged(nameof(SaveStatusText));
         OnPropertyChanged(nameof(SaveStatusDetail));
+        OnPropertyChanged(nameof(HasTaskCenterContent));
+        OnPropertyChanged(nameof(TaskCenterSummary));
     }
 
     public string ProjectDependencyWarning

@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SyncQuickPreferenceControls();
         SetUpDropImport();
         SizeChanged += (_, _) => UpdateWorkspaceLayout();
         PreviewWorkspace.SizeChanged += (_, _) =>
@@ -139,8 +140,8 @@ public partial class MainWindow : Window
                 SetUpNativeMenu();
             }
         };
-        // Onboarding first, then the delayed update check — the notice must not open on top of
-        // the first-run help, which is itself modal.
+        // Onboarding is an inline, dismissible task cue; it never blocks the workspace or an
+        // update notice behind a modal document window.
         Opened += async (_, _) =>
         {
             await MaybeShowOnboarding();
@@ -205,12 +206,7 @@ public partial class MainWindow : Window
         InitializeWindowsPresentation();
     }
 
-    /// <summary>
-    /// First-ever launch: show the onboarding once (persisted by a marker file).
-    ///
-    /// Opens 操作指引 rather than the shortcut list — the walkthrough a first-timer needs lives in
-    /// GUIDE.md, and the shortcuts dialog assumes you already know what the sampling buttons are.
-    /// </summary>
+    /// <summary>First-ever launch: reveal the inline checklist until the user starts or dismisses it.</summary>
     private async Task MaybeShowOnboarding()
     {
         try
@@ -218,12 +214,34 @@ public partial class MainWindow : Window
             string dir = Services.Settings.DataDir;
             string marker = System.IO.Path.Combine(dir, "onboarded");
             if (System.IO.File.Exists(marker)) return;
-            System.IO.Directory.CreateDirectory(dir);
-            await System.IO.File.WriteAllTextAsync(marker, "1");
-            await new DocDialog().ShowDialog(this);
+            FirstUseGuide.IsVisible = true;
+            await Task.CompletedTask;
         }
         catch { /* onboarding is best-effort */ }
     }
+
+    private void CompleteOnboarding()
+    {
+        FirstUseGuide.IsVisible = false;
+        try
+        {
+            string dir = Services.Settings.DataDir;
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "onboarded"), "1");
+        }
+        catch { /* onboarding is best-effort */ }
+    }
+
+    private async void OnFirstUseGuideClick(object? sender, RoutedEventArgs e) =>
+        await new DocDialog().ShowDialog(this);
+
+    private void OnFirstUseStartClick(object? sender, RoutedEventArgs e)
+    {
+        CompleteOnboarding();
+        OnOpenClick(sender, e);
+    }
+
+    private void OnFirstUseDismissClick(object? sender, RoutedEventArgs e) => CompleteOnboarding();
 
     private MainViewModel? Vm => DataContext as MainViewModel;
 
@@ -1488,6 +1506,8 @@ public partial class MainWindow : Window
     private async void OnAutoWbAiClick(object? sender, RoutedEventArgs e) { if (Vm != null) await Vm.AutoWbAiAsync(); }
     private void OnApplyCalToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToRoll();
     private void OnApplySceneToRollClick(object? sender, RoutedEventArgs e) => Vm?.ApplySceneToRoll();
+    private void OnApplyCalToTargetsClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCalibrationToTargets();
+    private void OnApplySceneToTargetsClick(object? sender, RoutedEventArgs e) => Vm?.ApplySceneToTargets();
     private void OnApplySprocketClick(object? sender, RoutedEventArgs e) => Vm?.ApplySprocketToFrames();
     private void OnSelectAllFramesClick(object? sender, RoutedEventArgs e) => Vm?.SelectAllFrames();
     private void OnClearFrameSelectionClick(object? sender, RoutedEventArgs e) => Vm?.ClearFrameSelection();
@@ -1505,6 +1525,7 @@ public partial class MainWindow : Window
     /// <summary>Seed the optional mask threshold and start the requested import calibration.</summary>
     private async void OnRollImported()
     {
+        CompleteOnboarding();
         if (Vm is { } vm) await vm.PrepareImportedRollAsync();
     }
 
@@ -1540,6 +1561,29 @@ public partial class MainWindow : Window
         s.Theme = s.Theme == "light" ? "dark" : "light";
         Services.Settings.Save();
         App.ApplyTheme(s.Theme);
+        SyncQuickPreferenceControls();
+    }
+
+    private void OnQuickLanguageClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string language }) return;
+        Services.Settings.Current.Language = language;
+        Services.Settings.Save();
+        Services.Loc.Apply(language);
+        SyncQuickPreferenceControls();
+    }
+
+    private void SyncQuickPreferenceControls()
+    {
+        string language = Services.Settings.Current.Language;
+        QuickLanguageAuto.IsChecked = language == "auto";
+        QuickLanguageZh.IsChecked = language == "zh";
+        QuickLanguageEn.IsChecked = language == "en";
+        bool light = Services.Settings.Current.Theme == "light";
+        // The glyph describes the action: moon while light means "switch to dark", and sun while
+        // dark means "switch to light". This avoids a state icon that reads backwards as a button.
+        QuickThemeMoonIcon.IsVisible = light;
+        QuickThemeSunIcon.IsVisible = !light;
     }
 
     // ── Photo backdrop (预览区右键 / 视图 → 背景色) ──────────────────────────────
@@ -2873,6 +2917,7 @@ public partial class MainWindow : Window
     private async void OnPreferencesClick(object? sender, RoutedEventArgs e)
     {
         await new PreferencesDialog().ShowDialog(this);
+        SyncQuickPreferenceControls();
         Vm?.RefreshViewingPreferences();
     }
 
@@ -2899,17 +2944,12 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnOpenLutFolderClick(object? sender, RoutedEventArgs e)
     {
+        e.Handled = true;
         string dir = Services.Settings.LutDir;
         try
         {
             System.IO.Directory.CreateDirectory(dir);
-
-            if (OperatingSystem.IsWindows())
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{dir}\""));
-            else if (OperatingSystem.IsMacOS())
-                Process.Start(new ProcessStartInfo("open") { ArgumentList = { dir } });
-            else
-                Process.Start(new ProcessStartInfo("xdg-open") { ArgumentList = { dir } });
+            Process.Start(ShellFolderLauncher.Create(dir));
 
             if (Vm is { } vm)
                 vm.StatusText = Loc.F($"把 .cube 复制进 {dir}，重启后出现在【胶片风格】里。");

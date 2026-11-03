@@ -33,6 +33,34 @@
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
+    <Style Selector="Window.dialog TextBlock.preferenceCategoryTitle">
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Window.dialog ListBox.preferencesNav">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0,2,12,0" />
+    </Style>
+    <Style Selector="Window.dialog ListBox.preferencesNav ListBoxItem">
+        <Setter Property="MinHeight" Value="40" />
+        <Setter Property="Padding" Value="12,9" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="Window.dialog ListBox.preferencesNav ListBoxItem:selected">
+        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Window.dialog Border.preferenceCard">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
     <Style Selector="Window.dialog Button.destructive">
         <Setter Property="Foreground" Value="{DynamicResource WarnBrush}" />
     </Style>

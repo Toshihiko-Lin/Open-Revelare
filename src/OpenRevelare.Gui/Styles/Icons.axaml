@@ -26,6 +26,10 @@
     <StreamGeometry x:Key="IcoFit">M6 2.5H3.5A1 1 0 0 0 2.5 3.5V6M10 2.5H12.5A1 1 0 0 1 13.5 3.5V6M6 13.5H3.5A1 1 0 0 1 2.5 12.5V10M10 13.5H12.5A1 1 0 0 0 13.5 12.5V10</StreamGeometry>
     <StreamGeometry x:Key="IcoActual">M2.5 2.5H13.5V13.5H2.5ZM6 6H10V10H6Z</StreamGeometry>
     <StreamGeometry x:Key="IcoGrid">M2.5 2.5H7V7H2.5ZM9 2.5H13.5V7H9ZM2.5 9H7V13.5H2.5ZM9 9H13.5V13.5H9Z</StreamGeometry>
+    <StreamGeometry x:Key="IcoSun">M8 5A3 3 0 1 0 8 11A3 3 0 1 0 8 5M8 1.5V3M8 13V14.5M1.5 8H3M13 8H14.5M3.4 3.4L4.5 4.5M11.5 11.5L12.6 12.6M12.6 3.4L11.5 4.5M4.5 11.5L3.4 12.6</StreamGeometry>
+    <StreamGeometry x:Key="IcoMoon">M12.8 10.7A5.5 5.5 0 0 1 5.3 3.2A5.5 5.5 0 1 0 12.8 10.7Z</StreamGeometry>
+    <!-- Compact A / 文 translation mark: language, not region or internet access. -->
+    <StreamGeometry x:Key="IcoTranslate">M1.5 13L4.5 3L7.5 13M2.5 9.5H6.5M9 4.5H14M11.5 2.5V4.5M9.5 7C10.5 9.5 12 11.5 14 13M14 7C13 9.5 11.5 11.5 9 13</StreamGeometry>
 
     <!-- ── Tools ───────────────────────────────────────────────────────────── -->
     <!-- marquee = every 框选 sampling toggle -->

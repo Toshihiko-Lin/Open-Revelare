@@ -743,11 +743,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DisplayStatus))]
+    [NotifyPropertyChangedFor(nameof(DisplayStatus), nameof(TaskCenterForegroundText), nameof(TaskCenterSummary))]
     private string _statusText = Loc.T("打开一张负片（RAW 或 TIFF）开始。");
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
-    [ObservableProperty] private string _backgroundStatus = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTaskCenterContent), nameof(TaskCenterBackgroundText), nameof(TaskCenterSummary))]
+    private string _backgroundStatus = "";
     /// <summary>
     /// True while the roll-wide auto-inversion is still pooling frames — i.e. while what is on
     /// screen comes from stage 1's SINGLE-frame measurement broadcast to the whole roll.
@@ -775,7 +777,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public bool ShowRollAnalysisNotice => RollAnalysisPending && !RollAnalysisNoticeDismissed;
 
     partial void OnRollAnalysisPendingChanged(bool value)
-        => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+    {
+        OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+        NotifyRollBroadcastHints();
+    }
 
     partial void OnRollAnalysisNoticeDismissedChanged(bool value)
         => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
@@ -784,7 +789,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void DismissRollAnalysisNotice() => RollAnalysisNoticeDismissed = true;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowProgress))]
+    [NotifyPropertyChangedFor(nameof(ShowProgress), nameof(HasTaskCenterContent), nameof(TaskCenterForegroundText), nameof(TaskCenterSummary))]
     private bool _isBusy;
     [ObservableProperty] private bool _hasImage;
     [ObservableProperty] private string _fileName = "";

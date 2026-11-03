@@ -160,6 +160,56 @@
         <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     </Style>
+    <Style Selector="Border.selectionActions">
+        <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    </Style>
+    <Style Selector="Border.selectionActions TextBlock.selectionSummary">
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+    <Style Selector="Border.selectionActions Button.selectionClear">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="7" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+    </Style>
+    <Style Selector="Border.selectionActions Button.selectionAction">
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.selectionActions Button.selectionAction.secondary">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="Border.frameMarkers">
+        <Setter Property="Background" Value="#B817181A" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="4,3" />
+    </Style>
+    <Style Selector="Button.renderSummary">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
+        <Setter Property="Padding" Value="10,4" />
+    </Style>
+    <Style Selector="Button.renderSummary:pointerover">
+        <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+    </Style>
+    <Style Selector="Border.taskRow">
+        <Setter Property="Background" Value="{DynamicResource Panel2Brush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+        <Setter Property="Padding" Value="10,8" />
+    </Style>
     <Style Selector="Border.calibrationStage Expander">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderBrush" Value="Transparent" />

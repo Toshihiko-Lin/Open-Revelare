@@ -2,38 +2,45 @@
 
 ## 未发布 / Unreleased
 
-- 精简日常界面：技术报告与显示链路信息统一到「帮助 → 诊断」，片基／高光证据及校正来源不再常驻展示；高级解码选项默认折叠，必要的显示异常提示仍保留。
-- Simplified the daily interface: frame reports and display details are grouped under Help → Diagnostics, with calibration evidence and provenance available on demand. Advanced decoding options are collapsed by default; actionable display warnings remain visible.
+**新增与改进**
 
-- 新增受内存预算和文件版本约束的 RAW 源字节缓存，合并并发读取；TIFF／FFF 多裁切共享读取扩展到导入预热与整卷分析。
-- Added a bounded, revision-aware RAW source-byte cache with shared concurrent reads, and extended TIFF/FFF crop batching to import warmup and roll analysis.
-- 新增可选的相机矩阵 RAW 底片显示，整图与局部放大保持一致；反相与采样保留原生通道。RAW 线性通道声明、电平诊断和源量化精度信息更明确。
-- Added optional camera-matrix RAW negative viewing with matching full/region rendering, while keeping inversion and measurements native. RAW channel semantics, level diagnostics and source precision are explicit.
-- 新增仅凭原片即可运行的 `audit-input` 命令，输出分阶段耗时、文件色彩依据、重复解码和预览／全质量一致性；原生构建提供 IPO／OpenMP 对照开关，默认保持关闭。
-- Added original-file-only `audit-input` reports for phase timings, colour evidence, repeatability and preview/full-quality consistency, plus opt-in IPO/OpenMP build controls that remain off by default.
-
-- RAW 多尺寸预览可共享 RGB16 样本转换，按小块并行累加，避免为每个预览尺寸重复转换整份输出。保留原始浮点累加顺序与量化信息；单通道、四通道、无 SIMD 或采样网格不适合共享时沿用独立缩小路径。
-- RAW previews at several sizes can share RGB16 sample conversion and accumulate in parallel cache-sized tiles. Float summation order and source quantization metadata are preserved; monochrome, four-channel, non-SIMD and incompatible-grid cases retain independent box reduction.
-
-- 降低 Deflate TIFF 连续导出的临时内存分配：并行工作槽复用原始条带与压缩输出缓冲区，16 位水平预测支持 SIMD；尾部条带仅处理有效数据，导出失败时归还租用缓冲区。
-- Reduced temporary allocations during repeated Deflate TIFF exports by reusing raw strip and compression output buffers per worker, with SIMD for the 16-bit horizontal predictor. Partial strips process only valid bytes, and rented buffers are returned on failure.
-
-- 印样生成支持同一 TIFF／FFF 的多个裁切共享流式解码与颜色转换；按批控制预览内存，并与单张预览复用缓存和进行中的解码。不同裁切与缩小倍率保持独立解码的像素结果。
-- Contact sheets now share streamed TIFF/FFF decoding and colour conversion across source crops, with bounded preview batches and shared cache/in-flight entries. Different crops and reduction factors retain the pixels of independent region decodes.
-
-- 优化 RAW 与扫描 TIFF／FFF 的样本转换，以及无压缩、LZW、Deflate TIFF 的 16 位导出量化；支持 SIMD 加速与无硬件加速时的回退。修复压缩 TIFF 区域读取从条带中间开始时可能失败的问题，并加强 FFF 内容识别的标签与目录完整性校验。
-- Optimized RAW and scanner TIFF/FFF sample conversion and 16-bit quantization for uncompressed, LZW and Deflate TIFF exports, with SIMD acceleration and a scalar fallback. Fixed compressed TIFF region reads starting inside a strip and tightened FFF tag and directory validation.
-
-- 未安装 Deep-WB 时，智能色偏修正按钮置灰并叠加半透明下载图标，显示模型大小；点击可查看许可并选择 GitHub 或 Gitee 下载，安装后恢复使用。GitHub 模型迁入独立模型仓库的固定 Release。
-- Uninstalled Deep-WB shows a greyed-out smart correction button with a translucent download icon and model size. Click to review the license and install from GitHub or Gitee. GitHub models are served from a fixed release in the dedicated model repository.
-
-- Deep-WB 模型改为可选下载安装：默认安装包不含权重，首次使用智能色偏修正时确认许可后下载，GitHub 失败时自动尝试 Gitee 国内镜像。支持取消、完整性校验与离线安装，模型保存到用户数据目录并在升级后保留；ONNX 推理运行库仍随包提供。
-- Deep-WB weights are now an optional download rather than bundled in default packages. First use offers license acceptance and installation, with automatic Gitee fallback if GitHub fails, cancellation, integrity checks and offline installation. Models persist in the user data directory across upgrades; the ONNX runtime remains bundled.
-
-- 改进内置除尘修复：扩大纹理候选搜索，避开其他已标记灰尘，按蒙版外的干净边界匹配颜色与明暗渐变，平滑融合边缘。修复保留浮点源图的负值与超白值，最小笔刷遮罩与实际修改范围一致，局部放大与整图使用一致的纹理上下文。无需额外组件或模型。
-- Improved built-in dust repair with a wider clean-texture search, exclusion of other marked defects, clean-boundary color and shading matching, and smooth feathering. Preserves extended floating-point source values, aligns the smallest brush mask with its actual footprint, and retains matching context for regional and full-frame rendering. No additional components or models are required.
+- 工作台更清楚易用：支持拖入 RAW／TIFF 文件或文件夹，检查器明确显示当前帧、勾选数量和同步范围；标签、图表及对话框也改进了键盘操作和浅深主题显示。
+- 重整修片流程：多选帧使用更大的批量操作面板，同步操作明确区分来源与目标；缩略图以颜色和形状标记未校准、已校准、已调整、原片缺失及虚拟副本状态。
+- 整卷渲染设置与单帧导出分开，状态栏新增任务中心，可查看前台任务、后台队列与最近批量结果；首次使用指引改为不阻塞工作的内嵌提示。
+- 偏好设置按「通用／图像与性能／存储」分类，并将资源文件夹归入设置菜单；顶栏新增太阳／月亮主题切换及翻译图标语言切换。
+- 日常界面更简洁：技术报告与显示链路信息统一到「帮助 → 诊断」，高级解码选项默认折叠，必要的显示异常提示仍会直接显示。
+- RAW／TIFF 浏览、印样和导出更快，连续处理大图时减少重复读取、转换和临时内存占用。
+- 偏好设置的高级解码选项新增可选的相机色彩 RAW 底片显示；只改变未反相画面的观看效果，不影响采样、反相或导出。
+- **Deep-WB 改为按需安装。** 默认安装包不含模型权重；需要「智能色偏修正」时，可点击下载图标并确认 CC BY-NC-SA 4.0 非商业许可后安装。支持 GitHub／Gitee 下载、进度显示、取消、重试、完整性校验和离线安装，升级后无需重复下载；其他功能不受影响。
+- 改进内置除尘修复：更准确地匹配附近干净纹理与明暗变化，减少修复边缘和局部放大时的不自然痕迹，无需额外组件或模型。
 - 来源致谢：内置除尘的部分改进参考了 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 的设计思路，由 OpenRevelare 独立实现。
+
+**修复**
+
+- 修复部分压缩 TIFF 从图像中间读取区域时可能失败的问题，并加强 FFF 文件识别，减少损坏或无效文件被误判。
+- 修复「打开 LUT 文件夹」可能同时触发底片导入窗口的问题。
+- 修复从图库编辑卷信息可能清空印样中的 ISO／EI 与冲洗信息、取消或关闭偏好设置未完全撤销预览，以及关闭裁切说明后操作按钮一并消失的问题。
+
+---
+
+**Added and improved**
+
+- A clearer, easier desktop workbench: drop RAW/TIFF files or folders into the window, see the current frame, checked count and sync scope at a glance, and use improved keyboard and light/dark theme support across tabs, plots and dialogs.
+- A reworked develop workflow with a larger multi-frame action panel and explicit sync sources and targets. Film-strip thumbnails use colour and shape to show uncalibrated, calibrated, adjusted, missing-source and virtual-copy states.
+- Roll rendering settings are separated from single-frame export, while a new task centre reports foreground work, background queues and recent batch results. First-use guidance is now an inline, non-blocking prompt.
+- Preferences are organised into General, Imaging & performance, and Storage, with resource folders under Settings. The top bar adds direct sun/moon theme switching and a translation-icon language picker.
+- A simpler daily interface: frame reports and display details are grouped under Help → Diagnostics, advanced decoding options are collapsed by default, and actionable display warnings remain visible.
+- Faster RAW/TIFF browsing, contact sheets and exports, with less repeated reading, conversion and temporary memory use when processing large images in succession.
+- Added optional camera-colour RAW negative viewing under advanced decoding preferences. It changes only the un-inverted view, not sampling, inversion or exports.
+- **Deep-WB is now installed on demand.** Default packages exclude model weights. To use Smart cast correction, click the download icon and accept the separate CC BY-NC-SA 4.0 non-commercial license. GitHub/Gitee downloads support progress, cancellation, retry and integrity checks, with offline installation available; the model persists across upgrades and other features do not require it.
+- Improved built-in dust repair by matching nearby clean texture and shading more accurately, reducing unnatural edges and regional-preview differences without requiring another component or model.
 - Acknowledgement: some built-in dust repair improvements were inspired by the design of [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) and independently implemented by OpenRevelare.
+
+**Fixed**
+
+- Fixed some compressed TIFF region reads failing when they start partway through an image, and tightened FFF recognition to reject damaged or invalid files more reliably.
+- Fixed Open LUT Folder also opening the negative-import window in some cases.
+- Fixed catalog roll edits clearing contact-sheet ISO/EI and processing details, preference cancellation not fully reverting previews, and crop actions disappearing with the help text.
 
 ## v1.8.6.4（2026-10-24）
 

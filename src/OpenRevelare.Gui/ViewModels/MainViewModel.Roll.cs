@@ -106,6 +106,7 @@ public partial class MainViewModel
             OnPropertyChanged(nameof(OutputSpaceIndex));
             OnPropertyChanged(nameof(OutputSpaceHint));
             OnPropertyChanged(nameof(CurrentOutputSpace));
+            OnPropertyChanged(nameof(RenderSettingsSummary));
 
             // Roll-uniform: a strip whose frames sat in different output spaces would be a contact
             // sheet of incomparable renders.
@@ -269,6 +270,7 @@ public partial class MainViewModel
             OnPropertyChanged(nameof(HdrEnabled));
             OnPropertyChanged(nameof(CanChooseOutputSpace));
             OnPropertyChanged(nameof(PrintLutTargetNote));
+            OnPropertyChanged(nameof(RenderSettingsSummary));
             // Said at the moment it starts mattering, not left for the greyed controls to imply:
             // the extended render keeps neither the roll's output space (D-024) nor an SDR print
             // stock (D-021), so a roll that had either set changes more than its highlights. A
@@ -305,6 +307,7 @@ public partial class MainViewModel
             if (Math.Abs(_hdrLimitStops - v) < 1e-9) return;
             _hdrLimitStops = v;
             OnPropertyChanged(nameof(HdrLimitStops));
+            OnPropertyChanged(nameof(RenderSettingsSummary));
             if (_hdrEnabled) ApplyHdrToRoll(rebuildThumbnails: false);
             else NotifyHdrText();
         }
@@ -341,6 +344,7 @@ public partial class MainViewModel
 
     private void NotifyHdrText()
     {
+        OnPropertyChanged(nameof(RenderSettingsSummary));
         OnPropertyChanged(nameof(HdrLimitText));
         OnPropertyChanged(nameof(HdrLimitHint));
         OnPropertyChanged(nameof(HdrToggleTooltip));
@@ -621,6 +625,19 @@ public partial class MainViewModel
         }
     }
 
+    public string RenderSettingsSummary
+    {
+        get
+        {
+            string space = HdrEnabled ? Loc.T("不裁色域") : CurrentOutputSpace.Name;
+            string range = HdrEnabled ? Loc.F($"HDR +{HdrLimitStops:0.0}") : "SDR";
+            string look = PrintLutNames.Count > 0 && PrintLutIndex >= 0 && PrintLutIndex < PrintLutNames.Count
+                ? PrintLutNames[PrintLutIndex]
+                : Loc.T("标准显示渲染");
+            return Loc.F($"整卷渲染：{space} · {range} · {look}");
+        }
+    }
+
     /// <summary>What the selected entry is, shown under the picker.</summary>
     ///
     /// Entry 0 is NOT "no transform" — it is a display RENDERING, doing analytically the job a
@@ -830,6 +847,7 @@ public partial class MainViewModel
 
         OnPropertyChanged(nameof(PrintLutIndex));
         OnPropertyChanged(nameof(PrintLutHint));
+        OnPropertyChanged(nameof(RenderSettingsSummary));
         NotifyPrintLutContract();
 
         // Thumbnails change too — this alters what each frame IS, not how it is shown.
@@ -1679,6 +1697,9 @@ public partial class MainViewModel
         {
             _lastBatchExportJob = value;
             OnPropertyChanged(nameof(CanShowBatchExportReport));
+            OnPropertyChanged(nameof(HasTaskCenterContent));
+            OnPropertyChanged(nameof(TaskCenterResultText));
+            OnPropertyChanged(nameof(TaskCenterSummary));
         }
     }
     public bool CanShowBatchExportReport => LastBatchExportJob is not null && !HasLongTask;

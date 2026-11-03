@@ -23,7 +23,9 @@ public partial class MainViewModel
 
     /// <summary>Context for roll-wide actions, shown before the user applies either one.</summary>
     private string RollBroadcastHint => CurrentFrame is { } source
-        ? Loc.F($"来自 {source.FileName} → 其余 {Math.Max(0, Frames.Count - 1)} 帧 · 可撤销")
+        ? HasFrameSelection
+            ? Loc.F($"来自 {source.FileName} → 勾选 {ContextTargetCount} 帧 · 可撤销")
+            : Loc.F($"来自 {source.FileName} → 其余 {ContextTargetCount} 帧 · 可撤销")
         : "";
     public string CalibrationBroadcastHint => RollBroadcastHint.Length == 0 ? "" :
         RollBroadcastHint + "\n" + Loc.T("同步：") + string.Join("、", new[]
@@ -47,7 +49,9 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(CalibrationBroadcastHint));
         OnPropertyChanged(nameof(SceneBroadcastHint));
         foreach (string property in new[] { nameof(CurrentFrameIdentity), nameof(CurrentFramePosition),
-            nameof(SelectionContext), nameof(HasOtherFrames), nameof(CanApplySceneToRoll),
+            nameof(SelectedFrameCount), nameof(HasFrameSelection), nameof(SelectionContext), nameof(FrameSelectionSummary),
+            nameof(HasOtherFrames), nameof(CanApplySceneToRoll), nameof(ContextTargetCount),
+            nameof(CanApplyContextTargets), nameof(BroadcastSourceText), nameof(BroadcastTargetText),
             nameof(CalibrationApplyLabel), nameof(SceneApplyLabel), nameof(CompositionTargetLabel),
             nameof(CropSyncLabel), nameof(GeometrySyncLabel), nameof(SprocketSyncLabel) }) OnPropertyChanged(property);
     }
@@ -64,6 +68,14 @@ public partial class MainViewModel
 
     /// <summary>Copy Stage-2 scene adjustments (per SyncOptions) from the current frame to every other frame.</summary>
     public void ApplySceneToRoll() => Broadcast(cal: false, scene: true, onlySelected: false, Loc.T("场景"));
+
+    /// <summary>The visible inspector footer follows the explicit checked-frame context; the
+    /// File/Edit menu's “整卷” commands above remain truly roll-wide.</summary>
+    public void ApplyCalibrationToTargets() =>
+        Broadcast(cal: true, scene: false, onlySelected: HasFrameSelection, Loc.T("标定"));
+
+    public void ApplySceneToTargets() =>
+        Broadcast(cal: false, scene: true, onlySelected: HasFrameSelection, Loc.T("场景"));
 
     /// <summary>Explicit mask broadcast; never part of Cineon or Display copy/paste.</summary>
     public void ApplySprocketToFrames()

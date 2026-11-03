@@ -30,10 +30,50 @@ public sealed partial class RollFrame : ObservableObject
     /// <summary>Re-resolve <see cref="Label"/> after a language switch — the 副本 marker is the
     /// only translated part of it, and it sits in the film strip for as long as the roll is open.
     /// Driven from MainViewModel, which is what owns the frames.</summary>
-    public void RefreshText() => OnPropertyChanged(nameof(Label));
+    public void RefreshText()
+    {
+        OnPropertyChanged(nameof(Label));
+    }
 
     /// <summary>Per-frame parameters — the single source of truth for this frame's edit.</summary>
-    public FrameParams Params { get; set; } = new();
+    private FrameParams _params = new();
+    public FrameParams Params
+    {
+        get => _params;
+        set
+        {
+            if (ReferenceEquals(_params, value)) return;
+            _params = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasCalibration));
+            OnPropertyChanged(nameof(HasSceneEdits));
+            OnPropertyChanged(nameof(IsUntouched));
+            OnPropertyChanged(nameof(IsCalibrationOnly));
+            OnPropertyChanged(nameof(IsFinished));
+        }
+    }
+
+    /// <summary>Compact film-strip state derived from the stored edit snapshot.</summary>
+    public bool HasCalibration =>
+        Params.DMinPerChannel.Any(v => Math.Abs(v) > 1e-6)
+        || Params.DMaxPerChannel.Any(v => Math.Abs(v - 2.0) > 1e-6);
+
+    public bool HasSceneEdits =>
+        Params.WbGains.Any(v => Math.Abs(v - 1.0) > 1e-6)
+        || Math.Abs(Params.ExposureEv) > 1e-6
+        || Math.Abs(Params.BlackPoint) > 1e-6
+        || Math.Abs(Params.WhitePoint - 1.0) > 1e-6
+        || Math.Abs(Params.Contrast) > 1e-6
+        || Math.Abs(Params.Highlights) > 1e-6
+        || Math.Abs(Params.Shadows) > 1e-6
+        || Math.Abs(Params.Saturation) > 1e-6
+        || Params.CurvePointsM.Count + Params.CurvePointsR.Count
+           + Params.CurvePointsG.Count + Params.CurvePointsB.Count > 0;
+
+    public bool IsSourceMissing => !File.Exists(Path);
+    public bool IsUntouched => !IsSourceMissing && !HasCalibration && !HasSceneEdits;
+    public bool IsCalibrationOnly => !IsSourceMissing && HasCalibration && !HasSceneEdits;
+    public bool IsFinished => !IsSourceMissing && HasSceneEdits;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPending))]

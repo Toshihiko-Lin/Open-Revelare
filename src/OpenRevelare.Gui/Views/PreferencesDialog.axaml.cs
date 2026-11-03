@@ -30,6 +30,7 @@ public sealed class PreferencesDialog : Window
     private ComboBox _language = new();
     private ComboBox _concurrency = new();
     private ComboBox _gpu = new();
+    private ListBox _category = new();
     private TextBlock _dngNote = new();
     private TextBlock _concurrencyNote = new();
     private CheckBox _autoInvert = new();
@@ -49,12 +50,14 @@ public sealed class PreferencesDialog : Window
     /// <summary>Everything the user can have changed but not yet saved.</summary>
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
-                                string SheetDir, int SheetBudget, bool AutoInvert, int Gpu, bool CameraColor);
+                                string SheetDir, int SheetBudget, bool AutoInvert, int Gpu, bool CameraColor,
+                                int Category);
 
     public PreferencesDialog()
     {
-        Width = 600; MinWidth = 480; MinHeight = 360;
-        Height = 720;
+        Classes.Add("dialog");
+        Width = 760; MinWidth = 640; MinHeight = 480;
+        Height = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         // Title-bar close, Escape and Cancel all discard the same preview (D08).
         Closed += (_, _) => { if (!_accepted) { App.ApplyTheme(); Loc.Apply(); } };
@@ -76,7 +79,8 @@ public sealed class PreferencesDialog : Window
             SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1),
             AutoInvert: s.AutoInvertOnImport,
             Gpu: s.GpuMode == GpuAccelerationMode.Off ? 1 : 0,
-            CameraColor: s.CharacterizeRawNegativeView));
+            CameraColor: s.CharacterizeRawNegativeView,
+            Category: 0));
     }
 
     private State Snapshot() => new(
@@ -93,7 +97,8 @@ public sealed class PreferencesDialog : Window
         SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex),
         AutoInvert: _autoInvert.IsChecked ?? true,
         Gpu: Math.Max(0, _gpu.SelectedIndex),
-        CameraColor: _cameraColor.IsChecked ?? false);
+        CameraColor: _cameraColor.IsChecked ?? false,
+        Category: Math.Max(0, _category.SelectedIndex));
 
     private void Build(State v)
     {
@@ -143,21 +148,6 @@ public sealed class PreferencesDialog : Window
         UpdateCacheNote();
         UpdateSheetNote();
 
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), Classes = { "dialogTitle" } });
-        var decodeOptions = new StackPanel { Spacing = 8 };
-        decodeOptions.Children.Add(Row(Loc.T("RAW 解码后端"), _backend));
-        decodeOptions.Children.Add(_dngNote);
-        decodeOptions.Children.Add(Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd));
-        decodeOptions.Children.Add(_cameraColor);
-        decodeOptions.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
-        decodeOptions.Children.Add(Details(Loc.T("解码资源详情"), _concurrencyNote));
-        panel.Children.Add(Details(Loc.T("高级解码选项"), decodeOptions));
-        panel.Children.Add(Row(Loc.T("GPU 加速"), _gpu));
-        panel.Children.Add(new TextBlock {
-            Text = Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。"),
-            TextWrapping = TextWrapping.Wrap, Opacity = 0.7 });
-
         var browse = new Button { Content = Loc.T("浏览…"), Margin = new Thickness(6, 0, 0, 0) };
         browse.Click += async (_, _) =>
         {
@@ -169,18 +159,7 @@ public sealed class PreferencesDialog : Window
         clear.Click += (_, _) => { _cacheDir.Text = ""; UpdateCacheNote(); };
         var dirRow = DirectoryRow(_cacheDir, browse, clear);
 
-        panel.Children.Add(new TextBlock { Text = Loc.T("导入"), FontWeight = FontWeight.SemiBold,
-                                           Margin = new Thickness(0, 14, 0, 2) });
-        panel.Children.Add(_autoInvert);
         _autoInvert.SetValue(ToolTip.TipProperty, Loc.T("设置下次导入的默认选项；每次仍可在导入窗口修改。"));
-
-        panel.Children.Add(new TextBlock { Text = Loc.T("磁盘缓存"), FontWeight = FontWeight.SemiBold,
-                                           Margin = new Thickness(0, 14, 0, 2) });
-        panel.Children.Add(_cacheOn);
-        panel.Children.Add(_cachePersist);
-        panel.Children.Add(dirRow);
-        panel.Children.Add(Row(Loc.T("缓存上限"), _cacheBudget));
-        panel.Children.Add(Details(Loc.T("缓存位置与占用"), _cacheNote));
 
         var sheetBrowse = new Button { Content = Loc.T("浏览…"), Margin = new Thickness(6, 0, 0, 0) };
         sheetBrowse.Click += async (_, _) =>
@@ -193,16 +172,66 @@ public sealed class PreferencesDialog : Window
         sheetClear.Click += (_, _) => { _sheetDir.Text = ""; UpdateSheetNote(); };
         var sheetRow = DirectoryRow(_sheetDir, sheetBrowse, sheetClear);
 
-        panel.Children.Add(new TextBlock { Text = Loc.T("卷目录缩略图（印样）"), FontWeight = FontWeight.SemiBold,
-                                           Margin = new Thickness(0, 14, 0, 2) });
-        panel.Children.Add(sheetRow);
-        panel.Children.Add(Row(Loc.T("存放上限"), _sheetBudget));
-        panel.Children.Add(Details(Loc.T("印样缓存详情"), _sheetNote));
+        // Preferences are grouped by the question the user is trying to answer, rather than by
+        // implementation type. This keeps the common appearance/import choices away from RAW
+        // internals and puts every directory/budget in one predictable place.
+        Control general = CategoryPage(
+            Loc.T("通用"),
+            Loc.T("界面外观、语言和每次导入时采用的默认行为。"),
+            PreferenceCard(Loc.T("外观与语言"),
+                Row(Loc.T("界面主题"), _theme),
+                // Deliberately bilingual and NOT translated: this is the row you have to find
+                // when the UI is in a language you cannot read.
+                Row("界面语言 / Language", _language)),
+            PreferenceCard(Loc.T("导入默认值"),
+                _autoInvert,
+                Description(Loc.T("只设置下一次导入的默认状态；导入窗口仍可逐次修改。"))));
 
-        panel.Children.Add(Row(Loc.T("界面主题"), _theme));
-        // Deliberately bilingual and NOT translated: this is the row you have to find when the
-        // UI is in a language you cannot read.
-        panel.Children.Add(Row("界面语言 / Language", _language));
+        Control imaging = CategoryPage(
+            Loc.T("图像与性能"),
+            Loc.T("控制 RAW 解码质量、并发数量以及可用的硬件加速。"),
+            PreferenceCard(Loc.T("RAW 解码"),
+                Row(Loc.T("RAW 解码后端"), _backend),
+                _dngNote,
+                Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd),
+                _cameraColor),
+            PreferenceCard(Loc.T("性能"),
+                Row(Loc.T("GPU 加速"), _gpu),
+                Description(Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。")),
+                Row(Loc.T("RAW 并发解码数"), _concurrency),
+                Details(Loc.T("解码资源详情"), _concurrencyNote)));
+
+        Control storage = CategoryPage(
+            Loc.T("存储"),
+            Loc.T("集中管理转换缓存、图库缩略图的位置与空间上限。"),
+            PreferenceCard(Loc.T("DNG 转换缓存"),
+                _cacheOn,
+                _cachePersist,
+                dirRow,
+                Row(Loc.T("缓存上限"), _cacheBudget),
+                Details(Loc.T("缓存位置与占用"), _cacheNote)),
+            PreferenceCard(Loc.T("图库缩略图（印样）"),
+                sheetRow,
+                Row(Loc.T("存放上限"), _sheetBudget),
+                Details(Loc.T("印样缓存详情"), _sheetNote)));
+
+        Control[] pages = { general, imaging, storage };
+        var pageHost = new Grid();
+        foreach (Control page in pages) pageHost.Children.Add(page);
+
+        _category = new ListBox
+        {
+            ItemsSource = new[] { Loc.T("通用"), Loc.T("图像与性能"), Loc.T("存储") },
+            SelectedIndex = Math.Clamp(v.Category, 0, pages.Length - 1),
+            Classes = { "preferencesNav" },
+        };
+        void ShowCategory()
+        {
+            int selected = Math.Clamp(_category.SelectedIndex, 0, pages.Length - 1);
+            for (int i = 0; i < pages.Length; i++) pages[i].IsVisible = i == selected;
+        }
+        _category.SelectionChanged += (_, _) => ShowCategory();
+        ShowCategory();
 
         var save = new Button { Content = Loc.T("保存"), IsDefault = true, Classes = { "primary" } };
         var cancel = new Button { Content = Loc.T("取消"), IsCancel = true };
@@ -220,13 +249,62 @@ public sealed class PreferencesDialog : Window
             Build(Snapshot());
         };
 
-        Content = DialogLayout.Compose(panel, DialogLayout.Actions(cancel, save));
+        var contentGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("148,1,*") };
+        contentGrid.Children.Add(_category);
+        var divider = new Border { Background = App.Current?.FindResource("BorderSoftBrush") as IBrush };
+        Grid.SetColumn(divider, 1);
+        contentGrid.Children.Add(divider);
+        var pageScroll = new ScrollViewer
+        {
+            Content = pageHost,
+            Margin = new Thickness(20, 0, 0, 0),
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+        Grid.SetColumn(pageScroll, 2);
+        contentGrid.Children.Add(pageScroll);
+
+        var heading = new StackPanel { Spacing = 2, Margin = new Thickness(0, 0, 0, 16) };
+        heading.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), Classes = { "dialogTitle" }, Margin = new Thickness(0) });
+        heading.Children.Add(Description(Loc.T("应用级设置；不会改变当前卷的校准、成片调整或导出参数。")));
+
+        var root = new DockPanel { Margin = new Thickness(20) };
+        DockPanel.SetDock(heading, Dock.Top);
+        root.Children.Add(heading);
+        Control actions = DialogLayout.Actions(cancel, save);
+        actions.Margin = new Thickness(0, 16, 0, 0);
+        DockPanel.SetDock(actions, Dock.Bottom);
+        root.Children.Add(actions);
+        root.Children.Add(contentGrid);
+        Content = root;
     }
 
     private static ComboBox Combo(string[] items, int index) =>
         new() { ItemsSource = items, SelectedIndex = Math.Clamp(index, 0, items.Length - 1) };
 
     private static TextBlock Note() => new() { Classes = { "dialogNote" } };
+
+    private static TextBlock Description(string text) => new()
+    {
+        Text = text,
+        Classes = { "dialogNote" },
+    };
+
+    private static StackPanel CategoryPage(string title, string description, params Control[] sections)
+    {
+        var page = new StackPanel { Spacing = 10 };
+        page.Children.Add(new TextBlock { Text = title, Classes = { "preferenceCategoryTitle" } });
+        page.Children.Add(Description(description));
+        foreach (Control section in sections) page.Children.Add(section);
+        return page;
+    }
+
+    private static Border PreferenceCard(string title, params Control[] content)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = title, Classes = { "sectionHead" } });
+        foreach (Control item in content) panel.Children.Add(item);
+        return new Border { Child = panel, Classes = { "preferenceCard" } };
+    }
 
     private static Expander Details(string title, Control content) => new()
     {

@@ -185,6 +185,10 @@
 
                     <MenuItem Header="_Settings">
                         <MenuItem Header="{i18n:T '偏好设置…（Ctrl+,）'}" Click="OnPreferencesClick" />
+                        <Separator />
+                        <MenuItem Header="{i18n:T '资源与文件夹'}">
+                            <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
+                        </MenuItem>
                     </MenuItem>
 
                     <MenuItem Header="_Help">
@@ -195,9 +199,6 @@
                             <MenuItem Name="CopyColorDiagnosticsMenuItem" Header="{i18n:T '复制诊断'}"
                                       Click="OnCopyColorDiagnosticsClick" />
                         </MenuItem>
-                        <Separator />
-                        <!-- 放进【帮助】而不是【设置】：它是「东西放哪儿」的答案，不是一个可调的项。 -->
-                        <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
                         <Separator />
@@ -245,6 +246,34 @@
                     </Button>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Name="QuickThemeButton" Classes="icon" Click="OnToggleThemeClick"
+                            AutomationProperties.Name="{i18n:T '切换深色/浅色主题'}"
+                            ToolTip.Tip="{i18n:T '切换深色/浅色主题（Ctrl+Shift+T）'}">
+                        <Panel Width="16" Height="16">
+                            <ctl:Icon Name="QuickThemeSunIcon" Data="{StaticResource IcoSun}" />
+                            <ctl:Icon Name="QuickThemeMoonIcon" Data="{StaticResource IcoMoon}" />
+                        </Panel>
+                    </Button>
+                    <Button Name="QuickLanguageButton" Classes="icon"
+                            AutomationProperties.Name="{i18n:T '界面语言'}"
+                            ToolTip.Tip="{i18n:T '切换界面语言'}">
+                        <ctl:Icon Data="{StaticResource IcoTranslate}" />
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <StackPanel Width="220" Spacing="8">
+                                    <TextBlock Text="界面语言 / Language" FontWeight="SemiBold" />
+                                    <TextBlock Classes="groupHint" Margin="0" Text="{i18n:T '选择后立即应用并保存。'}" />
+                                    <RadioButton Name="QuickLanguageAuto" GroupName="quickLanguage" Tag="auto"
+                                                 Content="{i18n:T '跟随系统'}" Click="OnQuickLanguageClick" />
+                                    <RadioButton Name="QuickLanguageZh" GroupName="quickLanguage" Tag="zh"
+                                                 Content="中文" Click="OnQuickLanguageClick" />
+                                    <RadioButton Name="QuickLanguageEn" GroupName="quickLanguage" Tag="en"
+                                                 Content="English" Click="OnQuickLanguageClick" />
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Border Width="1" Margin="2,4" Background="{DynamicResource BorderSoftBrush}" />
                     <Button Classes="quiet" Click="OnOpenProjectClick" ToolTip.Tip="{i18n:T '打开工程…'}"
                             AutomationProperties.Name="{i18n:T '打开工程…'}">
                         <ctl:Icon Data="{StaticResource IcoFolder}" />
@@ -265,29 +294,75 @@
             <TextBlock Text="{i18n:T '放下以导入'}" HorizontalAlignment="Center" />
         </Border>
 
+        <Border Name="FirstUseGuide" DockPanel.Dock="Top" IsVisible="False"
+                Background="{DynamicResource AccentSoftBrush}" Padding="16,10"
+                BorderBrush="{DynamicResource AccentBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock FontWeight="SemiBold" Text="{i18n:T '从第一卷开始'}" />
+                    <TextBlock Classes="groupHint" Margin="0"
+                               Text="{i18n:T '导入原片后，按“校准 → 成片 → 导出”完成一次可恢复的整卷流程。高级设置可以稍后再看。'}" />
+                </StackPanel>
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="{i18n:T '查看第一卷指南'}" Click="OnFirstUseGuideClick" />
+                <Button Grid.Column="2" Margin="8,0,0,0" Classes="primary" Content="{i18n:T '新建第一卷…'}" Click="OnFirstUseStartClick" />
+                <Button Grid.Column="3" Margin="8,0,0,0" Classes="quiet" Content="{i18n:T '关闭'}" Click="OnFirstUseDismissClick" />
+            </Grid>
+        </Border>
+
         <!-- ── Status bar ──────────────────────────────────────────────────── -->
         <Border DockPanel.Dock="Bottom" Padding="10,4" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto">
                 <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="80" Height="3" Margin="0,0,10,0"
                              IsVisible="{Binding ShowProgress}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding DisplayStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                            FontSize="{DynamicResource FontXs}" Foreground="{DynamicResource TextDimBrush}" />
-                <Button Grid.Column="2" Content="{i18n:T '取消'}" Click="OnCancelLongTaskClick"
+                <Button Grid.Column="2" Classes="quiet" Padding="6,1" MinHeight="0" Margin="8,0,0,0"
+                        ToolTip.Tip="{i18n:T '查看前台任务、后台队列和最近批量结果'}">
+                    <TextBlock Text="{Binding TaskCenterSummary}" FontSize="{DynamicResource FontXs}" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+                    <Button.Flyout>
+                        <Flyout Placement="TopEdgeAlignedRight">
+                            <StackPanel Width="360" Spacing="10">
+                                <TextBlock Text="{i18n:T '任务中心'}" FontWeight="SemiBold" />
+                                <Border Classes="taskRow">
+                                    <StackPanel>
+                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '前台任务'}" />
+                                        <TextBlock Text="{Binding TaskCenterForegroundText}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="taskRow">
+                                    <StackPanel>
+                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '后台队列'}" />
+                                        <TextBlock Text="{Binding TaskCenterBackgroundText}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="taskRow">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '最近结果'}" />
+                                        <TextBlock Text="{Binding TaskCenterResultText}" TextWrapping="Wrap" />
+                                        <Button Content="{i18n:T '查看批量导出结果…'}" Click="OnBatchExportReportClick"
+                                                IsEnabled="{Binding CanShowBatchExportReport}" HorizontalAlignment="Left" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <Button Grid.Column="3" Content="{i18n:T '取消'}" Click="OnCancelLongTaskClick"
                         IsVisible="{Binding HasLongTask}" IsEnabled="{Binding CanCancelLongTask}"
                         Padding="6,1" MinHeight="0" Margin="8,0,0,0" FontSize="{DynamicResource FontXs}" />
-                <Button Grid.Column="5" Classes="saveStatus" Classes.warning="{Binding SaveNeedsAttention}"
+                <Button Grid.Column="6" Classes="saveStatus" Classes.warning="{Binding SaveNeedsAttention}"
                         Content="{Binding SaveStatusText}" Click="OnRetrySaveClick"
                         IsVisible="{Binding HasSaveStatus}"
                         ToolTip.Tip="{Binding SaveStatusDetail}" Padding="6,1" MinHeight="0"
                         FontSize="{DynamicResource FontXs}" Margin="8,0,0,0" />
                 <!-- Background stage (解耦矩阵 / 色度补偿 / 后台解码 …). Its own field so roll
                      progress and the current frame name never overwrite each other. -->
-                <Border Grid.Column="3" Classes="chip" Margin="8,0,0,0" MaxWidth="240"
+                <Border Grid.Column="4" Classes="chip" Margin="8,0,0,0" MaxWidth="240"
                         IsVisible="{Binding BackgroundStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                     <TextBlock Text="{Binding BackgroundStatus}" Classes="readout" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </Border>
-                <Border Grid.Column="4" Name="ColorDiagnosticStatus" Classes="chip" IsVisible="False" Margin="8,0,0,0" MaxWidth="280">
+                <Border Grid.Column="5" Name="ColorDiagnosticStatus" Classes="chip" IsVisible="False" Margin="8,0,0,0" MaxWidth="280">
                     <TextBlock Name="ColorDiagnosticText" Classes="readout" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" MaxWidth="560" />
                 </Border>
@@ -315,13 +390,54 @@
               <DockPanel>
                 <Border DockPanel.Dock="Top" Padding="12,14,12,8">
                     <StackPanel Spacing="4">
-                        <TextBlock Classes="eyebrow" Text="{i18n:T '当前卷'}" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Classes="eyebrow" Text="{i18n:T '当前卷'}" />
+                            <TextBlock Grid.Column="1" Classes="readout" Text="{Binding FrameSelectionSummary}" />
+                        </Grid>
                         <Button Classes="quiet" Click="OnAddImagesClick" HorizontalAlignment="Stretch" Padding="6,5">
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoPlus}" />
                                 <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '添加图像'}" FontSize="12" />
                             </Grid>
                         </Button>
+                    </StackPanel>
+                </Border>
+                <Border DockPanel.Dock="Top" Classes="selectionActions" IsVisible="{Binding HasFrameSelection}"
+                        Margin="6,0,6,8" Padding="10,9">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Spacing="1">
+                                <TextBlock Text="{i18n:T '批量操作'}" FontSize="12" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding FrameSelectionSummary}" Classes="selectionSummary" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="icon selectionClear" Click="OnClearFrameSelectionClick"
+                                    AutomationProperties.Name="{i18n:T '清除选择'}"
+                                    ToolTip.Tip="{i18n:T '清除选择'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                        </Grid>
+                        <StackPanel Spacing="6">
+                            <Button Classes="selectionAction" Click="OnApplyCalToTargetsClick"
+                                    IsEnabled="{Binding CanApplyContextTargets}">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Grid.Column="0" Data="{StaticResource IcoBroadcast}" />
+                                    <TextBlock Grid.Column="1" Margin="8,0,0,0" Text="{i18n:T '同步校准'}" />
+                                </Grid>
+                            </Button>
+                            <Button Classes="selectionAction" Click="OnApplySceneToTargetsClick"
+                                    IsEnabled="{Binding CanApplyContextTargets}">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Grid.Column="0" Data="{StaticResource IcoLayers}" />
+                                    <TextBlock Grid.Column="1" Margin="8,0,0,0" Text="{i18n:T '同步成片'}" />
+                                </Grid>
+                            </Button>
+                            <Button Classes="selectionAction secondary" Click="OnVirtualCopyClick">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Grid.Column="0" Data="{StaticResource IcoCopy}" />
+                                    <TextBlock Grid.Column="1" Margin="8,0,0,0" Text="{i18n:T '建立副本'}" />
+                                </Grid>
+                            </Button>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
               <Panel>
@@ -413,6 +529,37 @@
                                     <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Left"
                                               VerticalAlignment="Top" Margin="2"
                                               ToolTip.Tip="{i18n:T '批量操作目标；Ctrl 点选，Shift 连选'}" />
+                                    <!-- Colour and geometry both carry meaning: users can scan the
+                                         rail without having to decipher 9 px labels or rely on hue. -->
+                                    <Border Classes="frameMarkers" HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom" Margin="3">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Ellipse Width="11" Height="11" Stroke="#C7CBD1" StrokeThickness="1.5"
+                                                     Fill="#32272A2E" IsVisible="{Binding IsUntouched}"
+                                                     ToolTip.Tip="{i18n:T '尚未校准'}" />
+                                            <Path Width="12" Height="12" Stretch="Uniform"
+                                                  Data="M6 0L12 6L6 12L0 6Z" Fill="#E2AD3E"
+                                                  IsVisible="{Binding IsCalibrationOnly}"
+                                                  ToolTip.Tip="{i18n:T '已完成底片校准'}" />
+                                            <Grid Width="13" Height="13" IsVisible="{Binding IsFinished}"
+                                                  ToolTip.Tip="{i18n:T '已有成片调整'}">
+                                                <Ellipse Fill="#36B978" />
+                                                <Path Data="M3.2 6.7L5.5 9L10 4.2" Stroke="White"
+                                                      StrokeThickness="1.5" StrokeLineCap="Round"
+                                                      StrokeJoin="Round" />
+                                            </Grid>
+                                            <Path Width="13" Height="12" Stretch="Uniform"
+                                                  Data="M6 0L12 12H0Z" Fill="#E05A67"
+                                                  IsVisible="{Binding IsSourceMissing}"
+                                                  ToolTip.Tip="{i18n:T '源文件缺失'}" />
+                                            <Border Width="13" Height="13" Background="Transparent"
+                                                    IsVisible="{Binding IsVirtual}"
+                                                    ToolTip.Tip="{i18n:T '虚拟副本'}">
+                                                <ctl:Icon Width="13" Height="13" Data="{StaticResource IcoLayers}"
+                                                          Foreground="#76A9FA" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
                                 </Grid>
                                 <!-- Left-aligned, not centred: forty file names down a column are
                                      read by their differences, and centring puts the difference
@@ -838,51 +985,64 @@
                      worked on, and leaving it next to 输出空间 put two controls here making
                      contradictory claims about the same pixels — it said sRGB while the render
                      exited in whatever 输出空间 named. It is a checkbox in the export dialog now. -->
-                <!-- One output toolbar preserves vertical room for the photograph. -->
+                <!-- Render settings describe the roll; export is the terminal action. Keeping them
+                     visually separate prevents a persistent colour decision reading as a one-off
+                     file option. -->
                 <Border Grid.Row="3" Padding="8,5" Background="{DynamicResource ChromeBrush}">
-                    <Grid Name="OutputToolbar" ColumnDefinitions="90,6,*,8,Auto,8,Auto,Auto" RowDefinitions="Auto,Auto">
-                        <TextBlock Grid.Row="1" Grid.ColumnSpan="8" Margin="0,4,0,0" FontSize="{DynamicResource FontXs}"
-                                   IsVisible="{Binding CanChooseOutputSpace}"
-                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                                   Text="{i18n:T '整卷渲染空间 · 改动影响画面和导出，可撤销'}"
-                                   ToolTip.Tip="{i18n:T '整卷渲染空间：切换会改变整卷画面与导出，可撤销比较。'}" />
-                        <ComboBox Name="OutputSpacePicker" Grid.Column="0" HorizontalAlignment="Stretch" AutomationProperties.Name="{i18n:T '整卷渲染空间'}" SelectedIndex="{Binding OutputSpaceIndex}" VerticalAlignment="Center"
-                                  IsVisible="{Binding CanChooseOutputSpace}"
-                                  ToolTip.Tip="{i18n:T 'Cineon 第 4 步的目标空间：反相结果转换到它，帧编辑在它内进行，导出也写成它。工作空间为 ACEScg，每个选项都是真实的色域变换。切换空间保留滑块数值，画面随之改变。属于胶卷参数，随工程保存。'}">
-                            <ComboBoxItem Content="sRGB" />
-                            <ComboBoxItem Content="Display P3" />
-                            <ComboBoxItem Content="Adobe RGB" />
-                        </ComboBox>
-                        <TextBlock Grid.Column="0" TextTrimming="CharacterEllipsis" IsVisible="{Binding HdrEnabled}" VerticalAlignment="Center"
-                                   Text="{i18n:T '不裁色域'}" Foreground="{DynamicResource TextDimBrush}"
-                                   ToolTip.Tip="{i18n:T 'HDR 渲染不裁到任何色域三角，P3 与 Adobe RGB 之外的颜色原样保留，float32 TIFF 导出同样保留。容器原色（P3 / BT.2020）在 PQ 导出时选择。屏幕可见范围由显示器决定，见左下角色彩状态。'}" />
-                        <ComboBox VerticalAlignment="Center" HorizontalAlignment="Left" Name="LookLutPicker" Grid.Column="2" MinWidth="80" MaxWidth="240" AutomationProperties.Name="{i18n:T '外观 LUT'}"
-                                      ItemsSource="{Binding PrintLutNames}" SelectedIndex="{Binding PrintLutIndex}"
-                                      ToolTip.Tip="{i18n:T '在数字中间片反相之后应用外观 LUT，不改变输入设备标定、片基或密度端点。输入固定为 Cineon Film Log，输出须与制作 LUT 时的编码一致。&#10;&#10;可使用随程序提供的 Film Looks 或自行制作的 .cube；「标准」表示不加外观 LUT。通过帮助菜单打开 LUT 文件夹可批量加入。随工程保存。'}">
-                            <ComboBox.ContextMenu>
-                                <ContextMenu>
-                                    <MenuItem Header="{Binding PrintLutContractText}" IsVisible="{Binding CanEditPrintLutContract}">
-                                        <MenuItem Header="Rec.709 Gamma 2.4" Tag="0" Click="OnPrintLutOutputClick" />
-                                        <MenuItem Header="DCI-P3 Gamma 2.6" Tag="1" Click="OnPrintLutOutputClick" />
-                                        <MenuItem Header="sRGB" Tag="2" Click="OnPrintLutOutputClick" />
-                                        <MenuItem Header="{i18n:T 'Rec.2100 ST2084（HDR · PQ）'}" Tag="3" IsVisible="{Binding HdrEnabled}" Click="OnPrintLutOutputClick" />
-                                    </MenuItem>
-                                </ContextMenu>
-                            </ComboBox.ContextMenu>
-                        </ComboBox>
-                        <ToggleSwitch Grid.Column="4" IsChecked="{Binding HdrEnabled}" IsEnabled="{Binding CanChooseHdrPeak}"
-                                      OnContent="HDR" OffContent="HDR"
-                                      VerticalAlignment="Center" MinHeight="0" Padding="0"
-                                      ToolTip.Tip="{Binding HdrToggleTooltip}" />
-                        <Button Grid.Column="6" Name="ExportButton" Classes="primary" Click="OnExportClick"
+                    <Grid Name="OutputToolbar" ColumnDefinitions="*,8,Auto,Auto">
+                        <Button Grid.Column="0" Classes="renderSummary" HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left" ToolTip.Tip="{i18n:T '整卷渲染设置会改变画面和导出，并随工程保存。'}">
+                            <TextBlock Text="{Binding RenderSettingsSummary}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            <Button.Flyout>
+                                <Flyout Placement="TopEdgeAlignedLeft">
+                                    <StackPanel Width="360" Spacing="10">
+                                        <TextBlock Text="{i18n:T '整卷渲染设置'}" FontWeight="SemiBold" />
+                                        <TextBlock Classes="groupHint" Margin="0" Text="{i18n:T '这些设置影响整卷画面与导出，可撤销，并随工程保存。'}" />
+                                        <Grid ColumnDefinitions="100,*">
+                                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '渲染空间'}" />
+                                            <ComboBox Name="OutputSpacePicker" Grid.Column="1" HorizontalAlignment="Stretch"
+                                                      AutomationProperties.Name="{i18n:T '整卷渲染空间'}" SelectedIndex="{Binding OutputSpaceIndex}"
+                                                      IsVisible="{Binding CanChooseOutputSpace}">
+                                                <ComboBoxItem Content="sRGB" />
+                                                <ComboBoxItem Content="Display P3" />
+                                                <ComboBoxItem Content="Adobe RGB" />
+                                            </ComboBox>
+                                            <TextBlock Grid.Column="1" IsVisible="{Binding HdrEnabled}" Text="{i18n:T '不裁色域'}" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="100,*">
+                                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '外观 LUT'}" />
+                                            <ComboBox Grid.Column="1" Name="LookLutPicker" ItemsSource="{Binding PrintLutNames}"
+                                                      SelectedIndex="{Binding PrintLutIndex}" HorizontalAlignment="Stretch">
+                                                <ComboBox.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="{Binding PrintLutContractText}" IsVisible="{Binding CanEditPrintLutContract}">
+                                                            <MenuItem Header="Rec.709 Gamma 2.4" Tag="0" Click="OnPrintLutOutputClick" />
+                                                            <MenuItem Header="DCI-P3 Gamma 2.6" Tag="1" Click="OnPrintLutOutputClick" />
+                                                            <MenuItem Header="sRGB" Tag="2" Click="OnPrintLutOutputClick" />
+                                                            <MenuItem Header="{i18n:T 'Rec.2100 ST2084（HDR · PQ）'}" Tag="3" IsVisible="{Binding HdrEnabled}" Click="OnPrintLutOutputClick" />
+                                                        </MenuItem>
+                                                    </ContextMenu>
+                                                </ComboBox.ContextMenu>
+                                            </ComboBox>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="100,*">
+                                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '动态范围'}" />
+                                            <ToggleSwitch Grid.Column="1" IsChecked="{Binding HdrEnabled}" IsEnabled="{Binding CanChooseHdrPeak}"
+                                                          OnContent="HDR" OffContent="SDR" ToolTip.Tip="{Binding HdrToggleTooltip}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                        <Button Grid.Column="2" Name="ExportButton" Classes="primary" Click="OnExportClick"
                                 IsEnabled="{Binding HasImage}" CornerRadius="6,0,0,6" Padding="12,4"
                                 ToolTip.Tip="{i18n:T '导出当前帧（Ctrl+E）'}">
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoExport}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '导出…'}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '导出当前帧…'}" VerticalAlignment="Center" />
                             </Grid>
                         </Button>
-                        <Button Grid.Column="7" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
+                        <Button Grid.Column="3" Name="ExportMoreButton" Classes="primary" IsEnabled="{Binding HasImage}"
                                 CornerRadius="0,6,6,0" Padding="6,4" Margin="1,0,0,0"
                                 ToolTip.Tip="{i18n:T '整卷导出 / 印样'}">
                             <ctl:Icon Data="{StaticResource IcoChevron}" Width="16" Height="16"
@@ -993,13 +1153,19 @@
                         <TabStripItem Content="{i18n:T '成片调整'}" />
                     </TabStrip>
                 </Border>
-                <Border Grid.Row="3" Padding="16,12" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                    <Panel>
-                        <Button Name="CalibrationSyncFooter" Classes="scopeAction" Content="{Binding CalibrationApplyLabel}" Click="OnApplyCalToRollClick"
-                                HorizontalAlignment="Stretch" IsEnabled="{Binding HasOtherFrames}" ToolTip.Tip="{Binding CalibrationBroadcastHint}" />
-                        <Button Name="SceneSyncFooter" Classes="scopeAction" Content="{Binding SceneApplyLabel}" Click="OnApplySceneToRollClick"
-                                HorizontalAlignment="Stretch" IsVisible="False" IsEnabled="{Binding CanApplySceneToRoll}" ToolTip.Tip="{Binding SceneBroadcastHint}" />
-                    </Panel>
+                <Border Grid.Row="3" Padding="16,10" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+                    <StackPanel Spacing="6">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding BroadcastSourceText}" Classes="readout" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="{Binding BroadcastTargetText}" Classes="readout" Margin="8,0,0,0" />
+                        </Grid>
+                        <Panel>
+                            <Button Name="CalibrationSyncFooter" Classes="scopeAction" Content="{Binding CalibrationApplyLabel}" Click="OnApplyCalToTargetsClick"
+                                    HorizontalAlignment="Stretch" IsEnabled="{Binding CanApplyContextTargets}" ToolTip.Tip="{Binding CalibrationBroadcastHint}" />
+                            <Button Name="SceneSyncFooter" Classes="scopeAction" Content="{Binding SceneApplyLabel}" Click="OnApplySceneToTargetsClick"
+                                    HorizontalAlignment="Stretch" IsVisible="False" IsEnabled="{Binding CanApplyContextTargets}" ToolTip.Tip="{Binding SceneBroadcastHint}" />
+                        </Panel>
+                    </StackPanel>
                 </Border>
                 <Panel Grid.Row="2">
                 <ScrollViewer Name="PanelScroll" HorizontalScrollBarVisibility="Disabled"

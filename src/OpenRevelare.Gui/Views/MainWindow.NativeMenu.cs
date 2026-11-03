@@ -93,7 +93,8 @@ public partial class MainWindow
 
     // ── 窗口菜单（File / Edit / View / Help）─────────────────────────────────────
     //
-    // 设置 那一栏在 mac 上没了：它唯一的内容是 偏好设置，已经按 mac 约定搬进应用菜单。
+    // 设置 那一栏在 mac 上没了：偏好设置已经按 mac 约定搬进应用菜单；资源位置放在
+    // Help 的明确子组中，避免为单个文件夹命令另造一栏。
     // 其余四栏与窗口内菜单逐条对齐，顺序也一样——文档里"文件 → 导出印样…"那类指路
     // 两个平台都还成立。
     private NativeMenu BuildWindowMenu()
@@ -196,7 +197,13 @@ public partial class MainWindow
             {
                 Item(Loc.T("操作指引 / 技术原理…"), OnDocsClick),
                 Item(Loc.T("快捷键…"), OnHelpClick),
-                Item(Loc.T("打开 LUT 文件夹"), OnOpenLutFolderClick),
+                Sub(Loc.T("资源与文件夹"), new NativeMenu
+                {
+                    Items =
+                    {
+                        Item(Loc.T("打开 LUT 文件夹"), OnOpenLutFolderClick),
+                    },
+                }),
                 new NativeMenuItemSeparator(),
                 Item(Loc.T("检查更新…"), OnCheckUpdateClick),
                 Sub(Loc.T("诊断"), new NativeMenu
