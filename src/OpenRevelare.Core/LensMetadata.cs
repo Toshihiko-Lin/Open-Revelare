@@ -24,8 +24,10 @@ public sealed record LensCorrectionEstimate(
 }
 
 /// <summary>
-/// Probes RAW image metadata (Sony SubIFD/MakerNotes, DNG OpcodeList3, Fuji, standard EXIF)
-/// to automatically determine radial distortion (k1) and peripheral vignetting falloff.
+/// Probes image metadata (Sony firmware correction tags in the maker note or the Exif SubIFD,
+/// DNG OpcodeList3, standard EXIF lens model) to automatically determine radial distortion (k1)
+/// and peripheral vignetting falloff. Nothing here keys on the camera body: a file is handled by
+/// whichever of those three sources it actually carries.
 /// </summary>
 public static class LensMetadata
 {
