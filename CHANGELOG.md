@@ -4,6 +4,8 @@
 
 **新增与改进**
 
+- 新增 Lensfun 镜头配置支持：优先读取 RAW／DNG 内嵌校正参数，缺少时尝试从随包数据库匹配畸变与暗角配置；两项可独立应用，启用 LCC 时由 LCC 优先处理暗角，避免重复校正。
+- 镜头校正区显示匹配来源与畸变／暗角详情；高级设置支持搜索并手动选择 Lensfun 配置、分别选择校正项目，以及指定自定义数据库文件夹。
 - 工作台更清楚易用：支持拖入 RAW／TIFF 文件或文件夹，检查器明确显示当前帧、勾选数量和同步范围；标签、图表及对话框也改进了键盘操作和浅深主题显示。
 - 重整修片流程：多选帧使用更大的批量操作面板，同步操作明确区分来源与目标；缩略图以颜色和形状标记未校准、已校准、已调整、原片缺失及虚拟副本状态。
 - 整卷渲染设置与单帧导出分开，状态栏新增任务中心，可查看前台任务、后台队列与最近批量结果；首次使用指引改为不阻塞工作的内嵌提示。
@@ -17,6 +19,7 @@
 
 **修复**
 
+- 修复低曝光 RAW 中齿孔紧贴画面边缘时自动识别失败、阈值停留在默认值的问题。仅在原检测失败后，依据边缘齿孔的尺寸、排列与间距补充识别；原检测成功时保持原阈值。
 - 修复拉宽左侧片夹后缩略图仍保持固定大小，以及从旧版覆盖升级时可能丢失已安装 Deep-WB 模型、要求重复下载的问题。
 - 修复部分压缩 TIFF 从图像中间读取区域时可能失败的问题，并加强 FFF 文件识别，减少损坏或无效文件被误判。
 - 修复「打开 LUT 文件夹」可能同时触发底片导入窗口的问题。
@@ -26,6 +29,8 @@
 
 **Added and improved**
 
+- Added Lensfun lens-profile support: embedded RAW/DNG correction metadata takes priority, with the bundled database providing distortion and vignetting profiles when available. The two corrections can be applied independently; enabled LCC takes priority over profile-based vignetting to avoid double correction.
+- The lens-correction panel shows the matching source and separate distortion/vignetting details. Advanced settings support searching and manually choosing a Lensfun profile, selecting which corrections to apply, and choosing a custom database folder.
 - A clearer, easier desktop workbench: drop RAW/TIFF files or folders into the window, see the current frame, checked count and sync scope at a glance, and use improved keyboard and light/dark theme support across tabs, plots and dialogs.
 - A reworked develop workflow with a larger multi-frame action panel and explicit sync sources and targets. Film-strip thumbnails use colour and shape to show uncalibrated, calibrated, adjusted, missing-source and virtual-copy states.
 - Roll rendering settings are separated from single-frame export, while a new task centre reports foreground work, background queues and recent batch results. First-use guidance is now an inline, non-blocking prompt.
@@ -39,6 +44,7 @@
 
 **Fixed**
 
+- Fixed automatic sprocket detection failing on dim RAW captures with holes clipped by the image edge, leaving the default threshold in place. A fallback verifies peripheral hole sizes, alignment and spacing only after the original detector fails; successful original estimates retain their exact thresholds.
 - Fixed film-strip thumbnails remaining at a fixed size when the left rail is widened, and overlay upgrades from older releases potentially discarding an installed Deep-WB model and requiring another download.
 - Fixed some compressed TIFF region reads failing when they start partway through an image, and tightened FFF recognition to reject damaged or invalid files more reliably.
 - Fixed Open LUT Folder also opening the negative-import window in some cases.
