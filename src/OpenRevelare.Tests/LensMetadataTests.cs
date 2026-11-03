@@ -287,7 +287,45 @@ public sealed class LensMetadataTests
         Assert.NotNull(estimate);
         Assert.Equal(expectedK1, estimate.DistortionK1);
         Assert.Equal(expectedVignette, estimate.VignetteAmount);
-        Assert.Contains("镜头预设", estimate.SourceDescription);
+        Assert.Contains("经验估算", estimate.SourceDescription);
+    }
+
+    [Theory]
+    // 腾龙 90 微不是索尼 90 微：旧条件只凭「90MM + MACRO」就把索尼的数值套上去。
+    [InlineData("Tamron SP 90mm F2.8 Di Macro 1:1")]
+    // 非微距的 NIKKOR 60mm：旧条件用 || 把任何 NIKKOR 60mm 都放了进来。
+    [InlineData("NIKKOR 60mm f/2.8D")]
+    public void EstimateCorrections_OtherBrandLookalikes_DoNotBorrowASonyProfile(string lens)
+    {
+        var subIfd = new ExifSubIfdDirectory();
+        subIfd.Set(0xa434, lens);
+        subIfd.Set(0x920a, 90.0);
+        subIfd.Set(0x829d, 8.0);
+
+        var estimate = LensMetadata.EstimateCorrections([subIfd]);
+
+        Assert.NotNull(estimate);
+        Assert.Equal("未内置校正曲线", estimate.SourceDescription);
+        Assert.Equal(0.0, estimate.DistortionK1);
+        Assert.Equal(0.0, estimate.VignetteAmount);
+    }
+
+    [Fact]
+    public void EstimateCorrections_Sony50mmMacro_MatchesThePresetItUsedToMiss()
+    {
+        // 索尼在 EXIF 里写的是 "FE 50mm F2.8 Macro"，并不含 "SONY"；旧条件要求含 SONY，
+        // 于是这条预设永远不命中，用户静默地拿到"未内置校正曲线"。改用索尼专有前缀判定。
+        var subIfd = new ExifSubIfdDirectory();
+        subIfd.Set(0xa434, "FE 50mm F2.8 Macro");
+        subIfd.Set(0x920a, 50.0);
+        subIfd.Set(0x829d, 8.0);
+
+        var estimate = LensMetadata.EstimateCorrections([subIfd]);
+
+        Assert.NotNull(estimate);
+        Assert.Equal(0.001, estimate.DistortionK1);
+        Assert.Equal(0.14, estimate.VignetteAmount);
+        Assert.Contains("经验估算", estimate.SourceDescription);
     }
 
     [Fact]

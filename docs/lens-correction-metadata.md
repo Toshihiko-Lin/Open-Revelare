@@ -65,12 +65,19 @@ Opcode 编号以 Adobe DNG SDK (`dng_opcodes.h`) 为准：**1 = `WarpRectilinear
   规范数据把中心增益归一化为 1（$k_0 \approx 1$），故角隅增益为系数和，OpenRevelare 的
   `amount = 角隅增益 - 1`；少数写入器直接存"增益 - 1"（$k_0 \approx 0$），这种形状也接受。
 
-### 2.4 翻拍镜头库预设回退 (Heuristic Fallback)
+### 2.4 翻拍镜头经验估算 (Heuristic Fallback)
 
-如果图像未包含厂商内嵌的 MakerNote 样条（例如经转接环转接、或元数据丢失）：
-从标准 EXIF 提取 `LensModel` (`0xA434`)、`FocalLength`、`FNumber`，自动匹配翻拍常用镜头预设。
-镜头型号只认 `0xA434`：`0xA431` 是机身序列号，拿它查预设既不会命中，还会把用户已手动调好的校正
-覆盖成"未内置校正曲线"（$k_1 = 0$）。
+如果图像既没有厂商内嵌样条、也没有 DNG opcode（例如经转接环转接、元数据被转换器剥离，
+或机身本身不写这些数据），从标准 EXIF 提取 `LensModel` (`0xA434`)、`FocalLength`、`FNumber`，
+按型号关键字匹配一张内置表。
+
+**这张表不是标定结果，是经验估算**：输出标题写作「经验估算（未标定）：<镜头>」，
+让界面说真话。实测同一支镜头，内置值与相机固件参数可差 30% 以上
+（FE 70-200 F4 Macro II：估算 0.0089 对固件 0.0118），近无畸变的微距头甚至差两个数量级
+（Nikkor Z MC 105mm：估算 0.001 对真实 0.000015）。只能在"没有更好的数据"时作为方向性近似。
+
+匹配必须带品牌/型号前缀，不得只凭焦距与 MACRO 判定——否则腾龙的 90mm 微距会被套上
+索尼 90mm 微距的数值，那比"没有数据"更糟。
 - Sony FE 70-200mm F4 Macro G OSS II
 - Sony FE 90mm F2.8 Macro G OSS
 - Sony FE 50mm F2.8 Macro
@@ -78,6 +85,9 @@ Opcode 编号以 Adobe DNG SDK (`dng_opcodes.h`) 为准：**1 = `WarpRectilinear
 - Canon RF 100mm F2.8 L MACRO IS USM
 - Nikon NIKKOR Z MC 105mm f/2.8 VR S
 - AF-S Micro Nikkor 60mm f/2.8G ED 等。
+
+镜头型号只认 `0xA434`：`0xA431` 是机身序列号，拿它查表既不会命中，还会把用户已手动调好的
+校正覆盖成"未内置校正曲线"（$k_1 = 0$）。
 
 ---
 

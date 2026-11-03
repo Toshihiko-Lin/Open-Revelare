@@ -389,30 +389,33 @@ public static class LensMetadata
         string norm = lensModel.ToUpperInvariant();
 
         // Sony FE 70-200mm F4 Macro G OSS II
-        if (norm.Contains("70-200") && norm.Contains("MACRO"))
+        if (norm.Contains("70-200") && norm.Contains("MACRO")
+            && (norm.Contains("FE 70-200") || norm.Contains("SONY")))
         {
             double t = focalLength > 0 ? Math.Clamp((focalLength - 70.0) / 130.0, 0.0, 1.0) : 0.5;
             distortionK1 = Math.Round(0.002 + 0.016 * t, 4);
             vignetteAmount = fNumber >= 8 ? 0.168 : 0.22;
-            profileName = "镜头预设 (Sony 70-200 F4 G II Macro)";
+            profileName = "经验估算（未标定）：Sony 70-200 F4 G II Macro";
             return true;
         }
 
         // Sony FE 90mm F2.8 Macro G OSS
-        if (norm.Contains("90MM") && (norm.Contains("MACRO") || norm.Contains("SEL90M28G")))
+        if (norm.Contains("90MM")
+            && (norm.Contains("FE 90") || norm.Contains("SEL90M28G")))
         {
             distortionK1 = 0.000;
             vignetteAmount = fNumber >= 8 ? 0.12 : 0.18;
-            profileName = "镜头预设 (Sony 90mm F2.8 Macro)";
+            profileName = "经验估算（未标定）：Sony 90mm F2.8 Macro";
             return true;
         }
 
         // Sony FE 50mm F2.8 Macro
-        if (norm.Contains("50MM") && norm.Contains("MACRO") && norm.Contains("SONY"))
+        if (norm.Contains("50MM") && norm.Contains("MACRO")
+            && (norm.Contains("FE 50") || norm.Contains("SEL50M28")))
         {
             distortionK1 = 0.001;
             vignetteAmount = fNumber >= 8 ? 0.14 : 0.20;
-            profileName = "镜头预设 (Sony 50mm F2.8 Macro)";
+            profileName = "经验估算（未标定）：Sony 50mm F2.8 Macro";
             return true;
         }
 
@@ -421,7 +424,7 @@ public static class LensMetadata
         {
             distortionK1 = 0.002;
             vignetteAmount = fNumber >= 8 ? 0.15 : 0.20;
-            profileName = "镜头预设 (Sigma 105mm F2.8 DG DN Macro)";
+            profileName = "经验估算（未标定）：Sigma 105mm F2.8 DG DN Macro";
             return true;
         }
 
@@ -430,7 +433,7 @@ public static class LensMetadata
         {
             distortionK1 = 0.000;
             vignetteAmount = fNumber >= 8 ? 0.14 : 0.19;
-            profileName = "镜头预设 (Sigma 70mm F2.8 Macro)";
+            profileName = "经验估算（未标定）：Sigma 70mm F2.8 Macro";
             return true;
         }
 
@@ -439,7 +442,7 @@ public static class LensMetadata
         {
             distortionK1 = -0.003;
             vignetteAmount = fNumber >= 8 ? 0.14 : 0.18;
-            profileName = "镜头预设 (Canon RF 100mm F2.8 L Macro)";
+            profileName = "经验估算（未标定）：Canon RF 100mm F2.8 L Macro";
             return true;
         }
 
@@ -448,7 +451,7 @@ public static class LensMetadata
         {
             distortionK1 = -0.002;
             vignetteAmount = fNumber >= 8 ? 0.15 : 0.20;
-            profileName = "镜头预设 (Canon EF 100mm F2.8 L Macro)";
+            profileName = "经验估算（未标定）：Canon EF 100mm F2.8 L Macro";
             return true;
         }
 
@@ -457,16 +460,16 @@ public static class LensMetadata
         {
             distortionK1 = 0.001;
             vignetteAmount = fNumber >= 8 ? 0.12 : 0.17;
-            profileName = "镜头预设 (Nikkor Z MC 105mm F2.8)";
+            profileName = "经验估算（未标定）：Nikkor Z MC 105mm F2.8";
             return true;
         }
 
         // Nikon AF-S Micro Nikkor 60mm f/2.8G ED
-        if (norm.Contains("60MM") && (norm.Contains("MICRO") || norm.Contains("NIKKOR")))
+        if (norm.Contains("60MM") && norm.Contains("MICRO") && norm.Contains("NIKKOR"))
         {
             distortionK1 = 0.001;
             vignetteAmount = fNumber >= 8 ? 0.15 : 0.22;
-            profileName = "镜头预设 (Micro-Nikkor 60mm F2.8G)";
+            profileName = "经验估算（未标定）：Micro-Nikkor 60mm F2.8G";
             return true;
         }
 
