@@ -17,6 +17,7 @@
 
 **修复**
 
+- 修复拉宽左侧片夹后缩略图仍保持固定大小，以及从旧版覆盖升级时可能丢失已安装 Deep-WB 模型、要求重复下载的问题。
 - 修复部分压缩 TIFF 从图像中间读取区域时可能失败的问题，并加强 FFF 文件识别，减少损坏或无效文件被误判。
 - 修复「打开 LUT 文件夹」可能同时触发底片导入窗口的问题。
 - 修复从图库编辑卷信息可能清空印样中的 ISO／EI 与冲洗信息、取消或关闭偏好设置未完全撤销预览，以及关闭裁切说明后操作按钮一并消失的问题。
@@ -38,6 +39,7 @@
 
 **Fixed**
 
+- Fixed film-strip thumbnails remaining at a fixed size when the left rail is widened, and overlay upgrades from older releases potentially discarding an installed Deep-WB model and requiring another download.
 - Fixed some compressed TIFF region reads failing when they start partway through an image, and tightened FFF recognition to reject damaged or invalid files more reliably.
 - Fixed Open LUT Folder also opening the negative-import window in some cases.
 - Fixed catalog roll edits clearing contact-sheet ISO/EI and processing details, preference cancellation not fully reverting previews, and crop actions disappearing with the help text.

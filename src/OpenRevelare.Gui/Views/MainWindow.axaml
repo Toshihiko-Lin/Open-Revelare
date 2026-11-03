@@ -509,58 +509,65 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Margin="1">
-                                <Grid>
-                                    <!-- Pending: the frame is in the roll, its decode has not run yet.
-                                         Quiet neutral panel — this is a wait state, not a warning. -->
-                                    <Border Width="104" Height="76" IsVisible="{Binding IsPending}"
-                                            Background="{DynamicResource ChromeBrush}"
-                                            BorderBrush="{DynamicResource BorderSoftBrush}"
-                                            BorderThickness="1" CornerRadius="2">
-                                        <TextBlock Text="{i18n:T '解码中…'}" FontSize="10"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TextMuteBrush}" />
-                                    </Border>
-                                    <Image Source="{Binding Thumbnail}" Height="76" Stretch="Uniform" />
-                                    <!-- A hairline round the picture, so a frame whose edges are
-                                         near-white stops bleeding into the strip and every cell
-                                         is the same rectangle whatever is inside it. -->
-                                    <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1"
-                                            IsHitTestVisible="False" />
-                                    <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Left"
-                                              VerticalAlignment="Top" Margin="2"
-                                              ToolTip.Tip="{i18n:T '批量操作目标；Ctrl 点选，Shift 连选'}" />
-                                    <!-- Colour and geometry both carry meaning: users can scan the
-                                         rail without having to decipher 9 px labels or rely on hue. -->
-                                    <Border Classes="frameMarkers" HorizontalAlignment="Right"
-                                            VerticalAlignment="Bottom" Margin="3">
-                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                            <Ellipse Width="11" Height="11" Stroke="#C7CBD1" StrokeThickness="1.5"
-                                                     Fill="#32272A2E" IsVisible="{Binding IsUntouched}"
-                                                     ToolTip.Tip="{i18n:T '尚未校准'}" />
-                                            <Path Width="12" Height="12" Stretch="Uniform"
-                                                  Data="M6 0L12 6L6 12L0 6Z" Fill="#E2AD3E"
-                                                  IsVisible="{Binding IsCalibrationOnly}"
-                                                  ToolTip.Tip="{i18n:T '已完成底片校准'}" />
-                                            <Grid Width="13" Height="13" IsVisible="{Binding IsFinished}"
-                                                  ToolTip.Tip="{i18n:T '已有成片调整'}">
-                                                <Ellipse Fill="#36B978" />
-                                                <Path Data="M3.2 6.7L5.5 9L10 4.2" Stroke="White"
-                                                      StrokeThickness="1.5" StrokeLineCap="Round"
-                                                      StrokeJoin="Round" />
-                                            </Grid>
-                                            <Path Width="13" Height="12" Stretch="Uniform"
-                                                  Data="M6 0L12 12H0Z" Fill="#E05A67"
-                                                  IsVisible="{Binding IsSourceMissing}"
-                                                  ToolTip.Tip="{i18n:T '源文件缺失'}" />
-                                            <Border Width="13" Height="13" Background="Transparent"
-                                                    IsVisible="{Binding IsVirtual}"
-                                                    ToolTip.Tip="{i18n:T '虚拟副本'}">
-                                                <ctl:Icon Width="13" Height="13" Data="{StaticResource IcoLayers}"
-                                                          Foreground="#76A9FA" />
-                                            </Border>
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
+                                <!-- The cell's 104:76 design size is only a coordinate system. The
+                                     Viewbox derives its height from the rail's available width, so
+                                     dragging the splitter scales the thumbnail and its overlays
+                                     together instead of leaving a fixed 76 px image in empty space. -->
+                                <Viewbox Stretch="Uniform" StretchDirection="Both"
+                                         HorizontalAlignment="Stretch">
+                                    <Grid Width="104" Height="76">
+                                        <!-- Pending: the frame is in the roll, its decode has not run yet.
+                                             Quiet neutral panel — this is a wait state, not a warning. -->
+                                        <Border IsVisible="{Binding IsPending}"
+                                                Background="{DynamicResource ChromeBrush}"
+                                                BorderBrush="{DynamicResource BorderSoftBrush}"
+                                                BorderThickness="1" CornerRadius="2">
+                                            <TextBlock Text="{i18n:T '解码中…'}" FontSize="10"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextMuteBrush}" />
+                                        </Border>
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                                        <!-- A hairline round the picture, so a frame whose edges are
+                                             near-white stops bleeding into the strip and every cell
+                                             is the same rectangle whatever is inside it. -->
+                                        <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1"
+                                                IsHitTestVisible="False" />
+                                        <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Left"
+                                                  VerticalAlignment="Top" Margin="2"
+                                                  ToolTip.Tip="{i18n:T '批量操作目标；Ctrl 点选，Shift 连选'}" />
+                                        <!-- Colour and geometry both carry meaning: users can scan the
+                                             rail without having to decipher 9 px labels or rely on hue. -->
+                                        <Border Classes="frameMarkers" HorizontalAlignment="Right"
+                                                VerticalAlignment="Bottom" Margin="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <Ellipse Width="11" Height="11" Stroke="#C7CBD1" StrokeThickness="1.5"
+                                                         Fill="#32272A2E" IsVisible="{Binding IsUntouched}"
+                                                         ToolTip.Tip="{i18n:T '尚未校准'}" />
+                                                <Path Width="12" Height="12" Stretch="Uniform"
+                                                      Data="M6 0L12 6L6 12L0 6Z" Fill="#E2AD3E"
+                                                      IsVisible="{Binding IsCalibrationOnly}"
+                                                      ToolTip.Tip="{i18n:T '已完成底片校准'}" />
+                                                <Grid Width="13" Height="13" IsVisible="{Binding IsFinished}"
+                                                      ToolTip.Tip="{i18n:T '已有成片调整'}">
+                                                    <Ellipse Fill="#36B978" />
+                                                    <Path Data="M3.2 6.7L5.5 9L10 4.2" Stroke="White"
+                                                          StrokeThickness="1.5" StrokeLineCap="Round"
+                                                          StrokeJoin="Round" />
+                                                </Grid>
+                                                <Path Width="13" Height="12" Stretch="Uniform"
+                                                      Data="M6 0L12 12H0Z" Fill="#E05A67"
+                                                      IsVisible="{Binding IsSourceMissing}"
+                                                      ToolTip.Tip="{i18n:T '源文件缺失'}" />
+                                                <Border Width="13" Height="13" Background="Transparent"
+                                                        IsVisible="{Binding IsVirtual}"
+                                                        ToolTip.Tip="{i18n:T '虚拟副本'}">
+                                                    <ctl:Icon Width="13" Height="13" Data="{StaticResource IcoLayers}"
+                                                              Foreground="#76A9FA" />
+                                                </Border>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Viewbox>
                                 <!-- Left-aligned, not centred: forty file names down a column are
                                      read by their differences, and centring puts the difference
                                      in a different place on every line. -->

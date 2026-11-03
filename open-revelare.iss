@@ -72,7 +72,10 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 ; 立刻由 [Files] 全量重装，所以是安全的。
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\*.json"
-Type: filesandordirs; Name: "{app}\models"
+; Do not delete models wholesale. Older releases stored an installed Deep-WB weight at
+; {app}\models\net_awb.onnx; retaining it lets an overlay upgrade inherit that optional
+; download. The current README / notice are overwritten by [Files], while new installations
+; store the weight under %LOCALAPPDATA% so subsequent upgrades never touch it.
 Type: filesandordirs; Name: "{app}\runtimes"
 ; D65 LUT 现仅保留程序集中的一份；升级时清理旧安装留下的重复副本。
 Type: files; Name: "{app}\luts\Rec709 Kodak 2383 D65.cube"

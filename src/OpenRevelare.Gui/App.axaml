@@ -881,6 +881,7 @@
             <Setter Property="Padding" Value="3" />
             <Setter Property="Margin" Value="0,2" />
             <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
         <Style Selector="ListBox.filmstrip ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Transitions">
