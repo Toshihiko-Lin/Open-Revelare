@@ -1401,7 +1401,11 @@
                                     <StackPanel Spacing="4">
                                         <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
                                         <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />
+                                                   Text="{i18n:T 'Lensfun 按首张拍摄参数校正整卷；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。'}" />
+                                        <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
+                                                  IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}" />
+                                        <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />

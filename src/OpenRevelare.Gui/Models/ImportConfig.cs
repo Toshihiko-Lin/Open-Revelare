@@ -19,6 +19,8 @@ public sealed class ImportConfig
     public string? CalDir { get; set; }     // Path A calibration directory (R/G/B blank-board RAWs)
     public bool LccEnabled { get; set; }
     public string? LccPath { get; set; }
+    public LensfunCalibration? Lensfun { get; set; }
+    public bool LensfunEnabled { get; set; }
 
     /// <summary>
     /// Run the roll-wide auto-inversion chain (片基 → 亮部 WB → D-max → 黑白场) after the roll

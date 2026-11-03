@@ -242,6 +242,14 @@ HEIC EXPORT RUNTIME
 
 ACKNOWLEDGEMENTS (no code incorporated)
 
+  Lensfun calibration database — Lensfun contributors (CC BY-SA 3.0 Unported)
+    https://github.com/lensfun/lensfun
+    Bundled unmodified XML database files in
+    src/OpenRevelare.Core/Assets/Lensfun/database.zip, used for offline lens
+    identification in the import dialog. No Lensfun library code is incorporated.
+    The pinned source revision and license are distributed in licenses/lensfun/.
+    https://creativecommons.org/licenses/by-sa/3.0/
+
   LightSourceDecouple — Toshihiko-Lin, karasuyasabou (MIT)
     https://github.com/karasuyasabou/LightSourceDecouple
     The narrow-band RGB decoupling approach (Path A) originates here.

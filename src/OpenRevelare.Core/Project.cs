@@ -510,7 +510,9 @@ public static class Project
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["dust_enabled"] = p.DustEnabled,
             ["dust_spots"] = DustSpots(p.DustSpots),
-            ["lensfun_override"] = null,                     // C# build has no lensfun
+            ["lensfun_override"] = null, // reserved for legacy Python project compatibility
+            ["lensfun_calibration"] = p.Lensfun is null ? null : JsonSerializer.SerializeToNode(p.Lensfun),
+            ["lensfun_enabled"] = p.LensfunEnabled,
             ["vignette_amount"] = p.VignetteAmount,
             ["vignette_falloff"] = p.VignetteFalloff,
             ["distortion_k1"] = p.DistortionK1,
@@ -594,6 +596,8 @@ public static class Project
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),
             VignetteFalloff = Dbl(d, "vignette_falloff", 2.5),
             DistortionK1 = Dbl(d, "distortion_k1", 0.0),
+            Lensfun = d["lensfun_calibration"]?.Deserialize<LensfunCalibration>(),
+            LensfunEnabled = Bool(d, "lensfun_enabled", false),
             WbGains = Vec3(d, "wb_gains", 1, 1, 1),
             ExposureEv = Dbl(d, "exposure_ev", 0.0),
             BlackPoint = Dbl(d, "black_point", 0.0),

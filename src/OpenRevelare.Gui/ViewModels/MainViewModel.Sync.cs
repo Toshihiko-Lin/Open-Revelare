@@ -254,7 +254,7 @@ public partial class MainViewModel
                 d.DMaxPerChannel = (double[])s.DMaxPerChannel.Clone();
             }
             if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
-            if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; }
+            if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; d.Lensfun = s.Lensfun; d.LensfunEnabled = s.LensfunEnabled; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform
         }
         if (scene)

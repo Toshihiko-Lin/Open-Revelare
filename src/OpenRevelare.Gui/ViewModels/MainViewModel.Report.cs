@@ -61,6 +61,9 @@ public sealed partial class MainViewModel
         sb.AppendLine("  " + DensityCorrectionText);
         sb.AppendLine("  " + DensityCorrectionSourceText);
         sb.AppendLine("  " + CaptureCorrectionScopeText);
+        sb.AppendLine("  " + LensfunProfileText);
+        sb.AppendLine("  " + Loc.F($"Lensfun 启用：{LensfunEnabled}"));
+        if (LensfunAvailable) sb.AppendLine("  " + LensfunDetails);
 
         if (LccEnabled && _lccFlatField is { } flat)
         {

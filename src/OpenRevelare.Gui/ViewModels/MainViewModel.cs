@@ -1012,6 +1012,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
     partial void OnLccEnabledChanged(bool value)
     {
+        NotifyLensfunInfo();
         foreach (RollFrame frame in Frames)
             frame.Params.LccFlatField = value && LccAvailable ? _lccFlatField : null;
         InvalidateOpticalCalibration();
@@ -2200,6 +2201,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         PrintLutOutput = _printLutIndex > 0 ? PrintLutOutputName : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
+        Lensfun = _lensfunCalibration,
+        LensfunEnabled = LensfunEnabled,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
@@ -2520,12 +2523,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (ReferenceEquals(neg, _previewLinear)) _previewStamp?.RequireCurrent();
         CalibrationSources.RequireCurrent(BuildParams());
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
-        if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
+        bool lensfunVignette = LensfunEnabled && _lensfunCalibration is { IsUsable: true, Vignetting: not null } && lcc is null;
+        if (lcc is null && !lensfunVignette && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
         var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone())
             .InheritSourceFrom(neg);
         if (lcc is not null)
             Lcc.Apply(src.Data, src.Width, src.Height, lcc);
+        else if (lensfunVignette)
+            LensfunCorrections.ApplyVignetting(src, _lensfunCalibration!);
         if (VignetteAmount != 0.0)
             LensCorrections.ApplyVignette(src.Data, src.Width, src.Height, VignetteAmount, VignetteFalloff);
         if (_decoupleMatrix is not null)
@@ -4014,6 +4020,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // a rendered positive and that render has to be the one the user is looking at.
         DMaxPerChannel = (double[])highlight.Clone(),
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
+        Lensfun = _lensfunCalibration, LensfunEnabled = LensfunEnabled,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
         // gains are folded straight into the highlight endpoint, which is then applied to a
@@ -4666,6 +4673,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RetranslateText()
     {
+        NotifyLensfunInfo();
         NotifyRollBroadcastHints();
         OnPropertyChanged(nameof(SmartCastFeedbackText));
         OnPropertyChanged(nameof(DeepWbInstallHint));

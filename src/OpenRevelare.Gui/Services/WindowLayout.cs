@@ -13,7 +13,7 @@ internal static class WindowLayout
         Dispatcher.UIThread.Post(() => FitToScreen(window), DispatcherPriority.Loaded);
     });
 
-    private static void FitToScreen(Window window)
+    internal static void FitToScreen(Window window)
     {
         var screen = window.Screens.ScreenFromWindow(window) ?? window.Screens.Primary;
         if (screen is null) return;

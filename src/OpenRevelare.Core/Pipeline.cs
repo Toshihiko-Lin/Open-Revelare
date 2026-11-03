@@ -340,6 +340,8 @@ public static class Pipeline
         // in-place op still has to write somewhere private.
         ImageBuffer src = img;
 
+        bool lensfun = LensfunCorrections.IsActive(cal);
+        if (lensfun) src = LensfunCorrections.Apply(src, cal);
         if (cal.DistortionK1 != 0.0)
             src = LensCorrections.ApplyDistortion(src, cal.DistortionK1);
 
@@ -358,7 +360,7 @@ public static class Pipeline
 
         if (inPlaceOps)
         {
-            if (cal.LccFlatField != null)
+            if (cal.LccFlatField != null && !lensfun)
                 Lcc.Apply(src.Data, src.Width, src.Height, cal.LccFlatField);
             if (cal.VignetteAmount != 0.0)
                 LensCorrections.ApplyVignette(src.Data, src.Width, src.Height,
