@@ -17,6 +17,15 @@ public static class FilmAutoCrop
         public double RotationCorrection { get; init; }
         public FilmPolarity Polarity { get; init; }
         public bool HasPerforationRuler { get; init; }
+        /// <summary>Centre of the perforation row pair across the strip, normalised on the same
+        /// frame as <see cref="Image"/>. The film is physically centred on that pair, while an
+        /// exposed gate can sit up to a millimetre off it — and on a reversal film the resulting
+        /// sliver of light table above the border crop is glaring. NaN when no ruler was found.</summary>
+        public double AcrossCentre { get; init; } = double.NaN;
+        /// <summary>35 mm film width normalised on the across axis of the same frame. Caps the
+        /// border crop so an overestimated gate scale can never grow it past the film. NaN when
+        /// unknown.</summary>
+        public double FilmWidth { get; init; } = double.NaN;
     }
 
     /// <summary>Use the same geometric domain as the displayed/exported crop. White rotation
@@ -167,7 +176,16 @@ public static class FilmAutoCrop
                         : new Rect((double)low / w, (double)start / h, (double)height / w, (double)length / h);
                 }
             }
-            return bestHoleScore < 0.12 ? null : new Detection(holeFrame, bestHoleScore, source.Width, source.Height) { Polarity = holePolarity, HasPerforationRuler = true };
+            return bestHoleScore < 0.12 ? null : new Detection(holeFrame, bestHoleScore, source.Width, source.Height)
+            {
+                Polarity = holePolarity,
+                HasPerforationRuler = true,
+                // The window this path scans is ±1 mm around the ruler centre, so the chosen
+                // centre is a guess about the gate, not a fact about the film. Report the ruler
+                // itself; Plan needs the strip centre, not the winning rectangle's centre.
+                AcrossCentre = horizontal ? (double)ruler.Centre / h : (double)ruler.Centre / w,
+                FilmWidth = 35 * ruler.AcrossScale / (horizontal ? h : w),
+            };
         }
         double best = 0;
         Rect found = default;
@@ -437,7 +455,12 @@ public static class FilmAutoCrop
         var rect = horizontal ? new Rect(start / (double)w, low / (double)h, (end - start) / (double)w, (high - low) / (double)h)
             : new Rect(low / (double)w, start / (double)h, (high - low) / (double)w, (end - start) / (double)h);
         return new Detection(rect, Math.Max(.12, best * 2), image.Width, image.Height)
-            { Polarity = polarity, HasPerforationRuler = true };
+        {
+            Polarity = polarity,
+            HasPerforationRuler = true,
+            AcrossCentre = horizontal ? (double)centre / h : (double)centre / w,
+            FilmWidth = 35 * acrossScale / (horizontal ? h : w),
+        };
     }
 
     private static (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? PerforationRuler(ImageBuffer image)
@@ -532,20 +555,28 @@ public static class FilmAutoCrop
             double Scale(Detection d) => group.Key.Landscape
                 ? Math.Min(d.Image.W * d.Width / 36, d.Image.H * d.Height / 24)
                 : Math.Min(d.Image.W * d.Width / 24, d.Image.H * d.Height / 36);
+            // The border crop IS the film, so its scale must come from the strip width once the
+            // ruler measured it. An overestimated gate would otherwise scale the crop past the
+            // film edge and show the light table on both sides — glaring on a reversal film.
+            double FilmScale(Detection d) => double.IsFinite(d.FilmWidth) && d.FilmWidth > 0
+                ? d.FilmWidth * (group.Key.Landscape ? d.Height : d.Width) / 35
+                : double.PositiveInfinity;
+            double Used(Detection d) => mode == FilmCropMode.WithSprockets
+                ? Math.Min(Scale(d), FilmScale(d)) : Scale(d);
             double Median(IEnumerable<double> v) { var a = v.Order().ToArray(); return (a[(a.Length - 1) / 2] + a[a.Length / 2]) / 2; }
-            double median = Median(ids.Select(i => Scale(frames[i]!)));
-            var reliable = ids.Where(i => Math.Abs(Scale(frames[i]!) / median - 1) <= 0.08).ToArray();
+            double median = Median(ids.Select(i => Used(frames[i]!)));
+            var reliable = ids.Where(i => Math.Abs(Used(frames[i]!) / median - 1) <= 0.08).ToArray();
             if (reliable.Length == 0) continue;
             // Fit inside all full-gate frames (>= 97.5% of median scale) with a 0.8% optical
             // inset (~0.14 mm per side) so normal frames share one crisp 3:2 size without leaking
             // film base, while a dark partial-gate exposure crops to its own 3:2 gate instead of
             // shrinking the whole roll or getting skipped.
             const double contentInset = .992;
-            var fullGate = reliable.Where(i => Scale(frames[i]!) >= median * .975).ToArray();
+            var fullGate = reliable.Where(i => Used(frames[i]!) >= median * .975).ToArray();
             if (fullGate.Length == 0) fullGate = reliable;
             double scale = mode == FilmCropMode.ImageArea
-                ? fullGate.Min(i => Scale(frames[i]!)) * contentInset
-                : Median(reliable.Select(i => Scale(frames[i]!)));
+                ? fullGate.Min(i => Used(frames[i]!)) * contentInset
+                : Median(reliable.Select(i => Used(frames[i]!)));
             double longSide = mode == FilmCropMode.ImageArea ? 36 : 37;
             // Integer multiples of 3×2 / 37×35 make export dimensions identical across the
             // group, including the one-pixel rounding drift of independently placed rectangles.
@@ -569,8 +600,17 @@ public static class FilmAutoCrop
                     fw = (double)((group.Key.Landscape ? numerator : denominator) * frameUnit) / group.Key.Width;
                     fh = (double)((group.Key.Landscape ? denominator : numerator) * frameUnit) / group.Key.Height;
                 }
-                double x = Math.Round((r.X + r.W / 2 - fw / 2) * group.Key.Width) / group.Key.Width;
-                double y = Math.Round((r.Y + r.H / 2 - fh / 2) * group.Key.Height) / group.Key.Height;
+                // A border crop belongs to the strip, not to the exposure. Following the
+                // perforation pair keeps the margin above and below the frame equal; centring it
+                // on the gate instead hands the leakage to whichever side the gate drifted
+                // towards, which is how a bright sliver of light table ends up on the top border.
+                bool landscape = group.Key.Landscape;
+                double alongCentre = landscape ? r.X + r.W / 2 : r.Y + r.H / 2;
+                double acrossCentre = landscape ? r.Y + r.H / 2 : r.X + r.W / 2;
+                if (mode == FilmCropMode.WithSprockets && double.IsFinite(frames[i]!.AcrossCentre))
+                    acrossCentre = frames[i]!.AcrossCentre;
+                double x = Math.Round((landscape ? alongCentre - fw / 2 : acrossCentre - fw / 2) * group.Key.Width) / group.Key.Width;
+                double y = Math.Round((landscape ? acrossCentre - fh / 2 : alongCentre - fh / 2) * group.Key.Height) / group.Key.Height;
                 // Moving a sprocket crop back into bounds would lose the film edge on one side.
                 // Refuse that frame rather than silently shrinking its zoom or cutting its holes.
                 if (x < 0 || y < 0 || x + fw > 1 || y + fh > 1) continue;

@@ -118,6 +118,57 @@ public sealed class FilmAutoCropTests
         return image;
     }
 
+    // The border crop is the strip, so it must follow the perforation pair. Centring it on the
+    // exposed gate hands the whole misalignment to one side: on a reversal film that side shows
+    // a bright sliver of light table above the frame, while a negative's bright base hides it.
+    [Fact]
+    public void With_border_crop_follows_the_perforation_pair_instead_of_the_gate()
+    {
+        var d = new FilmAutoCrop.Detection(new(.1, .3, .8, .4), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            AcrossCentre = .46,   // ruler centre 0.4 mm above the gate centre at .5
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        Assert.InRange(Math.Abs(border.Y + border.H / 2 - .46), 0, .5 / 4000 + 1e-12);
+        // Content framing keeps following the picture, not the strip.
+        var content = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.ImageArea)[0]!.Value;
+        Assert.InRange(Math.Abs(content.Y + content.H / 2 - .5), 0, .5 / 4000 + 1e-12);
+    }
+
+    // A portrait frame is the same physics with the strip running across X.
+    [Fact]
+    public void With_border_crop_anchors_on_x_when_the_strip_runs_vertically()
+    {
+        var d = new FilmAutoCrop.Detection(new(.2, .1, .4, .8), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            AcrossCentre = .45,
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        Assert.InRange(Math.Abs(border.X + border.W / 2 - .45), 0, .5 / 6000 + 1e-12);
+        // A quarter turn puts the 37 mm side across the strip: width:height is 35:37 here.
+        Assert.Equal(35.0 / 37, border.W * 6000 / (border.H * 4000), 10);
+    }
+
+    // A gate measured too large must not scale the 35 mm border past the film: the crop would
+    // then include the light table on both edges. Content framing is unaffected by that cap.
+    [Fact]
+    public void With_border_crop_never_exceeds_the_measured_film_width()
+    {
+        var d = new FilmAutoCrop.Detection(new(.1, .2, .8, .6), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            FilmWidth = .35,   // 35 mm = 1400 px on a 4000 px-high source
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        int height = (int)(Math.Round((border.Y + border.H) * 4000) - Math.Round(border.Y * 4000));
+        Assert.InRange(height, 1, 1400);
+        Assert.Equal(37.0 / 35, border.W * 6000 / (border.H * 4000), 10);
+        var content = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.ImageArea)[0]!.Value;
+        Assert.True(content.H * 4000 > 1400, "the film cap must not shrink content framing");
+    }
+
     private static FilmAutoCrop.Detection D(double x, double y, double width)
         => new(new(x, y, width, width), 1, 6000, 4000);
 
