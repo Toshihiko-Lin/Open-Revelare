@@ -33,7 +33,10 @@
 
 ### 2.2 Sony ARW 固件校正参数映射
 
-Sony 在 ARW 的 SubIFD 中内嵌了相机固件根据当前对焦距离与变焦焦距实时计算的镜头校正样条样点：
+Sony 在 ARW 的 **MakerNote** 中内嵌了相机固件根据当前对焦距离与变焦焦距实时计算的镜头校正样条样点。
+MetadataExtractor 把这段数据放进 `SonyType1MakernoteDirectory`，**不在** `ExifSubIfdDirectory` 里，
+因此两个 tag 都先查 MakerNote 目录；少数转换后的 DNG 会把这段搬进 Exif SubIFD，作为后备再查一次。
+参数在文件中是 16 位整型，随写入类型不同可能读出 `short[]`（SSHORT）或 `ushort[]`（SHORT），两种都接受。
 - **Tag `0x7037` (`DistortionCorrParams`)**：包含 17 个 16 位整数，第一个为样点数 $n = 16$，后 16 个为从中心 $r=0$ 到边缘 $r=1$ 的畸变位移因子。
   Sony 样条位移因子为 $g(r) = 1 + \frac{f(r)}{16384}$。
   将其与 OpenRevelare 的 $\text{scale}(r) = 1 + k_1 \cdot 3.25 \cdot r^2$ 进行加权最小二乘拟合：
@@ -49,14 +52,22 @@ Sony 在 ARW 的 SubIFD 中内嵌了相机固件根据当前对焦距离与变�
 
 ### 2.3 DNG OpcodeList3 支持
 
-对于 DNG 文件（如扫描仪导出或 Lightroom 线性 DNG），解析 Tag `51022` (`0xC74E` / `OpcodeList3`)：
-- **Opcode 4 (`WarpRectilinear`)**：解析 $k_1$ 并折算至 OpenRevelare 归一化量纲；
-- **Opcode 3 (`FixVignetteRadial`)**：解析多项式系数和求得角隅增益。
+对于 DNG 文件（如扫描仪导出或 Lightroom 线性 DNG），解析 Tag `51022` (`0xC74E` / `OpcodeList3`)。
+Opcode 编号以 Adobe DNG SDK (`dng_opcodes.h`) 为准：**1 = `WarpRectilinear`**、**3 = `FixVignetteRadial`**、
+4 = `FixBadPixelsConstant`（不是径向校正，遇到时忽略）：
+- **Opcode 1 (`WarpRectilinear`)**：uint32 平面数（1 或 3），随后每平面 6 个 double（$k_0 \dots k_5$，
+  按 $r^2$ 的多项式），最后是光学中心 2 个 double。取第一个平面的 $k_1$，
+  按 $k_{1,\text{OpenRevelare}} = k_{1,\text{DNG}} / 3.25$ 折算至 OpenRevelare 归一化量纲。
+- **Opcode 3 (`FixVignetteRadial`)**：$k_0 \dots k_4$ 共 5 个 double，随后是光学中心 2 个 double（共 56 字节）。
+  规范数据把中心增益归一化为 1（$k_0 \approx 1$），故角隅增益为系数和，OpenRevelare 的
+  `amount = 角隅增益 - 1`；少数写入器直接存"增益 - 1"（$k_0 \approx 0$），这种形状也接受。
 
 ### 2.4 翻拍镜头库预设回退 (Heuristic Fallback)
 
-如果图像未包含厂商内嵌的 SubIFD 样条（例如经转接环转接、或元数据丢失）：
-从标准 EXIF 提取 `LensModel`、`FocalLength`、`FNumber`，自动匹配翻拍常用镜头预设：
+如果图像未包含厂商内嵌的 MakerNote 样条（例如经转接环转接、或元数据丢失）：
+从标准 EXIF 提取 `LensModel` (`0xA434`)、`FocalLength`、`FNumber`，自动匹配翻拍常用镜头预设。
+镜头型号只认 `0xA434`：`0xA431` 是机身序列号，拿它查预设既不会命中，还会把用户已手动调好的校正
+覆盖成"未内置校正曲线"（$k_1 = 0$）。
 - Sony FE 70-200mm F4 Macro G OSS II
 - Sony FE 90mm F2.8 Macro G OSS
 - Sony FE 50mm F2.8 Macro
