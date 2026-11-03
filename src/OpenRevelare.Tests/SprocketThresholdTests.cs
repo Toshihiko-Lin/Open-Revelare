@@ -268,4 +268,53 @@ public class SprocketThresholdTests
         });
         Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
     }
+
+    // HP200ii copy-stand captures: the lamp is only ~0.20 in linear RAW,
+    // and every hole is cut by the top/bottom of the photographed frame.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Dim_edge_clipped_hole_rows_are_detected_in_every_orientation(int turns)
+    {
+        ImageBuffer f = DimHoleRows(peripheral: true, regular: true);
+        f = Geometry.ApplyOrientation(f, turns, false, false);
+        double cut = Sprocket.EstimateSprocketThreshold(f);
+        Assert.InRange(cut, 0.085, 0.18);
+        bool[] mask = Sprocket.MakeMask(f.Data, f.PixelCount, (float)cut);
+        for (int p = 0; p < f.PixelCount; p++)
+            Assert.Equal(f.Data[p * 3] > 0.18f, mask[p]);
+    }
+
+    [Theory]
+    [InlineData(false, true)]  // regularly spaced windows inside the picture
+    [InlineData(true, false)]  // irregular bright shapes touching an edge
+    [InlineData(false, false)]
+    public void Dim_bright_blobs_without_hole_topology_remain_unmasked(bool peripheral, bool regular)
+    {
+        Assert.Equal(Sprocket.NoBoard,
+            Sprocket.EstimateSprocketThreshold(DimHoleRows(peripheral, regular)));
+    }
+
+    [Fact]
+    public void A_dim_continuous_rebate_is_not_recovered_as_clipped_holes()
+    {
+        ImageBuffer f = Build((x, y, rng) =>
+            (float)((y < 10 || y >= H - 10 ? 0.20 : 0.065) + 0.002 * rng.Next()));
+        Assert.Equal(Sprocket.NoBoard, Sprocket.EstimateSprocketThreshold(f));
+    }
+
+    private static ImageBuffer DimHoleRows(bool peripheral, bool regular)
+    {
+        ImageBuffer f = Build((x, y, rng) => (float)(0.065 + 0.006 * rng.Next()));
+        int[] xs = regular ? new[] { 16, 48, 80, 112, 144, 176 }
+                           : new[] { 8, 25, 61, 108, 143, 181 };
+        foreach (int top in peripheral ? new[] { 0, H - 9 } : new[] { 85, 110 })
+            foreach (int left in xs)
+                for (int y = top; y < top + 9; y++)
+                    for (int x = left; x < left + 10; x++)
+                        for (int c = 0; c < 3; c++) f.Data[(y * W + x) * 3 + c] = 0.20f;
+        return f;
+    }
 }
