@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
+using MetadataExtractor.Formats.Exif.Makernotes;
 
 namespace OpenRevelare.Core;
 
@@ -28,6 +29,24 @@ public sealed record LensCorrectionEstimate(
 /// </summary>
 public static class LensMetadata
 {
+    /// <summary>EXIF LensModel. 0xA431 is BodySerialNumber and must never stand in for it.</summary>
+    private const int TagLensModel = 0xa434;
+
+    /// <summary>EXIF FocalLength.</summary>
+    private const int TagFocalLength = 0x920a;
+
+    /// <summary>EXIF FNumber.</summary>
+    private const int TagFNumber = 0x829d;
+
+    /// <summary>Sony maker note DistortionCorrParams: 16 radial knots after a count.</summary>
+    private const int TagSonyDistortionCorrParams = 0x7037;
+
+    /// <summary>Sony maker note VignettingCorrParams: 16 radial knots after a count.</summary>
+    private const int TagSonyVignettingCorrParams = 0x7032;
+
+    /// <summary>DNG OpcodeList3.</summary>
+    private const int TagDngOpcodeList3 = 0xc74e;
+
     /// <summary>
     /// Reads lens metadata and embedded corrections from the specified image file.
     /// Returns null if file does not exist, metadata cannot be read, or no lens information is available.
@@ -60,14 +79,14 @@ public static class LensMetadata
         // 0xA431 is BodySerialNumber, not a lens name: using it as a fallback fed serial numbers
         // into the preset lookup (never matching) and could overwrite a manual correction with the
         // "no built-in curve" estimate of k1 = 0.
-        string lensModel = subIfds.Select(d => d.GetString(0xa434))
+        string lensModel = subIfds.Select(d => d.GetString(TagLensModel))
             .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim()
             ?? "";
 
         double focalLength = 0;
         foreach (var d in subIfds)
         {
-            if (d.TryGetDouble(0x920a, out var f) && f > 0)
+            if (d.TryGetDouble(TagFocalLength, out var f) && f > 0)
             {
                 focalLength = f;
                 break;
@@ -77,25 +96,18 @@ public static class LensMetadata
         double fNumber = 0;
         foreach (var d in subIfds)
         {
-            if (d.TryGetDouble(0x829d, out var fn) && fn > 0)
+            if (d.TryGetDouble(TagFNumber, out var fn) && fn > 0)
             {
                 fNumber = fn;
                 break;
             }
         }
 
-        // 1. Sony SubIFD MakerNote tags:
+        // 1. Sony firmware correction parameters:
         //    0x7037: DistortionCorrParams (16-bit signed shorts)
         //    0x7032: VignettingCorrParams (16-bit signed shorts)
-        short[]? sonyDist = null;
-        short[]? sonyVign = null;
-        foreach (var d in subIfds)
-        {
-            if (sonyDist is null && d.GetObject(0x7037) is short[] sDist)
-                sonyDist = sDist;
-            if (sonyVign is null && d.GetObject(0x7032) is short[] sVign)
-                sonyVign = sVign;
-        }
+        short[]? sonyDist = ReadSonyCorrectionKnots(directories, TagSonyDistortionCorrParams);
+        short[]? sonyVign = ReadSonyCorrectionKnots(directories, TagSonyVignettingCorrParams);
 
         if (sonyDist is { Length: >= 17 } || sonyVign is { Length: >= 17 })
         {
@@ -145,9 +157,9 @@ public static class LensMetadata
         // 2. DNG OpcodeList3 (Tag 51022 / 0xC74E)
         foreach (var dir in directories)
         {
-            if (dir.ContainsTag(0xc74e))
+            if (dir.ContainsTag(TagDngOpcodeList3))
             {
-                var opcodeBytes = dir.GetByteArray(0xc74e);
+                var opcodeBytes = dir.GetByteArray(TagDngOpcodeList3);
                 if (opcodeBytes != null && TryParseDngOpcodeList3(opcodeBytes, out var dngK1, out var dngVign, out var dngFalloff))
                 {
                     return new LensCorrectionEstimate(
@@ -249,6 +261,53 @@ public static class LensMetadata
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads a Sony correction block from the Sony maker note directory, falling back to the
+    /// Exif SubIFD (some DNG converters copy the block there).
+    /// </summary>
+    private static short[]? ReadSonyCorrectionKnots(
+        IReadOnlyList<MetadataExtractor.Directory> directories,
+        int tagId)
+    {
+        foreach (var makerNote in directories.OfType<SonyType1MakernoteDirectory>())
+        {
+            if (TryGetInt16Knots(makerNote, tagId, out var knots)) return knots;
+        }
+
+        foreach (var subIfd in directories.OfType<ExifSubIfdDirectory>())
+        {
+            if (TryGetInt16Knots(subIfd, tagId, out var knots)) return knots;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads a 16-bit Sony correction block as signed values. The CLR value depends on the type
+    /// written in the file: TIFF SHORT (3) surfaces as <c>ushort[]</c>, SSHORT (8) as
+    /// <c>short[]</c> (verified against MetadataExtractor 2.9.3), so both are accepted and the
+    /// unsigned form keeps its two's-complement meaning.
+    /// </summary>
+    private static bool TryGetInt16Knots(MetadataExtractor.Directory directory, int tagId, out short[] knots)
+    {
+        switch (directory.GetObject(tagId))
+        {
+            case short[] signedValues:
+                knots = signedValues;
+                return knots.Length > 0;
+
+            case ushort[] unsignedValues:
+                knots = new short[unsignedValues.Length];
+                for (int i = 0; i < unsignedValues.Length; i++)
+                    knots[i] = unchecked((short)unsignedValues[i]);
+                return knots.Length > 0;
+
+            default:
+                knots = [];
+                return false;
         }
     }
 
