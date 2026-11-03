@@ -16,7 +16,7 @@ namespace OpenRevelare.Gui.Views;
 ///
 /// <list type="bullet">
 ///   <item>挂在 <c>Application.Current</c> 上的那棵 → 首个（粗体应用名）菜单。</item>
-///   <item>挂在 <see cref="Window"/> 上的那棵 → 它右边的 File / Edit / View / … 各栏。</item>
+///   <item>挂在 <see cref="Window"/> 上的那棵 → 它右边的 文件 / 编辑 / 视图 / … 各栏。</item>
 /// </list>
 ///
 /// ══ 为什么用 C# 建而不是写在 XAML 里 ══
@@ -91,7 +91,7 @@ public partial class MainWindow
         },
     };
 
-    // ── 窗口菜单（File / Edit / View / Help）─────────────────────────────────────
+    // ── 窗口菜单（文件 / 编辑 / 视图 / 帮助）─────────────────────────────────────
     //
     // 设置 那一栏在 mac 上没了：偏好设置已经按 mac 约定搬进应用菜单；资源位置放在
     // Help 的明确子组中，避免为单个文件夹命令另造一栏。
@@ -217,16 +217,14 @@ public partial class MainWindow
             },
         };
 
-        // 顶栏那五个字保持英文，理由和窗口内菜单同一条（见 MainWindow.axaml 的注释）：
-        // 它们是窗口的固定地标，截图和文档都指着它们。
         return new NativeMenu
         {
             Items =
             {
-                Sub("File", file),
-                Sub("Edit", edit),
-                Sub("View", view),
-                Sub("Help", help),
+                Sub(Loc.T("文件"), file),
+                Sub(Loc.T("编辑"), edit),
+                Sub(Loc.T("视图"), view),
+                Sub(Loc.T("帮助"), help),
             },
         };
     }

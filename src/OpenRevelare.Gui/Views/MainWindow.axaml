@@ -22,18 +22,12 @@
              Everything low-frequency lives here (same 文件/编辑/视图/设置/帮助
              spine as the Python build). The strip keeps only the three commands
              you actually hit mid-edit: 撤销 / 重做 / 重置.
-
-             The five top-level headers stay ENGLISH in both languages — they are
-             the fixed landmarks of the window, they are what every screenshot and
-             every line of the docs points at ("文件 → 导出印样…"), and File/Edit/
-             View is read as an icon rather than as a word. Everything INSIDE them
-             is translated as usual.
              ═══════════════════════════════════════════════════════════════════ -->
         <Border DockPanel.Dock="Top" Padding="8,4" Background="{DynamicResource ChromeBrush}"
                 BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
             <Grid Name="NavigationBar" ColumnDefinitions="*,Auto,*">
                 <Menu Name="WindowMenu" Grid.Column="0" VerticalAlignment="Center">
-                    <MenuItem Header="_File" SubmenuOpened="OnFileMenuOpened">
+                    <MenuItem Header="{i18n:T '文件(_F)'}" SubmenuOpened="OnFileMenuOpened">
                         <MenuItem Header="{i18n:T '新建卷…'}" InputGesture="{i18n:Accel 'N'}" Click="OnOpenClick" />
                         <MenuItem Header="{i18n:T '添加图像到当前卷…'}" InputGesture="{i18n:Accel 'O'}"
                                   Click="OnAddImagesClick" IsEnabled="{Binding HasImage}" />
@@ -69,7 +63,7 @@
                         <MenuItem Header="{i18n:T '退出'}" InputGesture="Alt+F4" Click="OnQuitClick" />
                     </MenuItem>
 
-                    <MenuItem Header="_Edit">
+                    <MenuItem Header="{i18n:T '编辑(_E)'}">
                         <MenuItem Header="{i18n:T '撤销'}" InputGesture="{i18n:Accel 'Z'}" Click="OnUndoClick" IsEnabled="{Binding CanUndo}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoUndo}" />
@@ -133,7 +127,7 @@
                         <MenuItem Header="{i18n:T '选择色彩同步项…'}" Click="OnSyncOptionsClick" IsEnabled="{Binding HasImage}" />
                     </MenuItem>
 
-                    <MenuItem Header="_View">
+                    <MenuItem Header="{i18n:T '视图(_V)'}">
                         <MenuItem Header="{i18n:T '图库（卷墙）'}" InputGesture="G" Click="OnLibraryModeClick">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoGrid}" />
@@ -183,7 +177,7 @@
                         <MenuItem Header="{i18n:T '切换浅色/深色主题'}" InputGesture="{i18n:Accel 'Shift+T'}" Click="OnToggleThemeClick" />
                     </MenuItem>
 
-                    <MenuItem Header="_Settings">
+                    <MenuItem Header="{i18n:T '设置(_S)'}">
                         <MenuItem Header="{i18n:T '偏好设置…（Ctrl+,）'}" Click="OnPreferencesClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '资源与文件夹'}">
@@ -191,7 +185,7 @@
                         </MenuItem>
                     </MenuItem>
 
-                    <MenuItem Header="_Help">
+                    <MenuItem Header="{i18n:T '帮助(_H)'}">
                         <MenuItem Header="{i18n:T '操作指引 / 技术原理…'}" Click="OnDocsClick" />
                         <MenuItem Header="{i18n:T '快捷键…'}" Click="OnHelpClick" />
                         <MenuItem Header="{i18n:T '诊断'}">
