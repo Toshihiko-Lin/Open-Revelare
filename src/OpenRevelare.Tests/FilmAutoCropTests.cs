@@ -130,13 +130,33 @@ public sealed class FilmAutoCropTests
         {
             var box = FilmAutoCrop.Suggest(flat, mode);
             Assert.NotNull(box);
-            var r = box!.Value;
+            var r = box!.Value.Rect;
+            // The fixture is level, so the fallback must not claim a rotation it did not measure.
+            Assert.Equal(0, box.Value.RotationCorrection, 6);
             // 36x24 at the fixture's 10 px/mm, centred on the perforation pair at y = 240.
             Assert.InRange(r.Y * 480 + r.H * 480 / 2, 236, 244);
             Assert.InRange(r.W * 640, 340, 380);
             Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35, r.W * 640 / (r.H * 480), 6);
             Assert.InRange(r.X, 0, 1 - r.W); Assert.InRange(r.Y, 0, 1 - r.H);
         }
+    }
+
+    // The box has to come back levelled: a guess placed axis-aligned on a tilted strip sits across
+    // the film edge, and the user then has to straighten AND reframe by hand.
+    [Theory]
+    [InlineData(2.0)]
+    [InlineData(-2.0)]
+    public void Suggest_levels_a_tilted_strip_and_places_the_box_in_that_frame(double angle)
+    {
+        var tilted = Geometry.ApplyRotation(Unreadable(), angle);
+        Assert.Null(FilmAutoCrop.Detect(tilted));
+        var box = FilmAutoCrop.Suggest(tilted, FilmCropMode.ImageArea);
+        Assert.NotNull(box);
+        Assert.InRange(box!.Value.RotationCorrection, -angle - .3, -angle + .3);
+        var r = box.Value.Rect;
+        Assert.Equal(1.5, r.W * tilted.Width / (r.H * tilted.Height), 6);
+        // The box is expressed in the levelled frame, so it must fit that frame's bounds.
+        Assert.InRange(r.X, 0, 1 - r.W); Assert.InRange(r.Y, 0, 1 - r.H);
     }
 
     // No perforations means no physical reference: a guess would be a coin flip, so none is made

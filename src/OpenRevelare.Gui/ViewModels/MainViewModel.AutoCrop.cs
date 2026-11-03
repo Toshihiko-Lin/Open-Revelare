@@ -32,7 +32,7 @@ public partial class MainViewModel
             var detections = new FilmAutoCrop.Detection?[targets.Length];
             // A frame the detector cannot confirm may still get a starting box; it is applied
             // further down, and only where the frame carries no crop of its own.
-            var suggestions = new FilmAutoCrop.Rect?[targets.Length];
+            var suggestions = new FilmAutoCrop.Suggestion?[targets.Length];
             for (int i = 0; i < snapshots.Length; i++)
             {
                 cts.Token.ThrowIfCancellationRequested();
@@ -55,9 +55,14 @@ public partial class MainViewModel
                             Height = swap ? entry.SourceWidth : entry.SourceHeight,
                         };
                         // The perforations outlive the exposure edges, so they can still place a
-                        // box when the gate itself cannot be read.
-                        return (Detection: confirmed,
-                            Suggestion: confirmed is null ? FilmAutoCrop.Suggest(pixels, mode) : null);
+                        // box when the gate itself cannot be read. Its levelling angle goes into
+                        // the frame exactly like a confirmed detection's, but the straighten
+                        // control cannot represent more than its own range: past that the box
+                        // would be placed in a rotation the frame cannot take.
+                        var suggestion = confirmed is null ? FilmAutoCrop.Suggest(pixels, mode) : null;
+                        if (suggestion is { } sg && Math.Abs(p.Rotation + sg.RotationCorrection) > StraightenLimit)
+                            suggestion = null;
+                        return (Detection: confirmed, Suggestion: suggestion);
                     }, cts.Token);
                     detections[i] = outcome.Detection;
                     suggestions[i] = outcome.Suggestion;
@@ -94,11 +99,12 @@ public partial class MainViewModel
                 s.Frame.Params = s.Params;
                 SetThumbnail(s.Frame, null);
             }
-            // No rotation correction here: a guess has no trustworthy angle of its own, and the
-            // user is about to place the box by hand anyway.
+            // The guess carries the strip's levelling angle, so the frame is straightened and the
+            // box lands parallel to the film edge instead of across it.
             foreach (var s in guessed)
             {
-                var r = s.Crop!.Value;
+                var r = s.Crop!.Value.Rect;
+                s.Params.Rotation += s.Crop!.Value.RotationCorrection;
                 s.Params.CropRect = (r.X, r.Y, r.W, r.H);
                 s.Frame.Params = s.Params;
                 SetThumbnail(s.Frame, null);

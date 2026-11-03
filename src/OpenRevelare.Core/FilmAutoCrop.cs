@@ -27,6 +27,10 @@ public static class FilmAutoCrop
         /// unknown.</summary>
         public double FilmWidth { get; init; } = double.NaN;
     }
+    /// <summary>A starting box for a frame the detector could not confirm, with the angle that
+    /// levels its strip. <see cref="Rect"/> is expressed in the frame rotated by
+    /// <see cref="RotationCorrection"/>, exactly like <see cref="Detection.Image"/>.</summary>
+    public readonly record struct Suggestion(Rect Rect, double RotationCorrection);
 
     /// <summary>Use the same geometric domain as the displayed/exported crop. White rotation
     /// fill is a display convention, not sensor light: it must not become the hole threshold.</summary>
@@ -50,12 +54,35 @@ public static class FilmAutoCrop
     /// when the exposure edges do not. The along position is the best pair of opposite exposure
     /// borders about 36 mm apart; when even those are flat, the window is centred on the scan,
     /// which is right for the common "one frame per photograph" case.
+    ///
+    /// The returned <see cref="Suggestion.RotationCorrection"/> is the same angle a confirmed
+    /// detection reports, and the rectangle is expressed in the frame WITH that rotation applied.
+    /// A tilted strip whose box was placed axis-aligned would sit across the frame edge, which is
+    /// exactly the "it is not straightened" complaint the fallback exists to avoid.
     /// </summary>
-    public static Rect? Suggest(ImageBuffer source, FilmCropMode mode)
+    public static Suggestion? Suggest(ImageBuffer source, FilmCropMode mode)
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         if (source.Width < 64 || source.Height < 64) return null;
         var image = Resample.Box(source, 1200);
+        if (PerforationRuler(image) is not { } ruler) return null;
+        if (Math.Abs(ruler.Angle) > 0.15 && Math.Abs(ruler.Angle) <= 5)
+        {
+            double correction = -ruler.Angle;
+            var levelled = Resample.Box(Geometry.ApplyRotation(source, correction, fill: 0), 1200);
+            // Re-measure on the levelled frame rather than carrying the strip centre across: the
+            // box is centred on that strip, and a centre measured on a tilted frame is off by
+            // more than the margin the box can absorb.
+            if (SuggestCore(levelled, mode) is { } box) return new Suggestion(box, correction);
+        }
+        return SuggestCore(image, mode, ruler) is { } plain ? new Suggestion(plain, 0) : null;
+    }
+
+    /// <summary>Box only, for an already resampled frame. <paramref name="known"/> skips the
+    /// ruler search when the caller has it; it must belong to <paramref name="image"/>.</summary>
+    private static Rect? SuggestCore(ImageBuffer image, FilmCropMode mode,
+        (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? known = null)
+    {
         int w = image.Width, h = image.Height;
         var log = new double[w * h];
         for (int i = 0; i < log.Length; i++)
@@ -64,7 +91,7 @@ public static class FilmAutoCrop
             if (!double.IsFinite(r + g + b)) return null;
             log[i] = Math.Log(Math.Max(1e-6, (Math.Max(0, r) + Math.Max(0, g) + Math.Max(0, b)) / 3));
         }
-        if (PerforationRuler(image) is not { } ruler) return null;
+        if ((known ?? PerforationRuler(image)) is not { } ruler) return null;
         // One square-pixel scale is all a suggestion needs; the two ruler estimates disagree by
         // a fraction of a percent, and taking the smaller keeps the box inside the film.
         double scale = Math.Min(ruler.Scale, ruler.AcrossScale);

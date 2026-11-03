@@ -22,6 +22,7 @@ var detections = new FilmAutoCrop.Detection?[paths.Length];
 // offers, so a real-roll check can judge the fallback instead of only listing "review".
 var suggestions = new FilmAutoCrop.Rect?[paths.Length];
 var suggestedRatios = new double?[paths.Length];
+var suggestedAngles = new double?[paths.Length];
 var previews = new List<ImageBuffer>();
 for (int i = 0; i < paths.Length; i++)
 {
@@ -33,13 +34,19 @@ for (int i = 0; i < paths.Length; i++)
     var d = FilmAutoCrop.Detect(prepared);
     bool swap = ((p.QuarterTurns % 2) + 2) % 2 == 1;
     detections[i] = d is null ? null : d with { Width = swap ? height : width, Height = swap ? width : height };
+    FilmAutoCrop.Suggestion? suggestion = null;
     if (d is null)
     {
-        suggestions[i] = FilmAutoCrop.Suggest(prepared, FilmCropMode.ImageArea);
-        if (suggestions[i] is { } guess)
-            suggestedRatios[i] = Math.Round(guess.W * prepared.Width / (guess.H * prepared.Height), 6);
+        suggestion = FilmAutoCrop.Suggest(prepared, FilmCropMode.ImageArea);
+        suggestions[i] = suggestion?.Rect;
+        suggestedAngles[i] = suggestion?.RotationCorrection;
     }
-    previews.Add(Geometry.ApplyRotation(prepared, d?.RotationCorrection ?? 0, fill: 0));
+    // Draw in the same frame the rectangle belongs to: a suggestion reports the angle that levels
+    // the strip, so the preview must be turned by it or the yellow box looks crooked on the film.
+    var preview = Geometry.ApplyRotation(prepared, d?.RotationCorrection ?? suggestion?.RotationCorrection ?? 0, fill: 0);
+    if (suggestion is { } placed)
+        suggestedRatios[i] = Math.Round(placed.Rect.W * preview.Width / (placed.Rect.H * preview.Height), 6);
+    previews.Add(preview);
     Console.WriteLine($"{i + 1}/{paths.Length} {Path.GetFileName(paths[i])}: " +
         (d is null ? suggestions[i] is null ? "review" : "review (suggested)" : d.Polarity.ToString()));
 }
@@ -66,7 +73,7 @@ for (int i = 0; i < paths.Length; i++)
         overview[(i % 4) * 360 + x, (i / 4) * 240 + y] = view[x * view.Width / 360, y * view.Height / 240];
     var d = detections[i];
     rows.Add(new { File = Path.GetFileName(paths[i]), InitialRotation=initial[i].Rotation, initial[i].DistortionK1, initial[i].VignetteAmount, initial[i].FlipH, initial[i].FlipV, initial[i].QuarterTurns, Detection = d, Content = content[i], Sprockets = sprockets[i],
-        ContentPixels = Size(content[i], d), SprocketPixels = Size(sprockets[i], d), Suggestion = suggestions[i], SuggestedRatio = suggestedRatios[i] });
+        ContentPixels = Size(content[i], d), SprocketPixels = Size(sprockets[i], d), Suggestion = suggestions[i], SuggestedRatio = suggestedRatios[i], SuggestedRotation = suggestedAngles[i] });
 
     void Draw(FilmAutoCrop.Rect? rect, Rgb24 color)
     {

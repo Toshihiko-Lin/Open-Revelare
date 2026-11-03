@@ -108,4 +108,31 @@ public sealed class AutoCropWorkflowTests
         Assert.Null(vm.Frames[0].Params.CropRect);
         Assert.Equal(saved, vm.Frames[1].Params.CropRect);
     }
+
+    // The guess reports the strip's levelling angle, and the frame has to actually receive it —
+    // otherwise the box is drawn straight across a tilted film and the user still has to level it.
+    [Fact]
+    public async Task A_guessed_box_also_straightens_the_frame()
+    {
+        string directory = Path.Combine(TestDataIsolation.Root, "auto-crop-guess-angle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string source = Path.Combine(directory, "tilted.tif");
+        TiffIO.ExportTiff16(Geometry.ApplyRotation(FilmAutoCropTests.Unreadable(), 2), source);
+        string project = Path.Combine(directory, "roll.ncproj");
+        Project.Save(project, new Project.Data
+        {
+            Meta = new() { InputType = "tiff", TiffIsLinear = true },
+            Frames = new() { new() { SourcePath = source } },
+        });
+        using var vm = new MainViewModel();
+        await vm.OpenProjectAsync(project);
+        for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
+        Assert.True(vm.HasImage);
+        await vm.AutoCrop135Async(FilmCropMode.ImageArea, wholeRoll: true);
+
+        Assert.NotNull(vm.Frames[0].Params.CropRect);
+        // A +2° scan is levelled by about -2°, the same sign a confirmed detection would use.
+        Assert.InRange(vm.Frames[0].Params.Rotation, -2.3, -1.7);
+        Assert.Contains("推测", vm.StatusText);
+    }
 }
