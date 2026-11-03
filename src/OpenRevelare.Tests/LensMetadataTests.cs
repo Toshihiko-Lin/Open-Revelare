@@ -276,22 +276,35 @@ public sealed class LensMetadataTests
     }
 
     [Fact]
-    public void EstimateCorrections_FromActualArwIfPresent_MatchesGroundTruth()
+    public void EstimateCorrections_FromRealArwLibrary_UsesFirmwareParameters()
     {
-        // No ARW sample ships with this worktree (scratch/ is not present), so this only runs
-        // where a real capture is available. The synthetic file above covers the same path.
-        const string path = "scratch/test-roll/RAW/DSC01910.ARW";
-        if (!File.Exists(path)) return;
+        // Real captures are not committed. Point OPENREVELARE_LENS_SAMPLES at a directory of Sony
+        // ARW files to run this; with the variable unset the test returns immediately.
+        string? root = Environment.GetEnvironmentVariable("OPENREVELARE_LENS_SAMPLES");
+        if (string.IsNullOrWhiteSpace(root) || !System.IO.Directory.Exists(root)) return;
 
-        var estimate = LensMetadata.EstimateCorrections(path);
-        Assert.NotNull(estimate);
-        Assert.Equal("FE 70-200mm F4 Macro G OSS II", estimate.LensModel);
-        Assert.Equal(126.0, estimate.FocalLengthMm);
-        Assert.Equal(8.0, estimate.FNumber);
-        Assert.InRange(estimate.DistortionK1, 0.011, 0.015);
-        Assert.InRange(estimate.VignetteAmount, 0.16, 0.18);
-        Assert.Contains("Sony RAW", estimate.SourceDescription);
+        string[] samples = System.IO.Directory.GetFiles(root, "*.ARW", SearchOption.AllDirectories);
+        if (samples.Length == 0) return;
+
+        var estimates = samples
+            .OrderBy(p => p)
+            .Select(LensMetadata.EstimateCorrections)
+            .OfType<LensCorrectionEstimate>()
+            .ToList();
+
+        Assert.Equal(samples.Length, estimates.Count);
+        Assert.All(estimates, estimate =>
+        {
+            // The firmware spline has to win over the hard-coded lens preset.
+            Assert.Equal("Sony RAW 固件参数", estimate.SourceDescription);
+            Assert.False(string.IsNullOrWhiteSpace(estimate.LensModel));
+            Assert.InRange(estimate.FocalLengthMm, 1, 2000);
+            Assert.InRange(estimate.FNumber, 1, 64);
+            Assert.InRange(estimate.DistortionK1, 0.001, 0.05);
+            Assert.InRange(estimate.VignetteAmount, 0.01, 0.6);
+        });
     }
+
     /// <summary>
     /// Builds an OpcodeList3 blob: a big-endian count, then per opcode a 16-byte header
     /// (id, version, flags, parameter byte count) followed by the parameters.
