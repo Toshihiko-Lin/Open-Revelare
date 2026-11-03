@@ -47,6 +47,16 @@ public static class LensMetadata
     /// <summary>DNG OpcodeList3.</summary>
     private const int TagDngOpcodeList3 = 0xc74e;
 
+    /// <summary>DNG opcode 1: WarpRectilinear (Adobe DNG SDK, dng_opcodes.h).</summary>
+    private const uint DngOpcodeWarpRectilinear = 1;
+
+    /// <summary>DNG opcode 3: FixVignetteRadial. Opcode 4 is FixBadPixelsConstant, not a warp.</summary>
+    private const uint DngOpcodeFixVignetteRadial = 3;
+
+    /// <summary>Radial coefficients per plane in a WarpRectilinear payload.</summary>
+    private const int WarpCoefficientsPerPlane = 6;
+
+
     /// <summary>
     /// Reads lens metadata and embedded corrections from the specified image file.
     /// Returns null if file does not exist, metadata cannot be read, or no lens information is available.
@@ -207,6 +217,11 @@ public static class LensMetadata
     /// Parses DNG OpcodeList3 binary stream for WarpRectilinear and FixVignetteRadial.
     /// DNG opcodes are stored big-endian.
     /// </summary>
+    /// <remarks>
+    /// Opcode ids follow the Adobe DNG SDK (<c>dng_opcodes.h</c>): 1 = WarpRectilinear,
+    /// 3 = FixVignetteRadial, 4 = FixBadPixelsConstant. Treating 4 as a radial warp (as an
+    /// earlier revision did) meant no conforming DNG was ever read.
+    /// </remarks>
     public static bool TryParseDngOpcodeList3(byte[] data, out double distortionK1, out double vignetteAmount, out double vignetteFalloff)
     {
         distortionK1 = 0;
@@ -232,25 +247,35 @@ public static class LensMetadata
                 if (offset + paramBytes > data.Length) break;
 
                 var paramSpan = span.Slice(offset, (int)paramBytes);
-                if (opcodeId == 4 && paramBytes >= 32) // WarpRectilinear
+                if (opcodeId == DngOpcodeWarpRectilinear)
                 {
-                    // k0, k1, k2, k3 (8-byte doubles, big-endian)
-                    // double k0 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(0, 8));
-                    double k1 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(8, 8));
-                    // OpenRevelare's k1 is normalized by the short frame radius squared (aspect 3:2 => corner r^2 = 3.25)
-                    distortionK1 = Math.Round(k1 / 3.25, 4);
+                    if (TryReadWarpRectilinearK1(paramSpan, out double warpK1))
+                    {
+                        // OpenRevelare's k1 is normalized by the short frame radius squared
+                        // (aspect 3:2 => corner r^2 = 3.25); the DNG polynomial is normalized
+                        // to r = 1 at the corner, hence the division.
+                        distortionK1 = Math.Round(warpK1 / 3.25, 4);
+                    }
                 }
-                else if (opcodeId == 3 && paramBytes >= 40) // FixVignetteRadial
+                else if (opcodeId == DngOpcodeFixVignetteRadial && paramBytes >= 56)
                 {
-                    // k0, k1, k2, k3, k4 (8-byte doubles, big-endian)
+                    // k0..k4 (8-byte doubles, big-endian), then the optical centre (2 doubles).
                     double k0 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(0, 8));
                     double k1 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(8, 8));
                     double k2 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(16, 8));
                     double k3 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(24, 8));
                     double k4 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(32, 8));
-                    double totalGain = k0 + k1 + k2 + k3 + k4;
-                    vignetteAmount = Math.Round(totalGain, 3);
-                    vignetteFalloff = 2.5;
+                    double cornerGain = k0 + k1 + k2 + k3 + k4;
+                    if (cornerGain > 0)
+                    {
+                        // A conforming payload normalises the gain to 1.0 at the optical centre
+                        // (k0 ~ 1), so the corner gain is the sum and OpenRevelare's "amount"
+                        // (gain - 1) is the sum minus one. A few writers store the gain minus one
+                        // directly (k0 ~ 0); keep accepting that shape instead of producing -1.
+                        vignetteAmount = Math.Round(
+                            Math.Abs(k0 - 1.0) <= 0.25 ? cornerGain - 1.0 : cornerGain, 3);
+                        vignetteFalloff = 2.5;
+                    }
                 }
 
                 offset += (int)paramBytes;
@@ -262,6 +287,27 @@ public static class LensMetadata
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads the first-order radial coefficient of a WarpRectilinear payload: a big-endian
+    /// <c>uint32</c> plane count (1 or 3), <c>6</c> doubles per plane (k0..k5 of the polynomial
+    /// in r^2), then the optical centre (2 doubles).
+    /// </summary>
+    private static bool TryReadWarpRectilinearK1(ReadOnlySpan<byte> param, out double k1)
+    {
+        k1 = 0;
+        if (param.Length < 4) return false;
+
+        uint planes = BinaryPrimitives.ReadUInt32BigEndian(param);
+        if (planes is not (1 or 3)) return false;
+
+        int required = 4 + 8 * ((int)planes * WarpCoefficientsPerPlane + 2);
+        if (param.Length < required) return false;
+
+        // Plane 0, coefficient 1 (the r^2 term): 4-byte plane count + one double.
+        k1 = BinaryPrimitives.ReadDoubleBigEndian(param.Slice(4 + 8, 8));
+        return true;
     }
 
     /// <summary>
