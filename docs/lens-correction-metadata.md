@@ -33,22 +33,25 @@
 
 ### 2.2 Sony ARW 固件校正参数映射
 
-Sony 在 ARW 的 **MakerNote** 中内嵌了相机固件根据当前对焦距离与变焦焦距实时计算的镜头校正样条样点。
-MetadataExtractor 把这段数据放进 `SonyType1MakernoteDirectory`，**不在** `ExifSubIfdDirectory` 里，
-因此两个 tag 都先查 MakerNote 目录；少数转换后的 DNG 会把这段搬进 Exif SubIFD，作为后备再查一次。
-参数在文件中是 16 位整型，随写入类型不同可能读出 `short[]`（SSHORT）或 `ushort[]`（SHORT），两种都接受。
+Sony 在 ARW 中内嵌了相机固件根据当前对焦距离与变焦焦距实时计算的镜头校正样条样点。
+按实测，Sony **ILCE-7M5** 的 ARW 把这两个 tag 写在 `ExifSubIfdDirectory`（值为 17 个 `short[]`），
+而 `SonyType1MakernoteDirectory`（该目录本身有上百个 tag）里并没有 `0x7037` / `0x7032`。
+不同机型与写入器把 Sony 厂商 tag 放进哪个目录并不统一，因此两处都查，任一处命中即用固件参数。
+参数是 16 位整型，MetadataExtractor 按文件里写的类型给出 `short[]`（SSHORT）或 `ushort[]`（SHORT），两种都接受。
 - **Tag `0x7037` (`DistortionCorrParams`)**：包含 17 个 16 位整数，第一个为样点数 $n = 16$，后 16 个为从中心 $r=0$ 到边缘 $r=1$ 的畸变位移因子。
   Sony 样条位移因子为 $g(r) = 1 + \frac{f(r)}{16384}$。
   将其与 OpenRevelare 的 $\text{scale}(r) = 1 + k_1 \cdot 3.25 \cdot r^2$ 进行加权最小二乘拟合：
   $$k_1 = \frac{\sum_{i=1}^{n} x_i y_i}{\sum_{i=1}^{n} x_i^2}, \quad x_i = 3.25 \cdot \left(\frac{i - 1}{n - 1}\right)^2, \quad y_i = \frac{\text{knot}_i}{16384}$$
-  以实测样片 `DSC01910.ARW` (FE 70-200mm F4 Macro G OSS II @ 126mm) 为例：
-  拟合计算得 $k_1 = +0.01358$，与用户片夹导轨实测完全拉直的最优系数 $k_1 = +0.0135$ 亚像素吻合。
+  以实测样片（FE 70-200mm F4 Macro G OSS II @ 126mm，样点见上）为例：
+  拟合计算得 $k_1 = +0.0118$（$\sum x y / \sum x^2 = 0.01184$）。
+  同一卷 109 张 ARW 实测：全部命中固件参数，$k_1$ 落在 $0.0118 \sim 0.0119$，角隅暗角随之为 0.168。
 
 - **Tag `0x7032` (`VignettingCorrParams`)**：包含 17 个 16 位整数，代表各径向位置的曝光补偿增益。
   角隅处的理论光通量增益为：
   $$\text{amount} = 2^{\frac{\text{knot}_{16}}{16384}} - 1.0$$
-  以 `DSC01910.ARW`（角隅值 3664）为例，$\text{amount} = 2^{3664/16384} - 1 \approx 0.168$。
-  在观片灯全白空照样片 `DSC02059.ARW` 实测角隅亮度衰减为 0.85，对应需补偿增益 $1/0.85 - 1 = 0.176$，误差极小。
+  以实测样片（角隅样点 3664）为例，$\text{amount} = 2^{3664/16384} - 1 \approx 0.168$，
+  与同卷 109 张 ARW 的实测输出一致。
+  用观片灯全白空照样片交叉验证时，角隅亮度衰减约 0.85，对应需补偿增益 $1/0.85 - 1 = 0.176$，两者相差约 0.008。
 
 ### 2.3 DNG OpcodeList3 支持
 
