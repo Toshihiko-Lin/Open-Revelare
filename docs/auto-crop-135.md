@@ -23,19 +23,11 @@
 
 ## 本地启动
 
-已将源码放在本项目目录。若已安装 .NET 8 SDK：
+需要 .NET 8 SDK：
 
 ```bash
 dotnet run --project src/OpenRevelare.Gui -c Release
 ```
-
-本次工作额外在 `scratch/dotnet/` 安装了本地 SDK，在 `scratch/nuget/` 缓存了依赖，并构建了当前 macOS arm64 的 LibRaw、LittleCMS、HEIC 和计算后端。当前机器可在项目目录执行：
-
-```bash
-NUGET_PACKAGES="$PWD/scratch/nuget" ./scratch/dotnet/dotnet run --project src/OpenRevelare.Gui -c Release --no-restore
-```
-
-这些本地依赖和测试副本均位于 Git 忽略目录，换机仍按仓库原有构建说明准备环境。
 
 ## 验证
 
