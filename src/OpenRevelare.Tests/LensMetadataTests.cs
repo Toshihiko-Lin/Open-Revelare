@@ -94,6 +94,21 @@ public sealed class LensMetadataTests
     }
 
     [Fact]
+    public void TryParseDngOpcodeList3_NearRectilinearWarpIsStillAHit()
+    {
+        // A macro prime is essentially rectilinear: a real Nikon Z 8 + 105mm DNG carries
+        // plane-0 k1 = 0.000048, which is 0.000015 after the /3.25 conversion. Rounding that to
+        // four decimals produced 0 and the old "k1 != 0" success test then reported "no data",
+        // dropping the file onto a preset 66x larger.
+        byte[] payload = WarpRectilinearPayload(planes: 1, k1: 0.000048);
+        bool ok = LensMetadata.TryParseDngOpcodeList3(OpcodeList3((1, payload)), out var k1, out _, out _);
+
+        Assert.True(ok);
+        Assert.Equal(0.000015, k1, 9);
+        Assert.NotEqual(0d, k1);
+    }
+
+    [Fact]
     public void TryParseDngOpcodeList3_Opcode4FixBadPixelsConstant_IsNotReadAsAWarp()
     {
         // Opcode 4 is FixBadPixelsConstant. The previous revision treated it as WarpRectilinear,

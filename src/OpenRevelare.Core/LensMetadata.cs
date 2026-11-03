@@ -237,6 +237,7 @@ public static class LensMetadata
             var span = data.AsSpan();
             uint count = BinaryPrimitives.ReadUInt32BigEndian(span);
             int offset = 4;
+            bool found = false;
 
             for (uint i = 0; i < count && offset + 16 <= data.Length; i++)
             {
@@ -255,8 +256,11 @@ public static class LensMetadata
                     {
                         // OpenRevelare's k1 is normalized by the short frame radius squared
                         // (aspect 3:2 => corner r^2 = 3.25); the DNG polynomial is normalized
-                        // to r = 1 at the corner, hence the division.
-                        distortionK1 = Math.Round(warpK1 / 3.25, 4);
+                        // to r = 1 at the corner, hence the division. Keep six digits: a nearly
+                        // rectilinear macro lens carries k1 around 1e-5, and rounding to four
+                        // decimals would silently turn that into 0.
+                        distortionK1 = Math.Round(warpK1 / 3.25, 6);
+                        found = true;
                     }
                 }
                 else if (opcodeId == DngOpcodeFixVignetteRadial && paramBytes >= 56)
@@ -277,13 +281,17 @@ public static class LensMetadata
                         vignetteAmount = Math.Round(
                             Math.Abs(k0 - 1.0) <= 0.25 ? cornerGain - 1.0 : cornerGain, 3);
                         vignetteFalloff = 2.5;
+                        found = true;
                     }
                 }
 
                 offset += (int)paramBytes;
             }
 
-            return distortionK1 != 0 || vignetteAmount != 0;
+            // A recognised opcode counts as a hit even when the correction is (near) zero: a
+            // rectilinear macro lens legitimately carries k1 ~ 0, and calling that "no data" threw
+            // such files back onto a lens preset that is orders of magnitude off.
+            return found;
         }
         catch
         {
