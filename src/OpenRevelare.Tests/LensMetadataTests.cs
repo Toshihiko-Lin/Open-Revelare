@@ -96,6 +96,21 @@ public sealed class LensMetadataTests
     }
 
     [Fact]
+    public void EstimateCorrections_BodySerialNumberOnly_DoesNotInventALens()
+    {
+        // 0xA431 is BodySerialNumber. Using it as a LensModel fallback looked presets up by serial
+        // number (never matching) and could replace a manual correction with k1 = 0.
+        var subIfd = new ExifSubIfdDirectory();
+        subIfd.Set(0xa431, "2024000123");
+        subIfd.Set(0x920a, 126.0);
+        subIfd.Set(0x829d, 8.0);
+
+        var estimate = LensMetadata.EstimateCorrections([subIfd]);
+
+        Assert.Null(estimate);
+    }
+
+    [Fact]
     public void EstimateCorrections_FromActualArwIfPresent_MatchesGroundTruth()
     {
         const string path = "scratch/test-roll/RAW/DSC01910.ARW";

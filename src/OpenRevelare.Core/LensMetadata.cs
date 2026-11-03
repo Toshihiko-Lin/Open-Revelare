@@ -56,10 +56,12 @@ public static class LensMetadata
         if (directories is null || directories.Count == 0) return null;
 
         var subIfds = directories.OfType<ExifSubIfdDirectory>().ToList();
-        var ifd0 = directories.OfType<ExifIfd0Directory>().FirstOrDefault();
 
-        string lensModel = subIfds.Select(d => d.GetString(0xa434)).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim()
-            ?? subIfds.Select(d => d.GetString(0xa431)).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim()
+        // 0xA431 is BodySerialNumber, not a lens name: using it as a fallback fed serial numbers
+        // into the preset lookup (never matching) and could overwrite a manual correction with the
+        // "no built-in curve" estimate of k1 = 0.
+        string lensModel = subIfds.Select(d => d.GetString(0xa434))
+            .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim()
             ?? "";
 
         double focalLength = 0;
