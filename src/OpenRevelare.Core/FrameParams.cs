@@ -402,6 +402,9 @@ public sealed class FrameParams
     /// </summary>
     public double[,]? InputPrimaries { get; set; }
 
+    /// <summary>Runtime-only RAW negative-view transform; never enters film inversion or projects.</summary>
+    public double[,]? NegativeCameraToWorking { get; set; }
+
     /// <summary>
     /// White point of <see cref="InputPrimaries"/> as CIE xy.
     ///
@@ -551,6 +554,7 @@ public sealed class FrameParams
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccFlatField,
         InputPrimaries = InputPrimaries,
+        NegativeCameraToWorking = NegativeCameraToWorking,
         InputWhitePoint = InputWhitePoint,
         DecoupleMatrix = DecoupleMatrix,
         DecoupleMode = DecoupleMode,

@@ -73,7 +73,7 @@ public partial class MainWindow
             return;
         }
 
-        ColorDiagnosticStatus.IsVisible = true;
+        ColorDiagnosticStatus.IsVisible = false;
 
         preview!.ContractChanged += OnWindowsDisplayContractChanged;
         preview.PresentationFailed += OnWindowsPresentationFailed;
@@ -308,6 +308,7 @@ public partial class MainWindow
         // The exception's own message is developer text; it stays in the diagnostics ("Composition
         // error: …") rather than becoming the sentence the user is handed.
         _lastWindowsColorDiagnostics = BuildWindowsColorDiagnostics(error);
+        ColorDiagnosticStatus.IsVisible = true;
         ColorDiagnosticText.Text = ColorDiagnosticBadge.Format(
             string.Empty,
             default,
@@ -629,36 +630,10 @@ public partial class MainWindow
         catch (FormatException) { return Color.Parse("#5E5E5E"); }
     }
 
-    /// <summary>
-    /// 没有原生宿主的平台的徽章内容：色彩管线版本与 TIFF 输入假设，加上诚实的 surface 能力。
-    ///
-    /// Linux 当前只有 Avalonia SDR bitmap surface，没有 display contract / HDR headroom，
-    /// 不能声称 WYSIWYG。HDR 渲染和导出仍然可用；这里只说明本机预览的最后一跳。
-    ///
-    /// 没有打开卷时整条徽章隐藏 —— 这条信息是按卷成立的，空着显示一个默认值只会误导。
-    /// </summary>
+    // Platform limitations and normal pipeline details are available in Help → Diagnostics.
     private void UpdateColorPipelineOnlyStatus()
     {
-        if (ActivePreview is not null) return;
-        if (Vm is not { HasImage: true } vm)
-        {
-            ColorDiagnosticStatus.IsVisible = false;
-            return;
-        }
-
-        ColorDiagnosticStatus.IsVisible = true;
-        bool linux = OperatingSystem.IsLinux();
-        ColorDiagnosticText.Text = linux
-            ? Loc.T("Linux 预览 · SDR") + " · " + vm.ColorPipelineDiagnostic
-            : vm.ColorPipelineDiagnostic;
-        ColorDiagnosticText.Foreground = Brushes.Gray;
-        // This is a declared platform limit, not a failed presenter. Keep the badge neutral while
-        // making the boundary discoverable where a Linux user will actually look for it.
-        ToolTip.SetTip(
-            ColorDiagnosticStatus,
-            linux
-                ? Loc.T("Linux 当前通过 Avalonia SDR surface 预览；HDR 渲染与导出仍可用，HDR 屏幕预览等待 Avalonia 提供合成线程内的 HDR GPU interop。")
-                : null);
+        if (ActivePreview is null) ColorDiagnosticStatus.IsVisible = false;
     }
 
     private void UpdateWindowsColorStatus()
@@ -667,7 +642,8 @@ public partial class MainWindow
         DisplayContract? contract = preview.CurrentContract;
         if (contract is null)
         {
-            ColorDiagnosticText.Text = "Native preview · probing display contract…";
+            ColorDiagnosticStatus.IsVisible = false;
+            ColorDiagnosticText.Text = string.Empty;
             ColorDiagnosticText.Foreground = Brushes.Orange;
             // Transient, and not a fault: do not leave a stale hover behind.
             ToolTip.SetTip(ColorDiagnosticStatus, null);
@@ -677,34 +653,8 @@ public partial class MainWindow
         Vm?.SetDisplayHdrCapability(DescribeDisplayCapability(preview, contract));
         string monitor = DescribeMonitorName(preview, contract);
         string warning = preview.VisibleWarning ?? preview.LastPresentationError ?? string.Empty;
-        string guarantee = PresentationGuarantee.IsEffective(
-            contract,
-            preview.IsPresenterAvailable)
-            ? "WYSIWYG"
-            : "unmanaged";
-        // The guarantee above is about the LAST hop only. On a roll whose input was never
-        // characterized — RAW today — an unqualified "WYSIWYG" is read as a claim about the whole
-        // chain, while the full diagnostics one click away say "Input encoding: Uncharacterized".
-        // Both are true; only one of them is on screen. D-009 asks the visible one to be honest.
-        // Kept SHORT on purpose. This TextBlock is capped at MaxWidth 560 with CharacterEllipsis,
-        // and the badge's fixed prefix already spends most of it — a fuller sentence here gets
-        // trimmed mid-qualifier, which reads worse than the unqualified word it was meant to fix.
-        // Scoping the claim is what matters; "why" is one hover (the tooltip) or one click
-        // (复制色彩诊断) away, where it says "Input encoding: Uncharacterized" in full.
-        if (Vm?.InputIsUncharacterized == true)
-            guarantee += Services.Loc.T("（显示端）");
-        // Same honesty for the top of the range. WYSIWYG is a claim about the last hop's colour
-        // transform; when the render reaches above what this panel can show, the highlights are
-        // either soft-proofed into it (D-028) or, with no headroom to proof into, clipped. Either
-        // way the picture on screen is not the render above diffuse white, and the badge says so.
-        if (Vm is { PreviewHighlightHeadroom: > 1f } vm && guarantee.StartsWith("WYSIWYG", StringComparison.Ordinal))
-        {
-            if (HighlightSoftProof.IsNeeded(vm.PreviewHighlightHeadroom, contract.ExtendedHeadroom))
-                guarantee += Services.Loc.T("（高光软校样）");
-            else if (!(contract.ExtendedHeadroom > 1f))
-                guarantee += Services.Loc.T("（高光裁切）");
-        }
         bool hasWarning = !string.IsNullOrWhiteSpace(warning);
+        ColorDiagnosticStatus.IsVisible = hasWarning;
         // Which advice applies is decided by the typed owner, not by the warning text; see
         // ColorDiagnosticBadge.
         bool colorManagementUnavailable = contract.TransformOwner == FinalTransformOwner.None;
@@ -712,7 +662,7 @@ public partial class MainWindow
             contract.DiagnosticName,
             contract.Encoding,
             monitor,
-            guarantee,
+            string.Empty,
             hasWarning,
             colorManagementUnavailable);
         ColorDiagnosticText.Foreground = hasWarning ? Brushes.OrangeRed : Brushes.Gray;
@@ -811,6 +761,7 @@ public partial class MainWindow
             text.AppendLine(contract.DeviceProfile is { } profile
                 ? $"Monitor profile: {profile.Description} [{profile.Identity.Sha256Hex}]"
                 : "Monitor profile: owned by system or unavailable");
+            text.AppendLine(ColorDiagnosticBadge.DescribeDisplaySpace(contract, DescribeMonitorName(preview, contract)));
             bool effectiveWysiwyg = PresentationGuarantee.IsEffective(
                 contract,
                 preview.IsPresenterAvailable);
@@ -831,14 +782,32 @@ public partial class MainWindow
         return text.ToString().TrimEnd();
     }
 
+    private string BuildUnifiedDiagnostics()
+    {
+        // Retain a recorded composition failure alongside a fresh frame/display snapshot.
+        string current = BuildWindowsColorDiagnostics();
+        var text = new StringBuilder(Vm?.BuildFrameReport() ?? string.Empty);
+        text.AppendLine();
+        text.AppendLine(current);
+        if (_lastWindowsColorDiagnostics.Contains("Composition error:", StringComparison.Ordinal)
+            && !string.Equals(current, _lastWindowsColorDiagnostics, StringComparison.Ordinal))
+        {
+            text.AppendLine();
+            text.AppendLine(_lastWindowsColorDiagnostics);
+        }
+        return text.ToString();
+    }
+
     private async void OnCopyColorDiagnosticsClick(
         object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
-        _lastWindowsColorDiagnostics = BuildWindowsColorDiagnostics();
+        string report = BuildUnifiedDiagnostics();
         if (Clipboard is { } clipboard)
-            await clipboard.SetTextAsync(_lastWindowsColorDiagnostics);
-        if (Vm is { } vm) vm.StatusText = "色彩诊断已复制";
+        {
+            await clipboard.SetTextAsync(report);
+            if (Vm is { } vm) vm.StatusText = Loc.T("诊断已复制");
+        }
     }
 
     private void StopWindowsPresentation()

@@ -17,7 +17,7 @@ public sealed class FrameReportDialog : Window
 {
     public FrameReportDialog(string report)
     {
-        Title = Loc.T("本帧技术报告");
+        Title = Loc.T("诊断");
         Width = 640;
         Height = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;

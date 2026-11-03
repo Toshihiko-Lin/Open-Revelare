@@ -18,6 +18,8 @@ public static class Settings
         public RawDecode.RawBackend DecodeBackend { get; set; } = RawDecode.RawBackend.Auto;
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public RawDecode.FbddMode FbddMode { get; set; } = RawDecode.FbddMode.Off;
+        /// <summary>Viewer-only camera matrix; default retains existing negative-view appearance.</summary>
+        public bool CharacterizeRawNegativeView { get; set; }
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public GpuAccelerationMode GpuMode { get; set; } = GpuAccelerationMode.Auto;
         public string Theme { get; set; } = "dark";     // "dark" | "light"

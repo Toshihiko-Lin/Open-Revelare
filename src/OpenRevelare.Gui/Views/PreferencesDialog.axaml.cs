@@ -33,6 +33,7 @@ public sealed class PreferencesDialog : Window
     private TextBlock _dngNote = new();
     private TextBlock _concurrencyNote = new();
     private CheckBox _autoInvert = new();
+    private CheckBox _cameraColor = new();
     private CheckBox _cacheOn = new();
     private CheckBox _cachePersist = new();
     private TextBox _cacheDir = new();
@@ -48,7 +49,7 @@ public sealed class PreferencesDialog : Window
     /// <summary>Everything the user can have changed but not yet saved.</summary>
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
-                                string SheetDir, int SheetBudget, bool AutoInvert, int Gpu);
+                                string SheetDir, int SheetBudget, bool AutoInvert, int Gpu, bool CameraColor);
 
     public PreferencesDialog()
     {
@@ -74,7 +75,8 @@ public sealed class PreferencesDialog : Window
             SheetDir: s.SheetCacheDirectory,
             SheetBudget: sb >= 0 ? sb : Array.IndexOf(SheetBudgets, 1),
             AutoInvert: s.AutoInvertOnImport,
-            Gpu: s.GpuMode == GpuAccelerationMode.Off ? 1 : 0));
+            Gpu: s.GpuMode == GpuAccelerationMode.Off ? 1 : 0,
+            CameraColor: s.CharacterizeRawNegativeView));
     }
 
     private State Snapshot() => new(
@@ -90,11 +92,14 @@ public sealed class PreferencesDialog : Window
         SheetDir: _sheetDir.Text ?? "",
         SheetBudget: Math.Max(0, _sheetBudget.SelectedIndex),
         AutoInvert: _autoInvert.IsChecked ?? true,
-        Gpu: Math.Max(0, _gpu.SelectedIndex));
+        Gpu: Math.Max(0, _gpu.SelectedIndex),
+        CameraColor: _cameraColor.IsChecked ?? false);
 
     private void Build(State v)
     {
         Title = Loc.T("偏好设置");
+        _cameraColor = new CheckBox { Content = Loc.T("使用相机色彩显示 RAW 底片（仅影响查看）"), IsChecked = v.CameraColor };
+        ToolTip.SetTip(_cameraColor, Loc.T("采用相机矩阵与拍摄白平衡显示底片；不改变片基采样、反相或导出。缺少有效矩阵时保留原显示。"));
 
         _backend = Combo(new[] { Loc.T("自动（LibRaw；打不开的文件才用 DNG Converter）"), "LibRaw", "Adobe DNG Converter" }, v.Backend);
         _fbdd = Combo(new[] { Loc.T("关闭", "FBDD"), Loc.T("轻度"), Loc.T("完全") }, v.Fbdd);
@@ -140,11 +145,14 @@ public sealed class PreferencesDialog : Window
 
         var panel = new StackPanel { Spacing = 8 };
         panel.Children.Add(new TextBlock { Text = Loc.T("偏好设置"), Classes = { "dialogTitle" } });
-        panel.Children.Add(Row(Loc.T("RAW 解码后端"), _backend));
-        panel.Children.Add(_dngNote);
-        panel.Children.Add(Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd));
-        panel.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
-        panel.Children.Add(Details(Loc.T("解码资源详情"), _concurrencyNote));
+        var decodeOptions = new StackPanel { Spacing = 8 };
+        decodeOptions.Children.Add(Row(Loc.T("RAW 解码后端"), _backend));
+        decodeOptions.Children.Add(_dngNote);
+        decodeOptions.Children.Add(Row(Loc.T("FBDD 色度降噪（去马赛克前）"), _fbdd));
+        decodeOptions.Children.Add(_cameraColor);
+        decodeOptions.Children.Add(Row(Loc.T("RAW 并发解码数"), _concurrency));
+        decodeOptions.Children.Add(Details(Loc.T("解码资源详情"), _concurrencyNote));
+        panel.Children.Add(Details(Loc.T("高级解码选项"), decodeOptions));
         panel.Children.Add(Row(Loc.T("GPU 加速"), _gpu));
         panel.Children.Add(new TextBlock {
             Text = Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。"),
@@ -322,6 +330,7 @@ public sealed class PreferencesDialog : Window
         Settings.Model s = Settings.Current;
         s.DecodeBackend = (RawDecode.RawBackend)Math.Max(0, _backend.SelectedIndex);
         s.FbddMode = (RawDecode.FbddMode)Math.Max(0, _fbdd.SelectedIndex);
+        s.CharacterizeRawNegativeView = _cameraColor.IsChecked ?? false;
         s.Theme = _theme.SelectedIndex == 1 ? "light" : "dark";
         s.Language = _language.SelectedIndex switch { 1 => "zh", 2 => "en", _ => "auto" };
         s.DecodeConcurrency = Math.Max(0, _concurrency.SelectedIndex);

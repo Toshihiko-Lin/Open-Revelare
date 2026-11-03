@@ -147,10 +147,19 @@ public sealed partial class MainViewModel
         if (RawDecode.IsRawExtension(path))
         {
             sb.AppendLine(Loc.F($"  路径　　相机 RAW（LibRaw，UniWB 线性解码；后端 {Settings.Current.DecodeBackend}）"));
-            double[,]? matrix = RawDecode.CameraToSrgbMatrix(path, out string diagnosis);
-            sb.AppendLine(matrix is not null
-                ? Loc.T("  相机矩阵　数据库可用但未应用：负片翻拍保持相机原生通道，等待灯光 / 胶片联合表征")
-                : Loc.F($"  相机矩阵　无 —— {diagnosis}；输入原色按约定处理，色彩为推定而非表征"));
+            RawColorMetadata metadata = RawDecode.ReadColorMetadata(path);
+            sb.AppendLine(metadata.CameraToLinearSrgb is not null
+                ? Settings.Current.CharacterizeRawNegativeView && CurrentNegativeCameraTransform() is not null
+                    ? Loc.T("  相机矩阵　仅底片显示启用；采样与反相保持相机原生通道")
+                    : Loc.T("  相机矩阵　可用；未参与底片显示或反相")
+                : Loc.F($"  相机矩阵　无 —— {metadata.MatrixEvidence}；输入原色按约定处理，色彩为推定而非表征"));
+            sb.AppendLine("  " + metadata.NativeBuild);
+            if (metadata.Levels is { } levels)
+            {
+                sb.AppendLine(Loc.F($"  文件电平　黑 {levels.Black:G6}；白 {levels.White:G6}；通道黑偏置 {string.Join(", ", levels.ChannelBlack)}"));
+                sb.AppendLine(Loc.T("  电平说明　以上为文件头证据；实际解包与处理后的值可用 audit-input 检查，不重复扣黑。"));
+            }
+            else sb.AppendLine(Loc.T("  文件电平　当前原生库未提供扩展诊断"));
             if (RawDecode.ReadNefCompression(path) is { } nef)
                 sb.AppendLine(Loc.F($"  NEF 压缩　{nef}"));
         }

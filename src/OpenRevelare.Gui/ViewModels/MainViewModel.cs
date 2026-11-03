@@ -627,6 +627,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void ClearPreviewCaches()
     {
+        RawDecode.ClearSourceCache();
+        _negativeCameraTransforms.Clear();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
         // Keep cache invalidation and tile insertion under one gate: a decode from the previous
@@ -2085,6 +2087,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return wb;
     }
 
+    public void RefreshViewingPreferences()
+    {
+        ClearSharpPatch();
+        if (_showingNegative) RefreshNegativeView();
+    }
+
+    private readonly Dictionary<string, double[,]?> _negativeCameraTransforms = new(StringComparer.Ordinal);
+
+    private double[,]? CurrentNegativeCameraTransform()
+    {
+        if (!Settings.Current.CharacterizeRawNegativeView || CurrentFrame is not { } frame
+            || !RawDecode.IsRawExtension(frame.Path)) return null;
+        SourceStamp stamp = SourceStamp.Capture(frame.Path);
+        if (_negativeCameraTransforms.TryGetValue(stamp.Key, out var hit)) return hit;
+        var matrix = CameraCharacterization.ToWorking(RawDecode.CameraToSrgbMatrix(frame.Path));
+        stamp.RequireCurrent();
+        _negativeCameraTransforms[stamp.Key] = matrix;
+        return matrix;
+    }
+
     /// <summary>
     /// True while the preview is showing the positive WITHOUT Stage-2 edits (before/after compare).
     ///
@@ -2148,6 +2170,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Snapshot the current state into a FrameParams for a render/export.</summary>
     private FrameParams BuildParams() => new()
     {
+        NegativeCameraToWorking = _showingNegative ? CurrentNegativeCameraTransform() : null,
         // Always BASIC. The intent stopped being a roll-level mode when the output space became
         // one: "linear" is a property of a particular EXPORT (hand this file to a colourist),
         // not of how the roll is being worked on. The preview is therefore always the full
@@ -2277,7 +2300,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // the highlight sampler's "darkest part of the negative" is judged through a cast too.
         // Null for a scanner TIFF or a camera with no as-shot record, in which case this is a
         // no-op and the view is what it always was.
-        NegativeView.ApplyWhiteBalance(disp.Data, CurrentNegativeWb());
+        NegativeView.Prepare(disp.Data, CurrentNegativeWb(), parameters.NegativeCameraToWorking);
         // A VIEWER transform — primaries + encoding curve only. NOT step 4: that carries the
         // Cineon encode and its display rendering, which describe a calibrated positive, while
         // this buffer is raw scene-linear film that nothing has inverted or calibrated. Running it
@@ -3212,7 +3235,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             int failed = 0;
             string? failReason = null;
             ReportBackground(Loc.F($"整卷分析 0/{order.Count} …"));
-            await Parallel.ForEachAsync(order, new ParallelOptions
+            var pipelineVersion = _colorPipelineVersion;
+            var inputAssumption = _tiffInputAssumption;
+            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            await Parallel.ForEachAsync(batches, new ParallelOptions
             {
                 CancellationToken = ct,
                 // PreviewAsync still shares the warm-up's cache and in-flight decodes.  The
@@ -3220,81 +3246,93 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // buffers outside the decode memory gate, so keep that fan-out deliberately
                 // narrower than the warm-up.
                 MaxDegreeOfParallelism = Math.Min(ImageIo.PreviewWorkers, AnalysisWorkers),
-            }, async (item, token) =>
+            }, async (batch, token) =>
             {
-                var (rollIndex, path, pre, frame) = item;
-                ImageBuffer raw;
-                try { raw = (await PreviewAsync(path, pre).WaitAsync(token)).Preview; }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
+                PreviewCache.Entry[]? batchEntries = null;
+                if (batch.Length > 1)
                 {
-                    // Undecodable frame → it does not vote. It is COUNTED, though, and the roll
-                    // is told at the end. This used to be a bare swallow, and on an 8 GB machine
-                    // splitting a Flextight strip it swallowed OutOfMemoryException: a split
-                    // scan's cells each decode the whole file (2.3 GB of float for a 190 MP
-                    // strip) and run PreviewWorkers wide, so some cells failed to allocate and
-                    // silently dropped out. The roll then took wb_high from whichever cells
-                    // survived — a different answer on every import, and no hint that the vote
-                    // was short. The pooled result is still the best available; the silence was
-                    // the bug.
-                    Interlocked.Increment(ref failed);
-                    failReason = ex is OutOfMemoryException ? Loc.T("内存不足") : ex.Message;
+                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                        pipelineVersion, inputAssumption).WaitAsync(token); }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* Preserve per-frame error handling below. */ }
+                }
+                for (int j = 0; j < batch.Length; j++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var (rollIndex, path, pre, frame) = batch[j];
+                    ImageBuffer raw;
+                    try { raw = (batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token)).Preview; }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        // Undecodable frame → it does not vote. It is COUNTED, though, and the roll
+                        // is told at the end. This used to be a bare swallow, and on an 8 GB machine
+                        // splitting a Flextight strip it swallowed OutOfMemoryException: a split
+                        // scan's cells each decode the whole file (2.3 GB of float for a 190 MP
+                        // strip) and run PreviewWorkers wide, so some cells failed to allocate and
+                        // silently dropped out. The roll then took wb_high from whichever cells
+                        // survived — a different answer on every import, and no hint that the vote
+                        // was short. The pooled result is still the best available; the silence was
+                        // the bug.
+                        Interlocked.Increment(ref failed);
+                        failReason = ex is OutOfMemoryException ? Loc.T("内存不足") : ex.Message;
+                        ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
+                        continue;
+                    }
+
+                    raw = Resample.Box(raw, AnalysisMaxEdge);
+
+                    // Restrict to the KEPT PICTURE before measuring anything — the same rule
+                    // AutoRegion states for the single-frame path. What PreviewAsync returns is the
+                    // whole file (single-frame scans get no region decode, so `pre` is null), and a
+                    // scan's black surround and film edges are denser than any real tone: leaving
+                    // them in hands D_max the border instead of the scene's highlight, and drags the
+                    // roll's D-max reduction with it. On a region decode the buffer is already the
+                    // margin box, so the frame's own rect is relative to that box, not to the file.
+                    // Un-oriented throughout: this is the raw sampling domain, before the geometry
+                    // stage, which is the same domain AutoRegion works in.
+                    var stored = UnorientRect(frame.Params.CropRect, frame.Params);
+                    var crop = pre is { } box && stored is { } inner ? Relative(inner, box) : stored;
+                    if (crop is { } c && (c.W >= 0.999 && c.H >= 0.999)) crop = null;
+
+                    // Same two-buffer contract the single-frame path uses: masks key off the RAW
+                    // luma (where the board cut is calibrated), values come from the Stage-1
+                    // (decoupled) domain the inversion actually divides.
+                    //
+                    // Stage 1 runs on the FULL buffer and the crop is applied AFTER, exactly as
+                    // AutoRegionStage1 does: vignette correction is radial about the frame centre, so
+                    // correcting an already-cropped buffer would centre the falloff on the wrong point.
+                    ImageBuffer? dec = Stage1Source(raw);
+                    ImageBuffer val = ReferenceEquals(dec, raw) || dec is null ? raw : dec;
+
+                    // The UNCROPPED buffer is kept alongside the cropped one, because t_base is the
+                    // one measurement that must NOT see the crop.
+                    //
+                    // Every other statistic here wants the kept picture: D-max and the highlight pick
+                    // are about the scene, so the border must go. The film base is the opposite — it
+                    // is bare rebate at the frame's edge, which is exactly what a crop removes. Stage
+                    // 1 measures the whole frame and finds it; stage 2 was cropping first, so the
+                    // sliver estimator had nothing left to find and fell through to the bright-tail
+                    // fallback, which reports picture highlights instead. That is why a roll opened
+                    // with a correct base drifted the moment the roll-wide pass finished, and why
+                    // re-running it on one frame could not recover: measured on 图像 001a, a 2% crop
+                    // cut the sliver's vote count from 7/8 frames to 3/8 and a 5% crop to 0/8, at
+                    // which point t_base jumped from (0.397, 0.272, 0.155) to the tail's answer.
+                    ImageBuffer baseMask = raw;
+                    ImageBuffer baseValue = val;
+
+                    if (crop is { } cc)
+                    {
+                        bool shared = ReferenceEquals(val, raw);
+                        raw = Geometry.ApplyCrop(raw, cc);
+                        val = shared ? raw : Geometry.ApplyCrop(val, cc);
+                    }
+                    lock (gate)
+                    {
+                        completed.Add((rollIndex, raw, val, baseMask, baseValue));
+                    }
                     ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
-                    return;
                 }
-
-                raw = Resample.Box(raw, AnalysisMaxEdge);
-
-                // Restrict to the KEPT PICTURE before measuring anything — the same rule
-                // AutoRegion states for the single-frame path. What PreviewAsync returns is the
-                // whole file (single-frame scans get no region decode, so `pre` is null), and a
-                // scan's black surround and film edges are denser than any real tone: leaving
-                // them in hands D_max the border instead of the scene's highlight, and drags the
-                // roll's D-max reduction with it. On a region decode the buffer is already the
-                // margin box, so the frame's own rect is relative to that box, not to the file.
-                // Un-oriented throughout: this is the raw sampling domain, before the geometry
-                // stage, which is the same domain AutoRegion works in.
-                var stored = UnorientRect(frame.Params.CropRect, frame.Params);
-                var crop = pre is { } box && stored is { } inner ? Relative(inner, box) : stored;
-                if (crop is { } c && (c.W >= 0.999 && c.H >= 0.999)) crop = null;
-
-                // Same two-buffer contract the single-frame path uses: masks key off the RAW
-                // luma (where the board cut is calibrated), values come from the Stage-1
-                // (decoupled) domain the inversion actually divides.
-                //
-                // Stage 1 runs on the FULL buffer and the crop is applied AFTER, exactly as
-                // AutoRegionStage1 does: vignette correction is radial about the frame centre, so
-                // correcting an already-cropped buffer would centre the falloff on the wrong point.
-                ImageBuffer? dec = Stage1Source(raw);
-                ImageBuffer val = ReferenceEquals(dec, raw) || dec is null ? raw : dec;
-
-                // The UNCROPPED buffer is kept alongside the cropped one, because t_base is the
-                // one measurement that must NOT see the crop.
-                //
-                // Every other statistic here wants the kept picture: D-max and the highlight pick
-                // are about the scene, so the border must go. The film base is the opposite — it
-                // is bare rebate at the frame's edge, which is exactly what a crop removes. Stage
-                // 1 measures the whole frame and finds it; stage 2 was cropping first, so the
-                // sliver estimator had nothing left to find and fell through to the bright-tail
-                // fallback, which reports picture highlights instead. That is why a roll opened
-                // with a correct base drifted the moment the roll-wide pass finished, and why
-                // re-running it on one frame could not recover: measured on 图像 001a, a 2% crop
-                // cut the sliver's vote count from 7/8 frames to 3/8 and a 5% crop to 0/8, at
-                // which point t_base jumped from (0.397, 0.272, 0.155) to the tail's answer.
-                ImageBuffer baseMask = raw;
-                ImageBuffer baseValue = val;
-
-                if (crop is { } cc)
-                {
-                    bool shared = ReferenceEquals(val, raw);
-                    raw = Geometry.ApplyCrop(raw, cc);
-                    val = shared ? raw : Geometry.ApplyCrop(val, cc);
-                }
-                lock (gate)
-                {
-                    completed.Add((rollIndex, raw, val, baseMask, baseValue));
-                }
-                ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
             });
             ReportBackground("");
             ct.ThrowIfCancellationRequested();

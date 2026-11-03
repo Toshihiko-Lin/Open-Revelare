@@ -160,35 +160,50 @@ public partial class MainViewModel
         {
             int done = 0, total = order.Count;
             ReportBackground(Loc.F($"后台解码 0/{total} …"));
-            await Parallel.ForEachAsync(order, opts, async (item, token) =>
+            var pipelineVersion = _colorPipelineVersion;
+            var inputAssumption = _tiffInputAssumption;
+            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            await Parallel.ForEachAsync(batches, opts, async (batch, token) =>
             {
-                var (path, pre) = item;
-                PreviewCache.Entry entry;
-                try { entry = await PreviewAsync(path, pre).WaitAsync(token); }
-                catch (OperationCanceledException) { throw; }
-                catch { Interlocked.Increment(ref done); return; }   // undecodable → skip, keep going
-
-                // Publish each frame's thumbnail the moment its decode lands, rather than at the
-                // end of the roll — the strip fills in progressively instead of all at once.
-                // Matched on the preview key, so a split frame only takes the decode of its OWN
-                // slice and not a sibling's.
-                string key = PreviewKey(path, pre);
-                List<RollFrame> targets = await Dispatcher.UIThread.InvokeAsync(() =>
-                    Frames.Where(f => f.Thumbnail is null &&
-                                      PreviewKey(f.Path, SplitCropOf(f)) == key)
-                          .ToList());
-                foreach (RollFrame f in targets)
+                PreviewCache.Entry[]? batchEntries = null;
+                if (batch.Length > 1)
                 {
-                    if (token.IsCancellationRequested) return;
-                    try { await RenderThumbnailAsync(f, entry.Working, pre, token); }
-                    catch (OperationCanceledException) { return; }
-                    catch { /* one bad thumbnail must not stop the roll */ }
+                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                        pipelineVersion, inputAssumption).WaitAsync(token); }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* Retry cells independently: a bad crop must not hide its siblings. */ }
                 }
+                for (int j = 0; j < batch.Length; j++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var (path, pre) = batch[j];
+                    PreviewCache.Entry entry;
+                    try { entry = batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token); }
+                    catch (OperationCanceledException) { throw; }
+                    catch { Interlocked.Increment(ref done); continue; }   // undecodable → skip, keep going
 
-                int n = Interlocked.Increment(ref done);
-                ReportBackground(n >= total ? "" : Loc.F($"后台解码 {n}/{total} …"));
-                // Each landed decode leaves one more tile behind, so the cover can fill in.
-                await Dispatcher.UIThread.InvokeAsync(MarkSheetDirty);
+                    // Publish each frame's thumbnail the moment its decode lands, rather than at the
+                    // end of the roll — the strip fills in progressively instead of all at once.
+                    // Matched on the preview key, so a split frame only takes the decode of its OWN
+                    // slice and not a sibling's.
+                    string key = PreviewKey(path, pre);
+                    List<RollFrame> targets = await Dispatcher.UIThread.InvokeAsync(() =>
+                        Frames.Where(f => f.Thumbnail is null &&
+                                          PreviewKey(f.Path, SplitCropOf(f)) == key)
+                              .ToList());
+                    foreach (RollFrame f in targets)
+                    {
+                        if (token.IsCancellationRequested) return;
+                        try { await RenderThumbnailAsync(f, entry.Working, pre, token); }
+                        catch (OperationCanceledException) { return; }
+                        catch { /* one bad thumbnail must not stop the roll */ }
+                    }
+
+                    int n = Interlocked.Increment(ref done);
+                    ReportBackground(n >= total ? "" : Loc.F($"后台解码 {n}/{total} …"));
+                    // Each landed decode leaves one more tile behind, so the cover can fill in.
+                    await Dispatcher.UIThread.InvokeAsync(MarkSheetDirty);
+                }
             });
             ReportBackground("");
             // The roll is as decoded as it will get (frames that failed above stay tile-less, and

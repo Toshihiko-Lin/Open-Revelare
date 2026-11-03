@@ -22,6 +22,14 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class NegativeView
 {
+    /// <summary>Viewer-only characterization. Source measurements and inversion remain UniWB.</summary>
+    public static void Prepare(float[] data, double[]? whiteBalance, double[,]? cameraToWorking = null)
+    {
+        ApplyWhiteBalance(data, whiteBalance);
+        if (cameraToWorking is not null)
+            OutputRender.ApplyMatrix(data, cameraToWorking, ColorPipeline.Working, GamutMapping.PreserveExtended);
+    }
+
     /// <summary>
     /// Luminance weights of <see cref="ColorPipeline.Working"/> — the Y row of its RGB→XYZ matrix,
     /// the same derivation <c>Stage2</c> uses for the space IT runs in. ACEScg because this gain is

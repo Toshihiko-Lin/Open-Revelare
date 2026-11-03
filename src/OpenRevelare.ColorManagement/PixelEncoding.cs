@@ -12,6 +12,8 @@ public enum TransferState
     Unknown,
     ProfileEncoded,
     LinearInProfilePrimaries,
+    /// <summary>Linear sensor/capture channels whose primaries are not an ICC colour space.</summary>
+    LinearInCaptureChannels,
 }
 
 public enum NumericRange
@@ -56,8 +58,8 @@ public sealed record CharacterizedPixelEncoding : PixelEncoding
         : base(transfer, range)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        if (transfer == TransferState.Unknown)
-            throw new ArgumentException("A characterized encoding cannot have an unknown transfer state.", nameof(transfer));
+        if (transfer is not (TransferState.ProfileEncoded or TransferState.LinearInProfilePrimaries))
+            throw new ArgumentException("A characterized encoding needs a transfer state in its profile primaries.", nameof(transfer));
         Profile = profile;
         Reference = reference;
     }

@@ -20,6 +20,14 @@ public static class RawDecode
 {
     /// <summary>Opt-in phase timing; emits no file names or image content.</summary>
     public static readonly ActivitySource Diagnostics = new("OpenRevelare.RawDecode");
+    private static readonly RawSourceCache SourceBytes = new(256L << 20,
+        () => PhysicalMemory.TryGetAvailableBytes(out long free) ? free : null);
+
+    /// <summary>Release retained source bytes without interrupting active native decoders.</summary>
+    public static void ClearSourceCache() => SourceBytes.Clear();
+
+    public static (long ResidentBytes, int Entries, long Hits, long Misses, long Joins) SourceCacheStatistics()
+        => SourceBytes.Snapshot();
     // Camera RAW extensions, as a ROUTING HINT ONLY — this decides whether a file is handed to
     // LibRaw or to TiffIO, nothing more. LibRaw itself dispatches on file CONTENT, not on the
     // name: a file with a RAW extension that is not actually RAW is rejected by the decoder
@@ -377,52 +385,92 @@ public static class RawDecode
             // frame to read nine numbers — measured at 3.5 s per file against 14 ms without it.
             using RawContext ctx = RawContext.OpenFile(path);
 
-            var m = ctx.RgbCamera;
-            var result = new double[3, 3];
-            double sum = 0;
-            for (int r = 0; r < 3; r++)
-                for (int c = 0; c < 3; c++)
-                {
-                    result[r, c] = m[r, c];
-                    sum += Math.Abs(result[r, c]);
-                }
-
-            // An unknown camera leaves the matrix all-zero; an identity means LibRaw had nothing
-            // to say either. Both are "no characterisation available", not a usable transform.
-            if (sum < 1e-6)
-            {
-                diagnosis = CoreText.F($"矩阵全零（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
-                return null;
-            }
-
-            bool identity = true;
-            for (int r = 0; r < 3 && identity; r++)
-                for (int c = 0; c < 3; c++)
-                    if (Math.Abs(result[r, c] - (r == c ? 1.0 : 0.0)) > 1e-6) { identity = false; break; }
-
-            if (identity)
-            {
-                // LibRaw parsed the file but has no colorimetry for this body — its camera table
-                // stops before the newer ones. Try the hand-maintained fallback before giving up.
-                string make = ctx.ImageParams.Make, model = ctx.ImageParams.Model;
-                double[,]? fb = CameraMatrixFallback.CameraToSrgb(make, model);
-                if (fb is not null)
-                {
-                    diagnosis = CoreText.F($"内置后备矩阵（{make} {model}）");
-                    return fb;
-                }
-                diagnosis = CoreText.F($"LibRaw 与内置后备表都没有这台相机（{make} {model}）");
-                return null;
-            }
-
-            diagnosis = CoreText.F($"LibRaw 的相机矩阵（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
-            return result;
+            return ReadCameraMatrix(ctx, out diagnosis);
         }
         catch (Exception ex)
         {
             // A colour probe must never break opening a file — but it must not hide why either.
             diagnosis = CoreText.F($"读取失败：{ex.GetType().Name}: {ex.Message}");
             return null;
+        }
+    }
+
+    private static double[,]? ReadCameraMatrix(RawContext ctx, out string diagnosis)
+    {
+        diagnosis = "";
+        var m = ctx.RgbCamera;
+        if (Enumerable.Range(0, 3).Any(r => !float.IsFinite(m[r,3]) || Math.Abs(m[r,3]) > 1e-6))
+        {
+            diagnosis = "Four-colour camera matrix requires a four-channel transform";
+            return null;
+        }
+        var result = new double[3, 3];
+        double sum = 0;
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 3; c++)
+            {
+                result[r, c] = m[r, c];
+                if (!double.IsFinite(result[r, c]))
+                {
+                    diagnosis = "Invalid non-finite camera matrix";
+                    return null;
+                }
+                sum += Math.Abs(result[r, c]);
+            }
+
+        // An unknown camera leaves the matrix all-zero; an identity means LibRaw had nothing
+        // to say either. Both are "no characterisation available", not a usable transform.
+        if (sum < 1e-6)
+        {
+            diagnosis = CoreText.F($"矩阵全零（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
+            return null;
+        }
+
+        bool identity = true;
+        for (int r = 0; r < 3 && identity; r++)
+            for (int c = 0; c < 3; c++)
+                if (Math.Abs(result[r, c] - (r == c ? 1.0 : 0.0)) > 1e-6) { identity = false; break; }
+
+        if (identity)
+        {
+            // LibRaw parsed the file but has no colorimetry for this body — its camera table
+            // stops before the newer ones. Try the hand-maintained fallback before giving up.
+            string make = ctx.ImageParams.Make, model = ctx.ImageParams.Model;
+            double[,]? fb = CameraMatrixFallback.CameraToSrgb(make, model);
+            if (fb is not null)
+            {
+                diagnosis = CoreText.F($"内置后备矩阵（{make} {model}）");
+                return fb;
+            }
+            diagnosis = CoreText.F($"LibRaw 与内置后备表都没有这台相机（{make} {model}）");
+            return null;
+        }
+
+        diagnosis = CoreText.F($"LibRaw 的相机矩阵（{ctx.ImageParams.Make} {ctx.ImageParams.Model}）");
+        return result;
+    }
+
+    /// <summary>File/decoder evidence only; does not infer a film stock or illuminant.</summary>
+    public static RawColorMetadata ReadColorMetadata(string path)
+    {
+        using RawContext ctx = RawContext.OpenFile(path);
+        var (make, model) = ctx.ImageParams;
+        double[,]? matrix = ReadCameraMatrix(ctx, out string evidence);
+        double[][]? rows = matrix is null ? null : Enumerable.Range(0, 3)
+            .Select(r => Enumerable.Range(0, 3).Select(c => matrix[r,c]).ToArray()).ToArray();
+        float[] wb = ctx.CameraMultipler;
+        double[]? gains = wb.Take(3).All(v => float.IsFinite(v) && v > 0)
+            ? new[] { (double)wb[0] / wb[1], 1d, (double)wb[2] / wb[1] } : null;
+        return new(make, model, gains, rows, evidence, ctx.Levels, Native.BuildInfo);
+    }
+
+    public static string NativeBuildInfo
+    {
+        get
+        {
+            try { return Native.BuildInfo; }
+            catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException)
+            { return $"RAW decoder unavailable: {ex.GetType().Name}"; }
         }
     }
 
@@ -551,7 +599,12 @@ public static class RawDecode
         if (UnsupportedRawReason(path) is { } unsupported) throw new NotSupportedException(unsupported);
 
         byte[] bytes;
-        using (Diagnostics.StartActivity("raw.read")) bytes = ReadFilePinned(path);
+        using (var trace = Diagnostics.StartActivity("raw.read"))
+        {
+            bytes = SourceBytes.Read(path, ReadFilePinned, out string status);
+            trace?.SetTag("raw.source-cache", status);
+            trace?.SetTag("raw.source-bytes", bytes.LongLength);
+        }
         RawContext ctx;
         using (Diagnostics.StartActivity("raw.open")) ctx = RawContext.FromBuffer(bytes);
         try
@@ -559,16 +612,33 @@ public static class RawDecode
             using (Diagnostics.StartActivity("raw.unpack")) ctx.Unpack();
 
             // Preserve the SENSOR lattice before dcraw_process scales it into a 16-bit output.
-            // LibRaw exposes this file's actual colour maximum, so 1/maximum describes a raw code
-            // in normalised linear units without guessing 12/14/16 bit from an extension. It is
-            // slightly optimistic when a non-zero black offset narrows the usable range, but far
-            // more truthful than the previous zero ("continuous/unknown") and avoids inventing a
-            // camera-specific black level. Demosaic and box averaging create intermediate float
-            // values but cannot manufacture source information between sensor codes.
+            // Use native per-channel black/white evidence when the extended bridge exposes it;
+            // the most coarsely sampled channel bounds the source lattice. This records precision,
+            // not an extra black subtraction: dcraw_process already performs that correction.
             int rawMaximum = ctx.ColorMaximum;
-            double sourceQuantisationStep = rawMaximum > 0
-                ? 1.0 / rawMaximum
-                : 1.0 / 65535.0;
+            RawLevelMetadata? levels = ctx.Levels;
+            double sourceQuantisationStep = levels is { QuantisationStep: > 0 }
+                ? levels.QuantisationStep
+                : rawMaximum > 0 ? 1.0 / rawMaximum : 1.0 / 65535.0;
+            using (var levelTrace = Diagnostics.StartActivity("raw.levels"))
+            {
+                levelTrace?.SetTag("raw.black", levels?.Black);
+                levelTrace?.SetTag("raw.white", levels?.White);
+                levelTrace?.SetTag("raw.source-step", sourceQuantisationStep);
+                levelTrace?.SetTag("raw.warnings", levels?.Warnings);
+                levelTrace?.SetTag("raw.levels-available", levels is not null);
+                if (levels is not null)
+                {
+                    levelTrace?.SetTag("raw.maximum-adjustment-threshold", levels.MaximumAdjustmentThreshold);
+                    levelTrace?.SetTag("raw.highlight-mode", levels.HighlightMode);
+                    levelTrace?.SetTag("raw.black-pattern-max", levels.PatternMaximum);
+                    for (int c = 0; c < 4; c++)
+                    {
+                        levelTrace?.SetTag($"raw.channel-black.{c}", levels.ChannelBlack[c]);
+                        levelTrace?.SetTag($"raw.channel-white.{c}", levels.ChannelWhite[c]);
+                    }
+                }
+            }
 
             // The inset crop is applied under half-size too. LibRaw takes params.cropbox in
             // full-resolution sensor coordinates whatever the shrink, and halves it itself:
@@ -594,6 +664,19 @@ public static class RawDecode
             // linear gamma, 16-bit, no auto-bright, AHD demosaic, FBDD per preference.
             using (Diagnostics.StartActivity(halfSize ? "raw.process.preview" : "raw.process.full"))
                 ctx.Process((int)fbdd, halfSize, cropbox);
+            // Maximum adjustment can change the scale after unpack. Keep the precision bound
+            // conservative against that effective normalization too, without touching pixels.
+            var after = ctx.Levels;
+            if (after is { White: > 0 }) sourceQuantisationStep = Math.Max(sourceQuantisationStep, 1d / after.White);
+            if (Diagnostics.HasListeners())
+            {
+                using var processed = Diagnostics.StartActivity("raw.levels.processed");
+                processed?.SetTag("raw.black", after?.Black);
+                processed?.SetTag("raw.white", after?.White);
+                processed?.SetTag("raw.data-maximum", after?.DataMaximum);
+                processed?.SetTag("raw.source-step", sourceQuantisationStep);
+                processed?.SetTag("raw.warnings", after?.Warnings);
+            }
             return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep);
         }
         catch { ctx.Dispose(); throw; }
@@ -1211,7 +1294,7 @@ public static class RawDecode
             CaptureKind.RawCameraNative,
             stableId,
             CompatibilityPolicy.LegacyTreatNumbersAsWorking,
-            TransferState.Unknown,
+            TransferState.LinearInCaptureChannels,
             NumericRange.Normalized);
         var source = new SourceDescriptor(
             stableId,

@@ -16,7 +16,7 @@ public class ColorDiagnosticBadgeTests
         "ColorProfileGetDisplayDefault failed with 0x80070002.";
 
     [Fact]
-    public void Healthy_badge_is_unchanged_and_offers_no_hover()
+    public void Healthy_display_details_stay_out_of_daily_ui()
     {
         string badge = ColorDiagnosticBadge.Format(
             "Windows Advanced Color · WideColorGamut",
@@ -26,10 +26,11 @@ public class ColorDiagnosticBadgeTests
             hasWarning: false,
             colorManagementUnavailable: false);
 
-        Assert.Equal(
-            "Windows Advanced Color · WideColorGamut · LinearExtendedSrgbRgba16F · " +
-            "VG27AQ1A · WYSIWYG（显示端）",
-            badge);
+        Assert.Empty(badge);
+        Assert.Null(ColorDiagnosticBadge.FormatTooltip(
+            hasWarning: false,
+            colorManagementUnavailable: false,
+            displaySpace: "Display pipeline details"));
         Assert.Null(ColorDiagnosticBadge.FormatTooltip(
             hasWarning: false,
             colorManagementUnavailable: false));
@@ -55,6 +56,7 @@ public class ColorDiagnosticBadgeTests
         Assert.DoesNotContain("ColorProfileGetDisplayDefault", badge);
         Assert.DoesNotContain(nameof(PresentationEncoding.UnmanagedEmergencySrgb8), badge);
         Assert.Contains("sRGB", badge);
+        Assert.DoesNotContain("Windows unmanaged emergency", badge);
 
         string tooltip = Assert.IsType<string>(ColorDiagnosticBadge.FormatTooltip(
             hasWarning: true,

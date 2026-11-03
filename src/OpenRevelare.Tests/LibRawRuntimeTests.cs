@@ -203,7 +203,7 @@ public sealed class LibRawRuntimeTests
 
     // Independent, minimal TIFF/DNG fixture: RGGB, constant per-channel sensor values,
     // deliberately non-unit as-shot WB, and a vendor crop smaller than the sensor.
-    private static void WriteBayerDng(string path, int width = 160, int height = 128, bool textured = false)
+    internal static void WriteBayerDng(string path, int width = 160, int height = 128, bool textured = false, ushort blackLevel = 0)
     {
         byte[] Shorts(params ushort[] values) => values.SelectMany(BitConverter.GetBytes).ToArray();
         byte[] Longs(params uint[] values) => values.SelectMany(BitConverter.GetBytes).ToArray();
@@ -219,6 +219,7 @@ public sealed class LibRawRuntimeTests
             (284, 3, 1, Shorts(1)), (33421, 3, 2, Shorts(2, 2)),
             (33422, 1, 4, new byte[] { 0, 1, 1, 2 }),
             (50706, 1, 4, new byte[] { 1, 4, 0, 0 }),
+            (50713, 3, 2, Shorts(1, 1)), (50714, 5, 1, Longs(blackLevel, 1)),
             (50717, 4, 1, Longs(65535)),
             (50719, 4, 2, Longs(8, 6)), (50720, 4, 2, Longs((uint)(width - 16), (uint)(height - 12))),
             (50721, 10, 9, Longs(1,1, 0,1, 0,1, 0,1, 1,1, 0,1, 0,1, 0,1, 1,1)),
@@ -243,7 +244,7 @@ public sealed class LibRawRuntimeTests
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
                 writer.Write((ushort)((y % 2 == 0 ? x % 2 == 0 ? 1 : 2 : x % 2 == 0 ? 2 : 3) * 10000
-                    + (textured ? (x * 17 + y * 29) % 1000 : 0)));
+                    + (textured ? (x * 17 + y * 29) % 1000 : 0) + blackLevel));
         File.WriteAllBytes(path, stream.ToArray());
     }
 }

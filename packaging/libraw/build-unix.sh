@@ -11,7 +11,9 @@ esac
 WORK="$ROOT/scratch/libraw-build-$RID"
 DEST="$ROOT/native/$RID"
 cmake -S "$ROOT/packaging/libraw" -B "$WORK" \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEST"
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEST" \
+  -DOR_RAW_ENABLE_IPO="${OR_RAW_ENABLE_IPO:-OFF}" \
+  -DOR_RAW_ENABLE_OPENMP="${OR_RAW_ENABLE_OPENMP:-OFF}"
 cmake --build "$WORK" --target OpenRevelare.Raw.Native --parallel 4
 cmake --install "$WORK" --component Raw
 if [[ "$RID" == osx-* ]]; then

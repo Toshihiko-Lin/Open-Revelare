@@ -9,6 +9,8 @@ internal static class Native
 {
     private const string Library = "OpenRevelare.Raw.Native";
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_version();
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr or_raw_build_info();
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] private static extern int or_raw_levels_v1(RawHandle raw, [Out] double[] values);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_create();
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void or_raw_close(IntPtr raw);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int or_raw_open(RawHandle raw, IntPtr data, nuint size);
@@ -26,6 +28,19 @@ internal static class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern void or_raw_image_free(IntPtr image);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_image_data(ImageHandle image, [Out] int[] info);
     internal static string Version => Marshal.PtrToStringAnsi(or_raw_version()) ?? "unknown";
+    internal static string BuildInfo
+    {
+        get { try { return Marshal.PtrToStringAnsi(or_raw_build_info()) ?? "unknown"; }
+            catch (EntryPointNotFoundException) { return "legacy bridge; extended diagnostics unavailable"; } }
+    }
+
+    internal static RawLevelMetadata? ReadLevels(RawHandle raw)
+    {
+        var v = new double[16];
+        try { if (or_raw_levels_v1(raw, v) != 1 || v.Any(n => !double.IsFinite(n))) return null; }
+        catch (EntryPointNotFoundException) { return null; }
+        return new(v[0], v[1..5], v[5], v[6], v[7..11], v[11], v[12], v[13], (int)v[14], (uint)v[15]);
+    }
     internal static void Check(int error)
     {
         if (error != 0) throw new LibRawException(error);
@@ -84,6 +99,7 @@ internal sealed class RawContext : IDisposable
     public int RawWidth => Native.or_raw_value(_raw, 2);
     public int RawHeight => Native.or_raw_value(_raw, 3);
     public int ColorMaximum => Native.or_raw_value(_raw, 4);
+    public RawLevelMetadata? Levels => Native.ReadLevels(_raw);
     public (string Make, string Model) ImageParams => (
         Marshal.PtrToStringAnsi(Native.or_raw_model(_raw, 0)) ?? "",
         Marshal.PtrToStringAnsi(Native.or_raw_model(_raw, 1)) ?? "");

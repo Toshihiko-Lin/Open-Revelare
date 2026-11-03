@@ -4,7 +4,7 @@ All supported platforms build the same application-owned native bridge from
 the official LibRaw **0.22.2** archive. CMake verifies the SHA-256 of LibRaw,
 libjpeg-turbo **3.1.2**, and Little CMS **2.19.1** before extracting them.
 Upstream sources are not patched. JPEG and Little CMS are linked statically
-inside the replaceable shared library; OpenMP and optional SDKs are disabled.
+inside the replaceable shared library. OpenMP and IPO are off by default; optional SDKs remain disabled.
 The independent Little CMS shared library used by the application's display
 and export pipeline is unchanged.
 
@@ -54,3 +54,17 @@ Independent JPEG Group.
 Camera support is separate from the runtime version. S1M2E RW2 support must be
 verified using the actual camera's original files; upgrading is not evidence
 that all recording modes decode correctly.
+
+## Build controls and diagnostics
+
+Windows accepts `-EnableIpo` and `-EnableOpenMp`; Unix accepts `OR_RAW_ENABLE_IPO=ON`
+and `OR_RAW_ENABLE_OPENMP=ON`. IPO is checked for compiler support. OpenMP requires
+its runtime to be deployed and a measured file/thread concurrency policy. Neither is
+assumed to improve every codec, and defaults do not add OpenMP dependencies or
+machine-specific instruction sets. Precise math is retained without fast-math.
+
+The optional `or_raw_build_info` and `or_raw_levels_v1` exports expose build provenance
+and flat black/white-level evidence. Legacy bridges remain loadable but report that
+extended diagnostics are unavailable. Rebuild the bridge to obtain level diagnostics;
+managed code never assumes native structure offsets. See [RAW I/O](../../docs/raw-io.md)
+for source-cache, camera-viewing and original-file audit behavior.

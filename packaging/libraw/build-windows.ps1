@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$EnableIpo, [switch]$EnableOpenMp)
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue
@@ -10,7 +10,9 @@ if ($null -eq $cmakeCommand) {
 } else { $cmakePath = $cmakeCommand.Source }
 $work = Join-Path $root "scratch/libraw-build-win-x64"
 $destination = Join-Path $root "native/win-x64"
-& $cmakePath -S $PSScriptRoot -B $work -A x64 "-DCMAKE_INSTALL_PREFIX=$destination"
+$ipo = if ($EnableIpo) { "ON" } else { "OFF" }
+$openmp = if ($EnableOpenMp) { "ON" } else { "OFF" }
+& $cmakePath -S $PSScriptRoot -B $work -A x64 "-DCMAKE_INSTALL_PREFIX=$destination" "-DOR_RAW_ENABLE_IPO=$ipo" "-DOR_RAW_ENABLE_OPENMP=$openmp"
 if ($LASTEXITCODE -ne 0) { throw "LibRaw configure failed" }
 & $cmakePath --build $work --config Release --target OpenRevelare.Raw.Native --parallel
 if ($LASTEXITCODE -ne 0) { throw "LibRaw build failed" }

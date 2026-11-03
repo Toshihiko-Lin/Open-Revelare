@@ -190,20 +190,16 @@
                     <MenuItem Header="_Help">
                         <MenuItem Header="{i18n:T '操作指引 / 技术原理…'}" Click="OnDocsClick" />
                         <MenuItem Header="{i18n:T '快捷键…'}" Click="OnHelpClick" />
-                        <!-- 与【复制色彩诊断】分工：那一项报告的是显示链路（这台机器、这块屏），
-                             这一项报告的是这一帧本身——输入域怎么判定的、片基是什么、六个端点是多少。
-                             出问题时先看哪一边，取决于是「屏上不对」还是「导出也不对」。 -->
-                        <MenuItem Header="{i18n:T '本帧技术报告…'}" Click="OnFrameReportClick" />
+                        <MenuItem Header="{i18n:T '诊断'}">
+                            <MenuItem Header="{i18n:T '查看诊断…'}" Click="OnFrameReportClick" />
+                            <MenuItem Name="CopyColorDiagnosticsMenuItem" Header="{i18n:T '复制诊断'}"
+                                      Click="OnCopyColorDiagnosticsClick" />
+                        </MenuItem>
                         <Separator />
                         <!-- 放进【帮助】而不是【设置】：它是「东西放哪儿」的答案，不是一个可调的项。 -->
                         <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '检查更新…'}" Click="OnCheckUpdateClick" />
-                        <!-- 诊断入口常驻在此，而不是跟着状态栏的告警出现：颜色报告多数发生在
-                             显示链路一切正常的时候（「导出偏色」「这张不对」），那时状态栏不该
-                             出现任何诊断字样，但报告通道必须仍然存在。 -->
-                        <MenuItem Name="CopyColorDiagnosticsMenuItem" Header="{i18n:T '复制色彩诊断'}"
-                                  Click="OnCopyColorDiagnosticsClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '关于 OpenRevelare'}" Click="OnAboutClick" />
                     </MenuItem>
@@ -1123,9 +1119,6 @@
                                         </Grid>
                                         <!-- 只在测不到裸露片基时出现。成功时不回显 t_base 数值——
                                              那个数已经没有滑块，它的意义由 D_min 承担。-->
-                                        <TextBlock Classes="groupHint" Text="{Binding FilmBaseText}"
-                                                   IsVisible="{Binding FilmBaseText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                   TextWrapping="Wrap" />
                                         <!-- 只有这一组 RGB。片基透射率 T_base 不再给滑块：它与
                                              D_min 描述的是同一件事——黑端在哪、暗部偏什么色（实测
                                              改任一个都在动同一个量）。T_base 由【片基采样】写入，
@@ -1165,9 +1158,6 @@
                                                 </Grid>
                                             </Button>
                                         </Grid>
-                                        <TextBlock Classes="groupHint" Text="{Binding HighlightConfidenceText}"
-                                                   IsVisible="{Binding HighlightConfidenceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                                   TextWrapping="Wrap" />
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
                                                   IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
@@ -1240,17 +1230,8 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <Expander Header="{i18n:T '输入与校正详情'}" Margin="0,0,0,8">
+                                <Expander Header="{i18n:T '镜头与平场校正'}" Margin="0,0,0,8">
                                     <StackPanel Spacing="4">
-                                        <TextBlock Classes="groupHint" Text="{Binding InputCharacterizationText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionSourceText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding DensityCorrectionSourceText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding CaptureCorrectionScopeText}" TextWrapping="Wrap" />
-                                        <Button Content="{i18n:T '查看本帧校准依据…'}" Click="OnFrameReportClick"
-                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch" />
-                                        <Separator Margin="0,6" />
                                         <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
                                         <TextBlock Classes="groupHint" TextWrapping="Wrap"
                                                    Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />

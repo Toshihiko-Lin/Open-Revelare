@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
@@ -12,7 +12,7 @@ using OpenRevelare.Core;
 //
 //   OpenRevelare.Cli -i neg.tiff -o pos.tiff --input-srgb --color-space sRGB
 
-return Run(args);
+return args.FirstOrDefault() == "audit-input" ? InputAuditCommand.Run(args[1..]) : Run(args);
 
 static int Run(string[] args)
 {
@@ -801,6 +801,7 @@ static void PrintUsage()
 {
     Console.WriteLine(
         "Usage: OpenRevelare.Cli -i <in.tiff> -o <out.tiff> [options]\n" +
+        "  audit-input --input FILE_OR_FOLDER --output REPORT.json [--compare-full] [--repeat 3] [--workers 1]\n" +
         "  --install-deep-wb          install optional CC BY-NC-SA 4.0 model (non-commercial); no input/output needed\n" +
         "  --awb-model <path>         use an offline model for --print-awb\n" +
         "  -i, --input <path>          input negative TIFF (RGB uint8/uint16/float32)\n" +

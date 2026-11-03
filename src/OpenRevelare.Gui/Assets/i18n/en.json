@@ -1229,5 +1229,13 @@
   "Deep-WB 模型下载已取消": "Deep-WB model download cancelled",
   "Deep-WB 模型下载失败，可点击下载图标重试：": "Deep-WB download failed. Click the download icon to retry: ",
   "下载 Deep-WB 模型": "Download Deep-WB model",
-  "点击下载安装可选模型，安装后启用智能色偏修正。GitHub 不可用时自动尝试 Gitee 国内镜像。": "Click to download and install the optional model to enable smart cast correction. Automatically tries the Gitee mirror if GitHub is unavailable."
+  "点击下载安装可选模型，安装后启用智能色偏修正。GitHub 不可用时自动尝试 Gitee 国内镜像。": "Click to download and install the optional model to enable smart cast correction. Automatically tries the Gitee mirror if GitHub is unavailable.",
+  "使用相机色彩显示 RAW 底片（仅影响查看）": "Use camera colour for RAW negative viewing (viewer only)",
+  "采用相机矩阵与拍摄白平衡显示底片；不改变片基采样、反相或导出。缺少有效矩阵时保留原显示。": "View negatives using the camera matrix and as-shot white balance. Film-base sampling, inversion and export are unchanged. Without a valid matrix, the existing view is retained.",
+  "诊断": "Diagnostics",
+  "查看诊断…": "View diagnostics…",
+  "复制诊断": "Copy diagnostics",
+  "诊断已复制": "Diagnostics copied",
+  "可先重新启动应用；若反复出现，请从【帮助 → 诊断 → 复制诊断】取得诊断后反馈。": "Try restarting the application; if it keeps happening, report it with Help → Diagnostics → Copy diagnostics.",
+  "高级解码选项": "Advanced decoding options"
 }

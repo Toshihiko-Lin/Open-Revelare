@@ -135,7 +135,7 @@ shadow endpoint; the deepest co-sited RGB picture samples are a **highlight prox
 endpoint also carries highlight balance, so there is no second white-balance parameter. The pass
 does not rewrite scene exposure; anchor a grey card or use the later exposure control for that.
 
-The result reports evidence and confidence for both ends. Film base is labelled either physical
+Evidence and confidence for both ends are available under **Help → Diagnostics → View diagnostics…**. Film base is labelled either physical
 (a mask mode below the light-board cut, or bare edge rebate) or inferred from content. A board-bounded
 mode is promoted to physical carrier only after high-confidence cross-frame agreement; otherwise its
 robust value is retained but labelled content inference. “Supporting
@@ -663,7 +663,7 @@ The histogram is pinned at the top of the right-hand panel, with two switches un
   display luma. A print can hold to 98%, while on screen 95% often already reads as paper white.
   The two values are saved with the application, not with the project.
 
-**Help → Frame technical report…** prints every number this frame's rendering rests on, and **where
+**Help → Diagnostics → View diagnostics…** prints every number this frame's rendering rests on, and **where
 each one came from**:
 
 - how the input domain was settled (read from the file's own declaration, or taken by convention —
@@ -678,9 +678,9 @@ each one came from**:
   clipping/quantisation risk
 - output space, print film emulation, HDR
 
-There is a "Copy all" button for pasting into an issue. It divides work with **Help → Copy colour
-diagnostics**: that one describes the DISPLAY path (this machine, this screen), this one describes
-THIS FRAME. Wrong on screen — start with the former; wrong in the export too — start with this.
+Diagnostics include both the frame report and the display path. Use "Copy all" or
+**Help → Diagnostics → Copy diagnostics** when reporting an issue. These technical details stay
+out of the daily interface; actionable display failures still show a short warning.
 
 ---
 

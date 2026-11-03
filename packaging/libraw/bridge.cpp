@@ -8,6 +8,27 @@
 #endif
 
 API const char* or_raw_version() { return LibRaw::version(); }
+API const char* or_raw_build_info() {
+    return "LibRaw=0.22.2;"
+#ifdef _MSC_VER
+        "compiler=MSVC;"
+#elif defined(__clang__)
+        "compiler=Clang;"
+#else
+        "compiler=GCC;"
+#endif
+#ifdef _OPENMP
+        "openmp=1;"
+#else
+        "openmp=0;"
+#endif
+#ifdef OR_RAW_IPO
+        "ipo=1;"
+#else
+        "ipo=0;"
+#endif
+        "math=precise;cpu=portable";
+}
 API LibRaw* or_raw_create() { try { return new LibRaw; } catch (...) { return nullptr; } }
 API void or_raw_close(LibRaw* r) { delete r; }
 API int or_raw_open(LibRaw* r, void* data, size_t size) { return r->open_buffer(data, size); }
@@ -37,6 +58,31 @@ API void or_raw_matrix(LibRaw* r, float* values) {
 API void or_raw_wb(LibRaw* r, float* values) {
     std::memcpy(values, r->imgdata.color.cam_mul, sizeof(float) * 4);
 }
+// Versioned flat payload; no native structure layout crosses the ABI.
+API int or_raw_levels_v1(LibRaw* r, double* values) {
+    const auto& c = r->imgdata.color;
+    values[0] = c.black;
+    for (int i = 0; i < 4; ++i) values[1+i] = c.cblack[i];
+    values[5] = c.maximum;
+    values[6] = c.data_maximum;
+    for (int i = 0; i < 4; ++i) values[7+i] = c.linear_max[i];
+    if (c.cblack[4] > 4096 || c.cblack[5] > 4096) return 0;
+    unsigned count = c.cblack[4] * c.cblack[5];
+    if (count > 4096) return 0;
+    unsigned low = 0, high = 0;
+    if (count) {
+        low = high = c.cblack[6];
+        for (unsigned i = 1; i < count; ++i) {
+            if (c.cblack[6+i] < low) low = c.cblack[6+i];
+            if (c.cblack[6+i] > high) high = c.cblack[6+i];
+        }
+    }
+    values[11] = low; values[12] = high;
+    values[13] = r->imgdata.params.adjust_maximum_thr;
+    values[14] = r->imgdata.params.highlight;
+    values[15] = r->imgdata.process_warnings;
+    return 1;
+}
 API void or_raw_crop(LibRaw* r, int* values) {
     const auto& c = r->imgdata.sizes.raw_inset_crops[0];
     values[0] = c.cleft; values[1] = c.ctop;
@@ -49,6 +95,9 @@ API int or_raw_process(LibRaw* r, int fbdd, int half, const unsigned* crop) {
     p.output_color = 0;
     p.output_bps = 16;
     p.no_auto_bright = 1;
+    p.highlight = 0; // retain the established clipping policy explicitly
+    p.adjust_maximum_thr = 0.75f; // preserve LibRaw's established maximum adjustment
+    p.bright = 1.f;
     p.user_qual = 3; // AHD
     p.gamm[0] = p.gamm[1] = 1.;
     for (int i = 2; i < 6; ++i) p.gamm[i] = 0.;

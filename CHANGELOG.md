@@ -2,6 +2,16 @@
 
 ## 未发布 / Unreleased
 
+- 精简日常界面：技术报告与显示链路信息统一到「帮助 → 诊断」，片基／高光证据及校正来源不再常驻展示；高级解码选项默认折叠，必要的显示异常提示仍保留。
+- Simplified the daily interface: frame reports and display details are grouped under Help → Diagnostics, with calibration evidence and provenance available on demand. Advanced decoding options are collapsed by default; actionable display warnings remain visible.
+
+- 新增受内存预算和文件版本约束的 RAW 源字节缓存，合并并发读取；TIFF／FFF 多裁切共享读取扩展到导入预热与整卷分析。
+- Added a bounded, revision-aware RAW source-byte cache with shared concurrent reads, and extended TIFF/FFF crop batching to import warmup and roll analysis.
+- 新增可选的相机矩阵 RAW 底片显示，整图与局部放大保持一致；反相与采样保留原生通道。RAW 线性通道声明、电平诊断和源量化精度信息更明确。
+- Added optional camera-matrix RAW negative viewing with matching full/region rendering, while keeping inversion and measurements native. RAW channel semantics, level diagnostics and source precision are explicit.
+- 新增仅凭原片即可运行的 `audit-input` 命令，输出分阶段耗时、文件色彩依据、重复解码和预览／全质量一致性；原生构建提供 IPO／OpenMP 对照开关，默认保持关闭。
+- Added original-file-only `audit-input` reports for phase timings, colour evidence, repeatability and preview/full-quality consistency, plus opt-in IPO/OpenMP build controls that remain off by default.
+
 - RAW 多尺寸预览可共享 RGB16 样本转换，按小块并行累加，避免为每个预览尺寸重复转换整份输出。保留原始浮点累加顺序与量化信息；单通道、四通道、无 SIMD 或采样网格不适合共享时沿用独立缩小路径。
 - RAW previews at several sizes can share RGB16 sample conversion and accumulate in parallel cache-sized tiles. Float summation order and source quantization metadata are preserved; monochrome, four-channel, non-SIMD and incompatible-grid cases retain independent box reduction.
 

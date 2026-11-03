@@ -2871,7 +2871,10 @@ public partial class MainWindow : Window
     }
 
     private async void OnPreferencesClick(object? sender, RoutedEventArgs e)
-        => await new PreferencesDialog().ShowDialog(this);
+    {
+        await new PreferencesDialog().ShowDialog(this);
+        Vm?.RefreshViewingPreferences();
+    }
 
     private async void OnDocsClick(object? sender, RoutedEventArgs e)
         => await new DocDialog().ShowDialog(this);
@@ -2879,7 +2882,7 @@ public partial class MainWindow : Window
     private async void OnFrameReportClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm) return;
-        await new FrameReportDialog(vm.BuildFrameReport()).ShowDialog(this);
+        await new FrameReportDialog(BuildUnifiedDiagnostics()).ShowDialog(this);
     }
 
     /// <summary>
