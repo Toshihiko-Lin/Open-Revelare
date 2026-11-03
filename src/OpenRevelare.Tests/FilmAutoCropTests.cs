@@ -118,6 +118,51 @@ public sealed class FilmAutoCropTests
         return image;
     }
 
+    // A reversal frame whose exposure edges drown in halation still shows its perforations. The
+    // detector must not invent a confirmed crop, but the fallback has to give the user a box to
+    // start from: the strip fixes the across position and the scale, the scan centre the along.
+    [Fact]
+    public void Suggest_places_a_box_from_the_perforations_when_no_gate_can_be_measured()
+    {
+        var flat = Unreadable();
+        Assert.Null(FilmAutoCrop.Detect(flat));
+        foreach (var mode in Enum.GetValues<FilmCropMode>())
+        {
+            var box = FilmAutoCrop.Suggest(flat, mode);
+            Assert.NotNull(box);
+            var r = box!.Value;
+            // 36x24 at the fixture's 10 px/mm, centred on the perforation pair at y = 240.
+            Assert.InRange(r.Y * 480 + r.H * 480 / 2, 236, 244);
+            Assert.InRange(r.W * 640, 340, 380);
+            Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35, r.W * 640 / (r.H * 480), 6);
+            Assert.InRange(r.X, 0, 1 - r.W); Assert.InRange(r.Y, 0, 1 - r.H);
+        }
+    }
+
+    // No perforations means no physical reference: a guess would be a coin flip, so none is made
+    // and the frame keeps whatever crop it had.
+    [Fact]
+    public void Suggest_declines_when_the_perforations_are_not_visible()
+    {
+        var blank = new ImageBuffer(320, 240);
+        Array.Fill(blank.Data, .5f);
+        Assert.Null(FilmAutoCrop.Suggest(blank, FilmCropMode.ImageArea));
+    }
+
+    // Film base with perforations but no readable exposure — the fallback's input. Shared with
+    // the workflow test so the GUI path is exercised on the same pixels.
+    internal static ImageBuffer Unreadable()
+    {
+        var flat = Perforated(positive: true);
+        // The base tone Perforated writes for an unexposed reversal frame, and its channel copies.
+        for (int y = 120; y < 360; y++) for (int x = 150; x < 510; x++)
+        {
+            int p = (y * 640 + x) * 3;
+            flat.Data[p] = .025f; flat.Data[p + 1] = .025f * .6f; flat.Data[p + 2] = .025f * .25f;
+        }
+        return flat;
+    }
+
     // The border crop is the strip, so it must follow the perforation pair. Centring it on the
     // exposed gate hands the whole misalignment to one side: on a reversal film that side shows
     // a bright sliver of light table above the frame, while a negative's bright base hides it.

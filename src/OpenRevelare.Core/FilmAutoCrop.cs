@@ -39,6 +39,89 @@ public static class FilmAutoCrop
 
     public static Detection? Detect(ImageBuffer source) => DetectCore(source, straighten: true);
 
+    /// <summary>
+    /// Best-effort frame for a scan the detector could not confirm — a slide photographed on a
+    /// light table with the exposure edges lost in halation, a frame whose borders fade into the
+    /// base, or a tilt past the straighten limit. It is deliberately NOT a detection: the result
+    /// is where the frame most likely is, so the crop tool opens on a usable box that the user
+    /// then corrects, instead of on nothing at all.
+    ///
+    /// The across position and both scales come from the perforation rows, which stay visible
+    /// when the exposure edges do not. The along position is the best pair of opposite exposure
+    /// borders about 36 mm apart; when even those are flat, the window is centred on the scan,
+    /// which is right for the common "one frame per photograph" case.
+    /// </summary>
+    public static Rect? Suggest(ImageBuffer source, FilmCropMode mode)
+    {
+        if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        if (source.Width < 64 || source.Height < 64) return null;
+        var image = Resample.Box(source, 1200);
+        int w = image.Width, h = image.Height;
+        var log = new double[w * h];
+        for (int i = 0; i < log.Length; i++)
+        {
+            double r = image.Data[i * 3], g = image.Data[i * 3 + 1], b = image.Data[i * 3 + 2];
+            if (!double.IsFinite(r + g + b)) return null;
+            log[i] = Math.Log(Math.Max(1e-6, (Math.Max(0, r) + Math.Max(0, g) + Math.Max(0, b)) / 3));
+        }
+        if (PerforationRuler(image) is not { } ruler) return null;
+        // One square-pixel scale is all a suggestion needs; the two ruler estimates disagree by
+        // a fraction of a percent, and taking the smaller keeps the box inside the film.
+        double scale = Math.Min(ruler.Scale, ruler.AcrossScale);
+        if (!(scale > 0)) return null;
+        bool horizontal = ruler.Horizontal;
+        int along = horizontal ? w : h, across = horizontal ? h : w;
+        int step = Math.Max(2, Math.Min(w, h) / 100);
+        int windowLength = (int)Math.Round(36 * scale), windowHeight = (int)Math.Round(24 * scale);
+        if (windowLength < step * 4 || windowHeight < step * 4) return null;
+        int centre = (int)Math.Round(ruler.Centre);
+        int low = Math.Clamp(centre - windowHeight / 2, step, Math.Max(step, across - step - windowHeight));
+        int high = Math.Min(low + windowHeight, across - step);
+        if (high - low < step * 4) return null;
+        double Edge(int at, int sign)
+        {
+            double sum = 0;
+            var contrasts = new double[high - low];
+            for (int p = low; p < high; p++)
+            {
+                int a = horizontal ? p * w + at - step : (at - step) * w + p;
+                int b = horizontal ? p * w + at + step : (at + step) * w + p;
+                double contrast = Math.Clamp(sign * (log[a] - log[b]), -1.5, 1.5);
+                contrasts[p - low] = contrast;
+                sum += contrast;
+            }
+            Array.Sort(contrasts);
+            return 0.35 * sum / (high - low) + 0.65 * contrasts[contrasts.Length / 3];
+        }
+        double best = double.NegativeInfinity;
+        int bestStart = Math.Clamp((along - windowLength) / 2, step, Math.Max(step, along - step - windowLength));
+        for (int sign = 1; sign >= -1; sign -= 2)
+            for (int start = step; start + windowLength < along - step; start++)
+            {
+                double score = Math.Min(Edge(start, sign), Edge(start + windowLength, -sign));
+                if (score <= best) continue;
+                best = score;
+                bestStart = start;
+            }
+        // No border pair at all: a single frame per scan is the common case, so aim at its middle.
+        if (best < .01) bestStart = Math.Clamp((along - windowLength) / 2, step, Math.Max(step, along - step - windowLength));
+        int unit = mode == FilmCropMode.ImageArea ? (int)Math.Floor(12 * scale * .992) : (int)Math.Floor(scale);
+        if (unit < 1) return null;
+        int numerator = mode == FilmCropMode.ImageArea ? 3 : 37;
+        int denominator = mode == FilmCropMode.ImageArea ? 2 : 35;
+        int pixelWidth = (horizontal ? numerator : denominator) * unit;
+        int pixelHeight = (horizontal ? denominator : numerator) * unit;
+        // Normalised against the resampled frame, exactly like Detection.Image.
+        double rw = (double)pixelWidth / w, rh = (double)pixelHeight / h;
+        double alongCentre = (bestStart + windowLength / 2.0) / along;
+        double acrossCentre = ruler.Centre / across;
+        double x = Math.Round((horizontal ? alongCentre - rw / 2 : acrossCentre - rw / 2) * w) / w;
+        double y = Math.Round((horizontal ? acrossCentre - rh / 2 : alongCentre - rh / 2) * h) / h;
+        if (x < 0 || y < 0 || x + rw > 1 || y + rh > 1) return null;
+        return new Rect(x, y, rw, rh);
+    }
+
+
     private static Detection? DetectCore(ImageBuffer source, bool straighten,
         (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? knownRuler = null)
     {

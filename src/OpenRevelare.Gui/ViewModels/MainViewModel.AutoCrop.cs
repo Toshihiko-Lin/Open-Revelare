@@ -30,6 +30,9 @@ public partial class MainViewModel
         try
         {
             var detections = new FilmAutoCrop.Detection?[targets.Length];
+            // A frame the detector cannot confirm may still get a starting box; it is applied
+            // further down, and only where the frame carries no crop of its own.
+            var suggestions = new FilmAutoCrop.Rect?[targets.Length];
             for (int i = 0; i < snapshots.Length; i++)
             {
                 cts.Token.ThrowIfCancellationRequested();
@@ -41,17 +44,23 @@ public partial class MainViewModel
                 try
                 {
                     var entry = await PreviewAsync(frame.Path, null).WaitAsync(cts.Token);
-                    detections[i] = await Task.Run(() =>
+                    var outcome = await Task.Run(() =>
                     {
                         var pixels = FilmAutoCrop.Prepare(entry.Preview, p);
                         var d = FilmAutoCrop.Detect(pixels);
                         bool swap = ((p.QuarterTurns % 2) + 2) % 2 == 1;
-                        return d is null || Math.Abs(p.Rotation + d.RotationCorrection) > StraightenLimit ? null : d with
+                        var confirmed = d is null || Math.Abs(p.Rotation + d.RotationCorrection) > StraightenLimit ? null : d with
                         {
                             Width = swap ? entry.SourceHeight : entry.SourceWidth,
                             Height = swap ? entry.SourceWidth : entry.SourceHeight,
                         };
+                        // The perforations outlive the exposure edges, so they can still place a
+                        // box when the gate itself cannot be read.
+                        return (Detection: confirmed,
+                            Suggestion: confirmed is null ? FilmAutoCrop.Suggest(pixels, mode) : null);
                     }, cts.Token);
+                    detections[i] = outcome.Detection;
+                    suggestions[i] = outcome.Suggestion;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception) { failed++; }
@@ -66,7 +75,12 @@ public partial class MainViewModel
             var plan = FilmAutoCrop.Plan(detections, mode);
             var prepared = snapshots.Select((s, i) => (s.Frame, Params: s.Params, Crop: plan[i], Detection: detections[i]))
                 .Where(s => s.Crop is not null).ToArray();
-            if (prepared.Length == 0)
+            // A guess is a starting point, not a correction: never replace a crop the user already
+            // placed by hand, or re-running the command would quietly discard that work.
+            var guessed = snapshots
+                .Select((s, i) => (s.Frame, Params: s.Params, Crop: plan[i] is null ? suggestions[i] : null))
+                .Where(s => s.Crop is not null && s.Frame.Params.CropRect is null).ToArray();
+            if (prepared.Length == 0 && guessed.Length == 0)
             {
                 StatusText = Loc.T("135 自动裁切：没有可靠的完整画格，已保留原裁切。请使用拖框裁切检查边界。");
                 return;
@@ -80,14 +94,26 @@ public partial class MainViewModel
                 s.Frame.Params = s.Params;
                 SetThumbnail(s.Frame, null);
             }
-            if (prepared.Any(s => ReferenceEquals(s.Frame, CurrentFrame))) LoadParams(CurrentFrame!.Params);
+            // No rotation correction here: a guess has no trustworthy angle of its own, and the
+            // user is about to place the box by hand anyway.
+            foreach (var s in guessed)
+            {
+                var r = s.Crop!.Value;
+                s.Params.CropRect = (r.X, r.Y, r.W, r.H);
+                s.Frame.Params = s.Params;
+                SetThumbnail(s.Frame, null);
+            }
+            if (prepared.Any(s => ReferenceEquals(s.Frame, CurrentFrame)) ||
+                guessed.Any(s => ReferenceEquals(s.Frame, CurrentFrame))) LoadParams(CurrentFrame!.Params);
             _sprocketOverlayDirty = true;
             MarkEdit();
             ScheduleRender();
             CommitUndo();
             RestartThumbnails();
             if (selected) ClearStripSelection();
-            StatusText = Loc.F($"135 自动裁切完成：{prepared.Length} 帧，跳过 {targets.Length - prepared.Length} 帧（含读取失败 {failed} 帧）；同尺寸同方向统一尺度，可撤销。");
+            StatusText = guessed.Length == 0
+                ? Loc.F($"135 自动裁切完成：{prepared.Length} 帧，跳过 {targets.Length - prepared.Length} 帧（含读取失败 {failed} 帧）；同尺寸同方向统一尺度，可撤销。")
+                : Loc.F($"135 自动裁切完成：{prepared.Length} 帧可靠，{guessed.Length} 帧按齿孔与片边推测（请用拖框确认）；跳过 {targets.Length - prepared.Length - guessed.Length} 帧，可撤销。");
         }
         catch (OperationCanceledException) { StatusText = Loc.T("135 自动裁切已取消，原裁切未改变。"); }
         catch (Exception ex) { StatusText = Loc.T("135 自动裁切失败：") + ex.Message; }

@@ -66,4 +66,46 @@ public sealed class AutoCropWorkflowTests
         Assert.All(vm.Frames, f => Assert.Null(f.Params.CropRect));
         Assert.False(vm.IsAutoCropping);
     }
+
+    // Frames the detector cannot read must still open on a usable box, because placing the crop
+    // by hand from nothing is the part that hurts. A frame that already has a crop keeps it: the
+    // guess is a starting point, and re-running the command must not erase manual work.
+    [Fact]
+    public async Task Unreadable_frames_get_a_guessed_box_but_keep_their_own_crop()
+    {
+        string directory = Path.Combine(TestDataIsolation.Root, "auto-crop-guess-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string fresh = Path.Combine(directory, "fresh.tif"), edited = Path.Combine(directory, "edited.tif");
+        TiffIO.ExportTiff16(FilmAutoCropTests.Unreadable(), fresh);
+        TiffIO.ExportTiff16(FilmAutoCropTests.Unreadable(), edited);
+        string project = Path.Combine(directory, "roll.ncproj");
+        var saved = (X: .12, Y: .2, W: .3, H: .2);
+        Project.Save(project, new Project.Data
+        {
+            Meta = new() { InputType = "tiff", TiffIsLinear = true },
+            Frames = new()
+            {
+                new() { SourcePath = fresh },
+                new() { SourcePath = edited, Params = new FrameParams { CropRect = saved } },
+            },
+        });
+        using var vm = new MainViewModel();
+        await vm.OpenProjectAsync(project);
+        for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
+        Assert.True(vm.HasImage);
+        await vm.AutoCrop135Async(FilmCropMode.ImageArea, wholeRoll: true);
+
+        var guessed = vm.Frames[0].Params.CropRect;
+        Assert.NotNull(guessed);
+        Assert.Equal(1.5, guessed.Value.W * 640 / (guessed.Value.H * 480), 6);
+        Assert.Equal(0, vm.Frames[0].Params.Rotation);      // a guess carries no rotation claim
+        Assert.Equal(saved, vm.Frames[1].Params.CropRect);   // manual crop untouched
+        Assert.Contains("推测", vm.StatusText);
+
+        // Undo restores the state before the command: no crop for the fresh frame, the hand-made
+        // crop for the other one.
+        vm.Undo();
+        Assert.Null(vm.Frames[0].Params.CropRect);
+        Assert.Equal(saved, vm.Frames[1].Params.CropRect);
+    }
 }

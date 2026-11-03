@@ -582,6 +582,7 @@
   "135 自动裁切未应用：检测期间参数或胶卷已改变，请重试。": "135 auto crop was not applied: the parameters or roll changed during detection. Please retry.",
   "135 自动裁切：没有可靠的完整画格，已保留原裁切。请使用拖框裁切检查边界。": "135 auto crop: no reliable complete frame found. Existing crops were preserved. Check the borders with the crop tool.",
   "135 自动裁切完成：{0} 帧，跳过 {1} 帧（含读取失败 {2} 帧）；同尺寸同方向统一尺度，可撤销。": "135 auto crop: applied to {0} frames, skipped {1} (including {2} read failures). Matching sizes and orientations share a scale. Undo is available.",
+  "135 自动裁切完成：{0} 帧可靠，{1} 帧按齿孔与片边推测（请用拖框确认）；跳过 {2} 帧，可撤销。": "135 auto crop: {0} frames confirmed, {1} estimated from the perforations and film edges (please confirm them with the crop tool); {2} skipped. Undo is available.",
   "135 自动裁切已取消，原裁切未改变。": "135 auto crop cancelled. Existing crops were preserved.",
   "135 自动裁切失败：": "135 auto crop failed: ",
   "拉直": "Straighten",
