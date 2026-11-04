@@ -603,15 +603,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void CaptureTile(string key, WorkingFrame preview, long generation, SourceStamp stamp)
     {
+        // File attributes and resampling can take much longer than a dictionary lookup.
+        // TileFor/ClearPreviewCaches run on the UI thread and share this gate.
+        if (_previews.Generation != generation || !stamp.IsCurrent) return;
+        lock (_tiles)
+            if (_tiles.ContainsKey(key)) return;
+        WorkingFrame tile = DecodedSources.Track(
+            preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
+        if (!stamp.IsCurrent) return;
         lock (_tiles)
         {
-            if (_previews.Generation != generation || !stamp.IsCurrent) return;
+            if (_previews.Generation != generation) return;
             if (_tileSources.TryGetValue(stamp.Path, out var old) && old != stamp)
                 foreach (string stale in _tiles.Keys.Where(k => k.StartsWith(old.Key + "|", StringComparison.Ordinal)).ToArray())
                     _tiles.Remove(stale);
             _tileSources[stamp.Path] = stamp;
             if (_tiles.ContainsKey(key)) return;
-            _tiles[key] = DecodedSources.Track(preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
+            _tiles[key] = tile;
         }
     }
 
@@ -1899,7 +1907,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             if (tok != _switchToken) return;
             AdoptPreview(frame, entry, pre, key);
             ProtectNearbyPreviews(frame);
-            _dragSmall = null;               // belongs to the buffer we just replaced
+            _renderCts?.Cancel();            // a drag's downsample belongs to the old buffer
+            _dragSmall = null;
             OnPropertyChanged(nameof(CropFrameSize));
             ScheduleRender();
         }
@@ -2243,6 +2252,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void ShowNegativeView()
     {
         CancelPreviewWarmup();
+        _renderCts?.Cancel();
         if (!EnsureCurrentPreviewSource()) return;
         if (_previewLinear is not { } negative) return;
         PreparedPreview preview = PrepareNegativePreview(negative);
@@ -2462,6 +2472,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void ShowBeforeEdits()
     {
         CancelPreviewWarmup();
+        _renderCts?.Cancel();
         if (!EnsureCurrentPreviewSource()) return;
         if (_previewWorking is null) return;
         FrameParams p = BuildParams();

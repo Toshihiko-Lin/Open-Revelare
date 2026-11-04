@@ -1,70 +1,34 @@
 # OpenRevelare — 更新日志
 
-## 未发布 / Unreleased
+## v1.9.0（2026-11-04）
 
-**新增与改进**
+**新增功能**
 
-- 修复实际导入时内嵌进度卡片被原生预览盖住的问题：布局和预览更新后恢复主窗口内部的子控件层级，不置顶程序、不抢焦点。
-
-- 导入进度改为主窗口内部的悬浮卡片，随程序一起遮挡、移动和最小化，不再创建独立浮窗；通过嵌入式子控件显示卡片，保留原生 HDR 预览。
-
-- 进度浮窗改为预览区上方居中；“灯板测量”提示改为“齿孔检测”，缩略图解码另行显示进度，避免并行任务互相覆盖。
-
-- 进度浮窗改为锚定当前内容区域内部，与工具栏、侧栏分隔线保持间距，并随预览宽度收窄。白光导入的全分辨率灯板测量独立显示逐张进度，不再误报为首帧准备；优先完成测量再启动全卷预热，手动导入跳过自动测量。批量处理收尾改为非阻塞内存回收，避免 UI 线程强制压缩大对象堆。
-
-- 新建卷导入时以不占布局空间的浮窗持续显示进度提示，覆盖准备与首帧解码；导入与自动整卷分析复用统一样式的浮窗，自动分析从测量开始显示提示，提供逐帧进度和汇总状态，完成或失败后自动收起。
-
-- 导入时在后台根据首张 RAW 从随包 Lensfun 数据库离线识别镜头，可用配置自动应用于整卷；首张不变时复用识别结果。导入弹窗不展示 Lensfun 信息和选框，配置详情与整卷启停集中在主界面的镜头校正区。
-- Lensfun 畸变与暗角按各自可用参数独立校正，启用 LCC 时由平场参考优先处理暗角，避免重复校正；工程保存实际校正参数及启用状态。导入界面的光源、LCC 与扫描分格直接显示，附加参考图控件按需展开。
-- 补齐 Lensfun 导入与镜头校正区的中英文资源，新增与英文键对齐的简体中文资源表；识别、启用状态和校正详情随界面语言切换更新。新增识别缓存、校正模型、LCC 优先、局部渲染一致性、工程保存及资源键与格式参数的回归测试，相关定向测试共 45 项通过。
-- 新增 Lensfun 镜头配置支持：优先读取 RAW／DNG 内嵌校正参数，缺少时尝试从随包数据库匹配畸变与暗角配置；两项可独立应用，启用 LCC 时由 LCC 优先处理暗角，避免重复校正。
-- 镜头校正区显示匹配来源与畸变／暗角详情；高级设置支持搜索并手动选择 Lensfun 配置、分别选择校正项目，以及指定自定义数据库文件夹。
-- 工作台更清楚易用：支持拖入 RAW／TIFF 文件或文件夹，检查器明确显示当前帧、勾选数量和同步范围；标签、图表及对话框也改进了键盘操作和浅深主题显示。
-- 重整修片流程：多选帧使用更大的批量操作面板，同步操作明确区分来源与目标；缩略图以颜色和形状标记未校准、已校准、已调整、原片缺失及虚拟副本状态。
-- 整卷渲染设置与单帧导出分开，状态栏新增任务中心，可查看前台任务、后台队列与最近批量结果；首次使用指引改为不阻塞工作的内嵌提示。
-- 偏好设置按「通用／图像与性能／存储」分类，并将资源文件夹归入设置菜单；顶栏新增太阳／月亮主题切换及翻译图标语言切换。
-- 日常界面更简洁：技术报告与显示链路信息统一到「帮助 → 诊断」，高级解码选项默认折叠，必要的显示异常提示仍会直接显示。
-- RAW／TIFF 浏览、印样和导出更快，连续处理大图时减少重复读取、转换和临时内存占用。
-- 偏好设置的高级解码选项新增可选的相机色彩 RAW 底片显示；只改变未反相画面的观看效果，不影响采样、反相或导出。
-- **Deep-WB 改为按需安装。** 默认安装包不含模型权重；需要「智能色偏修正」时，可点击下载图标并确认 CC BY-NC-SA 4.0 非商业许可后安装。支持 GitHub／Gitee 下载、进度显示、取消、重试、完整性校验和离线安装，升级后无需重复下载；其他功能不受影响。
-- 改进内置除尘修复：更准确地匹配附近干净纹理与明暗变化，减少修复边缘和局部放大时的不自然痕迹，无需额外组件或模型。
-- 来源致谢：内置除尘的部分改进参考了 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 的设计思路，由 OpenRevelare 独立实现。
+- **处理更快，修片更流畅。** 加快 RAW／TIFF 导入、浏览、印样和导出，降低内存占用；减少拖动滑杆、调整曲线时的卡顿，切换照片时避免旧画面覆盖。
+- 新增 Lensfun 离线自动镜头匹配，按首张 RAW 校正整卷畸变与暗角，可查看详情并整卷启停；LCC 优先处理暗角。
+- Deep-WB 改为按需安装，支持在线下载与离线安装，升级保留模型；使用前需确认 CC BY-NC-SA 4.0 非商业许可。
+- 除尘修复更自然（参考 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 设计思路，独立实现）；新增相机色彩底片预览，仅影响查看。
+- **界面焕新，提升使用体验。** 优化工作台、偏好设置与浅深主题，支持拖放导入和快捷切换主题、语言；批量操作更清楚，处理进度更直观，首次使用更易上手。
 
 **修复**
 
-- 修复低曝光 RAW 中齿孔紧贴画面边缘时自动识别失败、阈值停留在默认值的问题。仅在原检测失败后，依据边缘齿孔的尺寸、排列与间距补充识别；原检测成功时保持原阈值。
-- 修复拉宽左侧片夹后缩略图仍保持固定大小，以及从旧版覆盖升级时可能丢失已安装 Deep-WB 模型、要求重复下载的问题。
-- 修复部分压缩 TIFF 从图像中间读取区域时可能失败的问题，并加强 FFF 文件识别，减少损坏或无效文件被误判。
-- 修复「打开 LUT 文件夹」可能同时触发底片导入窗口的问题。
-- 修复从图库编辑卷信息可能清空印样中的 ISO／EI 与冲洗信息、取消或关闭偏好设置未完全撤销预览，以及关闭裁切说明后操作按钮一并消失的问题。
+- 修复低曝光 RAW 边缘齿孔识别、部分压缩 TIFF 局部读取及无效 FFF 误识别；修复编辑卷信息后印样拍摄与冲洗信息丢失。
+- 修复缩略图不随侧栏放大、菜单翻译遗漏、打开 LUT 文件夹误触发导入、偏好设置取消未还原，以及裁切按钮随说明隐藏的问题。
 
 ---
 
-**Added and improved**
+**New features**
 
-- Import identifies the lens in the background from the first RAW using the bundled Lensfun database and automatically applies usable profiles to the roll. Identification is reused while the first file remains unchanged. Lensfun details and the roll-wide enable checkbox are shown only in the main lens-correction panel.
-- Lensfun distortion and vignetting corrections use their available calibration parameters independently. Enabled LCC takes priority for vignetting to avoid double correction. Projects preserve resolved calibration parameters and the enable choice. Import light-source, LCC and strip-splitting options are directly visible, with reference controls shown only when needed.
-- Completed Chinese and English text for Lensfun import and correction controls, adding a Simplified Chinese resource table with matching English keys. Match details and correction status follow language changes. Regression coverage includes identification caching, correction models, LCC priority, regional-render consistency, project persistence, resource keys and format arguments; all 45 related targeted tests pass.
-- Added Lensfun lens-profile support: embedded RAW/DNG correction metadata takes priority, with the bundled database providing distortion and vignetting profiles when available. The two corrections can be applied independently; enabled LCC takes priority over profile-based vignetting to avoid double correction.
-- The lens-correction panel shows the matching source and separate distortion/vignetting details. Advanced settings support searching and manually choosing a Lensfun profile, selecting which corrections to apply, and choosing a custom database folder.
-- A clearer, easier desktop workbench: drop RAW/TIFF files or folders into the window, see the current frame, checked count and sync scope at a glance, and use improved keyboard and light/dark theme support across tabs, plots and dialogs.
-- A reworked develop workflow with a larger multi-frame action panel and explicit sync sources and targets. Film-strip thumbnails use colour and shape to show uncalibrated, calibrated, adjusted, missing-source and virtual-copy states.
-- Roll rendering settings are separated from single-frame export, while a new task centre reports foreground work, background queues and recent batch results. First-use guidance is now an inline, non-blocking prompt.
-- Preferences are organised into General, Imaging & performance, and Storage, with resource folders under Settings. The top bar adds direct sun/moon theme switching and a translation-icon language picker.
-- A simpler daily interface: frame reports and display details are grouped under Help → Diagnostics, advanced decoding options are collapsed by default, and actionable display warnings remain visible.
-- Faster RAW/TIFF browsing, contact sheets and exports, with less repeated reading, conversion and temporary memory use when processing large images in succession.
-- Added optional camera-colour RAW negative viewing under advanced decoding preferences. It changes only the un-inverted view, not sampling, inversion or exports.
-- **Deep-WB is now installed on demand.** Default packages exclude model weights. To use Smart cast correction, click the download icon and accept the separate CC BY-NC-SA 4.0 non-commercial license. GitHub/Gitee downloads support progress, cancellation, retry and integrity checks, with offline installation available; the model persists across upgrades and other features do not require it.
-- Improved built-in dust repair by matching nearby clean texture and shading more accurately, reducing unnatural edges and regional-preview differences without requiring another component or model.
-- Acknowledgement: some built-in dust repair improvements were inspired by the design of [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) and independently implemented by OpenRevelare.
+- **Faster processing, smoother editing.** Faster RAW/TIFF import, browsing, contact sheets and exports with lower memory use. More responsive sliders and curves, with stale previews prevented from replacing the current photo.
+- Added offline Lensfun matching to correct roll-wide distortion and vignetting from the first RAW's capture settings, with details and a roll-wide toggle. LCC takes priority for vignetting.
+- Deep-WB is installed on demand, supports online and offline installation, and survives upgrades. Requires acceptance of its CC BY-NC-SA 4.0 non-commercial license.
+- More natural dust repair, independently implemented with inspiration from [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner). Added camera-colour negative previews for viewing only.
+- **A refreshed interface for easier everyday use.** Refined workbench, preferences and light/dark themes, with drag-and-drop import and quick theme and language switching. Clearer batch actions and progress, with easier first-use guidance.
 
 **Fixed**
 
-- Fixed automatic sprocket detection failing on dim RAW captures with holes clipped by the image edge, leaving the default threshold in place. A fallback verifies peripheral hole sizes, alignment and spacing only after the original detector fails; successful original estimates retain their exact thresholds.
-- Fixed film-strip thumbnails remaining at a fixed size when the left rail is widened, and overlay upgrades from older releases potentially discarding an installed Deep-WB model and requiring another download.
-- Fixed some compressed TIFF region reads failing when they start partway through an image, and tightened FFF recognition to reject damaged or invalid files more reliably.
-- Fixed Open LUT Folder also opening the negative-import window in some cases.
-- Fixed catalog roll edits clearing contact-sheet ISO/EI and processing details, preference cancellation not fully reverting previews, and crop actions disappearing with the help text.
+- Fixed edge sprocket detection on dim RAW captures, region reads in some compressed TIFFs, and false recognition of invalid FFF files. Preserved contact-sheet capture and processing details when editing roll information.
+- Fixed thumbnail resizing, missing menu translations, Open LUT Folder triggering import, cancelled preferences not reverting previews, and crop buttons disappearing with help text.
 
 ## v1.8.6.4（2026-10-24）
 

@@ -148,14 +148,20 @@ public partial class MainViewModel
         // their parent's path and no rect, so they still collapse to one decode; a split scan's
         // negatives each carry their own rect and are decoded separately, which is the point —
         // deduping those by path gave every frame of the strip the first one's pixels.
-        var order = new List<(string Path, (double X, double Y, double W, double H)? Pre)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<(string Path, (double X, double Y, double W, double H)? Pre, string Key)>();
+        var targetsByKey = new Dictionary<string, List<RollFrame>>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < frames.Count; i++)
         {
             int offset = (i & 1) == 0 ? -(i / 2) : (i + 1) / 2;
             RollFrame f = frames[(start + offset + frames.Count) % frames.Count];
             var pre = SplitCropOf(f);
-            if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre));
+            string key = PreviewKey(f.Path, pre);
+            if (!targetsByKey.TryGetValue(key, out var targets))
+            {
+                targetsByKey[key] = targets = new List<RollFrame>();
+                order.Add((f.Path, pre, key));
+            }
+            targets.Add(f);
         }
 
         // Most of the cores, not a fixed few: LibRaw unpacks one file on one thread, so the
@@ -189,7 +195,7 @@ public partial class MainViewModel
                 for (int j = 0; j < batch.Length; j++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var (path, pre) = batch[j];
+                    var (path, pre, key) = batch[j];
                     PreviewCache.Entry entry;
                     try { entry = batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
@@ -199,10 +205,11 @@ public partial class MainViewModel
                     // end of the roll — the strip fills in progressively instead of all at once.
                     // Matched on the preview key, so a split frame only takes the decode of its OWN
                     // slice and not a sibling's.
-                    string key = PreviewKey(path, pre);
+                    // Reuse the snapshot's region/revision identity. Rebuilding every frame's
+                    // key here did N² synchronous FileInfo.Refresh calls on the UI thread.
                     List<RollFrame> targets = await Dispatcher.UIThread.InvokeAsync(() =>
-                        Frames.Where(f => f.Thumbnail is null &&
-                                          PreviewKey(f.Path, SplitCropOf(f)) == key)
+                        targetsByKey[key].Where(f => !token.IsCancellationRequested &&
+                                          Frames.Contains(f) && f.Thumbnail is null && SplitCropOf(f) == pre)
                               .ToList());
                     foreach (RollFrame f in targets)
                     {
