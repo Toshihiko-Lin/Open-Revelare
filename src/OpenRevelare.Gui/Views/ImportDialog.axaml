@@ -37,27 +37,6 @@
                     </WrapPanel>
                 </StackPanel>
 
-                <StackPanel Name="LensPreviewPanel" IsVisible="False" Spacing="4">
-                    <TextBlock Text="{i18n:T '翻拍镜头 · Lensfun 识别'}" FontWeight="SemiBold" />
-                    <TextBlock Name="LensPreviewSource" Classes="groupHint" TextWrapping="Wrap" />
-                    <TextBlock Name="LensCaptureSummary" TextWrapping="Wrap" />
-                    <TextBlock Name="LensMatchStatus" TextWrapping="Wrap" />
-                    <TextBlock Name="LensProfileDetails" Classes="groupHint" TextWrapping="Wrap" />
-                    <CheckBox Name="LensfunEnableChk" Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
-                              IsEnabled="False" IsCheckedChanged="OnLensfunEnableChanged"
-                              ToolTip.Tip="{i18n:T '仅识别首张，作为整卷参考；本卷须使用同一翻拍设备和拍摄参数。'}" />
-                    <TextBlock Name="LensCorrectionStatus" Classes="groupHint" TextWrapping="Wrap" />
-                    <Expander Name="LensManualSettings" Header="{i18n:T '查找镜头配置'}" IsExpanded="False" HorizontalAlignment="Stretch">
-                        <StackPanel Spacing="6" Margin="12,6,0,0">
-                            <TextBox Name="LensProfileSearch" Watermark="{i18n:T '输入品牌或镜头型号…'}" TextChanged="OnLensProfileSearchChanged" />
-                            <ComboBox Name="LensProfilePicker" HorizontalAlignment="Stretch" MaxDropDownHeight="220"
-                                      SelectionChanged="OnLensProfileSelected" />
-                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T '按首张的焦距、光圈和机身匹配校正参数；未记录对焦距离时，暗角按远距配置估算，LCC 优先。'}" />
-                        </StackPanel>
-                    </Expander>
-                </StackPanel>
-
                 <StackPanel Name="ImportProcessingOptions" Spacing="12">
                     <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
                         <StackPanel Spacing="8">

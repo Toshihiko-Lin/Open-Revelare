@@ -4,8 +4,8 @@
 
 **新增与改进**
 
-- C# 导入弹窗根据首张 RAW 从随包 Lensfun 数据库离线识别镜头，预览拍摄信息、匹配详情及畸变／暗角数据；可用配置默认启用并应用于整卷，也可搜索并手动选择配置覆盖自动匹配。首张不变时复用识别结果。
-- Lensfun 畸变与暗角按各自可用参数独立校正，启用 LCC 时由平场参考优先处理暗角，避免重复校正；导入弹窗与镜头校正区均提供整卷启用选框，工程保存实际校正参数及启用状态。光源、LCC 与扫描分格直接显示，附加参考图控件按需展开。
+- 导入时在后台根据首张 RAW 从随包 Lensfun 数据库离线识别镜头，可用配置自动应用于整卷；首张不变时复用识别结果。导入弹窗不展示 Lensfun 信息和选框，配置详情与整卷启停集中在主界面的镜头校正区。
+- Lensfun 畸变与暗角按各自可用参数独立校正，启用 LCC 时由平场参考优先处理暗角，避免重复校正；工程保存实际校正参数及启用状态。导入界面的光源、LCC 与扫描分格直接显示，附加参考图控件按需展开。
 - 补齐 Lensfun 导入与镜头校正区的中英文资源，新增与英文键对齐的简体中文资源表；识别、启用状态和校正详情随界面语言切换更新。新增识别缓存、校正模型、LCC 优先、局部渲染一致性、工程保存及资源键与格式参数的回归测试，相关定向测试共 45 项通过。
 - 新增 Lensfun 镜头配置支持：优先读取 RAW／DNG 内嵌校正参数，缺少时尝试从随包数据库匹配畸变与暗角配置；两项可独立应用，启用 LCC 时由 LCC 优先处理暗角，避免重复校正。
 - 镜头校正区显示匹配来源与畸变／暗角详情；高级设置支持搜索并手动选择 Lensfun 配置、分别选择校正项目，以及指定自定义数据库文件夹。
@@ -32,8 +32,8 @@
 
 **Added and improved**
 
-- The C# import dialog identifies the lens offline from the first RAW using the bundled Lensfun database and previews capture metadata, match details and distortion/vignetting data. Usable profiles are enabled for the roll by default; search and manual profile selection can override the automatic match. Identification is reused while the first file remains unchanged.
-- Lensfun distortion and vignetting corrections use their available calibration parameters independently. Enabled LCC takes priority for vignetting to avoid double correction. Both the import dialog and lens-correction panel provide a roll-wide enable checkbox, and projects preserve resolved calibration parameters and the enable choice. Light-source, LCC and strip-splitting options are directly visible, with reference controls shown as needed.
+- Import identifies the lens in the background from the first RAW using the bundled Lensfun database and automatically applies usable profiles to the roll. Identification is reused while the first file remains unchanged. Lensfun details and the roll-wide enable checkbox are shown only in the main lens-correction panel.
+- Lensfun distortion and vignetting corrections use their available calibration parameters independently. Enabled LCC takes priority for vignetting to avoid double correction. Projects preserve resolved calibration parameters and the enable choice. Import light-source, LCC and strip-splitting options are directly visible, with reference controls shown only when needed.
 - Completed Chinese and English text for Lensfun import and correction controls, adding a Simplified Chinese resource table with matching English keys. Match details and correction status follow language changes. Regression coverage includes identification caching, correction models, LCC priority, regional-render consistency, project persistence, resource keys and format arguments; all 45 related targeted tests pass.
 - Added Lensfun lens-profile support: embedded RAW/DNG correction metadata takes priority, with the bundled database providing distortion and vignetting profiles when available. The two corrections can be applied independently; enabled LCC takes priority over profile-based vignetting to avoid double correction.
 - The lens-correction panel shows the matching source and separate distortion/vignetting details. Advanced settings support searching and manually choosing a Lensfun profile, selecting which corrections to apply, and choosing a custom database folder.
