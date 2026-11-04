@@ -6,10 +6,13 @@ internal static class BoardCutAnalysis
 {
     internal static Task<double?> MeasureAsync(IReadOnlyList<Func<double?>> samples,
                                               CancellationToken cancellationToken = default,
-                                              int maxWorkers = 1)
+                                              int maxWorkers = 1,
+                                              Action<int, int>? progress = null)
         => Task.Run(() =>
         {
             double? best = null;
+            int done = 0;
+            progress?.Invoke(0, samples.Count);
             var gate = new object();
             Parallel.ForEach(samples, new ParallelOptions
             {
@@ -21,7 +24,10 @@ internal static class BoardCutAnalysis
                 double? cut = sample();
                 cancellationToken.ThrowIfCancellationRequested();
                 lock (gate)
+                {
                     if (cut is { } value && (best is null || value > best)) best = value;
+                    progress?.Invoke(++done, samples.Count);
+                }
             });
             return best;
         }, cancellationToken);

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Runtime;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -725,21 +724,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         Retire(old);
     }
 
-    /// <summary>
-    /// Give the big transient buffers back to the OS after a bulk operation.
-    ///
-    /// A full-resolution frame is ~288 MB at 24 MP, so an import, an export or a contact sheet
-    /// parks hundreds of megabytes on the large object heap — which the runtime never compacts on
-    /// its own, so the process keeps that footprint committed for the rest of the session even
-    /// though every buffer in it is long dead. Compacting is expensive, which is exactly why it
-    /// belongs here and nowhere else: these are the tail of an operation the user already waited
-    /// seconds for, so the pause is invisible, and they are the only places that allocate at this
-    /// size. Never call this on the render path.
-    /// </summary>
+    /// <summary>Reclaim bulk-operation buffers without forcing a compacting, stop-the-world GC
+    /// on the UI thread. Background collection leaves the preview and input loop responsive.</summary>
     private static void ReleaseBulkBuffers()
     {
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        using var trace = RenderTrace.Scope("bulk.release-buffers");
+        GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: false);
     }
 
     [ObservableProperty]
@@ -748,7 +738,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasTaskCenterContent), nameof(TaskCenterBackgroundText), nameof(TaskCenterSummary))]
+    [NotifyPropertyChangedFor(nameof(HasTaskCenterContent), nameof(TaskCenterBackgroundText), nameof(TaskCenterSummary), nameof(RollProgressDetail))]
     private string _backgroundStatus = "";
     /// <summary>
     /// True while the roll-wide auto-inversion is still pooling frames — i.e. while what is on
@@ -783,7 +773,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     partial void OnRollAnalysisNoticeDismissedChanged(bool value)
-        => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+    {
+        OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+        OnPropertyChanged(nameof(ShowRollProgressBanner));
+    }
 
     /// <summary>Dismiss the roll-analysis notice. The analysis itself keeps running.</summary>
     public void DismissRollAnalysisNotice() => RollAnalysisNoticeDismissed = true;
@@ -2712,25 +2705,62 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task PrepareImportedRollAsync()
     {
-        RollFrame[] importedFrames = Frames.ToArray();
-        // Off the UI thread: unlike every other estimator on this path, this one decodes a frame
-        // at full resolution (see MeasureBoardCut), which is seconds rather than milliseconds on a
-        // 100 MP scan. The chain it hands off to at the end is already async for the same reason.
-        ReportBackground(Loc.T("测量灯板阈值 …"));
-        double? threshold = await MeasureBoardCutAsync();
-        // A new import may have replaced this roll while the full-resolution decodes ran.
-        if (!Frames.SequenceEqual(importedFrames)) return;
-        ReportBackground("");
-
+        if (Frames.Count == 0) return;
+        // Manual import promises no automatic measurements, including this full-resolution pass.
         SprocketEnabled = false;
-        SprocketThreshold = threshold ?? 0.9;
-        foreach (RollFrame f in Frames)
+        if (!_cfgAutoInvert) { StartRollWarmUp(); return; }
+
+        RollFrame[] importedFrames = Frames.ToArray();
+        var progressOwner = new object();
+        _rollProgressOwner = progressOwner;
+        RollAnalysisNoticeDismissed = false;
+        RollAnalysisProgress = Loc.T("正在检测齿孔 …");
+        using var cts = new CancellationTokenSource();
+        _autoInvertCts?.Cancel();
+        _autoInvertCts = cts;
+        try
         {
-            f.Params.SprocketEnabled = false;
-            f.Params.SprocketThreshold = SprocketThreshold;
+            using var trace = RenderTrace.Scope("import.board-cut.full-resolution");
+            double? threshold = await MeasureBoardCutAsync(cts.Token, (done, total) =>
+            {
+                void Publish()
+                {
+                    if (!ReferenceEquals(_rollProgressOwner, progressOwner) || cts.IsCancellationRequested) return;
+                    RollAnalysisProgress = Loc.F($"齿孔检测 {done}/{total} …");
+                }
+                if (Dispatcher.UIThread.CheckAccess()) Publish();
+                else Dispatcher.UIThread.Post(Publish);
+            });
+            cts.Token.ThrowIfCancellationRequested();
+            if (!Frames.SequenceEqual(importedFrames)) return;
+
+            SprocketThreshold = threshold ?? 0.9;
+            foreach (RollFrame f in Frames)
+            {
+                f.Params.SprocketEnabled = false;
+                f.Params.SprocketThreshold = SprocketThreshold;
+            }
+            // Admit the expensive board samples before the rest of the roll's preview decodes.
+            StartRollWarmUp();
+            AutoInvertOnImportRun(new BoardCutResult(threshold));
+            UpdateSprocketOverlay();
         }
-        AutoInvertOnImportRun(new BoardCutResult(threshold));
-        UpdateSprocketOverlay();
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(_rollProgressOwner, progressOwner)) return;
+            StatusText = Loc.T("整卷分析失败：") + ex.Message;
+            StartRollWarmUp();
+        }
+        finally
+        {
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
+            if (ReferenceEquals(_rollProgressOwner, progressOwner))
+            {
+                _rollProgressOwner = null;
+                RollAnalysisProgress = "";
+            }
+        }
     }
 
     /// <summary>
@@ -2937,12 +2967,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     // Snapshot every input before leaving the UI thread. The worker never reads live frame,
     // crop or pipeline state, including when the user switches frames during a RAW decode.
-    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default)
+    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default, Action<int, int>? progress = null)
     {
         Func<double?>[] samples = CurrentFrame is { } current
             ? BoardCutSampleFrames(current).Select(BoardCutMeasurement).ToArray()
             : Array.Empty<Func<double?>>();
-        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: Math.Min(2, ImageIo.PreviewWorkers));
+        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: Math.Min(2, ImageIo.PreviewWorkers), progress: progress);
     }
 
     // The wrapper distinguishes an already-measured "no board" from "not measured yet".
@@ -3102,6 +3132,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null)
     {
+        var progressOwner = new object();
+        _rollProgressOwner = progressOwner;
+        RollAnalysisNoticeDismissed = false;
+        RollAnalysisProgress = Loc.T("正在测量片基与高光 …");
         try
         {
             await AutoInvertRollCoreAsync(measuredBoardCut);
@@ -3118,6 +3152,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            if (ReferenceEquals(_rollProgressOwner, progressOwner))
+            {
+                _rollProgressOwner = null;
+                RollAnalysisProgress = "";
+            }
             ReleaseBulkBuffers();
         }
     }
@@ -3133,6 +3172,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _autoInvertCts?.Cancel();
         _autoInvertCts = cts;
         CancellationToken ct = cts.Token;
+        // Paint the banner before synchronous current-frame measurements start.
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        ct.ThrowIfCancellationRequested();
 
         // ── Stage 1: the current frame alone, so there is something to look at at once ──────
         //
@@ -3207,7 +3249,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // let the notice be dismissed — a user who already knows should not have to keep reading
         // it. Raised here rather than at the top of the method because a single-frame roll (the
         // early return above) never has a provisional stage to warn about.
-        RollAnalysisNoticeDismissed = false;
         RollAnalysisPending = true;
 
         try
@@ -3245,7 +3286,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // must not vanish either — see the catch below.
             int failed = 0;
             string? failReason = null;
-            ReportBackground(Loc.F($"整卷分析 0/{order.Count} …"));
+            ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 0/{order.Count} …"));
             var pipelineVersion = _colorPipelineVersion;
             var inputAssumption = _tiffInputAssumption;
             var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
@@ -3287,7 +3328,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         // the bug.
                         Interlocked.Increment(ref failed);
                         failReason = ex is OutOfMemoryException ? Loc.T("内存不足") : ex.Message;
-                        ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
+                        ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                         continue;
                     }
 
@@ -3342,10 +3383,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     {
                         completed.Add((rollIndex, raw, val, baseMask, baseValue));
                     }
-                    ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
+                    ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                 }
             });
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             ct.ThrowIfCancellationRequested();
             completed.Sort((a, b) => a.RollIndex.CompareTo(b.RollIndex));
             var masks = new List<ImageBuffer>(completed.Count);
@@ -3493,13 +3534,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // longer coming would sit there for the rest of the session.
         catch (OperationCanceledException)
         {
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             RollAnalysisPending = false;
             if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
         }
         catch (Exception ex)
         {
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             RollAnalysisPending = false;
             StatusText = Loc.T("整卷分析去色罩失败：") + ex.Message;
             RestartThumbnails();
@@ -3521,6 +3562,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _autoInvertCts?.Cancel();
         _autoInvertCts = null;
+        _rollProgressOwner = null;
+        RollAnalysisProgress = "";
+        ThumbnailProgress = "";
+        WarmupProgress = "";
         RollAnalysisPending = false;
     }
 

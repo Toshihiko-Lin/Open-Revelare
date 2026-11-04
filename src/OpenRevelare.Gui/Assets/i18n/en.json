@@ -1347,5 +1347,17 @@
   "{0} · {1:0.##} mm · 畸变：{2} · 暗角：{3}": "{0} · {1:0.##} mm · Distortion: {2} · Vignetting: {3}",
   "Lensfun 按首张拍摄参数校正整卷；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。": "Lensfun corrects the roll using the first file’s capture settings. LCC takes priority for vignetting. The sliders below provide additional manual adjustment.",
   "Lensfun 启用：{0}": "Lensfun enabled: {0}",
-  "Lensfun": "Lensfun"
+  "Lensfun": "Lensfun",
+  "正在导入新卷 …": "Importing new roll …",
+  "正在自动分析整卷 …": "Automatically analyzing roll …",
+  "正在准备图像和首帧预览，请稍候。": "Preparing images and the first preview. Please wait.",
+  "正在汇总整卷标定结果 …": "Combining roll calibration results …",
+  "正在测量片基与高光，随后将统一分析整卷。完成前预览可能更新。": "Measuring the film base and highlights, then analyzing the whole roll. Previews may update until analysis finishes.",
+  "后台处理中，请稍候。": "Processing in the background. Please wait.",
+  "分析完成后自动刷新全卷，期间预览可能更新。": "The roll refreshes automatically when analysis finishes. Previews may update in the meantime.",
+  "正在测量片基与高光 …": "Measuring film base and highlights …",
+  "全分辨率灯板测量 {0}/{1} …": "Full-resolution light-board measurement {0}/{1} …",
+  "正在检测齿孔 …": "Detecting sprockets …",
+  "齿孔检测 {0}/{1} …": "Sprocket detection {0}/{1} …",
+  "缩略图解码 {0}/{1} …": "Thumbnail decoding {0}/{1} …"
 }

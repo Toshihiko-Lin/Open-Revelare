@@ -518,7 +518,10 @@ public partial class MainViewModel
     }
 
     /// <summary>Open a roll from the import dialog: compute Path-A decouple + LCC (roll-level), then load.</summary>
-    public async Task LoadRollWithConfigAsync(ImportConfig cfg)
+    public Task LoadRollWithConfigAsync(ImportConfig cfg)
+        => RunImportStageAsync(() => LoadRollWithConfigCoreAsync(cfg));
+
+    private async Task LoadRollWithConfigCoreAsync(ImportConfig cfg)
     {
         if (cfg.Paths.Count == 0) return;
 
@@ -938,6 +941,7 @@ public partial class MainViewModel
         double newRollPeak = DefaultHdrPeakNitsForNewRoll();
         foreach (RollFrame f in Frames) f.Params.HdrPeakNits = newRollPeak;
         RefreshSplitPaths();        // before the first switch, which consults it
+        LoadingImportedPreview = true;
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
 
@@ -958,7 +962,7 @@ public partial class MainViewModel
         // Fire and forget: the import must return as soon as frame 1 is on screen. Awaiting the
         // roll here is what made importing feel like it hung — it did not come back until every
         // frame in the roll had been decoded.
-        StartRollWarmUp();
+        if (!_cfgAutoInvert || RollImported is null) StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
     }
@@ -1082,7 +1086,7 @@ public partial class MainViewModel
         {
             if (tok == _switchToken) { StatusText = Loc.T("打开失败：") + ex.Message; HasImage = false; }
         }
-        finally { if (tok == _switchToken) IsBusy = false; }
+        finally { if (tok == _switchToken) { IsBusy = false; LoadingImportedPreview = false; } }
     }
 
     /// <summary>Push a frame's stored FrameParams into all the UI controls (suppressing renders).</summary>

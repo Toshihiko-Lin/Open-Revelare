@@ -20,6 +20,34 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private bool _rollProgressPlacementQueued;
+    private void UpdateRollProgressPlacement()
+    {
+        if (_rollProgressPlacementQueued) return;
+        _rollProgressPlacementQueued = true;
+        // Mode changes first attach/lay out the selected pane. Opening against the hidden pane
+        // closes a native Popup internally, leaving an unchanged IsOpen binding unable to reopen it.
+        Dispatcher.UIThread.Post(() =>
+        {
+            _rollProgressPlacementQueued = false;
+            Control target = Vm?.IsLibraryMode == true ? Library : PreviewViewport;
+            if (!ReferenceEquals(RollProgressPopup.PlacementTarget, target))
+            {
+                RollProgressPopup.IsOpen = false;
+                RollProgressPopup.PlacementTarget = target;
+            }
+            var origin = target.TranslatePoint(default, this) ?? default;
+            double visibleWidth = Math.Max(0, Math.Min(target.Bounds.Width, Bounds.Width - origin.X));
+            RollProgressPopup.PlacementRect = new Rect(0, 0, visibleWidth, target.Bounds.Height);
+            RollProgressCard.Width = RollProgressCardWidth(visibleWidth);
+            RollProgressPopup.IsOpen = IsVisible && target.IsVisible && visibleWidth > 36
+                && Vm?.ShowRollProgressBanner == true;
+        }, DispatcherPriority.Background);
+    }
+
+    internal static double RollProgressCardWidth(double paneWidth)
+        => Math.Min(420, Math.Max(1, paneWidth - 36));
+
     private void OnCancelLongTaskClick(object? sender, RoutedEventArgs e) => Vm?.CancelLongTask();
 
     private void OnPrintLutOutputClick(object? sender, RoutedEventArgs e)
@@ -33,10 +61,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         SyncQuickPreferenceControls();
         SetUpDropImport();
-        SizeChanged += (_, _) => UpdateWorkspaceLayout();
+        SizeChanged += (_, _) => { UpdateWorkspaceLayout(); UpdateRollProgressPlacement(); };
         PreviewWorkspace.SizeChanged += (_, _) =>
             PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
         UpdateWorkspaceLayout();
+        PreviewViewport.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        Library.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        Opened += (_, _) => UpdateRollProgressPlacement();
         Library.OpenRequested += OnLibraryOpenRequested;
         Library.NewRollRequested += ImportNewRollAsync;
         Curves.CurvesChanged += (_, _) => PushCurves();
@@ -121,6 +152,8 @@ public partial class MainWindow : Window
                              nameof(MainViewModel.ShowClipping) or
                              nameof(MainViewModel.ShowSprocketMask))
                         UpdatePatchLayout();
+                    if (args.PropertyName is nameof(MainViewModel.IsLibraryMode) or nameof(MainViewModel.ShowRollProgressBanner))
+                        UpdateRollProgressPlacement();
                     OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>

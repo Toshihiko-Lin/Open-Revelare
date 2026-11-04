@@ -94,4 +94,14 @@ public sealed class BoardCutAnalysisTests
             }, cancellation.Token));
         Assert.Equal(0, secondDecodes);
     }
+    [Fact]
+    public async Task Measurement_progress_includes_initial_and_every_completed_sample()
+    {
+        var progress = new List<(int Done, int Total)>();
+        double? result = await BoardCutAnalysis.MeasureAsync(
+            new Func<double?>[] { () => 0.65, () => null, () => 0.82 },
+            maxWorkers: 2, progress: (done, total) => progress.Add((done, total)));
+        Assert.Equal(0.82, result);
+        Assert.Equal(new[] { (0, 3), (1, 3), (2, 3), (3, 3) }, progress);
+    }
 }
