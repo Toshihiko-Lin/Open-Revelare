@@ -10,6 +10,11 @@ on:
   push:
     branches: [main]
 
+# A newer push supersedes earlier checks on the same branch or PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
@@ -22,29 +27,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: 构建固定 Little CMS 2.19.1
-        run: bash packaging/lcms/build-unix.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        run: bash packaging/libraw/build-unix.sh
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       # -warnaserror：本仓库长期保持 0 警告，退化了应当在这里就红
       - run: dotnet build -c Release -warnaserror
       # 回归测试。整套约 10 秒，而它守的是这个项目的核心承诺 ——「同一卷底片任何时候、
@@ -81,31 +65,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: 构建固定 Little CMS 2.19.1
-        shell: pwsh
-        run: ./packaging/lcms/build-windows.ps1
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        shell: pwsh
-        run: ./packaging/libraw/build-windows.ps1
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - name: 构建可重复 Win32 presenter
         shell: pwsh
         run: ./packaging/windows/build-win32-presenter.ps1
@@ -154,29 +115,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: 构建固定 Little CMS 2.19.1
-        run: bash packaging/lcms/build-unix.sh
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install NASM for x265 SIMD
-        if: runner.arch == 'X64'
-        shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux) sudo apt-get update && sudo apt-get install -y nasm ;;
-            Windows)
-              choco install nasm --yes --no-progress
-              echo 'C:/Program Files/NASM' >> "$GITHUB_PATH"
-              ;;
-            macOS) brew install nasm ;;
-          esac
-      - name: Build native GPU compute backend
-        run: python packaging/compute/build.py
-      - name: Build HEIC encoder (libheif + x265 Main10)
-        run: python packaging/heif/build.py
-      - name: 构建固定 LibRaw 0.22.2
-        run: bash packaging/libraw/build-unix.sh
+      - name: Restore or build native dependencies
+        uses: ./.github/actions/build-native
       - run: dotnet build -c Release -warnaserror
       # 同一套回归测试也在 macOS 上跑一遍：这里的测试有相当一部分在验数值结果，
       # 而浮点行为、文化相关的数字解析、路径大小写都是跨平台会分岔的地方。
