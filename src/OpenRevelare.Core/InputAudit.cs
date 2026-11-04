@@ -38,7 +38,8 @@ public static class InputAudit
         var phases = new ConcurrentDictionary<ActivityTraceId, ConcurrentQueue<InputPhase>>();
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == RawDecode.Diagnostics.Name,
+            // ActivitySource invokes listeners inside its constructor, before Diagnostics is assigned.
+            ShouldListenTo = source => source.Name == RawDecode.DiagnosticsSourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStopped = activity =>
             {

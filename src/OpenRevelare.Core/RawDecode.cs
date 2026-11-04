@@ -19,7 +19,8 @@ namespace OpenRevelare.Core;
 public static class RawDecode
 {
     /// <summary>Opt-in phase timing; emits no file names or image content.</summary>
-    public static readonly ActivitySource Diagnostics = new("OpenRevelare.RawDecode");
+    internal const string DiagnosticsSourceName = "OpenRevelare.RawDecode";
+    public static readonly ActivitySource Diagnostics = new(DiagnosticsSourceName);
     private static readonly RawSourceCache SourceBytes = new(256L << 20,
         () => PhysicalMemory.TryGetAvailableBytes(out long free) ? free : null);
 
