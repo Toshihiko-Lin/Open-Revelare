@@ -25,22 +25,19 @@ public partial class MainWindow : Window
     {
         if (_rollProgressPlacementQueued) return;
         _rollProgressPlacementQueued = true;
-        // Mode changes first attach/lay out the selected pane. Opening against the hidden pane
-        // closes a native Popup internally, leaving an unchanged IsOpen binding unable to reopen it.
+        // Wait until a mode/size change has laid out the active content pane.
         Dispatcher.UIThread.Post(() =>
         {
             _rollProgressPlacementQueued = false;
             Control target = Vm?.IsLibraryMode == true ? Library : PreviewViewport;
-            if (!ReferenceEquals(RollProgressPopup.PlacementTarget, target))
-            {
-                RollProgressPopup.IsOpen = false;
-                RollProgressPopup.PlacementTarget = target;
-            }
-            var origin = target.TranslatePoint(default, this) ?? default;
-            double visibleWidth = Math.Max(0, Math.Min(target.Bounds.Width, Bounds.Width - origin.X));
-            RollProgressPopup.PlacementRect = new Rect(0, 0, visibleWidth, target.Bounds.Height);
-            RollProgressCard.Width = RollProgressCardWidth(visibleWidth);
-            RollProgressPopup.IsOpen = IsVisible && target.IsVisible && visibleWidth > 36
+            var origin = target.TranslatePoint(default, RollProgressOverlay) ?? default;
+            double visibleWidth = Math.Max(0, Math.Min(target.Bounds.Width, RollProgressOverlay.Bounds.Width - origin.X));
+            double cardWidth = RollProgressCardWidth(visibleWidth);
+            RollProgressCard.Width = cardWidth;
+            RollProgressHost.Width = cardWidth;
+            Canvas.SetLeft(RollProgressHost, origin.X + (visibleWidth - cardWidth) / 2);
+            Canvas.SetTop(RollProgressHost, origin.Y + 18);
+            RollProgressHost.IsVisible = IsVisible && target.IsVisible && visibleWidth > 36
                 && Vm?.ShowRollProgressBanner == true;
         }, DispatcherPriority.Background);
     }
@@ -66,6 +63,8 @@ public partial class MainWindow : Window
             PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
         UpdateWorkspaceLayout();
         PreviewViewport.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        RollProgressOverlay.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        WorkspaceScroll.ScrollChanged += (_, _) => UpdateRollProgressPlacement();
         Library.SizeChanged += (_, _) => UpdateRollProgressPlacement();
         Opened += (_, _) => UpdateRollProgressPlacement();
         Library.OpenRequested += OnLibraryOpenRequested;

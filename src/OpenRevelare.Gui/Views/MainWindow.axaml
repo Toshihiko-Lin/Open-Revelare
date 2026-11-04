@@ -283,40 +283,6 @@
             </Grid>
         </Border>
 
-        <!-- A native popup floats above both the shell and the native preview without
-             reserving layout space or intercepting clicks outside the card. -->
-        <Popup Name="RollProgressPopup"
-               PlacementTarget="{Binding #PreviewViewport}" Placement="AnchorAndGravity"
-               PlacementAnchor="Top" PlacementGravity="Bottom"
-               VerticalOffset="18"
-               IsLightDismissEnabled="False" WindowManagerAddShadowHint="True">
-            <Border Name="RollProgressCard" Width="420" Padding="16,14" CornerRadius="8"
-                    Background="{DynamicResource ElevatedBrush}"
-                    BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
-                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
-                    <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,12,0">
-                        <TextBlock Text="{Binding RollProgressTitle}" FontSize="13"
-                                   FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
-                        <TextBlock Text="{Binding RollProgressDetail}" TextWrapping="Wrap"
-                                   FontSize="12" Foreground="{DynamicResource TextBrush}" />
-                    </StackPanel>
-                    <Button Grid.Column="1" Classes="icon" Width="24" Height="24" MinHeight="24"
-                            VerticalAlignment="Top" Padding="4" Click="OnDismissRollAnalysisNoticeClick"
-                            ToolTip.Tip="{i18n:T '关闭提示'}" AutomationProperties.Name="{i18n:T '关闭提示'}">
-                        <ctl:Icon Data="{StaticResource IcoClose}" />
-                    </Button>
-                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding RollProgressDecodeDetail}"
-                               IsVisible="{Binding RollProgressDecodeDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                               Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
-                               Foreground="{DynamicResource TextBrush}" />
-                    <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding RollProgressHint}"
-                               Margin="0,8,0,12" TextWrapping="Wrap" FontSize="11"
-                               Foreground="{DynamicResource TextDimBrush}" />
-                    <ProgressBar Grid.Row="3" Grid.ColumnSpan="2" IsIndeterminate="True" Height="3" />
-                </Grid>
-            </Border>
-        </Popup>
-
         <Border Name="DropNotice" DockPanel.Dock="Top" IsVisible="False"
                 Background="{DynamicResource AccentSoftBrush}" Padding="16,8">
             <TextBlock Text="{i18n:T '放下以导入'}" HorizontalAlignment="Center" />
@@ -1682,6 +1648,39 @@
             </Grid>
         </Grid>
         </ScrollViewer>
+
+        <!-- Embedded overlay: participates in the main window's clipping and stacking. -->
+        <Canvas Name="RollProgressOverlay" ZIndex="20" ClipToBounds="True">
+            <ctl:EmbeddedOverlayHost Name="RollProgressHost" IsVisible="False" Width="420">
+                <ctl:EmbeddedOverlayHost.Content>
+                    <Border Name="RollProgressCard" Width="420" Padding="16,14" CornerRadius="8"
+                            Background="{DynamicResource ElevatedBrush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                            <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,12,0">
+                                <TextBlock Text="{Binding RollProgressTitle}" FontSize="13"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+                                <TextBlock Text="{Binding RollProgressDetail}" TextWrapping="Wrap"
+                                           FontSize="12" Foreground="{DynamicResource TextBrush}" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="icon" Width="24" Height="24" MinHeight="24"
+                                    VerticalAlignment="Top" Padding="4" Click="OnDismissRollAnalysisNoticeClick"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}" AutomationProperties.Name="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                            <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding RollProgressDecodeDetail}"
+                                       IsVisible="{Binding RollProgressDecodeDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
+                                       Foreground="{DynamicResource TextBrush}" />
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding RollProgressHint}"
+                                       Margin="0,8,0,12" TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{DynamicResource TextDimBrush}" />
+                            <ProgressBar Grid.Row="3" Grid.ColumnSpan="2" IsIndeterminate="True" Height="3" />
+                        </Grid>
+                    </Border>
+                </ctl:EmbeddedOverlayHost.Content>
+            </ctl:EmbeddedOverlayHost>
+        </Canvas>
 
         </Panel>
     </DockPanel>
