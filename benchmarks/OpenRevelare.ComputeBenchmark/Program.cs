@@ -2,6 +2,20 @@ using System.Diagnostics;
 using System.Text.Json;
 using OpenRevelare.Core;
 
+if (args.FirstOrDefault() == "--raw-roll")
+{
+    string? mode = args.ElementAtOrDefault(4);
+    RawRollBenchmark.Run(args[1], int.Parse(args.ElementAtOrDefault(2) ?? "2"), int.Parse(args.ElementAtOrDefault(3) ?? "0"),
+        mode is "full" or "shared", mode == "shared");
+    return;
+}
+
+if (args.FirstOrDefault() == "--raw-import")
+{
+    RawImportBenchmark.Run(args.ElementAtOrDefault(1));
+    return;
+}
+
 if (args.FirstOrDefault() == "--raw-previews")
 {
     RawPreviewBenchmark.Run();

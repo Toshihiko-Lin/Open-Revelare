@@ -175,13 +175,13 @@ public partial class MainViewModel
             ReportPreviewProgress(ct, Loc.F($"缩略图解码 0/{total} …"), warmup: true);
             var pipelineVersion = _colorPipelineVersion;
             var inputAssumption = _tiffInputAssumption;
-            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            var batches = DecodeBatchPlan.Create(order, item => item.Path);
             await Parallel.ForEachAsync(batches, opts, async (batch, token) =>
             {
                 PreviewCache.Entry[]? batchEntries = null;
                 if (batch.Length > 1)
                 {
-                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                    try { batchEntries = await PreviewBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
                         pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
                     catch { /* Retry cells independently: a bad crop must not hide its siblings. */ }

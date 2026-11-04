@@ -506,9 +506,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Called with bounded groups by the contact-sheet loader. Every cell is registered in
+    // Called with bounded source groups by preview loaders. Every cell is registered in
     // _decoding before work begins, so foreground preview requests join the same batch.
-    private Task<PreviewCache.Entry[]> PreviewTiffBatchAsync(
+    private Task<PreviewCache.Entry[]> PreviewBatchAsync(
         string path,
         (double X, double Y, double W, double H)?[] rects,
         ColorPipelineVersion pipelineVersion,
@@ -546,8 +546,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     try
                     {
-                        using var trace = RenderTrace.Scope("decode.preview.tiff-batch");
-                        var decoded = ImageIo.LoadWorkingTiffPreviewBatch(path, pending.Select(p => p.Rect).ToArray(),
+                        using var trace = RenderTrace.Scope("decode.preview.source-batch");
+                        var decoded = ImageIo.LoadWorkingPreviewBatch(path, pending.Select(p => p.Rect).ToArray(),
                             PreviewMaxEdge, pipelineVersion, ColorManagement, inputAssumption);
                         stamp.RequireCurrent();
                         for (int i = 0; i < pending.Count; i++)
@@ -2718,6 +2718,25 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         using var cts = new CancellationTokenSource();
         _autoInvertCts?.Cancel();
         _autoInvertCts = cts;
+        bool warmupStarted = false;
+        int warmupQueued = 0;
+        bool overlap = BoardCutAnalysis.CanOverlapPreviews(ImageIo.PreviewWorkers,
+            SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
+        void PreviewReady()
+        {
+            if (!overlap || Interlocked.Exchange(ref warmupQueued, 1) != 0) return;
+            // A board job already holds its decode admission and has published its preview.
+            // Start the roll only after this checkpoint so preview jobs cannot claim every
+            // slot ahead of the full-resolution samples. Small-memory imports stay staged.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (warmupStarted || cts.IsCancellationRequested
+                    || !ReferenceEquals(_rollProgressOwner, progressOwner) || !Frames.SequenceEqual(importedFrames)) return;
+                warmupStarted = true;
+                StartRollWarmUp();
+                RenderTrace.Count("import.board-cut.preview-overlap");
+            });
+        }
         try
         {
             using var trace = RenderTrace.Scope("import.board-cut.full-resolution");
@@ -2730,7 +2749,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 }
                 if (Dispatcher.UIThread.CheckAccess()) Publish();
                 else Dispatcher.UIThread.Post(Publish);
-            });
+            }, previewReady: PreviewReady);
             cts.Token.ThrowIfCancellationRequested();
             if (!Frames.SequenceEqual(importedFrames)) return;
 
@@ -2741,7 +2760,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 f.Params.SprocketThreshold = SprocketThreshold;
             }
             // Admit the expensive board samples before the rest of the roll's preview decodes.
-            StartRollWarmUp();
+            if (!warmupStarted) StartRollWarmUp();
             AutoInvertOnImportRun(new BoardCutResult(threshold));
             UpdateSprocketOverlay();
         }
@@ -2952,6 +2971,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// Each frame is decoded transiently and dropped: none of them is put in the preview cache,
     /// whose entries are preview-sized on purpose (see PreviewAsync — the full-resolution float
     /// frame is the biggest allocation in the program).
+    /// RAW samples may seed that cache with a normal half-size preview from the same unpack;
+    /// the full-resolution pixels remain transient and are never stored there.
     /// </summary>
     private double? MeasureBoardCut()
     {
@@ -2967,12 +2988,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     // Snapshot every input before leaving the UI thread. The worker never reads live frame,
     // crop or pipeline state, including when the user switches frames during a RAW decode.
-    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default, Action<int, int>? progress = null)
+    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default, Action<int, int>? progress = null,
+        Action? previewReady = null)
     {
         Func<double?>[] samples = CurrentFrame is { } current
-            ? BoardCutSampleFrames(current).Select(BoardCutMeasurement).ToArray()
+            ? BoardCutSampleFrames(current).Select(frame => BoardCutMeasurement(frame, previewReady)).ToArray()
             : Array.Empty<Func<double?>>();
-        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: Math.Min(2, ImageIo.PreviewWorkers), progress: progress);
+        long? free = SystemMemory.TryGetAvailableBytes(out long available) ? available : null;
+        int workers = BoardCutAnalysis.RecommendedWorkers(ImageIo.PreviewWorkers, samples.Length, free);
+        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: workers, progress: progress);
     }
 
     // The wrapper distinguishes an already-measured "no board" from "not measured yet".
@@ -2998,7 +3022,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>One frame's board cut at full resolution, or null when it has no board.</summary>
-    private Func<double?> BoardCutMeasurement(RollFrame frame)
+    private Func<double?> BoardCutMeasurement(RollFrame frame, Action? previewReady = null)
     {
         bool isCurrent = ReferenceEquals(frame, CurrentFrame);
 
@@ -3020,6 +3044,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         IColorManagementEngine colorManagement = ColorManagement;
         ImageBuffer? preview = isCurrent ? _previewLinear : null;
         SourceStamp stamp = SourceStamp.Capture(path);
+        long previewGeneration = _previews.Generation;
 
         return () =>
         {
@@ -3028,6 +3053,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ImageBuffer region;
             try
             {
+                using var decodeTrace = RenderTrace.Scope("import.board-cut.decode");
                 // A split cell decodes only its box: a TIFF window at full resolution is the same
                 // pixels as the whole decode cropped to the box, and holds only the cell — a third
                 // of a 190 MP Flextight strip instead of all 2.3 GB of it. A whole-file frame (no
@@ -3042,11 +3068,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    ImageBuffer full = ImageIo.LoadWorking(
-                        path,
-                        pipelineVersion,
-                        colorManagement,
-                        assumption).Pixels;
+                    ImageBuffer full = box is null && RawDecode.IsRawExtension(path)
+                        ? LoadBoardRawWithPreview(path, pipelineVersion, colorManagement, assumption, stamp, previewGeneration, previewReady)
+                        : ImageIo.LoadWorking(path, pipelineVersion, colorManagement, assumption).Pixels;
                     region = box is { } bx2 ? Geometry.ApplyCrop(full, bx2) : full;
                 }
             }
@@ -3073,10 +3097,64 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             if (crop is { } c) region = Geometry.ApplyCrop(region, c);
 
-            double thr = Sprocket.EstimateSprocketThreshold(region);
+            double thr = RenderTrace.Measure("import.board-cut.detect", () => Sprocket.EstimateSprocketThreshold(region));
             stamp.RequireCurrent();
             return thr >= Sprocket.NoBoard ? null : thr;
         };
+    }
+
+    // Reserve the normal preview's in-flight key before unpacking. Foreground switches and
+    // roll warm-up join this work; a cached/already-running preview keeps its existing owner.
+    private ImageBuffer LoadBoardRawWithPreview(string path, ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement, TiffInputAssumption assumption, SourceStamp stamp, long generation,
+        Action? previewReady = null)
+    {
+        string key = PreviewKey(path, null, pipelineVersion, assumption, stamp);
+        TaskCompletionSource<PreviewCache.Entry>? owner = null;
+        lock (_decoding)
+        {
+            if (_previews.Generation == generation && _previews.Get(key) is null
+                && !(_decoding.TryGetValue(key, out var running) && running.Generation == generation))
+            {
+                owner = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _decoding[key] = (generation, owner.Task);
+            }
+        }
+        if (owner is null) return ImageIo.LoadWorking(path, pipelineVersion, colorManagement, assumption).Pixels;
+        try
+        {
+            bool published = false;
+            void Publish(WorkingFrame preview, int width, int height)
+            {
+                if (published) return;
+                stamp.RequireCurrent();
+                DecodedSources.Track(preview, stamp);
+                var entry = new PreviewCache.Entry(preview, width, height) { Source = stamp };
+                if (_previews.PutIfCurrent(key, preview, width, height, generation, stamp))
+                    CaptureTile(key, preview, generation, stamp);
+                owner.TrySetResult(entry);
+                published = true;
+                RenderTrace.Count("import.board-cut.preview-shared");
+                previewReady?.Invoke();
+            }
+            var (full, preview, width, height) = ImageIo.LoadWorkingWithPreview(
+                path, PreviewMaxEdge, pipelineVersion, colorManagement, assumption, Publish);
+            stamp.RequireCurrent();
+            Publish(preview, width, height);
+            return full.Pixels;
+        }
+        catch (Exception ex)
+        {
+            owner.TrySetException(ex);
+            _ = owner.Task.Exception; // Observe failures even when no foreground request joined.
+            throw;
+        }
+        finally
+        {
+            lock (_decoding)
+                if (_decoding.TryGetValue(key, out var current) && ReferenceEquals(current.Task, owner.Task))
+                    _decoding.Remove(key);
+        }
     }
 
     /// <summary>
@@ -3289,7 +3367,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 0/{order.Count} …"));
             var pipelineVersion = _colorPipelineVersion;
             var inputAssumption = _tiffInputAssumption;
-            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            var batches = DecodeBatchPlan.Create(order, item => item.Path);
             await Parallel.ForEachAsync(batches, new ParallelOptions
             {
                 CancellationToken = ct,
@@ -3303,7 +3381,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 PreviewCache.Entry[]? batchEntries = null;
                 if (batch.Length > 1)
                 {
-                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                    try { batchEntries = await PreviewBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
                         pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
                     catch { /* Preserve per-frame error handling below. */ }

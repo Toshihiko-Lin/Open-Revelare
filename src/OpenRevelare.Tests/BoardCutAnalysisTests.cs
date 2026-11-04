@@ -5,6 +5,34 @@ namespace OpenRevelare.Tests;
 
 public sealed class BoardCutAnalysisTests
 {
+    [Theory]
+    [InlineData(8, 3, 26, 3)]
+    [InlineData(8, 3, 13, 2)]
+    [InlineData(8, 3, 9, 1)]
+    [InlineData(8, 3, 0, 1)]
+    [InlineData(1, 3, 26, 1)]
+    [InlineData(8, 1, 26, 1)]
+    [InlineData(8, 0, 26, 1)]
+    public void Worker_recommendation_accounts_for_analysis_memory_manual_limit_and_sample_count(
+        int decodeWorkers, int samples, long freeGiB, int expected)
+        => Assert.Equal(expected, BoardCutAnalysis.RecommendedWorkers(decodeWorkers, samples, freeGiB << 30));
+
+    [Fact]
+    public void Unknown_free_memory_keeps_the_conservative_two_worker_limit()
+        => Assert.Equal(2, BoardCutAnalysis.RecommendedWorkers(8, 3, null));
+
+    [Theory]
+    [InlineData(8, 26, true)]
+    [InlineData(8, 18, true)]
+    [InlineData(8, 17, false)]
+    [InlineData(4, 32, false)]
+    public void Preview_overlap_requires_both_decode_slots_and_memory_headroom(int workers, long freeGiB, bool expected)
+        => Assert.Equal(expected, BoardCutAnalysis.CanOverlapPreviews(workers, freeGiB << 30));
+
+    [Fact]
+    public void Unknown_memory_never_enables_preview_overlap()
+        => Assert.False(BoardCutAnalysis.CanOverlapPreviews(8, null));
+
     [Fact]
     public async Task Full_resolution_measurement_does_not_run_on_the_calling_thread()
     {

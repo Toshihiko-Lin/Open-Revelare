@@ -201,6 +201,39 @@ public sealed class LibRawRuntimeTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(RawDecode.FbddMode.Off)]
+    [InlineData(RawDecode.FbddMode.Light)]
+    public void Raw_crop_batch_matches_independent_decodes_with_whole_frame_and_duplicates(RawDecode.FbddMode fbdd)
+    {
+        string path = Path.Combine(TestDataIsolation.Root, $"batch-preview-{Guid.NewGuid():N}.dng");
+        try
+        {
+            WriteBayerDng(path, width: 1024, height: 768, textured: true);
+            (double X, double Y, double W, double H)?[] rects =
+                { null, (0.123, 0.237, 0.51, 0.62), (0.5, 0, 0.5, 1), (0.123, 0.237, 0.51, 0.62) };
+            var actual = RawDecode.DecodeRawPreviewBatch(path, RawDecode.RawBackend.LibRaw, fbdd, rects, 170);
+            for (int i = 0; i < rects.Length; i++)
+            {
+                var expected = rects[i] is { } rect
+                    ? RawDecode.DecodeRawRegionDownsampled(path, RawDecode.RawBackend.LibRaw, fbdd, rect, 170)
+                    : Whole();
+                Assert.Equal((expected.SourceWidth, expected.SourceHeight), (actual[i].SourceWidth, actual[i].SourceHeight));
+                Assert.Equal((expected.Preview.Width, expected.Preview.Height), (actual[i].Preview.Width, actual[i].Preview.Height));
+                Assert.Equal(expected.Preview.Data, actual[i].Preview.Data);
+                Assert.Equal(expected.Preview.SourceQuantisationStep, actual[i].Preview.SourceQuantisationStep);
+            }
+            Assert.NotSame(actual[1].Preview.Data, actual[3].Preview.Data);
+
+            (ImageBuffer Preview, int SourceWidth, int SourceHeight) Whole()
+            {
+                var full = RawDecode.DecodeRawDownsampled(path, fbdd, new[] { 170 }, RawDecode.Demosaic.Preview);
+                return (full.Previews[0], full.SourceWidth, full.SourceHeight);
+            }
+        }
+        finally { File.Delete(path); }
+    }
+
     // Independent, minimal TIFF/DNG fixture: RGGB, constant per-channel sensor values,
     // deliberately non-unit as-shot WB, and a vendor crop smaller than the sensor.
     internal static void WriteBayerDng(string path, int width = 160, int height = 128, bool textured = false, ushort blackLevel = 0)

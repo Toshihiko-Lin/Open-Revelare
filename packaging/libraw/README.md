@@ -68,3 +68,14 @@ and flat black/white-level evidence. Legacy bridges remain loadable but report t
 extended diagnostics are unavailable. Rebuild the bridge to obtain level diagnostics;
 managed code never assumes native structure offsets. See [RAW I/O](../../docs/raw-io.md)
 for source-cache, camera-viewing and original-file audit behavior.
+
+The bridge uses LibRaw's parallel-decoder/interpolation hooks to schedule Fujifilm
+compressed strips and standard three-colour Bayer AHD tiles with portable C++ threads.
+The upstream strip and tile kernels are unchanged. Pinned input streams synchronize
+seek/read operations; file metadata streams retain the upstream serial unpack path.
+Both stages share at most eight workers (two thirds of the logical cores), with at most
+four per file. Small AHD regions and progress callbacks retain upstream AHD scheduling.
+The AHD share is balanced against other active processing contexts, including preview passes.
+No OpenMP runtime is added. `OPENREVELARE_RAW_UNPACK_THREADS=1` and
+`OPENREVELARE_RAW_PROCESS_THREADS=1` select serial scheduling for diagnostics and parity
+checks; `or_raw_build_info` reports the bounded schedulers.

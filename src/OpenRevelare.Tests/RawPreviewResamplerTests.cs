@@ -14,6 +14,10 @@ public sealed class RawPreviewResamplerTests
         Assert.Throws<ArgumentException>(() => RawDecode.DecodeRawDownsampled(missing, RawDecode.FbddMode.Off, Array.Empty<int>()));
         Assert.Throws<ArgumentOutOfRangeException>(() => RawDecode.DecodeRawDownsampled(missing, RawDecode.FbddMode.Off, new[] { 0 }));
         Assert.Throws<ArgumentOutOfRangeException>(() => RawDecode.DecodeRawDownsampled(missing, RawDecode.FbddMode.Off, new[] { -1 }));
+        Assert.Throws<ArgumentNullException>(() => RawDecode.DecodeRawPreviewBatch(missing, RawDecode.RawBackend.LibRaw, RawDecode.FbddMode.Off, null!, 170));
+        Assert.Throws<ArgumentException>(() => RawDecode.DecodeRawPreviewBatch(missing, RawDecode.RawBackend.LibRaw, RawDecode.FbddMode.Off, Array.Empty<(double, double, double, double)?>(), 170));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RawDecode.DecodeRawPreviewBatch(missing, RawDecode.RawBackend.LibRaw, RawDecode.FbddMode.Off, new (double, double, double, double)?[] { null }, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RawDecode.DecodeRawWithPreview(missing, RawDecode.RawBackend.LibRaw, RawDecode.FbddMode.Off, 0));
     }
 
     [Theory]
