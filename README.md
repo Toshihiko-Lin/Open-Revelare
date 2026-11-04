@@ -8,7 +8,7 @@
   <img src="src/OpenRevelare.Gui/Assets/branding/contact-sheet-wordmark.png" width="520" alt="OpenRevelare">
 </p>
 
-<p align="center"><b>基于物理模型的彩色负片反转工具</b><br>将翻拍 RAW 或扫描 TIFF 转换为可复现的正片。</p>
+<p align="center"><b>An open-source digital darkroom for film negatives</b><br>Turn camera-scanned RAW and scanner TIFF files into positives, one roll at a time.</p>
 
 <p align="center">
   <a href="https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64%20installer-1677ff?style=for-the-badge&logo=windows11&logoColor=white"></a>
@@ -22,113 +22,146 @@
   <a href="LICENSE"><img alt="GNU GPL v3" src="https://img.shields.io/badge/license-GPL--3.0--only-2ea44f.svg"></a>
 </p>
 
-<p align="center"><a href="README.en.md">English</a> · <a href="#项目概览">中文</a></p>
+<p align="center"><a href="#overview">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 <p align="center">
-  <a href="#项目概览">概览</a> · <a href="#核心模型">模型</a> · <a href="#处理流程">流程</a> ·
-  <a href="#界面与示例">界面</a> · <a href="#功能">功能</a> · <a href="#安装">安装</a> ·
-  <a href="#从源码构建">构建</a> · <a href="#许可证与第三方组件">许可</a>
+  <a href="#installation">Download</a> · <a href="#workflow">First roll</a> · <a href="#overview">Overview</a> ·
+  <a href="#interface-and-examples">Interface</a> · <a href="#features">Features</a> ·
+  <a href="#documentation">Documentation</a> · <a href="#building-from-source">Build</a> · <a href="#licence-and-third-party-components">Licence</a>
 </p>
 
 ---
 
-## 项目概览
+## Overview
 
-彩色负片包含橙色片基与染料层，翻拍或扫描的原始文件通常存在色偏。OpenRevelare 将输入还原为线性光，在 Cineon 对数密度域中完成片基扣除、白平衡与反转，再输出正片。
+New users can start with [Your first roll](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.en.md), also available offline in Help → documentation → First roll.
 
-- **可解释**：片基、最大密度、通道平衡等参数均有明确含义。
-- **可复现**：工程参数保存在图像旁的 `.ncproj` 文件中，源文件不被修改。
-- **本地优先**：无需联网或账号；图像处理由共享 CPU Core 完成。
-- **跨平台**：C# / .NET 8 + Avalonia，支持 Windows、Linux 和 macOS。
+OpenRevelare is a standalone desktop application for photographers who digitise film with a camera or scanner. Import a roll, share its base calibration across frames, make individual edits and export your photographs. No subscription or host photo editor is required.
 
-适用于相机翻拍或扫描的整卷底片处理、参数归档和跨设备重算。支持 HDR 编辑与导出；Linux 屏幕预览目前明确使用 SDR 回退。不提供逐卷色卡标定；文物翻拍、商业存档和科研用途可使用 [DiVERE](https://github.com/flipswitchingmonkey/DiVERE)。
+Colour negatives contain an orange base and dye layers. OpenRevelare linearises the input, removes the base, white-balances and inverts it in the Cineon log-density domain, then exports a positive.
 
-## 核心模型
+- **Explainable**: base, maximum density and channel-balance parameters have defined meanings.
+- **Reproducible**: settings are stored in a `.ncproj` beside the image; source files remain untouched.
+- **Local-first**: image processing works offline without an account. Update checks and optional model downloads use the network. The inversion pipeline runs in the shared CPU Core; supported Windows/macOS systems can accelerate selected resizing, sharpening and LUT operations on the GPU.
+- **Cross-platform**: C# / .NET 8 + Avalonia for Windows, Linux and macOS.
 
-| 阶段 | 作用域 | 内容 |
+The application is intended for whole-roll camera-copy and scanning workflows, archival parameters and reproducible reprocessing. HDR editing and export are supported; Linux currently keeps the on-screen preview on an explicitly labelled SDR fallback. It does not provide per-roll colour-chart calibration; use [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) for heritage, commercial-archive or research work that requires it.
+
+## Installation
+
+Packages are published on [Releases](https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest) with the .NET runtime included.
+
+| Platform | Package | Status and requirements |
 |---|---|---|
-| **FilmBase** | 整卷 | 片基透射率、最大密度、通道平衡和反转参数；物理还原结果 |
-| **SceneBase** | 单帧 | 色温、曝光、对比度、饱和度和曲线；创作调整 |
+| Windows 10/11 x64 | `setup.exe` | Stable; no additional dependency |
+| Linux x86_64 | `.AppImage` | Beta; glibc ≥ 2.35 |
+| macOS Apple Silicon | `-arm64.dmg` | Beta; macOS 12+, no real-device validation yet |
+| macOS Intel | `-x86_64.dmg` | Beta; macOS 12+, no real-device validation yet |
 
-两阶段分离后，物理参数可在整卷范围内复用，单帧调整不会改变物理还原结果。
+<details>
+<summary>Platform notes</summary>
 
-### 三项原则
+- **Windows**: if SmartScreen appears, select **More info → Run anyway**.
+- **macOS**: approve the first launch under **System Settings → Privacy & Security → Open Anyway**, or run:
 
-1. **色罩是物理量**：通过片基采样获得，不以视觉猜测替代测量。
-2. **密度域是计算域**：色罩表现为近似常量偏移，白平衡和反转可按线性关系计算。
-3. **还原与创作分离**：FilmBase 负责一致性，SceneBase 负责表达。
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/OpenRevelare.app
+  ```
 
-## 处理流程
+- **Linux**:
 
-首次使用可先阅读 [第一卷：从导入到重新打开](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.md)，应用内「帮助 → 操作指引 / 技术原理 → 第一卷」也可离线查看。
+  ```bash
+  chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
+  ```
 
-1. **导入**：导入 RAW、扫描 TIFF 或其他支持的图像，并填写胶卷、相机和冲洗信息。
-2. **整卷校准**：自动估计片基、白平衡、暗端和 `d_max`，必要时手动修正。
-3. **整卷同步**：将 FilmBase 参数应用于整卷或选定帧。
-4. **帧编辑**：在 SceneBase 中逐帧调整色温、曝光、对比度、饱和度和曲线。
-5. **导出**：输出 TIFF、JPEG、线性 DNG 或场景线性 ACEScg TIFF。
+  Add `--appimage-extract-and-run` if the package cannot start directly. Linux currently previews through SDR; HDR editing and export remain available.
 
-修改会自动写入磁盘；源目录可写时 `.ncproj` 与源图像位于同一目录，否则使用下方所列的用户级 `rolls` 回退目录。
+</details>
 
-## 界面与示例
+## Model
 
-### Cineon 校准
+| Stage | Scope | Responsibility |
+|---|---|---|
+| **FilmBase** | Whole roll | Base transmittance, maximum density, channel balance and inversion parameters |
+| **SceneBase** | Single frame | Temperature, exposure, contrast, saturation and curves |
 
-<p align="center"><img src="docs/assets/editor-filmbase.jpg" width="100%" alt="Cineon 整卷校准"></p>
-<p align="center"><sub>整卷缩略图、当前帧和共享物理参数集中在 Cineon 页面。</sub></p>
+The separation allows physical parameters to be shared across a roll while frame-level edits remain independent.
 
-### Display 调整
+### Principles
 
-<p align="center"><img src="docs/assets/editor-scenebase.jpg" width="100%" alt="Display 帧编辑"></p>
-<p align="center"><sub>Display 页面用于单帧创作调整，不改变 FilmBase 参数。</sub></p>
+1. **The mask is physical**: measure the base; do not replace measurement with visual guessing.
+2. **Density is the computation domain**: the mask is approximately a constant offset, making white balance and inversion predictable.
+3. **Restoration and creation are separate**: FilmBase provides consistency; SceneBase provides expression.
+
+## Workflow
+
+1. **Import** RAW, scanner TIFF or another supported image and enter roll metadata.
+2. **Calibrate the roll**: estimate the base, white balance, shadow endpoint and `d_max`; correct manually when required.
+3. **Apply FilmBase** to the roll or selected frames.
+4. **Edit frames** in SceneBase with temperature, exposure, contrast, saturation and curves.
+5. **Export** TIFF, JPEG, HEIC, linear DNG or scene-linear ACEScg TIFF. Start with an sRGB JPEG for sharing, or a 16-bit TIFF for further editing.
+
+Changes are written automatically. The `.ncproj` is placed beside the source when that directory is writable; read-only media use the per-user `rolls` fallback shown below.
+
+## Interface and examples
+
+### Cineon calibration
+
+<p align="center"><img src="docs/assets/editor-filmbase.jpg" width="100%" alt="Cineon roll calibration"></p>
+<p align="center"><sub>Roll thumbnails, the current frame and shared physical parameters on one page.</sub></p>
+
+### Display adjustment
+
+<p align="center"><img src="docs/assets/editor-scenebase.jpg" width="100%" alt="Display frame editing"></p>
+<p align="center"><sub>Frame-level creative adjustments without changing FilmBase.</sub></p>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/library.jpg" width="100%" alt="图库"></td>
-    <td width="50%"><img src="docs/assets/contactsheet-light.jpg" width="100%" alt="整卷印样"></td>
+    <td width="50%"><img src="docs/assets/library.jpg" width="100%" alt="Library"></td>
+    <td width="50%"><img src="docs/assets/contactsheet-light.jpg" width="100%" alt="Contact sheet"></td>
   </tr>
   <tr>
-    <td align="center"><sub>按胶卷管理、筛选和恢复工程</sub></td>
-    <td align="center"><sub>包含齿孔排版和卷信息的整版印样</sub></td>
+    <td align="center"><sub>Roll management, filtering and project recovery</sub></td>
+    <td align="center"><sub>Full-roll contact sheet with sprocket layout and metadata</sub></td>
   </tr>
 </table>
 
-### 反转结果
+### Reversal result
 
 <table>
   <tr>
-    <td width="33%"><img src="docs/assets/reversal-raw.jpg" width="100%" alt="翻拍原始输入"></td>
-    <td width="33%"><img src="docs/assets/reversal-nlp.jpg" width="100%" alt="NLP 自动反转结果"></td>
-    <td width="33%"><img src="docs/assets/reversal-after.jpg" width="100%" alt="OpenRevelare 反转结果"></td>
+    <td width="33%"><img src="docs/assets/reversal-raw.jpg" width="100%" alt="Camera-copied raw input"></td>
+    <td width="33%"><img src="docs/assets/reversal-nlp.jpg" width="100%" alt="NLP automatic reversal result"></td>
+    <td width="33%"><img src="docs/assets/reversal-after.jpg" width="100%" alt="OpenRevelare reversal result"></td>
   </tr>
   <tr>
-    <td align="center"><sub>翻拍原始输入</sub></td>
-    <td align="center"><sub>NLP 自动反转结果</sub></td>
-    <td align="center"><sub>OpenRevelare 反转结果</sub></td>
+    <td align="center"><sub>Raw input</sub></td>
+    <td align="center"><sub>NLP automatic reversal</sub></td>
+    <td align="center"><sub>OpenRevelare result</sub></td>
   </tr>
 </table>
 
-## 功能
+## Features
 
-| 类别 | 能力 |
+| Category | Capabilities |
 |---|---|
-| 反转 | Cineon 密度域反转、自动标定、窄带光源解耦（Path A）、黑白负片模式 |
-| 色彩 | ACEScg 工作空间；sRGB、Display P3、Adobe RGB 输出；精确 ICC 管理；Stage 2 调整 |
-| 预处理 | LCC 平场、镜头畸变、暗角、齿孔遮罩和几何裁切，均在线性光域完成 |
-| 工作流 | 按卷管理、整卷同步、虚拟副本、画幅预设、80 步撤销重做、直方图与波形图 |
-| 输出 | 16-bit TIFF、JPEG、线性 DNG、32-bit 浮点场景线性 ACEScg TIFF、HDR 增益图 JPEG；文件名模板、缩放和锐化选项 |
-| 风格 / HDR | Cineon 输入 `.cube` 印片风格、SDR/HDR 整卷渲染、以档数表示的 HDR 上限、HDR 印样 |
-| 报告 | 本帧技术报告，记录输入域、片基来源和反转参数 |
+| Reversal | Cineon density-domain inversion, auto-calibration, narrow-band light decoupling (Path A), black-and-white negatives |
+| Colour | ACEScg workspace; sRGB, Display P3 and Adobe RGB output; exact ICC management; Stage 2 controls |
+| Pre-processing | LCC flat-field, offline Lensfun lens matching, distortion and vignetting correction, sprocket masking and geometry crop in linear light |
+| Workflow | Roll management, roll sync, virtual copies, format presets, 80-step undo/redo, histogram and waveform |
+| Output | 16-bit TIFF, JPEG, 10-bit HEIC, linear DNG, 32-bit float scene-linear ACEScg TIFF and HDR gain-map JPEG; templates, scaling and sharpening |
+| Look / HDR | Cineon-input `.cube` print looks, SDR/HDR roll rendering, HDR limit in stops, HDR contact sheets; direct PQ or Adaptive HDR HEIC (viewer support required) |
+| Reports | Per-frame report of input domain, base source and inversion parameters |
 
-支持的输入包括 DNG、NEF、CR2/CR3、ARW、RAF、RW2、ORF、PEF、IIQ、哈苏/Flextight `.fff` 和 TIFF。JPEG/PNG 是导出或界面缓存格式，不是负片导入格式。文件选择器同时接受 RAW 扩展名的大写和小写形式。
+Inputs include DNG, NEF, CR2/CR3, ARW, RAF, RW2, ORF, PEF, IIQ, Hasselblad/Flextight `.fff` and TIFF. JPEG/PNG are export or cache formats, not negative-input formats. RAW file-dialog filters accept upper- and lower-case extensions.
 
-## 工作原理
+## How it works
 
-透射率 `T` 转换为对数密度：
+Transmittance `T` is converted to log density:
 
 $$D = -\log_{10}(T)$$
 
-片基归一化、密度域白平衡和反转分别为：
+The core operations are:
 
 $$T_{norm} = T / T_{base}$$
 
@@ -136,86 +169,103 @@ $$D_{corr}[c] = D[c] \times w_{high}[c] + w_{offset}[c]$$
 
 $$T_{pos} = 10^{\left(\frac{R_{out}}{D_{max}[c]}D[c]-R_{out}\right)}$$
 
-单帧处理顺序为：线性化 → 线性域光学校正 →（可选）光源解耦 → 片基扣除 → 密度域白平衡 → 反转 → 输出。应用内「帮助 → 操作指引 / 技术原理」提供完整说明。
+The per-frame pipeline is: linearisation → optical correction → optional light-source decoupling → base removal → density-domain white balance → inversion → output. The application includes the complete derivation under **Help → Operation guide / Technical theory**.
 
-## 安装
+## Data locations
 
-发行包位于 [Releases](https://github.com/Toshihiko-Lin/Open-Revelare/releases/latest)，已包含 .NET 运行时。
-
-| 平台 | 包 | 状态与要求 |
+| Content | Windows | Linux / macOS |
 |---|---|---|
-| Windows 10/11 x64 | `setup.exe` | 正式版；无需额外依赖 |
-| Linux x86_64 | `.AppImage` | 公测；glibc ≥ 2.35 |
-| macOS Apple Silicon | `-arm64.dmg` | 公测；macOS 12+，尚无真机验证 |
-| macOS Intel | `-x86_64.dmg` | 公测；macOS 12+，尚无真机验证 |
+| Settings and roll index | `%APPDATA%\OpenRevelare` | `$XDG_CONFIG_HOME/OpenRevelare/` (default `~/.config`) |
+| Contact-sheet cache | `%LOCALAPPDATA%\OpenRevelare\sheets` | `$XDG_CACHE_HOME/OpenRevelare/sheets/` (default `~/.cache`) |
+| DNG decode cache | `.revelare-cache/` beside the source | Same |
+| Print LUT drop-in folder | `%LOCALAPPDATA%\OpenRevelare\luts` | `$XDG_DATA_HOME/OpenRevelare/luts/` (default `~/.local/share`) |
+| Project file | `.ncproj` beside the source when writable; otherwise `%APPDATA%\OpenRevelare\rolls` | Beside the source when writable; otherwise `$XDG_CONFIG_HOME/OpenRevelare/rolls/` |
 
-<details>
-<summary>平台提示</summary>
+Cache locations and limits are configurable. Uninstalling does not remove these data.
 
-- **Windows**：若出现 SmartScreen 提示，选择「更多信息 → 仍要运行」。
-- **macOS**：首次启动若提示无法验证开发者，可在「系统设置 → 隐私与安全性 → 仍要打开」确认，或执行：
+## Documentation
 
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/OpenRevelare.app
-  ```
+- [Your first roll](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.en.md): import, calibration, editing, export and reopening a project.
+- [Operation guide](src/OpenRevelare.Gui/Assets/docs/GUIDE.en.md): controls and everyday workflows.
+- [Technical theory](src/OpenRevelare.Gui/Assets/docs/THEORY.en.md): the colour and inversion model.
+- [Changelog](CHANGELOG.md): release history and improvements.
+- [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.txt).
 
-- **Linux**：
+## Frequently asked questions
 
-  ```bash
-  chmod +x OpenRevelare-*.AppImage && ./OpenRevelare-*.AppImage
-  ```
+**Can I import JPEG or PNG negatives?** No. Use a supported RAW file or TIFF; 16-bit TIFF is preferable to 8-bit for shadow detail.
 
-  若无法直接启动，可添加 `--appimage-extract-and-run`。Linux 当前使用 SDR 预览；HDR 编辑与导出仍可用。
+**Do edits change my originals?** No. Edits are stored in `.ncproj` project files. For a complete backup, retain the originals, projects, LUTs and calibration references together; an exported TIFF does not replace them.
 
-</details>
+**Why does HDR look different in another app?** HDR display depends on the operating system, display and viewer. Linux uses an SDR preview fallback. Check a sample export in your intended viewer before exporting the full roll.
 
-## 数据位置
+**Is Smart Cast Correction required?** No. Deep-WB is optional and downloaded separately after licence acceptance. Its CC BY-NC-SA 4.0 non-commercial licence differs from the application's GPL licence; review [model licensing](models/README.md) before use.
 
-| 内容 | Windows | Linux / macOS |
-|---|---|---|
-| 设置与卷索引 | `%APPDATA%\OpenRevelare` | `$XDG_CONFIG_HOME/OpenRevelare/`（默认 `~/.config`） |
-| 印样缓存 | `%LOCALAPPDATA%\OpenRevelare\sheets` | `$XDG_CACHE_HOME/OpenRevelare/sheets/`（默认 `~/.cache`） |
-| DNG 解码缓存 | 源文件旁的 `.revelare-cache/` | 同左 |
-| 印片 LUT 放置目录 | `%LOCALAPPDATA%\OpenRevelare\luts` | `$XDG_DATA_HOME/OpenRevelare/luts/`（默认 `~/.local/share`） |
-| 工程文件 | 源目录可写时为其中的 `.ncproj`；否则 `%APPDATA%\OpenRevelare\rolls` | 源目录可写时为其中的 `.ncproj`；否则 `$XDG_CONFIG_HOME/OpenRevelare/rolls/` |
+## Building from source
 
-缓存位置与上限可在偏好设置中调整；卸载不会删除上述数据。
+Requires .NET 8 SDK, Python 3.12+, CMake 3.21+ and a C/C++ toolchain (Visual Studio 2022 C++ on Windows, Xcode command-line tools on macOS, GCC/Clang on Linux). x64 HEIC builds also require NASM 2.13+ on PATH. The first native build downloads checksum-pinned dependencies.
 
-## 从源码构建
-
-需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
+Clone the repository:
 
 ```bash
 git clone https://github.com/Toshihiko-Lin/Open-Revelare.git
 cd Open-Revelare
-dotnet build -c Release
-dotnet test -c Release
-dotnet run --project src/OpenRevelare.Gui
 ```
 
-命令行前端：
+Build native dependencies on **Windows (PowerShell)**:
+
+```powershell
+./packaging/lcms/build-windows.ps1
+./packaging/libraw/build-windows.ps1
+python packaging/compute/build.py
+python packaging/heif/build.py
+./packaging/windows/build-win32-presenter.ps1
+```
+
+On **Linux / macOS**:
+
+```bash
+bash packaging/lcms/build-unix.sh
+bash packaging/libraw/build-unix.sh
+python3 packaging/compute/build.py
+python3 packaging/heif/build.py
+```
+
+Then build, test and run:
+
+```bash
+dotnet build -c Release -warnaserror
+dotnet test -c Release --no-build
+dotnet run --project src/OpenRevelare.Gui -c Release
+```
+
+[LibRaw](packaging/libraw/README.md) · [Little CMS](packaging/lcms/README.md) · [HEIC](packaging/heif/README.md) · [GPU compute](packaging/compute/README.md). See [RELEASE.md](RELEASE.md) for platform packaging and release checks.
+
+CLI example:
 
 ```bash
 dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-linear --color-space sRGB
 ```
 
-`--input-linear` 与 `--input-srgb` 互斥。为兼容旧版对拍脚本，CLI 仍接受 `--d-max`、`--grade`、`--pivot` 和 `--scan-exposure-ev`，但这些参数现在是空操作；当前反相由两端密度标定与输出范围控制。
+`--input-linear` and `--input-srgb` are mutually exclusive input declarations. Legacy `--d-max`,
+`--grade`, `--pivot` and `--scan-exposure-ev` are accepted for old parity scripts but are no-ops;
+the current inversion is controlled by the two calibrated density endpoints and output range.
 
-开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。标定实验见 [`docs/calibration/`](docs/calibration/)，色彩管理记录见 [`docs/color-management-architecture.md`](docs/color-management-architecture.md)。
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before development. Calibration experiments are documented in [`docs/calibration/`](docs/calibration/); colour-management decisions are recorded in [`docs/color-management-architecture.md`](docs/color-management-architecture.md).
 
-## 许可证与第三方组件
+## Licence and third-party components
 
-代码采用 **GPL-3.0-only**，见 [LICENSE](LICENSE)。
+The code is licensed under **GPL-3.0-only**; see [LICENSE](LICENSE).
 
-Deep-WB 为可选下载：首次点击「智能色偏修正」时确认许可后安装，也可运行 `OpenRevelare.Cli --install-deep-wb`。默认安装包不含模型权重。 GitHub 下载失败时自动尝试 [Gitee 国内镜像](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx)，也可手动下载后离线安装。ONNX 推理运行库仍随包提供。
+Deep-WB is an optional download: accept the license when first using Smart Cast Correction, or run `OpenRevelare.Cli --install-deep-wb`. Default packages do not include model weights. Downloads automatically fall back to the [Gitee mirror](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx) if GitHub fails; offline installation is also supported. The ONNX runtime remains bundled.
 
-`models/net_awb.onnx` 为 Deep White-Balance Editing 模型，按 **CC BY-NC-SA 4.0** 单独授权，不属于本项目 GPL 范围。详情见 [models/README.md](models/README.md) 与 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。
+`models/net_awb.onnx` is the Deep White-Balance Editing model, distributed under **CC BY-NC-SA 4.0** and outside this project's GPL scope. See [models/README.md](models/README.md) and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
-主要参考：[LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)、[DiVERE](https://github.com/flipswitchingmonkey/DiVERE) 和 darktable `negadoctor`。
+References include [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple), [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) and darktable `negadoctor`.
 
-## 项目来源与致谢
+## Project origin and acknowledgements
 
-项目最初是作者用于个人胶片翻拍的工具，经过用户反馈和底层重构后，于 2026 年 8 月以跨平台开源项目发布。感谢以下用户对早期开发与完善提供的支持：
+The project began as a personal film-copying tool. After user feedback and a core rewrite, it was released as a cross-platform open-source project in August 2026. Early development was supported by:
 
 - 豆腐
 - Caramello_焦糖玛奇朵
@@ -223,22 +273,20 @@ Deep-WB 为可选下载：首次点击「智能色偏修正」时确认许可后
 - jamais
 - hhd
 
-## 项目支持
+## Support the project
 
-项目由个人持续维护，核心功能以 GPL-3.0-only 开源。若项目对工作流程有帮助，可通过以下方式提供支持：
+The project is maintained independently and released under GPL-3.0-only. If it is useful to your workflow, support is welcome:
 
 <p align="center">
-  <img src="docs/assets/donate-wechat.png" width="220" alt="微信支付">
-  <img src="docs/assets/donate-alipay.png" width="220" alt="支付宝">
+  <img src="docs/assets/donate-wechat.png" width="220" alt="WeChat Pay">
+  <img src="docs/assets/donate-alipay.png" width="220" alt="Alipay">
 </p>
 
-## 限制与反馈
+## Limitations and feedback
 
-- 不提供逐卷色卡标定。
-- 8-bit TIFF 暗部可能出现色带，建议使用 16-bit 输入。
-- Linux 使用明确标注的 SDR 屏幕预览回退，但 HDR 编辑和导出仍可用。
-- macOS 原生呈现仍待真机验证；TIFF/CPU 渲染不受影响。
+- No per-roll colour-chart calibration.
+- 8-bit TIFF may show banding in shadows; 16-bit input is recommended.
+- Linux uses an SDR preview fallback; HDR editing and export remain available.
+- macOS native presentation still requires real-device validation; TIFF/CPU rendering remains available.
 
-请通过 [issue](https://github.com/Toshihiko-Lin/Open-Revelare/issues) 报告问题，并附系统版本、相机或扫描仪型号、输入格式与错误信息；不要上传含隐私内容的原片。
-
-<p align="center"><sub>OpenRevelare 以 GPL-3.0-only 开源发布。</sub></p>
+Report issues through [GitHub Issues](https://github.com/Toshihiko-Lin/Open-Revelare/issues) with the OS version, camera or scanner, input format and error details. Do not upload private originals.
