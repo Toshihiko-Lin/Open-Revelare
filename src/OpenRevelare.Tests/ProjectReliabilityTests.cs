@@ -221,23 +221,37 @@ public sealed class ProjectReliabilityTests
     [Fact]
     public async Task Closing_during_a_write_waits_and_persists_the_edit_made_during_that_write()
     {
-        if (!OperatingSystem.IsWindows()) return; // Windows rename sharing is the controlled write gate.
         string dir = Folder(), source = Image(dir, "frame.tif");
         string path = ProjectFile(dir, new Project.Frame { SourcePath = source });
         using var vm = new MainViewModel();
         await vm.OpenProjectAsync(path); await Settle(vm);
-        vm.Rotation = 2;
-        Task<bool> saving, closing;
-        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writer = vm.ProjectWriterAsync;
+        int writes = 0;
+        vm.ProjectWriterAsync = async (file, data, revision) =>
         {
-            saving = vm.FlushRollAsync();
+            if (++writes == 1)
+            {
+                entered.SetResult();
+                await release.Task;
+            }
+            return await writer(file, data, revision);
+        };
+        vm.Rotation = 2;
+        Task<bool> saving = vm.FlushRollAsync();
+        Task<bool> closing;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             vm.Rotation = 4;
             closing = vm.PrepareCloseAsync();
-            await Task.Delay(20);
             Assert.False(closing.IsCompleted);
         }
+        finally { release.TrySetResult(); }
         Assert.True(await saving);
         Assert.True(await closing.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, writes);
         Assert.Equal(4, Project.Load(path).Frames[0].Params.Rotation);
     }
 

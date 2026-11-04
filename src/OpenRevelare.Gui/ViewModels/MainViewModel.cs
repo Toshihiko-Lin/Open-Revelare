@@ -4977,6 +4977,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return data;
     }
 
+    internal Func<string, Project.Data, string?, Task<string>> ProjectWriterAsync { get; set; }
+        = (path, data, revision) => Task.Run(() => Project.SaveIfUnchanged(path, data, revision));
+
     /// <summary>Persist whatever went stale: the project file, the cover sheet, or both.</summary>
     private async Task AutoSaveAsync()
     {
@@ -4990,8 +4993,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             SetSaveState(ProjectSaveState.Saving);
             try
             {
-                string savedRevision = await Task.Run(() =>
-                    Project.SaveIfUnchanged(path, data, _savedProjectRevision));
+                string savedRevision = await ProjectWriterAsync(path, data, _savedProjectRevision);
                 _savedProjectRevision = savedRevision;
             }
             catch (Exception ex)
