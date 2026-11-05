@@ -1,24 +1,21 @@
-## 这个 PR 做了什么
+## What changes and why / 改动及原因
 
-<!-- 一两句话。为什么要改，比改了什么更重要。 -->
+<!-- Describe the problem and resulting behaviour in one or two sentences. -->
 
-## 关联 issue
+## Related issue / 关联 issue
 
-<!-- Fixes #123 / 无 -->
+<!-- Fixes #123, or None -->
 
-## 自检
+## Validation / 自检
 
-- [ ] `dotnet build -c Release -warnaserror` 零警告
-- [ ] `dotnet test -c Release` 全绿
-- [ ] 改了行为的话，补了测试（并在测试注释里写清「这条在防什么」）
+- [ ] `dotnet build -c Release -warnaserror` passes with zero warnings / 零警告
+- [ ] `dotnet test -c Release` passes / 全绿
+- [ ] Behaviour changes include regression tests explaining the failure they prevent / 行为改动有对应回归测试
 
-## 金标准基线
+## Golden baselines / 金标准基线
 
-<!-- 三选一，删掉不适用的 -->
+<!-- Keep the applicable option and remove the others. -->
 
-- [ ] **没动** —— `Golden/*.txt` 未变，即像素输出未变
-- [ ] **动了，且本就该动** —— 请说明为什么该变，以及从基线里那几行通道统计看，变化方向是否符合预期：
-
-      <!-- 例：修正了 X，因此暗部整体抬升。ch0 mean 0.586 → 0.591，三通道同向，符合预期 -->
-
-- [ ] **动了，但没想明白为什么** —— 那就先别改基线，这很可能是回归
+- [ ] Unchanged: `Golden/*.txt` was not modified / 未修改基线
+- [ ] Intentionally changed: explain why pixel output should change and whether the channel statistics match expectations / 有意修改，请说明原因和通道统计变化
+- [ ] Unexpected change: investigate the regression before updating baselines / 非预期变化，先排查回归

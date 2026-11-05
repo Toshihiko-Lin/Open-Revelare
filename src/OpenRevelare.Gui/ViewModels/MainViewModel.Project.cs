@@ -359,7 +359,8 @@ public partial class MainViewModel
                         incomingPipelineVersion,
                         incomingTiffInputAssumption,
                         cachePreviews: false,
-                        incomingLccEnabled ? lcc : null);
+                        incomingLccEnabled ? lcc : null,
+                        lensfun: data.Frames.FirstOrDefault()?.Params is { LensfunEnabled: true } first ? first.Lensfun : null);
             }
             catch (Exception ex)
             {
@@ -517,7 +518,10 @@ public partial class MainViewModel
     }
 
     /// <summary>Open a roll from the import dialog: compute Path-A decouple + LCC (roll-level), then load.</summary>
-    public async Task LoadRollWithConfigAsync(ImportConfig cfg)
+    public Task LoadRollWithConfigAsync(ImportConfig cfg)
+        => RunImportStageAsync(() => LoadRollWithConfigCoreAsync(cfg));
+
+    private async Task LoadRollWithConfigCoreAsync(ImportConfig cfg)
     {
         if (cfg.Paths.Count == 0) return;
 
@@ -575,7 +579,8 @@ public partial class MainViewModel
                         {
                             lock (preparedPreviews) preparedPreviews.Add((path, working, width, height, stamp));
                         },
-                        identifyRgbFromMeans: identifyFromMeans);
+                        identifyRgbFromMeans: identifyFromMeans,
+                        lensfun: cfg.LensfunEnabled ? cfg.Lensfun : null);
                 }
                 ReportBackground("");
             });
@@ -616,7 +621,11 @@ public partial class MainViewModel
         // roll's LCC from leaking into an incoming config that has no flat field.
         bool wasConfigLoad = _configLoad;
         _configLoad = true;  // adopting incoming optical state is not an edit to the outgoing roll
-        try { LccEnabled = lccField is not null; }
+        try
+        {
+            LccEnabled = lccField is not null;
+            AdoptLensfun(cfg.Lensfun, cfg.LensfunEnabled);
+        }
         finally { _configLoad = wasConfigLoad; }
         LccStatus = lccField is not null
             ? Loc.T("已载入平场：") + lccName
@@ -662,6 +671,8 @@ public partial class MainViewModel
         // Bake into every frame's stored params so export / thumbnails carry them.
         foreach (RollFrame f in Frames)
         {
+            f.Params.Lensfun = cfg.Lensfun;
+            f.Params.LensfunEnabled = cfg.LensfunEnabled;
             f.Params.DecoupleMatrix = dm;
             f.Params.DecoupleMode = DecoupleMode.Linear;
             f.Params.DecoupleChromaMatrix = cm;
@@ -706,7 +717,8 @@ public partial class MainViewModel
         bool cachePreviews,
         ImageBuffer? lccField = null,
         Action<string, WorkingFrame, int, int, SourceStamp>? previewReady = null,
-        bool identifyRgbFromMeans = false)
+        bool identifyRgbFromMeans = false,
+        LensfunCalibration? lensfun = null)
     {
         int nF = Math.Min(6, paths.Count);
         string[] samplePaths = EvenlySpacedPaths(paths, nF);
@@ -797,6 +809,8 @@ public partial class MainViewModel
             if (neg is null) continue;
             if (lccField is not null)
                 Lcc.Apply(neg.Data, neg.Width, neg.Height, lccField);
+            else if (lensfun is { IsUsable: true })
+                LensfunCorrections.ApplyVignetting(neg, lensfun);
             var dec = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
             Decouple.Apply(dec.Data, dm, DecoupleMode.Linear);   // SAME (gamut-mapped) decouple the pipeline uses
             var (preSample, postSample) = PairedSamples(neg, dec, perFrameBudget);
@@ -887,6 +901,7 @@ public partial class MainViewModel
             _decoupleMatrix = null; _decoupleChromaMatrix = null;
             _calSourceDir = null; _calRgbPaths = null; _lccSourcePath = null;
             _lccFlatField = null; LccAvailable = false; LccEnabled = false;
+            AdoptLensfun(null, false);
             NotifyCalibrationInfo();
         }
         _undo.Clear(); _redo.Clear(); _committed = null; UpdateUndoState();
@@ -913,6 +928,11 @@ public partial class MainViewModel
         // rather than the finished frames keeps each split scan's virtual copies next to their
         // parent, since they are all contributed by one path.
         foreach (string p in SortedByName(paths)) AddFramesForPath(p);
+        foreach (var frame in Frames)
+        {
+            frame.Params.Lensfun = _lensfunCalibration;
+            frame.Params.LensfunEnabled = LensfunEnabled;
+        }
         // D-027: a new roll starts at the HDR tier this display shows in full. Seeded on the
         // frames BEFORE the first switch, so LoadParams adopts it like any stored value, and
         // before RegisterRoll, so the first .ncproj carries it — a default that lived only in the
@@ -921,6 +941,7 @@ public partial class MainViewModel
         double newRollPeak = DefaultHdrPeakNitsForNewRoll();
         foreach (RollFrame f in Frames) f.Params.HdrPeakNits = newRollPeak;
         RefreshSplitPaths();        // before the first switch, which consults it
+        LoadingImportedPreview = true;
         CurrentFrame = Frames[0];   // triggers SwitchFrameAsync (decode + render)
         RegisterRoll(paths);        // new roll → new catalog entry + project file
 
@@ -941,7 +962,7 @@ public partial class MainViewModel
         // Fire and forget: the import must return as soon as frame 1 is on screen. Awaiting the
         // roll here is what made importing feel like it hung — it did not come back until every
         // frame in the roll had been decoded.
-        StartRollWarmUp();
+        if (!_cfgAutoInvert || RollImported is null) StartRollWarmUp();
         ReleaseBulkBuffers();   // the calibration/import full-res decodes are dead; uncommit them
         await Task.CompletedTask;
     }
@@ -1065,13 +1086,14 @@ public partial class MainViewModel
         {
             if (tok == _switchToken) { StatusText = Loc.T("打开失败：") + ex.Message; HasImage = false; }
         }
-        finally { if (tok == _switchToken) IsBusy = false; }
+        finally { if (tok == _switchToken) { IsBusy = false; LoadingImportedPreview = false; } }
     }
 
     /// <summary>Push a frame's stored FrameParams into all the UI controls (suppressing renders).</summary>
     private void LoadParams(FrameParams p)
     {
         _suppressRender = true;
+        AdoptLensfun(p.Lensfun, p.LensfunEnabled);
         // Stage 1 — lens / sprocket / intent
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
         // A missing runtime buffer must not erase the roll's declared enable choice.

@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Runtime;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -507,9 +506,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Called with bounded groups by the contact-sheet loader. Every cell is registered in
+    // Called with bounded source groups by preview loaders. Every cell is registered in
     // _decoding before work begins, so foreground preview requests join the same batch.
-    private Task<PreviewCache.Entry[]> PreviewTiffBatchAsync(
+    private Task<PreviewCache.Entry[]> PreviewBatchAsync(
         string path,
         (double X, double Y, double W, double H)?[] rects,
         ColorPipelineVersion pipelineVersion,
@@ -547,8 +546,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     try
                     {
-                        using var trace = RenderTrace.Scope("decode.preview.tiff-batch");
-                        var decoded = ImageIo.LoadWorkingTiffPreviewBatch(path, pending.Select(p => p.Rect).ToArray(),
+                        using var trace = RenderTrace.Scope("decode.preview.source-batch");
+                        var decoded = ImageIo.LoadWorkingPreviewBatch(path, pending.Select(p => p.Rect).ToArray(),
                             PreviewMaxEdge, pipelineVersion, ColorManagement, inputAssumption);
                         stamp.RequireCurrent();
                         for (int i = 0; i < pending.Count; i++)
@@ -604,15 +603,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void CaptureTile(string key, WorkingFrame preview, long generation, SourceStamp stamp)
     {
+        // File attributes and resampling can take much longer than a dictionary lookup.
+        // TileFor/ClearPreviewCaches run on the UI thread and share this gate.
+        if (_previews.Generation != generation || !stamp.IsCurrent) return;
+        lock (_tiles)
+            if (_tiles.ContainsKey(key)) return;
+        WorkingFrame tile = DecodedSources.Track(
+            preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
+        if (!stamp.IsCurrent) return;
         lock (_tiles)
         {
-            if (_previews.Generation != generation || !stamp.IsCurrent) return;
+            if (_previews.Generation != generation) return;
             if (_tileSources.TryGetValue(stamp.Path, out var old) && old != stamp)
                 foreach (string stale in _tiles.Keys.Where(k => k.StartsWith(old.Key + "|", StringComparison.Ordinal)).ToArray())
                     _tiles.Remove(stale);
             _tileSources[stamp.Path] = stamp;
             if (_tiles.ContainsKey(key)) return;
-            _tiles[key] = DecodedSources.Track(preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
+            _tiles[key] = tile;
         }
     }
 
@@ -725,21 +732,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         Retire(old);
     }
 
-    /// <summary>
-    /// Give the big transient buffers back to the OS after a bulk operation.
-    ///
-    /// A full-resolution frame is ~288 MB at 24 MP, so an import, an export or a contact sheet
-    /// parks hundreds of megabytes on the large object heap — which the runtime never compacts on
-    /// its own, so the process keeps that footprint committed for the rest of the session even
-    /// though every buffer in it is long dead. Compacting is expensive, which is exactly why it
-    /// belongs here and nowhere else: these are the tail of an operation the user already waited
-    /// seconds for, so the pause is invisible, and they are the only places that allocate at this
-    /// size. Never call this on the render path.
-    /// </summary>
+    /// <summary>Reclaim bulk-operation buffers without forcing a compacting, stop-the-world GC
+    /// on the UI thread. Background collection leaves the preview and input loop responsive.</summary>
     private static void ReleaseBulkBuffers()
     {
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        using var trace = RenderTrace.Scope("bulk.release-buffers");
+        GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: false);
     }
 
     [ObservableProperty]
@@ -748,7 +746,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Which background stage is running (识别校正图 / 解耦矩阵 / 色度补偿 / 后台解码).
     /// Empty when idle. Shown in the status bar beside <see cref="StatusText"/>.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasTaskCenterContent), nameof(TaskCenterBackgroundText), nameof(TaskCenterSummary))]
+    [NotifyPropertyChangedFor(nameof(HasTaskCenterContent), nameof(TaskCenterBackgroundText), nameof(TaskCenterSummary), nameof(RollProgressDetail))]
     private string _backgroundStatus = "";
     /// <summary>
     /// True while the roll-wide auto-inversion is still pooling frames — i.e. while what is on
@@ -783,7 +781,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     partial void OnRollAnalysisNoticeDismissedChanged(bool value)
-        => OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+    {
+        OnPropertyChanged(nameof(ShowRollAnalysisNotice));
+        OnPropertyChanged(nameof(ShowRollProgressBanner));
+    }
 
     /// <summary>Dismiss the roll-analysis notice. The analysis itself keeps running.</summary>
     public void DismissRollAnalysisNotice() => RollAnalysisNoticeDismissed = true;
@@ -1012,6 +1013,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
     partial void OnLccEnabledChanged(bool value)
     {
+        NotifyLensfunInfo();
         foreach (RollFrame frame in Frames)
             frame.Params.LccFlatField = value && LccAvailable ? _lccFlatField : null;
         InvalidateOpticalCalibration();
@@ -1905,7 +1907,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             if (tok != _switchToken) return;
             AdoptPreview(frame, entry, pre, key);
             ProtectNearbyPreviews(frame);
-            _dragSmall = null;               // belongs to the buffer we just replaced
+            _renderCts?.Cancel();            // a drag's downsample belongs to the old buffer
+            _dragSmall = null;
             OnPropertyChanged(nameof(CropFrameSize));
             ScheduleRender();
         }
@@ -2200,6 +2203,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         PrintLutOutput = _printLutIndex > 0 ? PrintLutOutputName : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
+        Lensfun = _lensfunCalibration,
+        LensfunEnabled = LensfunEnabled,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
@@ -2247,6 +2252,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void ShowNegativeView()
     {
         CancelPreviewWarmup();
+        _renderCts?.Cancel();
         if (!EnsureCurrentPreviewSource()) return;
         if (_previewLinear is not { } negative) return;
         PreparedPreview preview = PrepareNegativePreview(negative);
@@ -2466,6 +2472,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void ShowBeforeEdits()
     {
         CancelPreviewWarmup();
+        _renderCts?.Cancel();
         if (!EnsureCurrentPreviewSource()) return;
         if (_previewWorking is null) return;
         FrameParams p = BuildParams();
@@ -2520,12 +2527,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (ReferenceEquals(neg, _previewLinear)) _previewStamp?.RequireCurrent();
         CalibrationSources.RequireCurrent(BuildParams());
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
-        if (lcc is null && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
+        bool lensfunVignette = LensfunEnabled && _lensfunCalibration is { IsUsable: true, Vignetting: not null } && lcc is null;
+        if (lcc is null && !lensfunVignette && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
         var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone())
             .InheritSourceFrom(neg);
         if (lcc is not null)
             Lcc.Apply(src.Data, src.Width, src.Height, lcc);
+        else if (lensfunVignette)
+            LensfunCorrections.ApplyVignetting(src, _lensfunCalibration!);
         if (VignetteAmount != 0.0)
             LensCorrections.ApplyVignette(src.Data, src.Width, src.Height, VignetteAmount, VignetteFalloff);
         if (_decoupleMatrix is not null)
@@ -2706,25 +2716,81 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task PrepareImportedRollAsync()
     {
-        RollFrame[] importedFrames = Frames.ToArray();
-        // Off the UI thread: unlike every other estimator on this path, this one decodes a frame
-        // at full resolution (see MeasureBoardCut), which is seconds rather than milliseconds on a
-        // 100 MP scan. The chain it hands off to at the end is already async for the same reason.
-        ReportBackground(Loc.T("测量灯板阈值 …"));
-        double? threshold = await MeasureBoardCutAsync();
-        // A new import may have replaced this roll while the full-resolution decodes ran.
-        if (!Frames.SequenceEqual(importedFrames)) return;
-        ReportBackground("");
-
+        if (Frames.Count == 0) return;
+        // Manual import promises no automatic measurements, including this full-resolution pass.
         SprocketEnabled = false;
-        SprocketThreshold = threshold ?? 0.9;
-        foreach (RollFrame f in Frames)
+        if (!_cfgAutoInvert) { StartRollWarmUp(); return; }
+
+        RollFrame[] importedFrames = Frames.ToArray();
+        var progressOwner = new object();
+        _rollProgressOwner = progressOwner;
+        RollAnalysisNoticeDismissed = false;
+        RollAnalysisProgress = Loc.T("正在检测齿孔 …");
+        using var cts = new CancellationTokenSource();
+        _autoInvertCts?.Cancel();
+        _autoInvertCts = cts;
+        bool warmupStarted = false;
+        int warmupQueued = 0;
+        bool overlap = BoardCutAnalysis.CanOverlapPreviews(ImageIo.PreviewWorkers,
+            SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
+        void PreviewReady()
         {
-            f.Params.SprocketEnabled = false;
-            f.Params.SprocketThreshold = SprocketThreshold;
+            if (!overlap || Interlocked.Exchange(ref warmupQueued, 1) != 0) return;
+            // A board job already holds its decode admission and has published its preview.
+            // Start the roll only after this checkpoint so preview jobs cannot claim every
+            // slot ahead of the full-resolution samples. Small-memory imports stay staged.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (warmupStarted || cts.IsCancellationRequested
+                    || !ReferenceEquals(_rollProgressOwner, progressOwner) || !Frames.SequenceEqual(importedFrames)) return;
+                warmupStarted = true;
+                StartRollWarmUp();
+                RenderTrace.Count("import.board-cut.preview-overlap");
+            });
         }
-        AutoInvertOnImportRun(new BoardCutResult(threshold));
-        UpdateSprocketOverlay();
+        try
+        {
+            using var trace = RenderTrace.Scope("import.board-cut.full-resolution");
+            double? threshold = await MeasureBoardCutAsync(cts.Token, (done, total) =>
+            {
+                void Publish()
+                {
+                    if (!ReferenceEquals(_rollProgressOwner, progressOwner) || cts.IsCancellationRequested) return;
+                    RollAnalysisProgress = Loc.F($"齿孔检测 {done}/{total} …");
+                }
+                if (Dispatcher.UIThread.CheckAccess()) Publish();
+                else Dispatcher.UIThread.Post(Publish);
+            }, previewReady: PreviewReady);
+            cts.Token.ThrowIfCancellationRequested();
+            if (!Frames.SequenceEqual(importedFrames)) return;
+
+            SprocketThreshold = threshold ?? 0.9;
+            foreach (RollFrame f in Frames)
+            {
+                f.Params.SprocketEnabled = false;
+                f.Params.SprocketThreshold = SprocketThreshold;
+            }
+            // Admit the expensive board samples before the rest of the roll's preview decodes.
+            if (!warmupStarted) StartRollWarmUp();
+            AutoInvertOnImportRun(new BoardCutResult(threshold));
+            UpdateSprocketOverlay();
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(_rollProgressOwner, progressOwner)) return;
+            StatusText = Loc.T("整卷分析失败：") + ex.Message;
+            StartRollWarmUp();
+        }
+        finally
+        {
+            if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
+            if (ReferenceEquals(_rollProgressOwner, progressOwner))
+            {
+                _rollProgressOwner = null;
+                RollAnalysisProgress = "";
+            }
+        }
     }
 
     /// <summary>
@@ -2916,6 +2982,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// Each frame is decoded transiently and dropped: none of them is put in the preview cache,
     /// whose entries are preview-sized on purpose (see PreviewAsync — the full-resolution float
     /// frame is the biggest allocation in the program).
+    /// RAW samples may seed that cache with a normal half-size preview from the same unpack;
+    /// the full-resolution pixels remain transient and are never stored there.
     /// </summary>
     private double? MeasureBoardCut()
     {
@@ -2931,12 +2999,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     // Snapshot every input before leaving the UI thread. The worker never reads live frame,
     // crop or pipeline state, including when the user switches frames during a RAW decode.
-    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default)
+    private Task<double?> MeasureBoardCutAsync(CancellationToken ct = default, Action<int, int>? progress = null,
+        Action? previewReady = null)
     {
         Func<double?>[] samples = CurrentFrame is { } current
-            ? BoardCutSampleFrames(current).Select(BoardCutMeasurement).ToArray()
+            ? BoardCutSampleFrames(current).Select(frame => BoardCutMeasurement(frame, previewReady)).ToArray()
             : Array.Empty<Func<double?>>();
-        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: Math.Min(2, ImageIo.PreviewWorkers));
+        long? free = SystemMemory.TryGetAvailableBytes(out long available) ? available : null;
+        int workers = BoardCutAnalysis.RecommendedWorkers(ImageIo.PreviewWorkers, samples.Length, free);
+        return BoardCutAnalysis.MeasureAsync(samples, ct, maxWorkers: workers, progress: progress);
     }
 
     // The wrapper distinguishes an already-measured "no board" from "not measured yet".
@@ -2962,7 +3033,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>One frame's board cut at full resolution, or null when it has no board.</summary>
-    private Func<double?> BoardCutMeasurement(RollFrame frame)
+    private Func<double?> BoardCutMeasurement(RollFrame frame, Action? previewReady = null)
     {
         bool isCurrent = ReferenceEquals(frame, CurrentFrame);
 
@@ -2984,6 +3055,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         IColorManagementEngine colorManagement = ColorManagement;
         ImageBuffer? preview = isCurrent ? _previewLinear : null;
         SourceStamp stamp = SourceStamp.Capture(path);
+        long previewGeneration = _previews.Generation;
 
         return () =>
         {
@@ -2992,6 +3064,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ImageBuffer region;
             try
             {
+                using var decodeTrace = RenderTrace.Scope("import.board-cut.decode");
                 // A split cell decodes only its box: a TIFF window at full resolution is the same
                 // pixels as the whole decode cropped to the box, and holds only the cell — a third
                 // of a 190 MP Flextight strip instead of all 2.3 GB of it. A whole-file frame (no
@@ -3006,11 +3079,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 }
                 else
                 {
-                    ImageBuffer full = ImageIo.LoadWorking(
-                        path,
-                        pipelineVersion,
-                        colorManagement,
-                        assumption).Pixels;
+                    ImageBuffer full = box is null && RawDecode.IsRawExtension(path)
+                        ? LoadBoardRawWithPreview(path, pipelineVersion, colorManagement, assumption, stamp, previewGeneration, previewReady)
+                        : ImageIo.LoadWorking(path, pipelineVersion, colorManagement, assumption).Pixels;
                     region = box is { } bx2 ? Geometry.ApplyCrop(full, bx2) : full;
                 }
             }
@@ -3037,10 +3108,64 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             if (crop is { } c) region = Geometry.ApplyCrop(region, c);
 
-            double thr = Sprocket.EstimateSprocketThreshold(region);
+            double thr = RenderTrace.Measure("import.board-cut.detect", () => Sprocket.EstimateSprocketThreshold(region));
             stamp.RequireCurrent();
             return thr >= Sprocket.NoBoard ? null : thr;
         };
+    }
+
+    // Reserve the normal preview's in-flight key before unpacking. Foreground switches and
+    // roll warm-up join this work; a cached/already-running preview keeps its existing owner.
+    private ImageBuffer LoadBoardRawWithPreview(string path, ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement, TiffInputAssumption assumption, SourceStamp stamp, long generation,
+        Action? previewReady = null)
+    {
+        string key = PreviewKey(path, null, pipelineVersion, assumption, stamp);
+        TaskCompletionSource<PreviewCache.Entry>? owner = null;
+        lock (_decoding)
+        {
+            if (_previews.Generation == generation && _previews.Get(key) is null
+                && !(_decoding.TryGetValue(key, out var running) && running.Generation == generation))
+            {
+                owner = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _decoding[key] = (generation, owner.Task);
+            }
+        }
+        if (owner is null) return ImageIo.LoadWorking(path, pipelineVersion, colorManagement, assumption).Pixels;
+        try
+        {
+            bool published = false;
+            void Publish(WorkingFrame preview, int width, int height)
+            {
+                if (published) return;
+                stamp.RequireCurrent();
+                DecodedSources.Track(preview, stamp);
+                var entry = new PreviewCache.Entry(preview, width, height) { Source = stamp };
+                if (_previews.PutIfCurrent(key, preview, width, height, generation, stamp))
+                    CaptureTile(key, preview, generation, stamp);
+                owner.TrySetResult(entry);
+                published = true;
+                RenderTrace.Count("import.board-cut.preview-shared");
+                previewReady?.Invoke();
+            }
+            var (full, preview, width, height) = ImageIo.LoadWorkingWithPreview(
+                path, PreviewMaxEdge, pipelineVersion, colorManagement, assumption, Publish);
+            stamp.RequireCurrent();
+            Publish(preview, width, height);
+            return full.Pixels;
+        }
+        catch (Exception ex)
+        {
+            owner.TrySetException(ex);
+            _ = owner.Task.Exception; // Observe failures even when no foreground request joined.
+            throw;
+        }
+        finally
+        {
+            lock (_decoding)
+                if (_decoding.TryGetValue(key, out var current) && ReferenceEquals(current.Task, owner.Task))
+                    _decoding.Remove(key);
+        }
     }
 
     /// <summary>
@@ -3096,6 +3221,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null)
     {
+        var progressOwner = new object();
+        _rollProgressOwner = progressOwner;
+        RollAnalysisNoticeDismissed = false;
+        RollAnalysisProgress = Loc.T("正在测量片基与高光 …");
         try
         {
             await AutoInvertRollCoreAsync(measuredBoardCut);
@@ -3112,6 +3241,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            if (ReferenceEquals(_rollProgressOwner, progressOwner))
+            {
+                _rollProgressOwner = null;
+                RollAnalysisProgress = "";
+            }
             ReleaseBulkBuffers();
         }
     }
@@ -3127,6 +3261,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _autoInvertCts?.Cancel();
         _autoInvertCts = cts;
         CancellationToken ct = cts.Token;
+        // Paint the banner before synchronous current-frame measurements start.
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+        ct.ThrowIfCancellationRequested();
 
         // ── Stage 1: the current frame alone, so there is something to look at at once ──────
         //
@@ -3201,7 +3338,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // let the notice be dismissed — a user who already knows should not have to keep reading
         // it. Raised here rather than at the top of the method because a single-frame roll (the
         // early return above) never has a provisional stage to warn about.
-        RollAnalysisNoticeDismissed = false;
         RollAnalysisPending = true;
 
         try
@@ -3239,10 +3375,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // must not vanish either — see the catch below.
             int failed = 0;
             string? failReason = null;
-            ReportBackground(Loc.F($"整卷分析 0/{order.Count} …"));
+            ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 0/{order.Count} …"));
             var pipelineVersion = _colorPipelineVersion;
             var inputAssumption = _tiffInputAssumption;
-            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            var batches = DecodeBatchPlan.Create(order, item => item.Path);
             await Parallel.ForEachAsync(batches, new ParallelOptions
             {
                 CancellationToken = ct,
@@ -3256,7 +3392,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 PreviewCache.Entry[]? batchEntries = null;
                 if (batch.Length > 1)
                 {
-                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                    try { batchEntries = await PreviewBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
                         pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
                     catch { /* Preserve per-frame error handling below. */ }
@@ -3281,7 +3417,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         // the bug.
                         Interlocked.Increment(ref failed);
                         failReason = ex is OutOfMemoryException ? Loc.T("内存不足") : ex.Message;
-                        ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
+                        ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                         continue;
                     }
 
@@ -3336,10 +3472,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     {
                         completed.Add((rollIndex, raw, val, baseMask, baseValue));
                     }
-                    ReportBackground(Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
+                    ReportRollAnalysisProgress(cts, Loc.F($"整卷分析 {Interlocked.Increment(ref done)}/{order.Count} …"));
                 }
             });
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             ct.ThrowIfCancellationRequested();
             completed.Sort((a, b) => a.RollIndex.CompareTo(b.RollIndex));
             var masks = new List<ImageBuffer>(completed.Count);
@@ -3487,13 +3623,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // longer coming would sit there for the rest of the session.
         catch (OperationCanceledException)
         {
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             RollAnalysisPending = false;
             if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
         }
         catch (Exception ex)
         {
-            ReportBackground("");
+            ReportRollAnalysisProgress(cts, "");
             RollAnalysisPending = false;
             StatusText = Loc.T("整卷分析去色罩失败：") + ex.Message;
             RestartThumbnails();
@@ -3515,6 +3651,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _autoInvertCts?.Cancel();
         _autoInvertCts = null;
+        _rollProgressOwner = null;
+        RollAnalysisProgress = "";
+        ThumbnailProgress = "";
+        WarmupProgress = "";
         RollAnalysisPending = false;
     }
 
@@ -4014,6 +4154,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // a rendered positive and that render has to be the one the user is looking at.
         DMaxPerChannel = (double[])highlight.Clone(),
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
+        Lensfun = _lensfunCalibration, LensfunEnabled = LensfunEnabled,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
         // gains are folded straight into the highlight endpoint, which is then applied to a
@@ -4666,6 +4807,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RetranslateText()
     {
+        NotifyLensfunInfo();
         NotifyRollBroadcastHints();
         OnPropertyChanged(nameof(SmartCastFeedbackText));
         OnPropertyChanged(nameof(DeepWbInstallHint));
@@ -4835,6 +4977,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return data;
     }
 
+    internal Func<string, Project.Data, string?, Task<string>> ProjectWriterAsync { get; set; }
+        = (path, data, revision) => Task.Run(() => Project.SaveIfUnchanged(path, data, revision));
+
     /// <summary>Persist whatever went stale: the project file, the cover sheet, or both.</summary>
     private async Task AutoSaveAsync()
     {
@@ -4848,8 +4993,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             SetSaveState(ProjectSaveState.Saving);
             try
             {
-                string savedRevision = await Task.Run(() =>
-                    Project.SaveIfUnchanged(path, data, _savedProjectRevision));
+                string savedRevision = await ProjectWriterAsync(path, data, _savedProjectRevision);
                 _savedProjectRevision = savedRevision;
             }
             catch (Exception ex)

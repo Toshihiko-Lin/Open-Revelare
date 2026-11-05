@@ -19,7 +19,8 @@ namespace OpenRevelare.Core;
 public static class RawDecode
 {
     /// <summary>Opt-in phase timing; emits no file names or image content.</summary>
-    public static readonly ActivitySource Diagnostics = new("OpenRevelare.RawDecode");
+    internal const string DiagnosticsSourceName = "OpenRevelare.RawDecode";
+    public static readonly ActivitySource Diagnostics = new(DiagnosticsSourceName);
     private static readonly RawSourceCache SourceBytes = new(256L << 20,
         () => PhysicalMemory.TryGetAvailableBytes(out long free) ? free : null);
 
@@ -553,13 +554,15 @@ public static class RawDecode
     /// buffer, and callers need the full-resolution size for crop and region geometry.</param>
     private sealed class RawSession(
         RawContext context, byte[] bytes, int frameWidth, int frameHeight,
-        double sourceQuantisationStep)
+        double sourceQuantisationStep, double rawQuantisationStep, System.Drawing.Rectangle? sourceCrop)
         : IDisposable
     {
         public RawContext Context { get; } = context;
         public int FrameWidth { get; } = frameWidth;
         public int FrameHeight { get; } = frameHeight;
         public double SourceQuantisationStep { get; } = sourceQuantisationStep;
+        public double RawQuantisationStep { get; } = rawQuantisationStep;
+        public System.Drawing.Rectangle? SourceCrop { get; } = sourceCrop;
         private byte[]? _bytes = bytes;   // kept alive, and pinned, until the context is gone
 
         public void Dispose()
@@ -662,6 +665,7 @@ public static class RawDecode
 
             // Mirror rawpy.postprocess(..) from _decode_rawpy: UniWB, raw colour,
             // linear gamma, 16-bit, no auto-bright, AHD demosaic, FBDD per preference.
+            double rawQuantisationStep = sourceQuantisationStep;
             using (Diagnostics.StartActivity(halfSize ? "raw.process.preview" : "raw.process.full"))
                 ctx.Process((int)fbdd, halfSize, cropbox);
             // Maximum adjustment can change the scale after unpack. Keep the precision bound
@@ -677,7 +681,7 @@ public static class RawDecode
                 processed?.SetTag("raw.source-step", sourceQuantisationStep);
                 processed?.SetTag("raw.warnings", after?.Warnings);
             }
-            return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep);
+            return new RawSession(ctx, bytes, frameW, frameH, sourceQuantisationStep, rawQuantisationStep, cropbox);
         }
         catch { ctx.Dispose(); throw; }
     }
@@ -789,6 +793,72 @@ public static class RawDecode
         {
             SourceQuantisationStep = decoded.SourceQuantisationStep,
         };
+    }
+
+    /// <summary>Produce the normal half-size preview and full AHD image from one unpack.
+    /// The context is private to this operation and is released before full float conversion.</summary>
+    public static (ImageBuffer Full, ImageBuffer Preview, int SourceWidth, int SourceHeight) DecodeRawWithPreview(
+        string path, RawBackend backend, FbddMode fbdd, int maxEdge,
+        Action<ImageBuffer, int, int>? previewReady = null)
+        => DecodeRawWithPreview(path, backend, fbdd, maxEdge, out _, previewReady);
+
+    public static (ImageBuffer Full, ImageBuffer Preview, int SourceWidth, int SourceHeight) DecodeRawWithPreview(
+        string path, RawBackend backend, FbddMode fbdd, int maxEdge, out bool dngFellBack,
+        Action<ImageBuffer, int, int>? previewReady = null)
+    {
+        if (maxEdge <= 0) throw new ArgumentOutOfRangeException(nameof(maxEdge));
+        var result = WithBackend(path, backend, p => DecodeLibRawWithPreview(p, fbdd, maxEdge,
+            backend == RawBackend.Dng ? null : previewReady), out dngFellBack);
+        // An explicit Adobe conversion may fall back to LibRaw. Publish only the chosen
+        // backend's pixels, after that decision is final.
+        if (backend == RawBackend.Dng) previewReady?.Invoke(result.Preview, result.SourceWidth, result.SourceHeight);
+        return result;
+    }
+
+    private static (ImageBuffer Full, ImageBuffer Preview, int SourceWidth, int SourceHeight) DecodeLibRawWithPreview(
+        string path, FbddMode fbdd, int maxEdge, Action<ImageBuffer, int, int>? previewReady)
+    {
+        ImageBuffer? preview = null;
+        ProcessedImage fullNative;
+        double fullStep;
+        try
+        {
+            using (RawSession session = OpenAndProcess(path, fbdd, halfSize: true))
+            {
+                using (ProcessedImage half = session.Context.MakeDcrawMemoryImage())
+                {
+                    if (half.Bits != 16) throw new NotSupportedException("expected 16-bit RAW output");
+                    preview = BoxFromRaw(half, half.Width, half.Height, half.Channels,
+                        Resample.BoxFactor(half.Width, half.Height, maxEdge), session.SourceQuantisationStep);
+                    bool shrunk = half.Width < session.FrameWidth && half.Width == (session.FrameWidth + 1) / 2
+                        && half.Height == (session.FrameHeight + 1) / 2;
+                    previewReady?.Invoke(preview, shrunk ? session.FrameWidth : half.Width,
+                        shrunk ? session.FrameHeight : half.Height);
+                }
+                // LibRaw's raw2image_start restores the original unpacked sensor data, colour
+                // metadata and sizes. Reapply the original crop, not the half-size output bounds.
+                using (Diagnostics.StartActivity("raw.process.full"))
+                    session.Context.Process((int)fbdd, halfSize: false, session.SourceCrop);
+                fullStep = session.RawQuantisationStep;
+                if (session.Context.Levels is { White: > 0 } levels) fullStep = Math.Max(fullStep, 1d / levels.White);
+                using (Diagnostics.StartActivity("raw.output-copy")) fullNative = session.Context.MakeDcrawMemoryImage();
+            }
+        }
+        catch (LibRawException) when (preview is not null)
+        {
+            // Some decoder types may decline a second process. The preview is still valid;
+            // preserve the normal full-quality route rather than losing board analysis.
+            var independent = DecodeLibRaw(path, fbdd, halfSize: false);
+            return (independent, preview, independent.Width, independent.Height);
+        }
+        using (fullNative)
+        {
+            if (fullNative.Bits != 16) throw new NotSupportedException("expected 16-bit RAW output");
+            using var conversion = Diagnostics.StartActivity("raw.rgb-float");
+            var full = new ImageBuffer(fullNative.Width, fullNative.Height, ConvertRawPixels(fullNative))
+                { SourceQuantisationStep = fullStep };
+            return (full, preview, full.Width, full.Height);
+        }
     }
 
     private static float[] ConvertRawPixels(ProcessedImage image)
@@ -947,6 +1017,32 @@ public static class RawDecode
         string path, FbddMode fbdd, (double X, double Y, double W, double H) rect, int maxEdge)
     {
         using Decoded decoded = Process(path, fbdd, halfSize: false, Demosaic.Preview);
+        return RegionPreview(decoded, rect, maxEdge);
+    }
+
+    /// <summary>Decode a shared RAW source once for several independent preview crops.</summary>
+    public static (ImageBuffer Preview, int SourceWidth, int SourceHeight)[] DecodeRawPreviewBatch(
+        string path, RawBackend backend, FbddMode fbdd,
+        (double X, double Y, double W, double H)?[] rects, int maxEdge)
+    {
+        ArgumentNullException.ThrowIfNull(rects);
+        if (rects.Length == 0) throw new ArgumentException("At least one crop is required.", nameof(rects));
+        if (maxEdge <= 0) throw new ArgumentOutOfRangeException(nameof(maxEdge));
+        // Snapshot requests before backend conversion or native decoding begins.
+        var requests = rects.ToArray();
+        return WithBackend(path, backend, p =>
+        {
+            using Decoded decoded = Process(p, fbdd, halfSize: false, Demosaic.Preview);
+            var results = new (ImageBuffer, int, int)[requests.Length];
+            for (int i = 0; i < requests.Length; i++)
+                results[i] = RegionPreview(decoded, requests[i] ?? (0, 0, 1, 1), maxEdge);
+            return results;
+        }, out _);
+    }
+
+    private static (ImageBuffer Preview, int SourceWidth, int SourceHeight) RegionPreview(
+        Decoded decoded, (double X, double Y, double W, double H) rect, int maxEdge)
+    {
         // Same rounded, half-open bounds as Geometry.ApplyCrop, in each resolution's axes.
         System.Drawing.Rectangle Bounds(int w, int h)
         {

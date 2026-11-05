@@ -16,13 +16,14 @@ public sealed class TiffPreviewBatchTests
     [Theory]
     [InlineData(".tif")]
     [InlineData(".fff")]
+    [InlineData(".dng")]
     public void Gated_batch_matches_individual_previews_and_source_dimensions(string extension)
     {
         string path = WriteFixture(extension);
         try
         {
             using var engine = new LittleCmsEngine();
-            var actual = ImageIo.LoadWorkingTiffPreviewBatch(path, Crops, 31,
+            var actual = ImageIo.LoadWorkingPreviewBatch(path, Crops, 31,
                 ColorPipelineVersion.ManagedV2, engine, TiffInputAssumption.Linear);
             for (int i = 0; i < Crops.Length; i++)
             {
@@ -31,15 +32,18 @@ public sealed class TiffPreviewBatchTests
                     : ImageIo.LoadWorkingPreview(path, 31, ColorPipelineVersion.ManagedV2, engine, TiffInputAssumption.Linear);
                 Assert.Equal((expected.SourceWidth, expected.SourceHeight), (actual[i].SourceWidth, actual[i].SourceHeight));
                 Assert.Equal(expected.Preview.Pixels.Data, actual[i].Preview.Pixels.Data);
+                Assert.Equal(expected.Preview.Source, actual[i].Preview.Source);
             }
         }
         finally { File.Delete(path); }
     }
 
-    [Fact]
-    public async Task Foreground_requests_and_duplicate_crops_share_batch_pixels_and_cache_entries()
+    [Theory]
+    [InlineData(".fff")]
+    [InlineData(".dng")]
+    public async Task Foreground_requests_and_duplicate_crops_share_batch_pixels_and_cache_entries(string extension)
     {
-        string path = WriteFixture(".fff");
+        string path = WriteFixture(extension);
         try
         {
             using var vm = new MainViewModel(() => 4L << 30);
@@ -77,13 +81,14 @@ public sealed class TiffPreviewBatchTests
 
     private static Task<PreviewCache.Entry[]> Batch(MainViewModel vm, string path,
         (double X, double Y, double W, double H)?[] crops)
-        => (Task<PreviewCache.Entry[]>)typeof(MainViewModel).GetMethod("PreviewTiffBatchAsync", Private)!
+        => (Task<PreviewCache.Entry[]>)typeof(MainViewModel).GetMethod("PreviewBatchAsync", Private)!
             .Invoke(vm, new object[] { path, crops, ColorPipelineVersion.ManagedV2, TiffInputAssumption.Linear })!;
 
     private static string WriteFixture(string extension)
     {
         string path = Path.Combine(TestDataIsolation.Root, $"batch-preview-{Guid.NewGuid():N}{extension}");
-        WriteFixturePixels(path);
+        if (extension == ".dng") LibRawRuntimeTests.WriteBayerDng(path, width: 1024, height: 768, textured: true);
+        else WriteFixturePixels(path);
         return path;
     }
 

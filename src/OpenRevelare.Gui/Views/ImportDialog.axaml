@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i18n="using:OpenRevelare.Gui.Markup"
         x:Class="OpenRevelare.Gui.Views.ImportDialog"
-        Width="600" SizeToContent="Height" MinWidth="480" MinHeight="400" MaxHeight="760"
+        Width="640" SizeToContent="Height" MinWidth="520" MinHeight="400" MaxHeight="760"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource PanelBrush}"
         Title="{i18n:T '新建项目 / 导入'}">
@@ -19,13 +19,13 @@
             </StackPanel>
         </StackPanel>
 
-        <ScrollViewer>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="12">
                 <!-- ── 文件 ─────────────────────────────────────────── -->
                 <StackPanel Spacing="4">
                     <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold"
                                ToolTip.Tip="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
-                    <ListBox Name="FileList" Height="140" SelectionMode="Multiple"
+                    <ListBox Name="FileList" Height="112" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
                     <WrapPanel Orientation="Horizontal">
                         <Button Content="{i18n:T '添加文件…'}" Click="OnAddFiles" Margin="0,0,6,6" />
@@ -37,56 +37,48 @@
                     </WrapPanel>
                 </StackPanel>
 
-                <Expander Name="AdvancedImportSettings" Header="{i18n:T '高级导入设置（分割 / 光源 / 平场）'}" IsExpanded="False" HorizontalAlignment="Stretch">
-                <StackPanel Spacing="12" Margin="12,8,0,0">
-                <!-- ── 底片分割（仅扫描件）───────────────────────────── -->
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '底片分割（仅扫描件）'}" FontWeight="SemiBold" />
-                    <CheckBox Name="SplitChk" Content="{i18n:T '导入时识别一张里的多格底片并分割'}"
-                              ToolTip.Tip="{i18n:T '扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。'}" />
-                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '不勾选则一个文件按一帧导入——已经在扫描软件里切好、或本来就是一格一张时用这个。相机 RAW 不受影响，始终一张一帧。'}" />
-                </StackPanel>
-
-                <!-- ── 翻拍光源 ─────────────────────────────────────── -->
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '翻拍光源（仅相机 RAW）'}" FontWeight="SemiBold" />
-                    <RadioButton Name="SrcB" GroupName="src" Content="{i18n:T '宽谱光源（白光）— Path B'}" IsChecked="True" />
-                    <RadioButton Name="SrcA" GroupName="src" Content="{i18n:T '窄谱光源（RGB 合成）— Path A，需校正图'}"
-                                 Checked="OnSourceChanged" Unchecked="OnSourceChanged"
-                                 ToolTip.Tip="{i18n:T 'RGB LED 灯板翻拍：分别拍红 / 绿 / 蓝三张，加一张空白灯板 RAW，放在同一文件夹（自动识别）。据此解出通道串扰，还原更准确的原色。'}" />
-                    <StackPanel Name="CalRow" IsVisible="False" Spacing="4" Margin="20,2,0,0">
-                        <TextBlock Text="{i18n:T '校正图目录（含红/绿/蓝三张空白灯板 RAW）'}" Foreground="{DynamicResource TextMuteBrush}" FontSize="11" />
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Name="CalEdit" Grid.Column="0" IsReadOnly="True" Margin="0,0,6,0"
-                                     Watermark="{i18n:T '选择含 R/G/B 校正图的文件夹'}" />
-                            <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickCal" />
+                <StackPanel Name="ImportProcessingOptions" Spacing="12">
+                    <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="{i18n:T '翻拍校正（相机 RAW）'}" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="84,*">
+                                <TextBlock Text="{i18n:T '翻拍光源'}" VerticalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />
+                                <WrapPanel Grid.Column="1" Orientation="Horizontal">
+                                    <RadioButton Name="SrcB" GroupName="src" Content="{i18n:T '白光'}" IsChecked="True" Margin="0,0,18,0"
+                                                 ToolTip.Tip="{i18n:T '宽谱光源（白光）— Path B'}" />
+                                    <RadioButton Name="SrcA" GroupName="src" Content="{i18n:T 'RGB 合成光'}"
+                                                 Checked="OnSourceChanged" Unchecked="OnSourceChanged"
+                                                 ToolTip.Tip="{i18n:T 'RGB LED 灯板翻拍：分别拍红 / 绿 / 蓝三张，加一张空白灯板 RAW，放在同一文件夹（自动识别）。据此解出通道串扰，还原更准确的原色。'}" />
+                                </WrapPanel>
+                            </Grid>
+                            <StackPanel Name="CalRow" IsVisible="False" Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBox Name="CalEdit" IsReadOnly="True" Margin="0,0,6,0"
+                                             Watermark="{i18n:T '选择含 R/G/B 校正图的文件夹'}" />
+                                    <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickCal" />
+                                </Grid>
+                                <TextBlock Name="CalDetect" Classes="groupHint" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <CheckBox Name="LccChk" Content="{i18n:T 'LCC 平场校正（可选）'}" IsCheckedChanged="OnLccToggled"
+                                      ToolTip.Tip="{i18n:T '拍一张均匀光的平场参考图，逐像素/逐通道修正本翻拍镜头的暗角与角落偏色。'}" />
+                            <Grid Name="LccRow" ColumnDefinitions="*,Auto" IsVisible="False">
+                                <TextBox Name="LccEdit" IsReadOnly="True" Margin="0,0,6,0"
+                                         Watermark="{i18n:T '均匀光的平场参考图（RAW 或 TIFF）'}" />
+                                <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickLcc" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{i18n:T '导入处理'}" FontWeight="SemiBold" />
+                        <Grid ColumnDefinitions="*,*">
+                            <CheckBox Name="SplitChk" Content="{i18n:T '扫描件多格分割'}"
+                                      ToolTip.Tip="{i18n:T '扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。'}" />
+                            <CheckBox Name="AutoInvertChk" Grid.Column="1" IsChecked="True"
+                                      ToolTip.Tip="{i18n:T '分析整卷的片基与高光代理，统一标定端点；完成后刷新预览。'}">
+                                <TextBlock Text="{i18n:T '导入后自动分析整卷（推荐）'}" TextWrapping="Wrap" />
+                            </CheckBox>
                         </Grid>
-                        <TextBlock Name="CalDetect" Classes="groupHint" Text="" />
                     </StackPanel>
-                </StackPanel>
-
-                <!-- ── LCC 平场校正 ─────────────────────────────────── -->
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T 'LCC 平场校正（可选）'}" FontWeight="SemiBold" />
-                    <CheckBox Name="LccChk" Content="{i18n:T '启用 LCC 平场校正'}"
-                              IsCheckedChanged="OnLccToggled"
-                              ToolTip.Tip="{i18n:T '拍一张均匀光的平场参考图，逐像素/逐通道修正本翻拍镜头的暗角与角落偏色。'}" />
-                    <Grid Name="LccRow" ColumnDefinitions="*,Auto" IsVisible="False" Margin="20,2,0,0">
-                        <TextBox Name="LccEdit" Grid.Column="0" IsReadOnly="True" Margin="0,0,6,0"
-                                 Watermark="{i18n:T '均匀光的平场参考图（RAW 或 TIFF）'}" />
-                        <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickLcc" />
-                    </Grid>
-                </StackPanel>
-
-                </StackPanel>
-                </Expander>
-
-                <!-- ── 自动整卷分析去色罩 ───────────────────────────── -->
-                <StackPanel Name="AutoImportOptions" Spacing="4">
-                    <CheckBox Name="AutoInvertChk" Content="{i18n:T '导入后自动分析整卷（推荐）'}"
-                              IsChecked="True"
-                              ToolTip.Tip="{i18n:T '分析整卷的片基与高光代理，统一标定端点；完成后刷新预览。'}" />
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

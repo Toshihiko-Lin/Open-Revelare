@@ -68,6 +68,24 @@ for (int i = 0; i < iterations; i++)
 for (int i = 0; i < 5; i++) Time("uncached-preview-decode-os-cache-unspecified", Decode);
 var drag = preview.WithPixels(Resample.Box(preview.Pixels, 800));
 for (int i = 0; i < 12; i++) Time("drag-pipeline-800", () => Pipeline.Render(drag, parameters, version, cmm));
+// The interactive path also pays for canonical conversion and the fallback. Measuring only
+// Pipeline.Render concealed most of its former UI-thread cost. Keep this a CPU-only harness;
+// actual Avalonia bitmap packing, dispatcher publication and compositor work remain excluded.
+var encodeFallback = typeof(OpenRevelare.Gui.ViewModels.MainViewModel).GetMethod(
+    "EncodeCanonicalFallbackSrgb", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+var dragAllocations = new List<long>();
+for (int i = 0; i < 12; i++)
+{
+    long allocated = GC.GetAllocatedBytesForCurrentThread();
+    Time("drag-prepare-with-fallback-800", () =>
+    {
+        var rendered = Pipeline.Render(drag, parameters, version, cmm);
+        var scene = CanonicalPreviewConverter.Convert(rendered, cmm, 1);
+        _ = encodeFallback.Invoke(null, new object[] { scene });
+        return HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
+    });
+    dragAllocations.Add(GC.GetAllocatedBytesForCurrentThread() - allocated);
+}
 for (int i = 0; i < 8; i++) Time("zoom-region-render", () => RegionRender.Render(preview, parameters,
     new RegionRender.Roi(0.25, 0.25, 0.25, 0.25), version, cmm));
 var full = ImageIo.LoadWorking(path, version, cmm, TiffInputAssumption.Linear);
@@ -86,6 +104,7 @@ File.WriteAllText(output, JsonSerializer.Serialize(new
     ProcessorCount = Environment.ProcessorCount, SourceDimensions = "2400x1600", PreviewDimensions = $"{preview.Pixels.Width}x{preview.Pixels.Height}",
     Pipeline = version.ToString(), Iterations = iterations, PeakWorkingSetBytes = process.PeakWorkingSet64,
     PreparedResidentBytes = cache.ResidentBytes, PixelEquality = true,
+    DragPreparingThreadMedianAllocatedBytes = dragAllocations.Order().ElementAt(dragAllocations.Count / 2),
     Scope = "Synthetic TIFF, in-process CPU pipeline/canonical scene/histogram; excludes Avalonia fallback bitmap, compositor and real RAW; OS file cache unspecified.",
     Phases = statistics.Snapshot(),
 }, new JsonSerializerOptions { WriteIndented = true }));

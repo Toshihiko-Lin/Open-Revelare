@@ -290,11 +290,24 @@ public static class Sprocket
         if (luma.Length < 100) return NoBoard;
         double[] smooth = Smooth7(Histogram256(luma));
 
+        // Preserve every successful legacy estimate, including its exact threshold.
+        double original = EstimateBoardThreshold(image, luma, smooth, recoverDimHoles: false);
+        return original < NoBoard ? original
+            : EstimateBoardThreshold(image, luma, smooth, recoverDimHoles: true);
+    }
+
+    private static double EstimateBoardThreshold(ImageBuffer image, float[] luma,
+                                                  double[] smooth, bool recoverDimHoles)
+    {
+
         // 1. The board cluster, identified by ITS OWN properties rather than by pairing it with a
         //    film-base peak. See the class remarks: a normally-exposed negative HAS no base peak,
         //    so requiring one is what made this fire on pictures.
         int boardPk = TopCluster(smooth, out int boardFoot);
         if (boardPk < 0) return NoBoard;
+        // This fallback addresses conservatively exposed RAWs only. Ordinary bright
+        // captures continue to use the original rejection rules.
+        if (recoverDimHoles && Centre(boardPk) >= MinBoardLuma) return NoBoard;
 
         // 2. The gap between the FILM's bright edge and the board's foot.
         //
@@ -325,7 +338,14 @@ public static class Sprocket
         //     genuinely separate populations rather than one distribution with a dip in it. A
         //     normally-exposed negative rolls off smoothly into its highlights, so it fails the
         //     depth test even where a wide shoulder passes the separation one.
-        if (Centre(boardPk) - valleyLuma < MinBoardSeparation) return NoBoard;
+        // Dim RAW captures compress the same physical board/film contrast below the
+        // absolute 0.10 gap. Only a verified peripheral row may use a relative gap;
+        // brightness alone must not promote a picture's highlight mode to hardware.
+        if (Centre(boardPk) - valleyLuma < MinBoardSeparation)
+        {
+            if (!recoverDimHoles) return NoBoard;
+            if (Centre(boardPk) - valleyLuma < 0.25 * Centre(boardPk)) return NoBoard;
+        }
         if (smooth[valleyIdx] > MaxValleyDepth * smooth[boardPk]) return NoBoard;
 
         // (c) The cluster is BARE LIGHT rather than light through the orange mask. Cheap, and it
@@ -339,7 +359,13 @@ public static class Sprocket
         // first so ordinary boards do not also require labelling every interior bright blob.
         bool board = BorderDominant(luma, image.Width, image.Height, valleyLuma)
                      && HasFilmBelowBoard(image, luma, smooth, filmTop, valleyLuma);
-        if (!board && !RepeatedHoles(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
+        // Every recovery needs independent geometric evidence, even if a bright
+        // band at the edge could otherwise pass the border/film test.
+        if (recoverDimHoles)
+        {
+            if (!RepeatedHoles(luma, image.Width, image.Height, valleyLuma, allowClipped: true)) return NoBoard;
+        }
+        else if (!board && !RepeatedHoles(luma, image.Width, image.Height, valleyLuma)) return NoBoard;
 
         // (e) The board is BARE LIGHT SOURCE, so it is bright in absolute terms — not merely the
         //     brightest thing present.
@@ -695,11 +721,11 @@ public static class Sprocket
     /// (<see cref="MinHoleFill"/>), and each is small (<see cref="MaxHoleShare"/>). Picture content
     /// can also be uniform, so the centres must form a regular row near a frame edge as well.
     ///
-    /// Edge-touching blobs are excluded before the statistics rather than counted: they are the
-    /// bare panel past the film's edge and the partial holes the frame cuts through, and both have
-    /// arbitrary size. Leaving them in would inflate the spread and cost the frame its own test.
+    /// A tight copy-stand crop can cut every hole through one frame edge. Keep these
+    /// candidates: their fill, size, alignment and pitch still have to agree. Blobs
+    /// spanning multiple edges are surround rather than individual punched holes.
     /// </summary>
-    private static bool RepeatedHoles(float[] luma, int w, int h, double cut)
+    private static bool RepeatedHoles(float[] luma, int w, int h, double cut, bool allowClipped = false)
     {
         int n = w * h;
         var seen = new bool[n];
@@ -720,7 +746,6 @@ public static class Sprocket
             stack.Push(start);
             long area = 0;
             int minX = w, maxX = -1, minY = h, maxY = -1;
-            bool touchesEdge = false;
 
             while (stack.Count > 0)
             {
@@ -731,7 +756,6 @@ public static class Sprocket
                 if (px > maxX) maxX = px;
                 if (py < minY) minY = py;
                 if (py > maxY) maxY = py;
-                if (px == 0 || py == 0 || px == w - 1 || py == h - 1) touchesEdge = true;
 
                 void Push(int q) { if (!seen[q] && luma[q] > cut) { seen[q] = true; stack.Push(q); } }
                 if (px > 0) Push(p - 1);
@@ -740,7 +764,9 @@ public static class Sprocket
                 if (py < h - 1) Push(p + w);
             }
 
-            if (touchesEdge) continue;                       // panel, or a hole the frame cut through
+            int touchedEdges = (minX == 0 ? 1 : 0) + (minY == 0 ? 1 : 0)
+                             + (maxX == w - 1 ? 1 : 0) + (maxY == h - 1 ? 1 : 0);
+            if (touchedEdges > (allowClipped ? 1 : 0)) continue;
             if (area > MaxHoleShare * n) continue;           // too big to be a hole
             // Speckle floor: grain and dust in the highlight tail are interior blobs too, and a
             // handful of single pixels would otherwise set the spread. Scaled to the frame so it

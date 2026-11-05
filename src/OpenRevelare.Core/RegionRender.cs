@@ -271,13 +271,15 @@ public static class RegionRender
         }
 
         var region = new FrameRegion(b.X0, b.Y0, frameW, frameH);
+        bool lensfun = LensfunCorrections.IsActive(cal);
+        if (lensfun) slice = LensfunCorrections.Apply(slice, cal, region);
         if (cal.DistortionK1 != 0.0)
         {
             // Distortion RESAMPLES, so its output slice is the sub-rect we actually want while
             // its input is the wider box SourceBounds reserved. Both live at the same offset.
             slice = LensCorrections.ApplyDistortion(slice, cal.DistortionK1, region);
         }
-        if (cal.LccFlatField != null)
+        if (cal.LccFlatField != null && !lensfun)
             Lcc.Apply(slice.Data, sw, sh, cal.LccFlatField, region);
         if (cal.VignetteAmount != 0.0)
             LensCorrections.ApplyVignette(slice.Data, sw, sh, cal.VignetteAmount, cal.VignetteFalloff, region);
@@ -568,6 +570,12 @@ public static class RegionRender
             sx0 -= 2; sy0 -= 2; sx1 += 2; sy1 += 2;
         }
 
+        if (LensfunCorrections.IsActive(cal) && cal.Lensfun!.Distortion is not null)
+        {
+            var d = LensfunCorrections.SourceBounds(sx0, sy0, sx1, sy1, cal.Lensfun, srcW, srcH);
+            sx0 = Math.Min(sx0, d.X0) - 2; sy0 = Math.Min(sy0, d.Y0) - 2;
+            sx1 = Math.Max(sx1, d.X1) + 2; sy1 = Math.Max(sy1, d.Y1) + 2;
+        }
         int ix0 = Math.Clamp((int)Math.Floor(sx0), 0, srcW - 1);
         int iy0 = Math.Clamp((int)Math.Floor(sy0), 0, srcH - 1);
         int ix1 = Math.Clamp((int)Math.Ceiling(sx1) + 1, ix0 + 1, srcW);

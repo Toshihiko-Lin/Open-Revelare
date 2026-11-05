@@ -1,0 +1,6 @@
+Lensfun calibration database
+Upstream: https://github.com/lensfun/lensfun
+Commit: bc5615d6278cb5fb75dd53e74015367453d5591d
+Source: https://github.com/lensfun/lensfun/tree/bc5615d6278cb5fb75dd53e74015367453d5591d/data/db
+License: Creative Commons Attribution-ShareAlike 3.0 Unported (see COPYING.CC_BY-SA_3.0).
+Only database XML files are bundled; no Lensfun library code is incorporated.

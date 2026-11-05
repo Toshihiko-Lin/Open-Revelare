@@ -27,21 +27,23 @@ public partial class MainViewModel
     // A drag therefore switches strategy entirely, the way the source does
     // (main_window.py::_on_interaction_started):
     //
-    //   • No debounce. Every move renders.
+    //   • No debounce. A move requests a render immediately.
     //   • Half the preview's long edge, i.e. a quarter of the pixels. The heavy density inversion
     //     re-runs on every move because FilmBase/WB edits invalidate everything upstream of it.
     //   • The downsampled source is computed ONCE per drag and reused. It cannot change mid-drag
     //     (the frame, its decode and the photometric chain are all fixed), and re-deriving it per
     //     move costs more than the render it feeds.
-    //   • SYNCHRONOUSLY, on the UI thread. Handing each move to a worker means the moves that
-    //     arrive while one is running are dropped, which is what makes a preview lurch instead of
-    //     track; running inline lets the pointer input coalesce naturally against the work, so
-    //     every frame that is computed is a frame that is shown.
+    //   • One background render at a time. Moves arriving during a pass are coalesced into
+    //     the next pass's latest parameters, keeping input responsive without queuing old frames.
     //
     // Release restores full resolution with one immediate, un-debounced pass.
     private bool _interacting;
     private Stopwatch? _frameSwitchTrace;
+    private bool _interactiveRunning;
+    private bool _interactivePending;
     private ImageBuffer? _dragSmall;
+    private WorkingFrame? _dragSource;
+    internal Task InteractiveRenderTask { get; private set; } = Task.CompletedTask;
     private const int DragMaxEdge = PreviewMaxEdge / 2;
 
     /// <summary>A slider thumb or curve point was grabbed — enter low-latency drag mode.</summary>
@@ -51,7 +53,9 @@ public partial class MainViewModel
         CommitUndo();          // the grab closes the previous edit; the drag itself is one step
         _renderCts?.Cancel();  // whatever the last change queued is about to be superseded
         _interacting = true;
-        _dragSmall = null;     // force a fresh downsample on the first move
+        _interactivePending = false;
+        _dragSmall = null;
+        _dragSource = null;
     }
 
     /// <summary>Released — back to full resolution, immediately.</summary>
@@ -59,7 +63,10 @@ public partial class MainViewModel
     {
         if (!_interacting) return;
         _interacting = false;
+        _interactivePending = false;
         _dragSmall = null;
+        _dragSource = null;
+        _renderCts?.Cancel();
         RenderNow();
     }
 
@@ -69,8 +76,7 @@ public partial class MainViewModel
     // ScheduleRender and RenderNow are `async void`: they are driven straight off property
     // setters, so there is no Task for anyone to observe and an escaping exception unwinds
     // past the message loop and TERMINATES the process, taking every unsaved edit in the roll
-    // with it. RenderInteractive is worse in one way — it runs INLINE on the UI thread inside
-    // the same async void, so it does not even need an await to get there.
+    // with it. The interactive pump needs the same exception backstop.
     //
     // The sampling path already learned this (MainWindow's pointer-released backstop and
     // TrySample); a render is exactly as user-triggered and exactly as fatal. Cancellation
@@ -132,73 +138,66 @@ public partial class MainViewModel
         catch (Exception ex) { ReportRenderFailure(ex); }
     }
 
-    /// <summary>One drag frame, inline on the UI thread at drag resolution.</summary>
+    /// <summary>Render the latest drag parameters with bounded background work.</summary>
     private void RenderInteractive()
     {
-        using var dragTrace = RenderTrace.Scope("drag.total");
-        if (_previewWorking is null) return;
-        try
-        {
-            var trace = RenderTrace.Start();
-            _dragSmall ??= Resample.Box(_previewWorking.Pixels, DragMaxEdge);
-            long tSmall = trace?.ElapsedMilliseconds ?? 0;
-            // _dragSmall comes off _previewLinear, so it inherits its pre-cropped-ness.
-            FrameParams parameters = ForPreview(BuildParams());
-            RenderedFrame rendered = Pipeline.Render(
-                _previewWorking.WithPixels(_dragSmall),
-                parameters,
-                _colorPipelineVersion,
-                ColorManagement);
-            long tRender = trace?.ElapsedMilliseconds ?? 0;
-            ImageBuffer outImg = rendered.Pixels;
-            PresentationScene scene = ConvertPreviewScene(rendered);
-            long tScene = trace?.ElapsedMilliseconds ?? 0;
-            Bitmap fallback = BuildFallbackBitmap(rendered, scene);
-            long tFallback = trace?.ElapsedMilliseconds ?? 0;
-            // Histograms stay live: at a quarter of the pixels the pass is noise next to the
-            // render, and a histogram that freezes mid-drag is exactly when it is being read.
-            HistogramData histogram = ShowWaveform && Histogram is { } cachedHistogram
-                ? cachedHistogram
-                : HistogramData.FromFrame(rendered, parameters.ResolvedOutputTarget.HighlightHeadroom);
-            ClippingMasks? masks = ShowClipping ? DetectClipping(outImg) : null;
-            WriteableBitmap? clipping = masks is { } detected
-                ? BuildClippingOverlay(outImg, detected)
-                : null;
-            PresentationScene? clippingScene = masks is { } sceneMasks
-                ? BuildClippingPresentationScene(outImg, sceneMasks)
-                : null;
-            long tHist = trace?.ElapsedMilliseconds ?? 0;
-            PublishCompletePreview(
-                rendered,
-                scene,
-                fallback,
-                histogram,
-                clipping,
-                clippingScene,
-                refreshSprocketMask: true);
-            if (trace is not null)
-                RenderTrace.Write($"drag  {_dragSmall.Width}x{_dragSmall.Height}: downsample {tSmall} | pipeline {tRender - tSmall} | scene {tScene - tRender} | fallback {tFallback - tScene} | hist+clip {tHist - tFallback} | publish {trace.ElapsedMilliseconds - tHist} | total {trace.ElapsedMilliseconds} ms");
-        }
-        catch (Exception ex) { ReportRenderFailure(ex); }
+        _interactivePending = true;
+        if (_interactiveRunning || _previewWorking is null) return;
+        InteractiveRenderTask = RunInteractiveAsync();
     }
 
-    private async Task RenderPreviewAsync(FrameParams p, CancellationToken ct)
+    private async Task RunInteractiveAsync()
+    {
+        _interactiveRunning = true;
+        _renderCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _renderCts = cts;
+        WorkingFrame source = _previewWorking!;
+        ImageBuffer? cached = ReferenceEquals(_dragSource, source) ? _dragSmall : null;
+        try
+        {
+            WorkingFrame small = cached is not null ? source.WithPixels(cached) : await Task.Run(() =>
+                source.WithPixels(Resample.Box(source.Pixels, DragMaxEdge)), cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            _dragSmall = small.Pixels;
+            _dragSource = source;
+            while (_interacting && _interactivePending && !cts.IsCancellationRequested
+                   && !_showingNegative && !_showingBeforeEdits)
+            {
+                _interactivePending = false;
+                using var dragTrace = RenderTrace.Scope("drag.total");
+                await RenderPreviewAsync(BuildParams(), cts.Token, small);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { ReportRenderFailure(ex); }
+        finally
+        {
+            _interactiveRunning = false;
+            // A new drag may start while a cancelled pass is draining. It still gets its
+            // own source and token; the old pass must never publish over the settling frame.
+            if (_interacting && _interactivePending && !_disposed && !_showingNegative && !_showingBeforeEdits)
+                RenderInteractive();
+        }
+    }
+
+    private async Task RenderPreviewAsync(FrameParams p, CancellationToken ct, WorkingFrame? interactiveSource = null)
     {
         CancelPreviewWarmup();
         using var totalTrace = RenderTrace.Scope("preview.total");
-        WorkingFrame source = _previewWorking!;
+        WorkingFrame source = interactiveSource ?? _previewWorking!;
         p = ForPreview(p).Clone();
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         // Captured now, not read at apply time: if the user switches frames while this render is
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
         RollFrame? frame = CurrentFrame;
         SourceStamp? sourceStamp = _previewStamp;
-        PreparedPreviewKey? preparedKey = PreparedKey(frame, sourceStamp, _previewKey, p);
+        PreparedPreviewKey? preparedKey = interactiveSource is null ? PreparedKey(frame, sourceStamp, _previewKey, p) : null;
         long preparedGeneration = _preparedPreviews.Generation;
 
         bool wantClipping = ShowClipping;
 
-        bool wantThumbnail = frame is not null && !RollAnalysisPending;
+        bool wantThumbnail = interactiveSource is null && frame is not null && !RollAnalysisPending;
 
         (Bitmap bmp, HistogramData hist, Bitmap? thumb, WriteableBitmap? clip,
          PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(async () =>
@@ -274,6 +273,7 @@ public partial class MainViewModel
         {
             using var publishTrace = RenderTrace.Scope("preview.publish");
             if (ct.IsCancellationRequested || !ReferenceEquals(frame, CurrentFrame)
+                || (interactiveSource is not null && (!_interacting || _showingNegative || _showingBeforeEdits))
                 || sourceStamp is { IsCurrent: false })
             { RenderTrace.Count("preview.publish.stale"); bmp.Dispose(); thumb?.Dispose(); clip?.Dispose(); return; }
             PublishCompletePreview(
@@ -291,7 +291,7 @@ public partial class MainViewModel
                 RenderTrace.Observe("frame.switch.first-publication", switchTrace.Elapsed.TotalMilliseconds);
                 _frameSwitchTrace = null;
             }
-            SchedulePreviewWarmup();
+            if (interactiveSource is null) SchedulePreviewWarmup();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();
         else await Dispatcher.UIThread.InvokeAsync(Apply);

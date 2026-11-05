@@ -58,10 +58,10 @@ public partial class ImportDialog : Window
     {
         InitializeComponent();
         FileList.ItemsSource = Files;
+        SetUpLensDetection();
         // Opens on whatever the last import chose (OnAcceptClick writes them back).
         AutoInvertChk.IsChecked = Settings.Current.AutoInvertOnImport;
         SplitChk.IsChecked = Settings.Current.SplitStripsOnImport;
-        AdvancedImportSettings.IsExpanded = SplitChk.IsChecked == true;
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
@@ -88,8 +88,8 @@ public partial class ImportDialog : Window
 
     private void OnDestinationChanged(object? sender, RoutedEventArgs e)
     {
-        if (AdvancedImportSettings is null || AutoImportOptions is null) return;
-        AdvancedImportSettings.IsVisible = AutoImportOptions.IsVisible = !AddToCurrent;
+        if (ImportProcessingOptions is null) return;
+        ImportProcessingOptions.IsVisible = !AddToCurrent;
         UpdateReadyUi();
     }
 
@@ -161,7 +161,6 @@ public partial class ImportDialog : Window
     {
         if (CalRow is null) return;
         CalRow.IsVisible = SrcA.IsChecked == true;
-        if (SrcA.IsChecked == true) AdvancedImportSettings.IsExpanded = true;
         UpdateReadyUi();
     }
 
@@ -188,7 +187,6 @@ public partial class ImportDialog : Window
     {
         if (LccRow is null) return;
         LccRow.IsVisible = LccChk.IsChecked == true;
-        if (LccChk.IsChecked == true) AdvancedImportSettings.IsExpanded = true;
         UpdateReadyUi();
     }
 
@@ -210,7 +208,16 @@ public partial class ImportDialog : Window
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
 
+    private bool _acceptingImport;
     private async void OnAcceptClick(object? sender, RoutedEventArgs e)
+    {
+        if (_acceptingImport) return;
+        _acceptingImport = true;
+        try { await AcceptImportAsync(); }
+        finally { _acceptingImport = false; }
+    }
+
+    private async Task AcceptImportAsync()
     {
         UpdateReadyUi();
         if (!OkBtn.IsEnabled) return;
@@ -227,12 +234,18 @@ public partial class ImportDialog : Window
             return;
         }
 
+        // Complete only the same first-file metadata read already started in the background.
+        // An early click must not silently import without the default automatic correction.
+        var lensDetection = await FinishLensDetectionAsync();
+        if (!lensDetection.Current) return;
         var cfg = new ImportConfig
         {
             PathA = SrcA.IsChecked == true,
             CalDir = SrcA.IsChecked == true ? CalEdit.Text : null,
             LccEnabled = LccChk.IsChecked == true,
             LccPath = LccChk.IsChecked == true ? LccEdit.Text : null,
+            Lensfun = lensDetection.Calibration,
+            LensfunEnabled = lensDetection.Calibration is not null,
             AutoInvert = AutoInvertChk.IsChecked == true,
             SplitStrips = SplitChk.IsChecked == true,
             // Left at Unspecified on purpose: that is now "detect", not "unanswered".

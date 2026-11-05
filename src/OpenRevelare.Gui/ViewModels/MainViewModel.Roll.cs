@@ -1884,19 +1884,18 @@ public partial class MainViewModel
             var cellParams = new FrameParams[total];
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
-            // Group split TIFF/FFF cells by source, then bound each batch to four preview
-            // buffers. RAW files retain the existing backend path and memory admission rules.
+            // Group cells by source and bound each shared decode to four preview buffers.
             foreach (var group in Enumerable.Range(0, total).GroupBy(i => frames[i].Path,
                 OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal))
             {
                 ct.ThrowIfCancellationRequested();
                 int[] indices = group.ToArray();
-                if (indices.Length > 1 && !RawDecode.IsRawExtension(group.Key))
+                if (indices.Length > 1)
                 {
                     foreach (int[] batch in indices.Chunk(4))
                     {
                         ct.ThrowIfCancellationRequested();
-                        var entries = await PreviewTiffBatchAsync(group.Key, batch.Select(i => frames[i].Box).ToArray(),
+                        var entries = await PreviewBatchAsync(group.Key, batch.Select(i => frames[i].Box).ToArray(),
                             pipelineVersion, tiffInputAssumption).WaitAsync(ct);
                         for (int k = 0; k < batch.Length; k++)
                         {

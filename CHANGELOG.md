@@ -1,48 +1,34 @@
 # OpenRevelare — 更新日志
 
-## 未发布 / Unreleased
+## v1.9.0（2026-11-04）
 
-**新增与改进**
+**新增功能**
 
-- 工作台更清楚易用：支持拖入 RAW／TIFF 文件或文件夹，检查器明确显示当前帧、勾选数量和同步范围；标签、图表及对话框也改进了键盘操作和浅深主题显示。
-- 重整修片流程：多选帧使用更大的批量操作面板，同步操作明确区分来源与目标；缩略图以颜色和形状标记未校准、已校准、已调整、原片缺失及虚拟副本状态。
-- 整卷渲染设置与单帧导出分开，状态栏新增任务中心，可查看前台任务、后台队列与最近批量结果；首次使用指引改为不阻塞工作的内嵌提示。
-- 偏好设置按「通用／图像与性能／存储」分类，并将资源文件夹归入设置菜单；顶栏新增太阳／月亮主题切换及翻译图标语言切换。
-- 日常界面更简洁：技术报告与显示链路信息统一到「帮助 → 诊断」，高级解码选项默认折叠，必要的显示异常提示仍会直接显示。
-- RAW／TIFF 浏览、印样和导出更快，连续处理大图时减少重复读取、转换和临时内存占用。
-- 偏好设置的高级解码选项新增可选的相机色彩 RAW 底片显示；只改变未反相画面的观看效果，不影响采样、反相或导出。
-- **Deep-WB 改为按需安装。** 默认安装包不含模型权重；需要「智能色偏修正」时，可点击下载图标并确认 CC BY-NC-SA 4.0 非商业许可后安装。支持 GitHub／Gitee 下载、进度显示、取消、重试、完整性校验和离线安装，升级后无需重复下载；其他功能不受影响。
-- 改进内置除尘修复：更准确地匹配附近干净纹理与明暗变化，减少修复边缘和局部放大时的不自然痕迹，无需额外组件或模型。
-- 来源致谢：内置除尘的部分改进参考了 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 的设计思路，由 OpenRevelare 独立实现。
+- **处理更快，修片更流畅。** 加快 RAW／TIFF 导入、浏览、印样和导出，降低内存占用；减少拖动滑杆、调整曲线时的卡顿，切换照片时避免旧画面覆盖。
+- 新增 Lensfun 离线自动镜头匹配，按首张 RAW 校正整卷畸变与暗角，可查看详情并整卷启停；LCC 优先处理暗角。
+- Deep-WB 改为按需安装，支持在线下载与离线安装，升级保留模型；使用前需确认 CC BY-NC-SA 4.0 非商业许可。
+- 除尘修复更自然（参考 [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) 设计思路，独立实现）；新增相机色彩底片预览，仅影响查看。
+- **界面焕新，提升使用体验。** 优化工作台、偏好设置与浅深主题，支持拖放导入和快捷切换主题、语言；批量操作更清楚，处理进度更直观，首次使用更易上手。
 
 **修复**
 
-- 修复拉宽左侧片夹后缩略图仍保持固定大小，以及从旧版覆盖升级时可能丢失已安装 Deep-WB 模型、要求重复下载的问题。
-- 修复部分压缩 TIFF 从图像中间读取区域时可能失败的问题，并加强 FFF 文件识别，减少损坏或无效文件被误判。
-- 修复「打开 LUT 文件夹」可能同时触发底片导入窗口的问题。
-- 修复从图库编辑卷信息可能清空印样中的 ISO／EI 与冲洗信息、取消或关闭偏好设置未完全撤销预览，以及关闭裁切说明后操作按钮一并消失的问题。
+- 修复低曝光 RAW 边缘齿孔识别、部分压缩 TIFF 局部读取及无效 FFF 误识别；修复编辑卷信息后印样拍摄与冲洗信息丢失。
+- 修复缩略图不随侧栏放大、菜单翻译遗漏、打开 LUT 文件夹误触发导入、偏好设置取消未还原，以及裁切按钮随说明隐藏的问题。
 
 ---
 
-**Added and improved**
+**New features**
 
-- A clearer, easier desktop workbench: drop RAW/TIFF files or folders into the window, see the current frame, checked count and sync scope at a glance, and use improved keyboard and light/dark theme support across tabs, plots and dialogs.
-- A reworked develop workflow with a larger multi-frame action panel and explicit sync sources and targets. Film-strip thumbnails use colour and shape to show uncalibrated, calibrated, adjusted, missing-source and virtual-copy states.
-- Roll rendering settings are separated from single-frame export, while a new task centre reports foreground work, background queues and recent batch results. First-use guidance is now an inline, non-blocking prompt.
-- Preferences are organised into General, Imaging & performance, and Storage, with resource folders under Settings. The top bar adds direct sun/moon theme switching and a translation-icon language picker.
-- A simpler daily interface: frame reports and display details are grouped under Help → Diagnostics, advanced decoding options are collapsed by default, and actionable display warnings remain visible.
-- Faster RAW/TIFF browsing, contact sheets and exports, with less repeated reading, conversion and temporary memory use when processing large images in succession.
-- Added optional camera-colour RAW negative viewing under advanced decoding preferences. It changes only the un-inverted view, not sampling, inversion or exports.
-- **Deep-WB is now installed on demand.** Default packages exclude model weights. To use Smart cast correction, click the download icon and accept the separate CC BY-NC-SA 4.0 non-commercial license. GitHub/Gitee downloads support progress, cancellation, retry and integrity checks, with offline installation available; the model persists across upgrades and other features do not require it.
-- Improved built-in dust repair by matching nearby clean texture and shading more accurately, reducing unnatural edges and regional-preview differences without requiring another component or model.
-- Acknowledgement: some built-in dust repair improvements were inspired by the design of [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner) and independently implemented by OpenRevelare.
+- **Faster processing, smoother editing.** Faster RAW/TIFF import, browsing, contact sheets and exports with lower memory use. More responsive sliders and curves, with stale previews prevented from replacing the current photo.
+- Added offline Lensfun matching to correct roll-wide distortion and vignetting from the first RAW's capture settings, with details and a roll-wide toggle. LCC takes priority for vignetting.
+- Deep-WB is installed on demand, supports online and offline installation, and survives upgrades. Requires acceptance of its CC BY-NC-SA 4.0 non-commercial license.
+- More natural dust repair, independently implemented with inspiration from [Film Dust Cleaner](https://gitee.com/filmdust/film-dust-cleaner). Added camera-colour negative previews for viewing only.
+- **A refreshed interface for easier everyday use.** Refined workbench, preferences and light/dark themes, with drag-and-drop import and quick theme and language switching. Clearer batch actions and progress, with easier first-use guidance.
 
 **Fixed**
 
-- Fixed film-strip thumbnails remaining at a fixed size when the left rail is widened, and overlay upgrades from older releases potentially discarding an installed Deep-WB model and requiring another download.
-- Fixed some compressed TIFF region reads failing when they start partway through an image, and tightened FFF recognition to reject damaged or invalid files more reliably.
-- Fixed Open LUT Folder also opening the negative-import window in some cases.
-- Fixed catalog roll edits clearing contact-sheet ISO/EI and processing details, preference cancellation not fully reverting previews, and crop actions disappearing with the help text.
+- Fixed edge sprocket detection on dim RAW captures, region reads in some compressed TIFFs, and false recognition of invalid FFF files. Preserved contact-sheet capture and processing details when editing roll information.
+- Fixed thumbnail resizing, missing menu translations, Open LUT Folder triggering import, cancelled preferences not reverting previews, and crop buttons disappearing with help text.
 
 ## v1.8.6.4（2026-10-24）
 

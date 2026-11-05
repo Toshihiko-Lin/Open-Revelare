@@ -352,6 +352,8 @@ public sealed class FrameParams
 
 
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
+    public LensfunCalibration? Lensfun { get; set; }
+    public bool LensfunEnabled { get; set; }
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
     /// <summary>Manual radial vignette corner gain strength. 0 = pass-through.</summary>
@@ -550,6 +552,8 @@ public sealed class FrameParams
         PrintLut = PrintLut,
         PrintLutOutput = PrintLutOutput,
         DistortionK1 = DistortionK1,
+        Lensfun = Lensfun,
+        LensfunEnabled = LensfunEnabled,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccFlatField,

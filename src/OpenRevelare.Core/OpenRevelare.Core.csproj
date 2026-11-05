@@ -8,6 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\Lensfun\database.zip" LogicalName="OpenRevelare.Core.Lensfun.database.zip" />
+    <None Update="Assets\Lensfun\SOURCE.txt;Assets\Lensfun\COPYING.CC_BY-SA_3.0"
+          Link="licenses\lensfun\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="OpenRevelare.Tests" />
     <InternalsVisibleTo Include="OpenRevelare.ComputeBenchmark" />
     <PackageReference Include="MetadataExtractor" Version="2.9.3" />

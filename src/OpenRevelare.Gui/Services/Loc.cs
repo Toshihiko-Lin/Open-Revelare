@@ -39,7 +39,7 @@ public static class Loc
     /// <summary>Raised after <see cref="Apply"/> changes the language, on the UI thread.</summary>
     public static event Action? Changed;
 
-    /// <summary>zh → target-language table. Null while the source language (zh) is in effect.</summary>
+    /// <summary>Source-string translation table; null only when resource loading fails.</summary>
     private static Dictionary<string, string>? _table;
 
     /// <summary>
@@ -51,14 +51,14 @@ public static class Loc
         setting ??= Settings.Current.Language;
         string lang = setting switch
         {
-            "zh" => "zh",
+            "zh" or "zh-CN" => "zh",
             "en" => "en",
             _ => SystemLanguage(),
         };
-        if (lang == Current && (lang == "zh") == (_table is null)) return;
+        if (lang == Current && _table is not null) return;
 
         Current = lang;
-        _table = lang == "zh" ? null : LoadTable(lang);
+        _table = LoadTable(lang == "zh" ? "zh-CN" : lang);
         OpenRevelare.Core.CoreText.Lookup = Lookup;
         Changed?.Invoke();
     }

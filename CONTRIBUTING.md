@@ -10,14 +10,14 @@ English speakers: contributions are welcome in English. Code comments in this re
 
 需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
-RAW 解码改为随项目构建的 **LibRaw 0.22.2**，不再使用 Sdcb NuGet 原生包。
-首次运行测试或处理 RAW 前，先安装 CMake 和 C/C++ 编译器，并执行
-Windows 的 `./packaging/libraw/build-windows.ps1`，或 Linux/macOS 的
-`bash packaging/libraw/build-unix.sh`。构建输入、校验和及平台要求见
-[LibRaw 构建说明](packaging/libraw/README.md)。CI 会在每个平台执行这一步。
+首次编译前，请先按 [README 的源码构建步骤](README.zh-CN.md#从源码构建)安装工具链并构建原生依赖，包括 Little CMS、LibRaw、compute 和 HEIC；Windows 还需构建 Win32 presenter。仅安装 .NET SDK 不足以运行完整测试或发布程序。
 
-HEIC 导出还需先运行 `python packaging/heif/build.py`（Python 3.12+、CMake 与 C/C++ 编译器），
-构建随程序发行的 libheif / x265 Main10 编码器。见 [HEIC 构建说明](packaging/heif/README.md)。
+- [LibRaw 构建说明](packaging/libraw/README.md)
+- [Little CMS 构建说明](packaging/lcms/README.md)
+- [HEIC 构建说明](packaging/heif/README.md)
+- [GPU compute 构建说明](packaging/compute/README.md)
+
+以下命令假定原生依赖已构建：
 
 ```bash
 git clone https://github.com/Toshihiko-Lin/Open-Revelare.git
@@ -80,8 +80,8 @@ feat: 印样可选版面比例与横竖，差额落在页边距上
 
 - **动 Stage 1 的数学**（`Inversion` / `FilmBase` / `DensityEndpoints`）。这是产品承诺所在，金标准基线首当其冲。
 - **给同一个自由度加第二个控件。** 比如再加一组「亮度」「对比度」滑块——`FrameParams` 顶部那段注释详细讲了为什么参数数量必须等于自由度数量，历史上这里有过十几个参数描述同样的六个数，结局是同一个校正被应用两遍。
-- **加联网功能。** 目前只有一个更新检查，且失败必须静默。不联网、不要账号是产品定位的一部分。
-- **加 GPU 后端。** 之前有过，被删了——`Pipeline.cs` 顶部写了实测结论。要重提请先给出测量数据。
+- **加联网功能。** 当前联网用于更新检查和用户主动安装可选模型；图像处理应保持可离线、无需账号。新增联网行为需说明用途、失败处理和隐私影响。
+- **扩大 GPU 加速范围。** 当前 Windows/macOS 仅对部分缩放、锐化和 LUT 操作提供自适应加速，反转等核心处理仍使用 CPU。扩展前请给出包含传输与分配开销的测量、CPU 一致性验证与回退方案，见 [compute 说明](packaging/compute/README.md)。
 
 拿不准就先开个 issue 或 Discussion 聊，比写完一大堆代码再被劝退省事。
 

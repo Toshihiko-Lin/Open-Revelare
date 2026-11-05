@@ -265,6 +265,31 @@ public static class ImageIo
             out _);
     });
 
+    /// <summary>Board measurement and preview share source reading/unpacking, with independent
+    /// full AHD and half-size processing. Both outputs retain their established pixel recipes.</summary>
+    internal static (WorkingFrame Full, WorkingFrame Preview, int SourceWidth, int SourceHeight) LoadWorkingWithPreview(
+        string path, int maxEdge, ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement, TiffInputAssumption tiffInputAssumption,
+        Action<WorkingFrame, int, int>? previewReady = null) => GatedFull(path, () =>
+    {
+        RequirePipelineVersion(pipelineVersion);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (!RawDecode.IsRawExtension(path)) throw new NotSupportedException("Shared unpack requires a RAW source.");
+        var settings = Settings.Current;
+        var backend = settings.DecodeBackend;
+        var fbdd = settings.FbddMode;
+        WorkingFrame? admitted = null;
+        var (full, preview, width, height) = RawDecode.DecodeRawWithPreview(path, backend, fbdd, maxEdge, out bool fellBack, (pixels, w, h) =>
+        {
+            admitted = RawDecode.AdmitRawWorking(pixels, path, backend.ToString(), fbdd, $"preview decode; max-edge={maxEdge}");
+            previewReady?.Invoke(admitted, w, h);
+        });
+        string fullBackend = fellBack ? $"{backend}->LibRaw fallback" : backend.ToString();
+        return (RawDecode.AdmitRawWorking(full, path, fullBackend, fbdd, "full-quality decode"),
+            admitted ?? RawDecode.AdmitRawWorking(preview, path, backend.ToString(), fbdd, $"preview decode; max-edge={maxEdge}"),
+            width, height);
+    });
+
     /// <summary>
     /// Centre-ROI channel mean of a full-quality decode — the Path A calibration frames' entire
     /// contribution. Streams off the decoder rather than decoding to a full float frame and then
@@ -639,8 +664,45 @@ public static class ImageIo
         return (preview, sourceWidth, sourceHeight);
     });
 
-    /// <summary>Several TIFF/FFF cells share decoding and colour conversion. The memory gate
+    /// <summary>Several cells share RAW decoding or TIFF colour conversion. The memory gate
     /// accounts for every output, including narrow crops that cannot be box-reduced.</summary>
+    internal static (WorkingFrame Preview, int SourceWidth, int SourceHeight)[] LoadWorkingPreviewBatch(
+        string path,
+        (double X, double Y, double W, double H)?[] rects,
+        int maxEdge,
+        ColorPipelineVersion pipelineVersion,
+        IColorManagementEngine colorManagement,
+        TiffInputAssumption tiffInputAssumption)
+    {
+        ArgumentNullException.ThrowIfNull(rects);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        RequirePipelineVersion(pipelineVersion);
+        if (maxEdge <= 0) throw new ArgumentOutOfRangeException(nameof(maxEdge));
+        if (rects.Length == 0) throw new ArgumentException("At least one crop is required.", nameof(rects));
+        if (!RawDecode.IsRawExtension(path))
+            return LoadWorkingTiffPreviewBatch(path, rects, maxEdge, pipelineVersion, colorManagement, tiffInputAssumption);
+
+        var settings = Settings.Current;
+        var backend = settings.DecodeBackend;
+        var fbdd = settings.FbddMode;
+        // Retain the independent jobs' conservative budget for all retained output buffers.
+        long slot = backend == RawDecode.RawBackend.Dng ? FullSlotBytes : PreviewSlotBytes;
+        return Gated(checked(slot * rects.Length), () => SourceStamp.ReadStable(path, () =>
+        {
+            var decoded = RawDecode.DecodeRawPreviewBatch(path, backend, fbdd, rects, maxEdge);
+            var results = new (WorkingFrame, int, int)[decoded.Length];
+            for (int i = 0; i < decoded.Length; i++)
+            {
+                var (pixels, width, height) = decoded[i];
+                string kind = rects[i] is { } rect
+                    ? $"region preview {rect}; max-edge={maxEdge}" : $"preview decode; max-edge={maxEdge}";
+                results[i] = (RawDecode.AdmitRawWorking(pixels, path, backend.ToString(), fbdd, kind), width, height);
+            }
+            return results;
+        }));
+    }
+
+    /// <summary>Stream several TIFF crops through the same decoder and colour transform.</summary>
     internal static (WorkingFrame Preview, int SourceWidth, int SourceHeight)[] LoadWorkingTiffPreviewBatch(
         string path,
         (double X, double Y, double W, double H)?[] rects,

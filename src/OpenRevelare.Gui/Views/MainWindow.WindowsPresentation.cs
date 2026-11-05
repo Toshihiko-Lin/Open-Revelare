@@ -96,6 +96,7 @@ public partial class MainWindow
 
             if (args.Property.Name == nameof(IPreviewHost.IsPresenterAvailable))
                 UpdateNoticeStripPlacement();
+            RollProgressHost.EnsureAboveNativePreview();
         };
         Opened += (_, _) => QueueWindowsPresentation();
     }
@@ -288,7 +289,11 @@ public partial class MainWindow
             ActivePreview!.PresentNewest(buffer);
             if (Volatile.Read(ref _restoreNativeAfterCropPresentation))
                 Dispatcher.UIThread.Post(RestoreNativeAfterCropPresentation, DispatcherPriority.Render);
-            Dispatcher.UIThread.Post(UpdateWindowsColorStatus, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() =>
+            {
+                UpdateWindowsColorStatus();
+                RollProgressHost.EnsureAboveNativePreview();
+            }, DispatcherPriority.Background);
         }
         catch (PresentationContractException)
         {

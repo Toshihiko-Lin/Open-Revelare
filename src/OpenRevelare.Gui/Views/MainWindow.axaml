@@ -758,30 +758,9 @@
                         </Grid>
                     </Border>
 
-                    <Border IsVisible="{Binding ShowRollAnalysisNotice}"
-                            HorizontalAlignment="Center" Margin="0,0,0,4"
-                            CornerRadius="8" Padding="12,8" MaxWidth="620"
-                            Background="{DynamicResource ChromeBrush}"
-                            BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
-                        <Grid ColumnDefinitions="Auto,10,*,10,Auto">
-                            <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="90" Height="3"
-                                         VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="2" VerticalAlignment="Center" TextWrapping="Wrap"
-                                       FontSize="12" Foreground="{DynamicResource TextBrush}"
-                                       Text="{i18n:T '正在分析整卷……当前画面用的是第一帧的参数，仅供预览。分析完成后全卷会自动刷新为最终结果。'}" />
-                            <Button Grid.Column="4" Classes="icon" Width="24" Height="24"
-                                    MinHeight="24" CornerRadius="12" VerticalAlignment="Center"
-                                    Click="OnDismissRollAnalysisNoticeClick"
-                                    Background="{DynamicResource ChromeBrush}"
-                                    BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
-                                    ToolTip.Tip="{i18n:T '关闭提示'}">
-                                <ctl:Icon Data="{StaticResource IcoClose}" />
-                            </Button>
-                        </Grid>
-                    </Border>
                 </StackPanel>
 
-                <Border Grid.Row="2" Padding="10" CornerRadius="10" ClipToBounds="True" Background="{DynamicResource ViewerBrush}">
+                <Border Name="PreviewViewport" Grid.Row="2" Padding="10" CornerRadius="10" ClipToBounds="True" Background="{DynamicResource ViewerBrush}">
                     <Border.ContextMenu>
                         <ContextMenu>
                             <!-- Copy/paste of the frame's parameters leads the menu: it is the
@@ -1401,7 +1380,11 @@
                                     <StackPanel Spacing="4">
                                         <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
                                         <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T '翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。'}" />
+                                                   Text="{i18n:T 'Lensfun 按首张拍摄参数校正整卷；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。'}" />
+                                        <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
+                                                  IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}" />
+                                        <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
                                         <Grid ColumnDefinitions="*,*" Margin="0,4,0,2">
                                             <Button Grid.Column="0" Content="{i18n:T '自动读取镜头校正'}" Click="OnAutoLensCorrectionCurrentClick"
                                                     HorizontalAlignment="Stretch" Margin="0,0,3,0" IsEnabled="{Binding HasImage}" />
@@ -1673,6 +1656,39 @@
             </Grid>
         </Grid>
         </ScrollViewer>
+
+        <!-- Embedded overlay: participates in the main window's clipping and stacking. -->
+        <Canvas Name="RollProgressOverlay" ZIndex="20" ClipToBounds="True">
+            <ctl:EmbeddedOverlayHost Name="RollProgressHost" IsVisible="False" Width="420">
+                <ctl:EmbeddedOverlayHost.Content>
+                    <Border Name="RollProgressCard" Width="420" Padding="16,14" CornerRadius="8"
+                            Background="{DynamicResource ElevatedBrush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="1">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                            <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,12,0">
+                                <TextBlock Text="{Binding RollProgressTitle}" FontSize="13"
+                                           FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+                                <TextBlock Text="{Binding RollProgressDetail}" TextWrapping="Wrap"
+                                           FontSize="12" Foreground="{DynamicResource TextBrush}" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="icon" Width="24" Height="24" MinHeight="24"
+                                    VerticalAlignment="Top" Padding="4" Click="OnDismissRollAnalysisNoticeClick"
+                                    ToolTip.Tip="{i18n:T '关闭提示'}" AutomationProperties.Name="{i18n:T '关闭提示'}">
+                                <ctl:Icon Data="{StaticResource IcoClose}" />
+                            </Button>
+                            <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding RollProgressDecodeDetail}"
+                                       IsVisible="{Binding RollProgressDecodeDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Margin="0,6,0,0" TextWrapping="Wrap" FontSize="12"
+                                       Foreground="{DynamicResource TextBrush}" />
+                            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding RollProgressHint}"
+                                       Margin="0,8,0,12" TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{DynamicResource TextDimBrush}" />
+                            <ProgressBar Grid.Row="3" Grid.ColumnSpan="2" IsIndeterminate="True" Height="3" />
+                        </Grid>
+                    </Border>
+                </ctl:EmbeddedOverlayHost.Content>
+            </ctl:EmbeddedOverlayHost>
+        </Canvas>
 
         </Panel>
     </DockPanel>

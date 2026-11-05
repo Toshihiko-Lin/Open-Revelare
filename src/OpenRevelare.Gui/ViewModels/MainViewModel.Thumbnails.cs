@@ -30,30 +30,41 @@ public partial class MainViewModel
     /// </summary>
     private async Task DecodeThumbnailsAsync(CancellationToken ct)
     {
-        foreach (RollFrame f in Frames.ToList())
+        RollFrame[] pending = Frames.Where(f => f.Thumbnail is null).ToArray();
+        int done = 0;
+        if (pending.Length > 0) ReportPreviewProgress(ct, Loc.F($"缩略图解码 {done}/{pending.Length} …"));
+        try
         {
-            if (ct.IsCancellationRequested) return;
-            if (f.Thumbnail is not null) continue;
-            try
+            foreach (RollFrame f in pending)
             {
-                // Join the SHARED decode rather than starting a private one. This loop runs
-                // during import, at the same time as the roll warm-up, on the same files, and a
-                // private decode would not go through PreviewAsync's in-flight table — the roll
-                // used to be decoded twice over, with both halves competing for the same decode
-                // slots. Awaiting PreviewAsync joins whatever is already running (returning
-                // immediately on a cache hit) and caches the result for everyone else.
-                // Every one of these three resolves THIS frame's region, never the bare file: on a
-                // split scan the file holds several negatives, and the path-keyed lookups used to
-                // hand each frame the strip's first slice.
-                var pre = SplitCropOf(f);
-                WorkingFrame source = TileFor(f)
-                                      ?? _previews.Get(PreviewKey(f.Path, pre))?.Working
-                                      ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Working;
-                await RenderThumbnailAsync(f, source, pre, ct);
+                if (ct.IsCancellationRequested) return;
+                if (f.Thumbnail is not null) continue;
+                try
+                {
+                    // Join the SHARED decode rather than starting a private one. This loop runs
+                    // during import, at the same time as the roll warm-up, on the same files, and a
+                    // private decode would not go through PreviewAsync's in-flight table — the roll
+                    // used to be decoded twice over, with both halves competing for the same decode
+                    // slots. Awaiting PreviewAsync joins whatever is already running (returning
+                    // immediately on a cache hit) and caches the result for everyone else.
+                    // Every one of these three resolves THIS frame's region, never the bare file: on a
+                    // split scan the file holds several negatives, and the path-keyed lookups used to
+                    // hand each frame the strip's first slice.
+                    var pre = SplitCropOf(f);
+                    WorkingFrame source = TileFor(f)
+                                          ?? _previews.Get(PreviewKey(f.Path, pre))?.Working
+                                          ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Working;
+                    await RenderThumbnailAsync(f, source, pre, ct);
+                }
+                catch (OperationCanceledException) { return; }
+                catch { /* skip undecodable frame */ }
+                finally
+                {
+                    ReportPreviewProgress(ct, Loc.F($"缩略图解码 {++done}/{pending.Length} …"));
+                }
             }
-            catch (OperationCanceledException) { return; }
-            catch { /* skip undecodable frame */ }
         }
+        finally { ReportPreviewProgress(ct, ""); }
     }
 
     /// <summary>Render one frame's thumbnail off an already-decoded preview. Never decodes: every
@@ -108,6 +119,7 @@ public partial class MainViewModel
     private void RestartThumbnails()
     {
         _thumbCts?.Cancel();
+        ThumbnailProgress = "";
         _thumbCts = new CancellationTokenSource();
         _ = DecodeThumbnailsAsync(_thumbCts.Token);
     }
@@ -136,14 +148,20 @@ public partial class MainViewModel
         // their parent's path and no rect, so they still collapse to one decode; a split scan's
         // negatives each carry their own rect and are decoded separately, which is the point —
         // deduping those by path gave every frame of the strip the first one's pixels.
-        var order = new List<(string Path, (double X, double Y, double W, double H)? Pre)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<(string Path, (double X, double Y, double W, double H)? Pre, string Key)>();
+        var targetsByKey = new Dictionary<string, List<RollFrame>>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < frames.Count; i++)
         {
             int offset = (i & 1) == 0 ? -(i / 2) : (i + 1) / 2;
             RollFrame f = frames[(start + offset + frames.Count) % frames.Count];
             var pre = SplitCropOf(f);
-            if (seen.Add(PreviewKey(f.Path, pre))) order.Add((f.Path, pre));
+            string key = PreviewKey(f.Path, pre);
+            if (!targetsByKey.TryGetValue(key, out var targets))
+            {
+                targetsByKey[key] = targets = new List<RollFrame>();
+                order.Add((f.Path, pre, key));
+            }
+            targets.Add(f);
         }
 
         // Most of the cores, not a fixed few: LibRaw unpacks one file on one thread, so the
@@ -160,15 +178,16 @@ public partial class MainViewModel
         {
             int done = 0, total = order.Count;
             ReportBackground(Loc.F($"后台解码 0/{total} …"));
+            ReportPreviewProgress(ct, Loc.F($"缩略图解码 0/{total} …"), warmup: true);
             var pipelineVersion = _colorPipelineVersion;
             var inputAssumption = _tiffInputAssumption;
-            var batches = DecodeBatchPlan.Create(order, item => item.Path, RawDecode.IsRawExtension);
+            var batches = DecodeBatchPlan.Create(order, item => item.Path);
             await Parallel.ForEachAsync(batches, opts, async (batch, token) =>
             {
                 PreviewCache.Entry[]? batchEntries = null;
                 if (batch.Length > 1)
                 {
-                    try { batchEntries = await PreviewTiffBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
+                    try { batchEntries = await PreviewBatchAsync(batch[0].Path, batch.Select(item => item.Pre).ToArray(),
                         pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
                     catch { /* Retry cells independently: a bad crop must not hide its siblings. */ }
@@ -176,7 +195,7 @@ public partial class MainViewModel
                 for (int j = 0; j < batch.Length; j++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var (path, pre) = batch[j];
+                    var (path, pre, key) = batch[j];
                     PreviewCache.Entry entry;
                     try { entry = batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token); }
                     catch (OperationCanceledException) { throw; }
@@ -186,10 +205,11 @@ public partial class MainViewModel
                     // end of the roll — the strip fills in progressively instead of all at once.
                     // Matched on the preview key, so a split frame only takes the decode of its OWN
                     // slice and not a sibling's.
-                    string key = PreviewKey(path, pre);
+                    // Reuse the snapshot's region/revision identity. Rebuilding every frame's
+                    // key here did N² synchronous FileInfo.Refresh calls on the UI thread.
                     List<RollFrame> targets = await Dispatcher.UIThread.InvokeAsync(() =>
-                        Frames.Where(f => f.Thumbnail is null &&
-                                          PreviewKey(f.Path, SplitCropOf(f)) == key)
+                        targetsByKey[key].Where(f => !token.IsCancellationRequested &&
+                                          Frames.Contains(f) && f.Thumbnail is null && SplitCropOf(f) == pre)
                               .ToList());
                     foreach (RollFrame f in targets)
                     {
@@ -201,6 +221,7 @@ public partial class MainViewModel
 
                     int n = Interlocked.Increment(ref done);
                     ReportBackground(n >= total ? "" : Loc.F($"后台解码 {n}/{total} …"));
+                    ReportPreviewProgress(ct, n >= total ? "" : Loc.F($"缩略图解码 {n}/{total} …"), warmup: true);
                     // Each landed decode leaves one more tile behind, so the cover can fill in.
                     await Dispatcher.UIThread.InvokeAsync(MarkSheetDirty);
                 }
@@ -212,7 +233,11 @@ public partial class MainViewModel
             await Dispatcher.UIThread.InvokeAsync(() => { _rollWarm = true; MarkSheetDirty(); });
         }
         catch (OperationCanceledException) { /* roll changed under us */ }
-        finally { if (!ct.IsCancellationRequested) ReportBackground(""); }
+        finally
+        {
+            ReportPreviewProgress(ct, "", warmup: true);
+            if (!ct.IsCancellationRequested) ReportBackground("");
+        }
     }
 
     /// <summary>Set <see cref="BackgroundStatus"/> from any thread. Separate from
@@ -231,6 +256,7 @@ public partial class MainViewModel
     {
         _rollWarm = false;
         _warmCts?.Cancel();
+        WarmupProgress = "";
         _warmCts = new CancellationTokenSource();
         _ = WarmRollAsync(_warmCts.Token);
     }

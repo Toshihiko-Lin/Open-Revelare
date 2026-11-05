@@ -20,6 +20,31 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private bool _rollProgressPlacementQueued;
+    private void UpdateRollProgressPlacement()
+    {
+        if (_rollProgressPlacementQueued) return;
+        _rollProgressPlacementQueued = true;
+        // Wait until a mode/size change has laid out the active content pane.
+        Dispatcher.UIThread.Post(() =>
+        {
+            _rollProgressPlacementQueued = false;
+            Control target = Vm?.IsLibraryMode == true ? Library : PreviewViewport;
+            var origin = target.TranslatePoint(default, RollProgressOverlay) ?? default;
+            double visibleWidth = Math.Max(0, Math.Min(target.Bounds.Width, RollProgressOverlay.Bounds.Width - origin.X));
+            double cardWidth = RollProgressCardWidth(visibleWidth);
+            RollProgressCard.Width = cardWidth;
+            RollProgressHost.Width = cardWidth;
+            Canvas.SetLeft(RollProgressHost, origin.X + (visibleWidth - cardWidth) / 2);
+            Canvas.SetTop(RollProgressHost, origin.Y + 18);
+            RollProgressHost.IsVisible = IsVisible && target.IsVisible && visibleWidth > 36
+                && Vm?.ShowRollProgressBanner == true;
+        }, DispatcherPriority.Background);
+    }
+
+    internal static double RollProgressCardWidth(double paneWidth)
+        => Math.Min(420, Math.Max(1, paneWidth - 36));
+
     private void OnCancelLongTaskClick(object? sender, RoutedEventArgs e) => Vm?.CancelLongTask();
 
     private void OnPrintLutOutputClick(object? sender, RoutedEventArgs e)
@@ -33,10 +58,15 @@ public partial class MainWindow : Window
         InitializeComponent();
         SyncQuickPreferenceControls();
         SetUpDropImport();
-        SizeChanged += (_, _) => UpdateWorkspaceLayout();
+        SizeChanged += (_, _) => { UpdateWorkspaceLayout(); UpdateRollProgressPlacement(); };
         PreviewWorkspace.SizeChanged += (_, _) =>
             PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
         UpdateWorkspaceLayout();
+        PreviewViewport.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        RollProgressOverlay.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        WorkspaceScroll.ScrollChanged += (_, _) => UpdateRollProgressPlacement();
+        Library.SizeChanged += (_, _) => UpdateRollProgressPlacement();
+        Opened += (_, _) => UpdateRollProgressPlacement();
         Library.OpenRequested += OnLibraryOpenRequested;
         Library.NewRollRequested += ImportNewRollAsync;
         Curves.CurvesChanged += (_, _) => PushCurves();
@@ -121,6 +151,8 @@ public partial class MainWindow : Window
                              nameof(MainViewModel.ShowClipping) or
                              nameof(MainViewModel.ShowSprocketMask))
                         UpdatePatchLayout();
+                    if (args.PropertyName is nameof(MainViewModel.IsLibraryMode) or nameof(MainViewModel.ShowRollProgressBanner))
+                        UpdateRollProgressPlacement();
                     OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>

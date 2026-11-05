@@ -1,6 +1,8 @@
 // Stable, application-owned C ABI. LibRaw structures never cross into managed code.
+#define LIBRAW_LIBRARY_BUILD
 #include <libraw/libraw.h>
 #include <cstring>
+#include "parallel_raw.h"
 #ifdef _WIN32
 #define API extern "C" __declspec(dllexport)
 #else
@@ -27,11 +29,13 @@ API const char* or_raw_build_info() {
 #else
         "ipo=0;"
 #endif
-        "math=precise;cpu=portable";
+        "math=precise;cpu=portable;fuji-threads=bounded;ahd-threads=bounded";
 }
-API LibRaw* or_raw_create() { try { return new LibRaw; } catch (...) { return nullptr; } }
+API LibRaw* or_raw_create() { try { return new open_revelare::ParallelRaw; } catch (...) { return nullptr; } }
 API void or_raw_close(LibRaw* r) { delete r; }
-API int or_raw_open(LibRaw* r, void* data, size_t size) { return r->open_buffer(data, size); }
+API int or_raw_open(LibRaw* r, void* data, size_t size) {
+    return static_cast<open_revelare::ParallelRaw*>(r)->open_locked_buffer(data, size);
+}
 API int or_raw_open_file(LibRaw* r, const char* path) { return r->open_file(path); }
 #ifdef _WIN32
 API int or_raw_open_file_wide(LibRaw* r, const wchar_t* path) { return r->open_file(path); }
@@ -104,6 +108,8 @@ API int or_raw_process(LibRaw* r, int fbdd, int half, const unsigned* crop) {
     p.fbdd_noiserd = fbdd;
     p.half_size = half;
     if (crop) for (int i = 0; i < 4; ++i) p.cropbox[i] = crop[i];
+    static_cast<open_revelare::ParallelRaw*>(r)->configure_parallel_ahd(half != 0);
+    open_revelare::ProcessingScope processing;
     return r->dcraw_process();
 }
 API libraw_processed_image_t* or_raw_image(LibRaw* r, int* error) {
