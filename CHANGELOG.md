@@ -2,33 +2,19 @@
 
 ## 未发布（2026-11-06）
 
-**新增与改进**
+- 新增 **135 全幅正负片自动裁切与拉直**，可选择仅保留画面或保留齿孔，支持单张和批量处理。入口默认折叠，手动裁切仍是主要方式。
+- 改善裁切偏移和误识别，整卷结果更一致，重复识别更快；不确定时保留原框，可撤销或恢复。
+- 镜头校正逐张匹配，优先使用照片内嵌参数，否则尝试 Lensfun；改善部分 Sony／DNG 照片的校正，并保留独立手动微调。
 
-- 新增 **135 全幅正负片裁切辅助**，支持仅画面 3:2、含齿孔 37:35（自动适配横竖）、小角度拉直及本帧／勾选帧／整卷处理。通用手动裁切保持主要入口，135 专用辅助默认折叠。基础实现来自 [i3nit 的 #10](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10)。
-- 整卷结合孔列、尺寸、方向和边线交叉验证，改善截断／遮挡齿孔、弱边界和片基干扰下的定位；单帧也能借用同卷参考，不改变参考帧的裁切。
-- 自动镜头校正改为逐帧选择：有效内嵌参数优先，其次 Lensfun，均不可用时不应用。基础曲线与手动微调独立保存，保留 LCC 的暗角优先级；重开工程沿用已保存设置。
-- 缓存独立裁切测量及镜头元数据，减少重复识别和读取；切换自动输出、调整曝光或暗角可复用裁切测量，源文件或几何设置变化时重新测量。
-
-**修复**
-
-- 修正含齿孔裁切的左右偏移、画面内部矩形被误认成局部竖框，以及可靠画格因倾角偏离整卷统计而被排除的问题。
-- 未可靠识别或未拍全片边时保留原裁切，并显示简短原因；支持撤销、重做及保存后恢复识别前的裁切与拉直。取消或检测期间参数、胶卷、源文件变化时不应用过期结果。
-- 完整保留 Sony 径向样点及受支持 DNG 的径向、切向、分平面与偏移中心参数，修正曲线被压缩为单参数、区域渲染边界不足及自动校正与手动微调混用的问题。
+感谢 [i3nit（#10）](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10)提供 135 裁切基础实现。
 
 ---
 
-**Added and improved**
+- Added **automatic cropping and straightening for 135 full-frame positives and negatives**, with image-only or perforation-inclusive output for individual photos or batches. The section is collapsed by default; manual cropping remains primary.
+- Improved crop positioning and detection, with more consistent roll results and faster repeated detection. Uncertain results keep the previous crop; undo and recovery remain available.
+- Matches lens correction per photo, preferring embedded calibration and falling back to Lensfun. Improves correction for some Sony/DNG photos while keeping manual adjustments independent.
 
-- Added **135 full-frame positive/negative crop assistance** with image-only 3:2 and perforated-film 37:35 outputs in either orientation, small-angle straightening, and current/selected/whole-roll actions. Manual cropping remains primary; the dedicated 135 section is collapsed by default. Based on [i3nit's #10](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10).
-- Cross-checks perforation rows, dimensions, orientation and boundaries across the roll to improve positioning with clipped/occluded holes, weak edges and irregular film base. A single frame can borrow roll references without changing their crops.
-- Selects lens correction per frame: valid embedded calibration first, then Lensfun, otherwise none. Base curves and manual adjustments are stored independently, LCC retains priority for vignetting, and reopening a project preserves saved settings.
-- Caches independent crop measurements and lens metadata to reduce repeated work. Output-mode, exposure and vignette changes reuse crop measurements; source or geometry changes invalidate them.
-
-**Fixed**
-
-- Fixed sideways offsets in perforated-film crops, internal scene rectangles mistaken for portrait gates, and valid frames rejected solely for differing roll tilt.
-- Keeps previous crops when boundaries are uncertain or film edges are missing, with concise feedback. Supports undo/redo and saved recovery of previous crop/straightening; cancelled or stale tasks do not apply results.
-- Preserves complete Sony radial samples and supported DNG radial, tangential, per-plane and off-centre calibration. Fixed single-parameter curve approximations, insufficient region-render bounds and mixing automatic calibration with manual adjustments.
+Thanks to [i3nit (#10)](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10) for the initial 135 crop implementation.
 
 ## v1.9.0（2026-11-04）
 
