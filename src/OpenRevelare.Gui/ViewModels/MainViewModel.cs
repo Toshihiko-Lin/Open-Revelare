@@ -1707,9 +1707,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 4:3 selection came back as 0.59:1 after one turn instead of 3:4. The rect therefore gets
     // the same transform the pixels do.
     //
-    // Only the incremental operation is applied, not the whole orientation — for the FLIPS that
-    // is unconditionally sound (they are applied last, so toggling one mirrors the displayed
-    // frame and nothing else). For a QUARTER TURN it holds only when the mirrors compose to a
+    // Only the incremental operation is applied, not the whole orientation. Mirrors also
+    // conjugate the later straighten angle (see FlipDisplayedFrame). For a QUARTER TURN the
+    // incremental orientation holds only when the mirrors compose to a
     // rotation, i.e. zero or two of them: a single mirror CONJUGATES the turn into its inverse,
     // because Geometry.ApplyOrientation runs the turns FIRST and the flips after.
     //
@@ -1768,22 +1768,37 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ScheduleRender();
     }
 
-    public void FlipHorizontal()
-    {
-        _sprocketOverlayDirty = true;
-        _flipH = !_flipH;
-        if (_cropRect is { } c) _cropRect = FlipCropH(c);
-        StatusText = OrientationStatus(Loc.T("水平翻转"));
-        ScheduleRender();
-    }
+    public void FlipHorizontal() => FlipHorizontal(null);
+    public void FlipVertical() => FlipVertical(null);
 
-    public void FlipVertical()
+    public (double X, double Y, double W, double H)? FlipHorizontal(
+        (double X, double Y, double W, double H)? draft) => FlipDisplayedFrame(horizontal: true, draft);
+
+    public (double X, double Y, double W, double H)? FlipVertical(
+        (double X, double Y, double W, double H)? draft) => FlipDisplayedFrame(horizontal: false, draft);
+
+    private (double X, double Y, double W, double H)? FlipDisplayedFrame(bool horizontal,
+        (double X, double Y, double W, double H)? draft)
     {
+        // The draft has not been applied: carry it through whole-frame coordinates without
+        // committing it, so Cancel still discards it and split previews retain their own box.
+        var storedDraft = draft is { } d ? FromDisplay(d) : ((double X, double Y, double W, double H)?)null;
+        (double X, double Y, double W, double H) Mirror((double X, double Y, double W, double H) r)
+            => horizontal ? FlipCropH(r) : FlipCropV(r);
         _sprocketOverlayDirty = true;
-        _flipV = !_flipV;
-        if (_cropRect is { } c) _cropRect = FlipCropV(c);
-        StatusText = OrientationStatus(Loc.T("竖直翻转"));
+        if (horizontal) _flipH = !_flipH; else _flipV = !_flipV;
+        if (_cropRect is { } c) _cropRect = Mirror(c);
+        // Core stores mirrors BEFORE straightening. F R(angle) = R(-angle) F, so the
+        // angle must change sign to mirror the already-rotated, cropped picture on screen.
+        // Keep the angle binding notified, but render only after all geometry is ready.
+        bool wasSuppressed = _suppressRender;
+        _suppressRender = true;
+        try { Rotation = -Rotation; }
+        finally { _suppressRender = wasSuppressed; }
+        var mirroredDraft = storedDraft is { } r ? ToDisplay(Mirror(r)) : null;
+        StatusText = OrientationStatus(Loc.T(horizontal ? "水平翻转" : "竖直翻转"));
         ScheduleRender();
+        return mirroredDraft;
     }
     /// <summary>
     /// Pixel dimensions the crop rect is normalised against: the frame AFTER orientation (and
@@ -3651,6 +3666,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void CancelRollAnalysis()
     {
+        CancelAutoCrop();
         _autoInvertCts?.Cancel();
         _autoInvertCts = null;
         _rollProgressOwner = null;
@@ -4782,6 +4798,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (_disposed) return;
         _disposed = true;
         DisposeScopeSubscriptions();
+        CancelAutoCrop();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
         RenderTrace.SaveSummary();

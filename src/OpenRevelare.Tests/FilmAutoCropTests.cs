@@ -1,0 +1,251 @@
+using OpenRevelare.Core;
+using Xunit;
+
+namespace OpenRevelare.Tests;
+
+public sealed class FilmAutoCropTests
+{
+    // A landscape camera file can contain a portrait negative. The ratio belongs to the
+    // exposed frame, not to the sensor, and must survive every discrete orientation.
+    [Theory]
+    [InlineData(0, false, false)]
+    [InlineData(1, true, false)]
+    [InlineData(2, false, true)]
+    [InlineData(3, true, true)]
+    public void Detects_frame_instead_of_holder_and_preserves_orientation(int turns, bool flipH, bool flipV)
+    {
+        var pixels = Geometry.ApplyOrientation(Negative(), turns, flipH, flipV);
+        var d = FilmAutoCrop.Detect(pixels);
+        Assert.NotNull(d);
+        Assert.InRange(d.Image.W * pixels.Width, turns % 2 == 0 ? 355 : 235, turns % 2 == 0 ? 365 : 245);
+        foreach (var mode in Enum.GetValues<FilmCropMode>())
+        {
+            var r = FilmAutoCrop.Plan(new[] { d }, mode)[0];
+            Assert.NotNull(r);
+            double ratio = r.Value.W * pixels.Width / (r.Value.H * pixels.Height);
+            double expected = mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35;
+            Assert.Equal(turns % 2 == 0 ? expected : 1 / expected, ratio, 10);
+        }
+    }
+
+    [Fact]
+    public void Blank_or_nonfinite_pixels_do_not_invent_a_crop()
+    {
+        var blank = new ImageBuffer(120, 100);
+        Array.Fill(blank.Data, .4f);
+        Assert.Null(FilmAutoCrop.Detect(blank));
+        blank.Data[180] = float.NaN;
+        Assert.Null(FilmAutoCrop.Detect(blank));
+    }
+
+    [Fact]
+    public void Roll_uses_one_size_and_independent_centres_and_rejects_scale_outlier()
+    {
+        var frames = new[] { D(.2, .3, .5), D(.22, .31, .505), D(.18, .28, .495), D(.1, .1, .8), null };
+        foreach (var mode in Enum.GetValues<FilmCropMode>())
+        {
+            var crops = FilmAutoCrop.Plan(frames, mode);
+            Assert.Null(crops[3]); Assert.Null(crops[4]);
+            for (int i = 0; i < 3; i++)
+            {
+                var crop = crops[i]!.Value;
+                Assert.Equal(crops[0]!.Value.W, crop.W);
+                Assert.Equal(crops[0]!.Value.H, crop.H);
+                // An exactly half-pixel centre can round a few double ULPs above the bound.
+                Assert.InRange(Math.Abs(frames[i]!.Image.X + frames[i]!.Image.W / 2 - crop.X - crop.W / 2), 0, .5 / frames[i]!.Width + 1e-12);
+                int width = (int)(Math.Round((crop.X + crop.W) * 6000) - Math.Round(crop.X * 6000));
+                int height = (int)(Math.Round((crop.Y + crop.H) * 4000) - Math.Round(crop.Y * 4000));
+                Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35, (double)width / height, 10);
+            }
+        }
+    }
+
+    [Fact]
+    public void Sprocket_crop_refuses_missing_film_edges_instead_of_shrinking_or_moving()
+    {
+        var cropped = D(.2, .02, .6);
+        Assert.NotNull(FilmAutoCrop.Plan(new[] { cropped }, FilmCropMode.ImageArea)[0]);
+        Assert.Null(FilmAutoCrop.Plan(new[] { cropped }, FilmCropMode.WithSprockets)[0]);
+    }
+
+    [Fact]
+    public void Repeated_runs_and_mixed_source_sizes_do_not_change_the_ratio()
+    {
+        var a = D(.2, .25, .5);
+        var b = a with { Width = 3000, Height = 2000 };
+        var plan = FilmAutoCrop.Plan(new[] { a, b }, FilmCropMode.WithSprockets);
+        Assert.Equal(plan, FilmAutoCrop.Plan(new[] { a, b }, FilmCropMode.WithSprockets));
+        Assert.Equal(37.0 / 35, plan[1]!.Value.W * 3000 / (plan[1]!.Value.H * 2000), 10);
+    }
+
+    // Slides have a dark base; negatives have a bright base. Both must use the same
+    // perforation ruler even when rotation changes the bright components at the scan edge.
+    [Theory]
+    [InlineData(false, 0.0)]
+    [InlineData(false, -2.0)]
+    [InlineData(true, 0.0)]
+    [InlineData(true, 2.0)]
+    public void Perforations_locate_both_polarities_and_correct_small_rotation(bool positive, double angle)
+    {
+        var source = Perforated(positive);
+        var d = FilmAutoCrop.Detect(Geometry.ApplyRotation(source, angle));
+        Assert.NotNull(d);
+        Assert.Equal(positive ? FilmPolarity.Positive : FilmPolarity.Negative, d.Polarity);
+        Assert.InRange(d.RotationCorrection, -angle - .25, -angle + .25);
+        Assert.InRange(d.Image.X * 640, 145, 155);
+        Assert.InRange(d.Image.Y * 480, 115, 125);
+        Assert.InRange(d.Image.W * 640, 350, 370);
+    }
+
+    internal static ImageBuffer Perforated(bool positive)
+    {
+        var image = new ImageBuffer(640, 480);
+        Array.Fill(image.Data, .9f);
+        for (int y = 65; y < 415; y++) for (int x = 0; x < 640; x++)
+        {
+            bool picture = x >= 150 && x < 510 && y >= 120 && y < 360;
+            float value = picture ? .3f + .04f * (float)Math.Sin(x * .04) : positive ? .025f : .65f;
+            int i = (y * 640 + x) * 3;
+            image.Data[i] = value; image.Data[i + 1] = value * .6f; image.Data[i + 2] = value * .25f;
+        }
+        // 28.17 mm row separation at 10 px/mm; the old 29.5 mm fixture masked the bug.
+        for (int hole = 0; hole < 13; hole++) foreach (double centre in new[] { 99.15, 380.85 })
+        {
+            int cx = (int)Math.Round(32 + hole * 47.5), cy = (int)Math.Round(centre);
+            for (int y = cy - 14; y < cy + 14; y++) for (int x = cx - 10; x < cx + 10 && x < 640; x++)
+                for (int c = 0; c < 3; c++) image.Data[(y * 640 + x) * 3 + c] = .9f;
+        }
+        return image;
+    }
+
+    // A reversal frame whose exposure edges drown in halation still shows its perforations. The
+    // detector must not invent a confirmed crop, but the fallback has to give the user a box to
+    // start from: the strip fixes the across position and the scale, the scan centre the along.
+    [Fact]
+    public void Suggest_places_a_box_from_the_perforations_when_no_gate_can_be_measured()
+    {
+        var flat = Unreadable();
+        Assert.Null(FilmAutoCrop.Detect(flat));
+        foreach (var mode in Enum.GetValues<FilmCropMode>())
+        {
+            var box = FilmAutoCrop.Suggest(flat, mode);
+            Assert.NotNull(box);
+            var r = box!.Value.Rect;
+            // The fixture is level, so the fallback must not claim a rotation it did not measure.
+            Assert.Equal(0, box.Value.RotationCorrection, 6);
+            // 36x24 at the fixture's 10 px/mm, centred on the perforation pair at y = 240.
+            Assert.InRange(r.Y * 480 + r.H * 480 / 2, 236, 244);
+            Assert.InRange(r.W * 640, 340, 380);
+            Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37.0 / 35, r.W * 640 / (r.H * 480), 6);
+            Assert.InRange(r.X, 0, 1 - r.W); Assert.InRange(r.Y, 0, 1 - r.H);
+        }
+    }
+
+    // The box has to come back levelled: a guess placed axis-aligned on a tilted strip sits across
+    // the film edge, and the user then has to straighten AND reframe by hand.
+    [Theory]
+    [InlineData(2.0)]
+    [InlineData(-2.0)]
+    public void Suggest_levels_a_tilted_strip_and_places_the_box_in_that_frame(double angle)
+    {
+        var tilted = Geometry.ApplyRotation(Unreadable(), angle);
+        Assert.Null(FilmAutoCrop.Detect(tilted));
+        var box = FilmAutoCrop.Suggest(tilted, FilmCropMode.ImageArea);
+        Assert.NotNull(box);
+        Assert.InRange(box!.Value.RotationCorrection, -angle - .3, -angle + .3);
+        var r = box.Value.Rect;
+        Assert.Equal(1.5, r.W * tilted.Width / (r.H * tilted.Height), 6);
+        // The box is expressed in the levelled frame, so it must fit that frame's bounds.
+        Assert.InRange(r.X, 0, 1 - r.W); Assert.InRange(r.Y, 0, 1 - r.H);
+    }
+
+    // No perforations means no physical reference: a guess would be a coin flip, so none is made
+    // and the frame keeps whatever crop it had.
+    [Fact]
+    public void Suggest_declines_when_the_perforations_are_not_visible()
+    {
+        var blank = new ImageBuffer(320, 240);
+        Array.Fill(blank.Data, .5f);
+        Assert.Null(FilmAutoCrop.Suggest(blank, FilmCropMode.ImageArea));
+    }
+
+    // Film base with perforations but no readable exposure — the fallback's input. Shared with
+    // the workflow test so the GUI path is exercised on the same pixels.
+    internal static ImageBuffer Unreadable()
+    {
+        var flat = Perforated(positive: true);
+        // The base tone Perforated writes for an unexposed reversal frame, and its channel copies.
+        for (int y = 120; y < 360; y++) for (int x = 150; x < 510; x++)
+        {
+            int p = (y * 640 + x) * 3;
+            flat.Data[p] = .025f; flat.Data[p + 1] = .025f * .6f; flat.Data[p + 2] = .025f * .25f;
+        }
+        return flat;
+    }
+
+    // The border crop is the strip, so it must follow the perforation pair. Centring it on the
+    // exposed gate hands the whole misalignment to one side: on a reversal film that side shows
+    // a bright sliver of light table above the frame, while a negative's bright base hides it.
+    [Fact]
+    public void With_border_crop_follows_the_perforation_pair_instead_of_the_gate()
+    {
+        var d = new FilmAutoCrop.Detection(new(.1, .3, .8, .4), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            AcrossCentre = .46,   // ruler centre 0.4 mm above the gate centre at .5
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        Assert.InRange(Math.Abs(border.Y + border.H / 2 - .46), 0, .5 / 4000 + 1e-12);
+        // Content framing keeps following the picture, not the strip.
+        var content = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.ImageArea)[0]!.Value;
+        Assert.InRange(Math.Abs(content.Y + content.H / 2 - .5), 0, .5 / 4000 + 1e-12);
+    }
+
+    // A portrait frame is the same physics with the strip running across X.
+    [Fact]
+    public void With_border_crop_anchors_on_x_when_the_strip_runs_vertically()
+    {
+        var d = new FilmAutoCrop.Detection(new(.2, .1, .4, .8), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            AcrossCentre = .45,
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        Assert.InRange(Math.Abs(border.X + border.W / 2 - .45), 0, .5 / 6000 + 1e-12);
+        // A quarter turn puts the 37 mm side across the strip: width:height is 35:37 here.
+        Assert.Equal(35.0 / 37, border.W * 6000 / (border.H * 4000), 10);
+    }
+
+    // A gate measured too large must not scale the 35 mm border past the film: the crop would
+    // then include the light table on both edges. Content framing is unaffected by that cap.
+    [Fact]
+    public void With_border_crop_never_exceeds_the_measured_film_width()
+    {
+        var d = new FilmAutoCrop.Detection(new(.1, .2, .8, .6), 1, 6000, 4000)
+        {
+            Polarity = FilmPolarity.Positive,
+            FilmWidth = .35,   // 35 mm = 1400 px on a 4000 px-high source
+        };
+        var border = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.WithSprockets)[0]!.Value;
+        int height = (int)(Math.Round((border.Y + border.H) * 4000) - Math.Round(border.Y * 4000));
+        Assert.InRange(height, 1, 1400);
+        Assert.Equal(37.0 / 35, border.W * 6000 / (border.H * 4000), 10);
+        var content = FilmAutoCrop.Plan(new[] { d }, FilmCropMode.ImageArea)[0]!.Value;
+        Assert.True(content.H * 4000 > 1400, "the film cap must not shrink content framing");
+    }
+
+    private static FilmAutoCrop.Detection D(double x, double y, double width)
+        => new(new(x, y, width, width), 1, 6000, 4000);
+
+    private static ImageBuffer Negative()
+    {
+        var image = new ImageBuffer(640, 480);
+        for (int y = 40; y < 440; y++) for (int x = 25; x < 615; x++)
+        {
+            float v = x >= 150 && x < 510 && y >= 120 && y < 360 ? .23f + .05f * (float)Math.Sin(x * .04) : .65f;
+            int p = (y * 640 + x) * 3;
+            image.Data[p] = v; image.Data[p + 1] = v * .6f; image.Data[p + 2] = v * .25f;
+        }
+        return image;
+    }
+}

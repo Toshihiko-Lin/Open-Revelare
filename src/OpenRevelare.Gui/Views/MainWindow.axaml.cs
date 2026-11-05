@@ -1844,6 +1844,23 @@ public partial class MainWindow : Window
     // the in-progress draft and the locked ratio, so an edit in flight survives a 90° turn
     // instead of snapping back to the pre-turn shape.
     private void OnApplyGeometryClick(object? sender, RoutedEventArgs e) => Vm?.ApplyGeometryToFrames();
+    private async void OnAutoCropCurrentClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(false);
+    private async void OnAutoCropRollClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(true);
+    private void OnCancelAutoCropClick(object? sender, RoutedEventArgs e) => Vm?.CancelAutoCrop();
+    private async Task AutoCrop135Async(bool wholeRoll)
+    {
+        if (Vm is null) return;
+        var mode = OpenRevelare.Gui.Models.CropAspectPresets.AutoMode(CropPresetCombo.SelectedIndex);
+        if (mode is null)
+        {
+            Vm.StatusText = Loc.T("135 自动裁切请选择内容 (3:2) 或含边框 (37:35)；其他比例可使用拖框裁切。");
+            return;
+        }
+        ExitMode();
+        await Vm.AutoCrop135Async(mode.Value, wholeRoll);
+        SyncCropPreset(Vm);
+    }
+
     private void OnApplyCropClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCropToFrames();
 
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)
@@ -1864,15 +1881,13 @@ public partial class MainWindow : Window
 
     private void OnFlipHClick(object? sender, RoutedEventArgs e)
     {
-        Vm?.FlipHorizontal();
-        ResyncCropDraft();
+        if (Vm is { } vm) _cropDraft = vm.FlipHorizontal(_cropDraft);
         RenderCropFrame();
     }
 
     private void OnFlipVClick(object? sender, RoutedEventArgs e)
     {
-        Vm?.FlipVertical();
-        ResyncCropDraft();
+        if (Vm is { } vm) _cropDraft = vm.FlipVertical(_cropDraft);
         RenderCropFrame();
     }
 
