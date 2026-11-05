@@ -1366,5 +1366,8 @@
   "全分辨率灯板测量 {0}/{1} …": "Full-resolution light-board measurement {0}/{1} …",
   "正在检测齿孔 …": "Detecting sprockets …",
   "齿孔检测 {0}/{1} …": "Sprocket detection {0}/{1} …",
-  "缩略图解码 {0}/{1} …": "Thumbnail decoding {0}/{1} …"
+  "缩略图解码 {0}/{1} …": "Thumbnail decoding {0}/{1} …",
+  "请先关闭 Lensfun 校正，避免重复应用镜头校正": "Disable Lensfun first to avoid applying lens correction twice.",
+  "未找到可应用的内嵌镜头校正参数，保留现有调整": "No usable embedded lens correction found. Existing adjustments were kept.",
+  "已应用内嵌镜头校正：{0} 帧": "Applied embedded lens correction to {0} frames."
 }

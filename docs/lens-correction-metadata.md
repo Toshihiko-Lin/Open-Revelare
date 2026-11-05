@@ -58,18 +58,16 @@ Sony 在 ARW 中内嵌了相机固件根据当前对焦距离与变焦焦距实�
 对于 DNG 文件（如扫描仪导出或 Lightroom 线性 DNG），解析 Tag `51022` (`0xC74E` / `OpcodeList3`)。
 Opcode 编号以 Adobe DNG SDK (`dng_opcodes.h`) 为准：**1 = `WarpRectilinear`**、**3 = `FixVignetteRadial`**、
 4 = `FixBadPixelsConstant`（不是径向校正，遇到时忽略）：
-- **Opcode 1 (`WarpRectilinear`)**：uint32 平面数（1 或 3），随后每平面 6 个 double（$k_0 \dots k_5$，
-  按 $r^2$ 的多项式），最后是光学中心 2 个 double。取第一个平面的 $k_1$，
-  按 $k_{1,\text{OpenRevelare}} = k_{1,\text{DNG}} / 3.25$ 折算至 OpenRevelare 归一化量纲。
-- **Opcode 3 (`FixVignetteRadial`)**：$k_0 \dots k_4$ 共 5 个 double，随后是光学中心 2 个 double（共 56 字节）。
-  规范数据把中心增益归一化为 1（$k_0 \approx 1$），故角隅增益为系数和，OpenRevelare 的
-  `amount = 角隅增益 - 1`；少数写入器直接存"增益 - 1"（$k_0 \approx 0$），这种形状也接受。
+- **Opcode 1 (`WarpRectilinear`)**：每平面四个径向系数和两个切向系数，最后是光学中心。仅接受中心为 `(0.5, 0.5)`、常数径向项为 1、高阶径向项及切向项为零、各平面系数相同的子集；其它形状无法由当前单参数模型忠实表达，故不自动应用。
+- **Opcode 3 (`FixVignetteRadial`)**：5 个系数加光学中心，共 56 字节。按 Adobe SDK，`gain = 1 + k0*r² + k1*r⁴ + k2*r⁶ + k3*r⁸ + k4*r¹⁰`，角隅补偿量为五项系数之和，零系数是恒等校正。当前将曲线近似为相同角隅增益、默认 falloff=2.5，来源明确标为「近似」。仅接受居中光学中心及有限、范围内的结果。
+
+实现依据：[Adobe DNG SDK 源码](https://android.googlesource.com/platform/external/dng_sdk.git/+/master/source/dng_lens_correction.h)。核心返回的畸变参数以 3:2 画幅为参考，界面按当前源画幅的长短边比例换算；批量应用适用于拍摄设置和画幅一致的翻拍卷。DNG 尚无真实样片的端到端效果验证，单测覆盖规范载荷。Sony 固件参数的真实样片数据由原贡献者报告，本次维护未独立复测。
 
 ### 2.4 翻拍镜头经验估算 (Heuristic Fallback)
 
 如果图像既没有厂商内嵌样条、也没有 DNG opcode（例如经转接环转接、元数据被转换器剥离，
 或机身本身不写这些数据），从标准 EXIF 提取 `LensModel` (`0xA434`)、`FocalLength`、`FNumber`，
-按型号关键字匹配一张内置表。
+按型号关键字匹配一张内置表。该表只供核心诊断使用，界面自动读取不会应用未标定估算。
 
 **这张表不是标定结果，是经验估算**：输出标题写作「经验估算（未标定）：<镜头>」，
 让界面说真话。实测同一支镜头，内置值与相机固件参数可差 30% 以上
@@ -95,8 +93,8 @@ Opcode 编号以 Adobe DNG SDK (`dng_opcodes.h`) 为准：**1 = `WarpRectilinear
 
 在「输入与校正详情」面板中的「镜头与平场校正」部分：
 1. **自动读取镜头校正**：
-   点击后异步读取当前帧的 RAW 元数据，自动识别镜头型号与固件参数，直接填入「畸变」与「暗角」滑块，并在下方显示识别信息（例如：`FE 70-200mm F4 Macro G OSS II · Sony RAW 固件参数`）。
+   点击后异步读取当前帧的 RAW 元数据，自动识别镜头型号与固件参数，仅将有效的内嵌参数填入对应滑块；缺失的校正分量和已有手调值保留。启用 Lensfun 时拒绝应用以免叠加；启用有效 LCC 时保留暗角调整。读取期间切帧、换卷、编辑或改变选择会丢弃过期结果。识别成功后，并在下方显示识别信息（例如：`FE 70-200mm F4 Macro G OSS II · Sony RAW 固件参数`）。
 2. **应用到整卷**：
    将已检测的镜头参数一键同步给选中的帧或整卷所有帧，无需每张重新解析。
 3. **完全无损与撤销支持**：
-   所有操作均支持全局 Undo/Redo，且参数直接持久化至 `.revelare` 工程文件。
+   所有操作均支持全局 Undo/Redo，且参数直接持久化至 `.ncproj` 工程文件。

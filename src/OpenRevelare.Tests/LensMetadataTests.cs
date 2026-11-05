@@ -19,10 +19,65 @@ public sealed class LensMetadataTests
     private const string LensModel = "FE 70-200mm F4 Macro G OSS II";
 
     [Fact]
+    public void TruncatedOpcodeCountCannotAcceptAnEarlierValidOpcode()
+    {
+        var data = OpcodeList3((1, WarpRectilinearPayload(1, 0.03)));
+        BinaryPrimitives.WriteUInt32BigEndian(data, 2);
+        Assert.False(LensMetadata.TryParseDngOpcodeList3(data, out _, out _, out _));
+    }
+
+    [Fact]
+    public void UnsupportedTangentialWarpIsRejected()
+    {
+        var data = WarpRectilinearPayload(1, 0.03);
+        BinaryPrimitives.WriteDoubleBigEndian(data.AsSpan(4 + 4 * 8), 0.001);
+        Assert.False(LensMetadata.TryParseDngOpcodeList3(OpcodeList3((1, data)), out _, out _, out _));
+    }
+
+    [Fact]
+    public void UnknownLensHasNoApplicableComponents()
+    {
+        var result = LensMetadata.EstimateCorrections([SubIfd("Unknown lens")]);
+        Assert.NotNull(result);
+        Assert.False(result.HasDistortion);
+        Assert.False(result.HasVignette);
+    }
+
+    [Fact]
+    public void DistortionOnlyPreservesMissingVignette()
+    {
+        var dir = SubIfd();
+        dir.Set(0x7037, DistortionKnots);
+        var result = LensMetadata.EstimateCorrections([dir]);
+        Assert.NotNull(result);
+        Assert.True(result.HasDistortion);
+        Assert.False(result.HasVignette);
+    }
+
+    [Theory]
+    [InlineData(0.0, 0.0)]
+    [InlineData(1.0, 1.0)]
+    public void DngVignetteCoefficientsAreAdditionalGain(double coefficient, double expected)
+    {
+        Assert.True(LensMetadata.TryParseDngOpcodeList3(OpcodeList3((3,
+            FixVignetteRadialPayload(coefficient, 0, 0, 0, 0))), out _, out var amount, out _));
+        Assert.Equal(expected, amount);
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void NonFiniteDngWarpIsRejected(double value)
+    {
+        Assert.False(LensMetadata.TryParseDngOpcodeList3(OpcodeList3((1,
+            WarpRectilinearPayload(1, value))), out _, out _, out _));
+    }
+
+    [Fact]
     public void TryParseDngOpcodeList3_Opcode1WarpRectilinear_ReadsFirstPlaneCoefficient()
     {
         // Opcode 1 payload per the DNG SDK: uint32 plane count, then 6 doubles per plane
-        // (k0..k5 of the polynomial in r^2), then the optical centre (2 doubles).
+        // (four radial and two tangential coefficients), then the optical centre (2 doubles).
         // planes = 1 => 4 + 8 * (6 + 2) = 68 bytes. 0.0455 / 3.25 = 0.014.
         byte[] data = OpcodeList3(
             (1, WarpRectilinearPayload(planes: 1, k1: 0.0455)));
@@ -53,9 +108,9 @@ public sealed class LensMetadataTests
     public void TryParseDngOpcodeList3_Opcode3FixVignetteRadial_ReadsCornerGain()
     {
         // Opcode 3 payload: k0..k4 then the optical centre (7 doubles = 56 bytes). k0 is the gain
-        // at the optical centre (~1.0), so the corner gain is the sum (1.17) and the amount 0.17.
+        // coefficient of r^2, so corner gain is 1 + sum and amount is 0.17.
         byte[] data = OpcodeList3(
-            (3, FixVignetteRadialPayload(k0: 1.0, k1: 0.08, k2: 0.05, k3: 0.03, k4: 0.01)));
+            (3, FixVignetteRadialPayload(k0: 0.0, k1: 0.08, k2: 0.05, k3: 0.03, k4: 0.01)));
 
         bool ok = LensMetadata.TryParseDngOpcodeList3(data, out var k1, out var vignette, out var falloff);
 
@@ -84,7 +139,7 @@ public sealed class LensMetadataTests
     {
         byte[] data = OpcodeList3(
             (1, WarpRectilinearPayload(planes: 1, k1: 0.0455)),
-            (3, FixVignetteRadialPayload(k0: 1.0, k1: 0.08, k2: 0.05, k3: 0.03, k4: 0.01)));
+            (3, FixVignetteRadialPayload(k0: 0.0, k1: 0.08, k2: 0.05, k3: 0.03, k4: 0.01)));
 
         bool ok = LensMetadata.TryParseDngOpcodeList3(data, out var k1, out var vignette, out _);
 

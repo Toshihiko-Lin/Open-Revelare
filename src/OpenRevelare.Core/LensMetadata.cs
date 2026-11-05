@@ -18,6 +18,10 @@ public sealed record LensCorrectionEstimate(
     double VignetteFalloff,
     string SourceDescription)
 {
+    public bool HasDistortion { get; init; } = true;
+    public bool HasVignette { get; init; } = true;
+    public bool IsHeuristic { get; init; }
+
     public string Summary => string.IsNullOrEmpty(LensModel)
         ? SourceDescription
         : $"{LensModel} ({SourceDescription})";
@@ -121,13 +125,13 @@ public static class LensMetadata
         short[]? sonyDist = ReadSonyCorrectionKnots(directories, TagSonyDistortionCorrParams);
         short[]? sonyVign = ReadSonyCorrectionKnots(directories, TagSonyVignettingCorrParams);
 
-        if (sonyDist is { Length: >= 17 } || sonyVign is { Length: >= 17 })
+        if (ValidKnots(sonyDist) || ValidKnots(sonyVign))
         {
             double k1 = 0;
             if (sonyDist is { Length: >= 17 })
             {
                 int n = sonyDist[0];
-                if (n > 0 && n < sonyDist.Length)
+                if (n >= 2 && n < sonyDist.Length)
                 {
                     // Least-squares fit to radial quadratic: scale = 1 + k1 * 3.25 * r^2
                     // Sony knot: g(r) = 1 + knot / 16384.0
@@ -149,7 +153,7 @@ public static class LensMetadata
             if (sonyVign is { Length: >= 17 })
             {
                 int n = sonyVign[0];
-                if (n > 0 && n < sonyVign.Length)
+                if (n >= 2 && n < sonyVign.Length)
                 {
                     short cornerVal = sonyVign[n];
                     vignAmount = Math.Round(Math.Pow(2.0, (double)cornerVal / 16384.0) - 1.0, 3);
@@ -163,7 +167,8 @@ public static class LensMetadata
                 DistortionK1: k1,
                 VignetteAmount: vignAmount,
                 VignetteFalloff: vignFalloff,
-                SourceDescription: "Sony RAW 固件参数");
+                SourceDescription: "Sony RAW 固件参数")
+            { HasDistortion = ValidKnots(sonyDist), HasVignette = ValidKnots(sonyVign) };
         }
 
         // 2. DNG OpcodeList3 (Tag 51022 / 0xC74E)
@@ -172,7 +177,7 @@ public static class LensMetadata
             if (dir.ContainsTag(TagDngOpcodeList3))
             {
                 var opcodeBytes = dir.GetByteArray(TagDngOpcodeList3);
-                if (opcodeBytes != null && TryParseDngOpcodeList3(opcodeBytes, out var dngK1, out var dngVign, out var dngFalloff))
+                if (opcodeBytes != null && TryParseDngOpcodeList3(opcodeBytes, out var dngK1, out var dngVign, out var dngFalloff, out var hasWarp, out var hasVignette))
                 {
                     return new LensCorrectionEstimate(
                         LensModel: lensModel,
@@ -181,7 +186,8 @@ public static class LensMetadata
                         DistortionK1: dngK1,
                         VignetteAmount: dngVign,
                         VignetteFalloff: dngFalloff,
-                        SourceDescription: "DNG OpcodeList3");
+                        SourceDescription: "DNG OpcodeList3（近似）")
+                    { HasDistortion = hasWarp, HasVignette = hasVignette };
                 }
             }
         }
@@ -196,7 +202,7 @@ public static class LensMetadata
                 DistortionK1: k1Est,
                 VignetteAmount: vignEst,
                 VignetteFalloff: falloffEst,
-                SourceDescription: profileName);
+                SourceDescription: profileName) { IsHeuristic = true };
         }
 
         // 4. If lens model is detected but no specific profile exists
@@ -209,7 +215,7 @@ public static class LensMetadata
                 DistortionK1: 0,
                 VignetteAmount: 0,
                 VignetteFalloff: 2.5,
-                SourceDescription: "未内置校正曲线");
+                SourceDescription: "未内置校正曲线") { HasDistortion = false, HasVignette = false };
         }
 
         return null;
@@ -225,7 +231,12 @@ public static class LensMetadata
     /// earlier revision did) meant no conforming DNG was ever read.
     /// </remarks>
     public static bool TryParseDngOpcodeList3(byte[] data, out double distortionK1, out double vignetteAmount, out double vignetteFalloff)
+        => TryParseDngOpcodeList3(data, out distortionK1, out vignetteAmount, out vignetteFalloff, out _, out _);
+
+    private static bool TryParseDngOpcodeList3(byte[] data, out double distortionK1, out double vignetteAmount,
+        out double vignetteFalloff, out bool hasWarp, out bool hasVignette)
     {
+        hasWarp = hasVignette = false;
         distortionK1 = 0;
         vignetteAmount = 0;
         vignetteFalloff = 2.5;
@@ -239,15 +250,16 @@ public static class LensMetadata
             int offset = 4;
             bool found = false;
 
-            for (uint i = 0; i < count && offset + 16 <= data.Length; i++)
+            for (uint i = 0; i < count; i++)
             {
+                if (data.Length - offset < 16) return false;
                 uint opcodeId = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset, 4));
                 // uint version = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 4, 4));
                 // uint flags = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 8, 4));
                 uint paramBytes = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 12, 4));
                 offset += 16;
 
-                if (offset + paramBytes > data.Length) break;
+                if (paramBytes > (uint)(data.Length - offset)) return false;
 
                 var paramSpan = span.Slice(offset, (int)paramBytes);
                 if (opcodeId == DngOpcodeWarpRectilinear)
@@ -260,7 +272,8 @@ public static class LensMetadata
                         // rectilinear macro lens carries k1 around 1e-5, and rounding to four
                         // decimals would silently turn that into 0.
                         distortionK1 = Math.Round(warpK1 / 3.25, 6);
-                        found = true;
+                        hasWarp = found = double.IsFinite(distortionK1) && Math.Abs(distortionK1) <= 0.5;
+                        if (!hasWarp) return false;
                     }
                 }
                 else if (opcodeId == DngOpcodeFixVignetteRadial && paramBytes >= 56)
@@ -271,18 +284,13 @@ public static class LensMetadata
                     double k2 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(16, 8));
                     double k3 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(24, 8));
                     double k4 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(32, 8));
-                    double cornerGain = k0 + k1 + k2 + k3 + k4;
-                    if (cornerGain > 0)
-                    {
-                        // A conforming payload normalises the gain to 1.0 at the optical centre
-                        // (k0 ~ 1), so the corner gain is the sum and OpenRevelare's "amount"
-                        // (gain - 1) is the sum minus one. A few writers store the gain minus one
-                        // directly (k0 ~ 0); keep accepting that shape instead of producing -1.
-                        vignetteAmount = Math.Round(
-                            Math.Abs(k0 - 1.0) <= 0.25 ? cornerGain - 1.0 : cornerGain, 3);
-                        vignetteFalloff = 2.5;
-                        found = true;
-                    }
+                    // Adobe DNG SDK: gain = 1 + k0*r^2 + ... + k4*r^10.
+                    // Reduce the centered curve to our corner gain and default falloff.
+                    double amount = k0 + k1 + k2 + k3 + k4;
+                    if (!Centered(paramSpan.Slice(40)) || !double.IsFinite(amount)
+                        || amount <= -1 || amount > 2) return false;
+                    vignetteAmount = Math.Round(amount, 3);
+                    hasVignette = found = true;
                 }
 
                 offset += (int)paramBytes;
@@ -291,7 +299,7 @@ public static class LensMetadata
             // A recognised opcode counts as a hit even when the correction is (near) zero: a
             // rectilinear macro lens legitimately carries k1 ~ 0, and calling that "no data" threw
             // such files back onto a lens preset that is orders of magnitude off.
-            return found;
+            return found && offset == data.Length;
         }
         catch
         {
@@ -301,8 +309,7 @@ public static class LensMetadata
 
     /// <summary>
     /// Reads the first-order radial coefficient of a WarpRectilinear payload: a big-endian
-    /// <c>uint32</c> plane count (1 or 3), <c>6</c> doubles per plane (k0..k5 of the polynomial
-    /// in r^2), then the optical centre (2 doubles).
+    /// <c>uint32</c> plane count (1 or 3), <c>6</c> doubles per plane (four radial and two tangential coefficients), then the optical centre (2 doubles).
     /// </summary>
     private static bool TryReadWarpRectilinearK1(ReadOnlySpan<byte> param, out double k1)
     {
@@ -315,10 +322,29 @@ public static class LensMetadata
         int required = 4 + 8 * ((int)planes * WarpCoefficientsPerPlane + 2);
         if (param.Length < required) return false;
 
+        if (!Centered(param.Slice(required - 16))) return false;
+        for (int plane = 0; plane < planes; plane++)
+        {
+            var coefficients = param.Slice(4 + plane * 48, 48);
+            // Only accept the subset our single radial term can represent.
+            for (int j = 0; j < 6; j++)
+            {
+                double value = BinaryPrimitives.ReadDoubleBigEndian(coefficients.Slice(j * 8));
+                if (!double.IsFinite(value) || (j == 0 && value != 1) || (j >= 2 && value != 0)) return false;
+                if (plane > 0 && value != BinaryPrimitives.ReadDoubleBigEndian(param.Slice(4 + j * 8))) return false;
+            }
+        }
         // Plane 0, coefficient 1 (the r^2 term): 4-byte plane count + one double.
         k1 = BinaryPrimitives.ReadDoubleBigEndian(param.Slice(4 + 8, 8));
         return true;
     }
+
+    private static bool ValidKnots(short[]? knots) => knots is { Length: >= 17 }
+        && knots[0] >= 2 && knots[0] < knots.Length;
+
+    private static bool Centered(ReadOnlySpan<byte> center) =>
+        BinaryPrimitives.ReadDoubleBigEndian(center) == 0.5
+        && BinaryPrimitives.ReadDoubleBigEndian(center.Slice(8)) == 0.5;
 
     /// <summary>
     /// Reads a Sony correction block from the Sony maker note directory, falling back to the
