@@ -529,6 +529,13 @@
   "整卷校准": "Roll calibration",
   "镜头校正（手动）": "Lens correction (manual)",
   "翻拍镜头的桶形/枕形畸变与四角压暗，反相后会让边框弯曲、四角泛白，此处补偿（不依赖镜头库）。": "Barrel/pincushion distortion and corner falloff of the copy lens; inverted, they bend the frame edges and wash the corners out. Corrected here, with no lens database.",
+  "自动读取镜头校正": "Auto Lens Correction",
+  "应用到整卷": "Apply to Roll",
+  "未在图像元数据中检测到镜头校正参数": "No lens correction parameters found in image metadata",
+  "请先选择包含 RAW 图像的帧": "Please select a frame with a RAW image first",
+  "已为选中的 {0} 帧应用镜头校正：{1}（畸变 {2:+0.000;-0.000;0}，暗角 {3:0.00}）": "Lens correction applied to the {0} selected frames: {1} (distortion {2:+0.000;-0.000;0}, vignetting {3:0.00})",
+  "已为全卷（{0} 帧）应用镜头校正：{1}（畸变 {2:+0.000;-0.000;0}，暗角 {3:0.00}）": "Lens correction applied to the whole roll ({0} frames): {1} (distortion {2:+0.000;-0.000;0}, vignetting {3:0.00})",
+  "已应用镜头校正：{0}（畸变 {1:+0.000;-0.000;0}，暗角 {2:0.00}）": "Lens correction applied: {0} (distortion {1:+0.000;-0.000;0}, vignetting {2:0.00})",
   "畸变": "Distortion",
   "暗角": "Vignetting",
   "范围": "Range",
@@ -1359,5 +1366,8 @@
   "全分辨率灯板测量 {0}/{1} …": "Full-resolution light-board measurement {0}/{1} …",
   "正在检测齿孔 …": "Detecting sprockets …",
   "齿孔检测 {0}/{1} …": "Sprocket detection {0}/{1} …",
-  "缩略图解码 {0}/{1} …": "Thumbnail decoding {0}/{1} …"
+  "缩略图解码 {0}/{1} …": "Thumbnail decoding {0}/{1} …",
+  "请先关闭 Lensfun 校正，避免重复应用镜头校正": "Disable Lensfun first to avoid applying lens correction twice.",
+  "未找到可应用的内嵌镜头校正参数，保留现有调整": "No usable embedded lens correction found. Existing adjustments were kept.",
+  "已应用内嵌镜头校正：{0} 帧": "Applied embedded lens correction to {0} frames."
 }

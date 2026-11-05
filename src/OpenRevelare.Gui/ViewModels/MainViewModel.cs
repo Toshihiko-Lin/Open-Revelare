@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -824,6 +824,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     partial void OnCurrentFrameChanged(RollFrame? value)
     {
+        _lensCorrectionGeneration++;
+        LensCorrectionStatusText = "";
         NotifyRollBroadcastHints();
         // A reorder pulls the selected frame out of Frames and puts it back, which the strip's
         // SelectedItem binding reports as null-then-reselect. Nothing about the frame changed, so
