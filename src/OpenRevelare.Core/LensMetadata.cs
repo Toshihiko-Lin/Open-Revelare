@@ -18,6 +18,8 @@ public sealed record LensCorrectionEstimate(
     double VignetteFalloff,
     string SourceDescription)
 {
+    public string Diagnostic { get; init; } = "";
+    public EmbeddedLensCalibration? Native { get; init; }
     public bool HasDistortion { get; init; } = true;
     public bool HasVignette { get; init; } = true;
     public bool IsHeuristic { get; init; }
@@ -75,7 +77,21 @@ public static class LensMetadata
         try
         {
             var directories = ImageMetadataReader.ReadMetadata(path);
-            return EstimateCorrections(directories);
+            var estimate = EstimateCorrections(directories);
+            if (estimate is not { HasDistortion: true }) return estimate;
+            // Prefer active EXIF dimensions, then the primary image IFD. Portrait and landscape agree.
+            foreach (var d in directories.OfType<ExifSubIfdDirectory>().Cast<MetadataExtractor.Directory>()
+                .Concat(directories.OfType<ExifIfd0Directory>()))
+            {
+                int wx = d is ExifSubIfdDirectory ? 0xa002 : 0x0100;
+                int hy = d is ExifSubIfdDirectory ? 0xa003 : 0x0101;
+                if (d.TryGetDouble(wx, out var w) && d.TryGetDouble(hy, out var h) && w > 1 && h > 1)
+                {
+                    double aspect = (Math.Max(w, h) - 1) / (Math.Min(w, h) - 1);
+                    return estimate with { DistortionK1 = estimate.DistortionK1 * 3.25 / (1 + aspect * aspect) };
+                }
+            }
+            return estimate;
         }
         catch
         {
@@ -168,7 +184,10 @@ public static class LensMetadata
                 VignetteAmount: vignAmount,
                 VignetteFalloff: vignFalloff,
                 SourceDescription: "Sony RAW 固件参数")
-            { HasDistortion = ValidKnots(sonyDist), HasVignette = ValidKnots(sonyVign) };
+            { HasDistortion = ValidKnots(sonyDist), HasVignette = ValidKnots(sonyVign),
+                Native = new EmbeddedLensCalibration("Sony RAW 固件曲线",
+                    DistortionKnots: ValidKnots(sonyDist) ? sonyDist!.Skip(1).Take(sonyDist![0]).Select(x => 1+x/16384.0).ToArray() : null,
+                    VignetteKnots: ValidKnots(sonyVign) ? sonyVign!.Skip(1).Take(sonyVign![0]).Select(x => Math.Pow(2,x/16384.0)).ToArray() : null) };
         }
 
         // 2. DNG OpcodeList3 (Tag 51022 / 0xC74E)
@@ -177,32 +196,19 @@ public static class LensMetadata
             if (dir.ContainsTag(TagDngOpcodeList3))
             {
                 var opcodeBytes = dir.GetByteArray(TagDngOpcodeList3);
-                if (opcodeBytes != null && TryParseDngOpcodeList3(opcodeBytes, out var dngK1, out var dngVign, out var dngFalloff, out var hasWarp, out var hasVignette))
+                if (opcodeBytes != null && EmbeddedLensCalibration.TryParseDng(opcodeBytes, out var native))
                 {
                     return new LensCorrectionEstimate(
                         LensModel: lensModel,
                         FocalLengthMm: focalLength,
                         FNumber: fNumber,
-                        DistortionK1: dngK1,
-                        VignetteAmount: dngVign,
-                        VignetteFalloff: dngFalloff,
-                        SourceDescription: "DNG OpcodeList3（近似）")
-                    { HasDistortion = hasWarp, HasVignette = hasVignette };
+                        DistortionK1: native!.Warp is {} w ? w[0][1]/3.25 : 0,
+                        VignetteAmount: native!.Gain(1)-1,
+                        VignetteFalloff: 2.5,
+                        SourceDescription: "DNG OpcodeList3（完整曲线）")
+                    { HasDistortion = native!.HasDistortion, HasVignette = native.HasVignette, Native = native };
                 }
             }
-        }
-
-        // 3. Known Lens Database / Heuristics
-        if (TryLookupKnownLens(lensModel, focalLength, fNumber, out var k1Est, out var vignEst, out var falloffEst, out var profileName))
-        {
-            return new LensCorrectionEstimate(
-                LensModel: lensModel,
-                FocalLengthMm: focalLength,
-                FNumber: fNumber,
-                DistortionK1: k1Est,
-                VignetteAmount: vignEst,
-                VignetteFalloff: falloffEst,
-                SourceDescription: profileName) { IsHeuristic = true };
         }
 
         // 4. If lens model is detected but no specific profile exists
@@ -231,111 +237,11 @@ public static class LensMetadata
     /// earlier revision did) meant no conforming DNG was ever read.
     /// </remarks>
     public static bool TryParseDngOpcodeList3(byte[] data, out double distortionK1, out double vignetteAmount, out double vignetteFalloff)
-        => TryParseDngOpcodeList3(data, out distortionK1, out vignetteAmount, out vignetteFalloff, out _, out _);
-
-    private static bool TryParseDngOpcodeList3(byte[] data, out double distortionK1, out double vignetteAmount,
-        out double vignetteFalloff, out bool hasWarp, out bool hasVignette)
     {
-        hasWarp = hasVignette = false;
-        distortionK1 = 0;
-        vignetteAmount = 0;
-        vignetteFalloff = 2.5;
-
-        if (data.Length < 4) return false;
-
-        try
-        {
-            var span = data.AsSpan();
-            uint count = BinaryPrimitives.ReadUInt32BigEndian(span);
-            int offset = 4;
-            bool found = false;
-
-            for (uint i = 0; i < count; i++)
-            {
-                if (data.Length - offset < 16) return false;
-                uint opcodeId = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset, 4));
-                // uint version = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 4, 4));
-                // uint flags = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 8, 4));
-                uint paramBytes = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset + 12, 4));
-                offset += 16;
-
-                if (paramBytes > (uint)(data.Length - offset)) return false;
-
-                var paramSpan = span.Slice(offset, (int)paramBytes);
-                if (opcodeId == DngOpcodeWarpRectilinear)
-                {
-                    if (TryReadWarpRectilinearK1(paramSpan, out double warpK1))
-                    {
-                        // OpenRevelare's k1 is normalized by the short frame radius squared
-                        // (aspect 3:2 => corner r^2 = 3.25); the DNG polynomial is normalized
-                        // to r = 1 at the corner, hence the division. Keep six digits: a nearly
-                        // rectilinear macro lens carries k1 around 1e-5, and rounding to four
-                        // decimals would silently turn that into 0.
-                        distortionK1 = Math.Round(warpK1 / 3.25, 6);
-                        hasWarp = found = double.IsFinite(distortionK1) && Math.Abs(distortionK1) <= 0.5;
-                        if (!hasWarp) return false;
-                    }
-                }
-                else if (opcodeId == DngOpcodeFixVignetteRadial && paramBytes >= 56)
-                {
-                    // k0..k4 (8-byte doubles, big-endian), then the optical centre (2 doubles).
-                    double k0 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(0, 8));
-                    double k1 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(8, 8));
-                    double k2 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(16, 8));
-                    double k3 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(24, 8));
-                    double k4 = BinaryPrimitives.ReadDoubleBigEndian(paramSpan.Slice(32, 8));
-                    // Adobe DNG SDK: gain = 1 + k0*r^2 + ... + k4*r^10.
-                    // Reduce the centered curve to our corner gain and default falloff.
-                    double amount = k0 + k1 + k2 + k3 + k4;
-                    if (!Centered(paramSpan.Slice(40)) || !double.IsFinite(amount)
-                        || amount <= -1 || amount > 2) return false;
-                    vignetteAmount = Math.Round(amount, 3);
-                    hasVignette = found = true;
-                }
-
-                offset += (int)paramBytes;
-            }
-
-            // A recognised opcode counts as a hit even when the correction is (near) zero: a
-            // rectilinear macro lens legitimately carries k1 ~ 0, and calling that "no data" threw
-            // such files back onto a lens preset that is orders of magnitude off.
-            return found && offset == data.Length;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Reads the first-order radial coefficient of a WarpRectilinear payload: a big-endian
-    /// <c>uint32</c> plane count (1 or 3), <c>6</c> doubles per plane (four radial and two tangential coefficients), then the optical centre (2 doubles).
-    /// </summary>
-    private static bool TryReadWarpRectilinearK1(ReadOnlySpan<byte> param, out double k1)
-    {
-        k1 = 0;
-        if (param.Length < 4) return false;
-
-        uint planes = BinaryPrimitives.ReadUInt32BigEndian(param);
-        if (planes is not (1 or 3)) return false;
-
-        int required = 4 + 8 * ((int)planes * WarpCoefficientsPerPlane + 2);
-        if (param.Length < required) return false;
-
-        if (!Centered(param.Slice(required - 16))) return false;
-        for (int plane = 0; plane < planes; plane++)
-        {
-            var coefficients = param.Slice(4 + plane * 48, 48);
-            // Only accept the subset our single radial term can represent.
-            for (int j = 0; j < 6; j++)
-            {
-                double value = BinaryPrimitives.ReadDoubleBigEndian(coefficients.Slice(j * 8));
-                if (!double.IsFinite(value) || (j == 0 && value != 1) || (j >= 2 && value != 0)) return false;
-                if (plane > 0 && value != BinaryPrimitives.ReadDoubleBigEndian(param.Slice(4 + j * 8))) return false;
-            }
-        }
-        // Plane 0, coefficient 1 (the r^2 term): 4-byte plane count + one double.
-        k1 = BinaryPrimitives.ReadDoubleBigEndian(param.Slice(4 + 8, 8));
+        distortionK1 = 0; vignetteAmount = 0; vignetteFalloff = 2.5;
+        if (!EmbeddedLensCalibration.TryParseDng(data, out var profile)) return false;
+        if (profile!.Warp is {} warp) distortionK1 = Math.Round(warp[0][1]/3.25,6);
+        vignetteAmount = Math.Round(profile.Gain(1)-1,3);
         return true;
     }
 
@@ -393,112 +299,4 @@ public static class LensMetadata
         }
     }
 
-    /// <summary>
-    /// Known reproduction and macro lens profile estimates.
-    /// </summary>
-    public static bool TryLookupKnownLens(
-        string lensModel,
-        double focalLength,
-        double fNumber,
-        out double distortionK1,
-        out double vignetteAmount,
-        out double vignetteFalloff,
-        out string profileName)
-    {
-        distortionK1 = 0;
-        vignetteAmount = 0;
-        vignetteFalloff = 2.5;
-        profileName = "";
-
-        if (string.IsNullOrWhiteSpace(lensModel)) return false;
-
-        string norm = lensModel.ToUpperInvariant();
-
-        // Sony FE 70-200mm F4 Macro G OSS II
-        if (norm.Contains("70-200") && norm.Contains("MACRO")
-            && (norm.Contains("FE 70-200") || norm.Contains("SONY")))
-        {
-            double t = focalLength > 0 ? Math.Clamp((focalLength - 70.0) / 130.0, 0.0, 1.0) : 0.5;
-            distortionK1 = Math.Round(0.002 + 0.016 * t, 4);
-            vignetteAmount = fNumber >= 8 ? 0.168 : 0.22;
-            profileName = "经验估算（未标定）：Sony 70-200 F4 G II Macro";
-            return true;
-        }
-
-        // Sony FE 90mm F2.8 Macro G OSS
-        if (norm.Contains("90MM")
-            && (norm.Contains("FE 90") || norm.Contains("SEL90M28G")))
-        {
-            distortionK1 = 0.000;
-            vignetteAmount = fNumber >= 8 ? 0.12 : 0.18;
-            profileName = "经验估算（未标定）：Sony 90mm F2.8 Macro";
-            return true;
-        }
-
-        // Sony FE 50mm F2.8 Macro
-        if (norm.Contains("50MM") && norm.Contains("MACRO")
-            && (norm.Contains("FE 50") || norm.Contains("SEL50M28")))
-        {
-            distortionK1 = 0.001;
-            vignetteAmount = fNumber >= 8 ? 0.14 : 0.20;
-            profileName = "经验估算（未标定）：Sony 50mm F2.8 Macro";
-            return true;
-        }
-
-        // Sigma 105mm F2.8 DG DN Macro | Art
-        if (norm.Contains("105MM") && norm.Contains("MACRO") && (norm.Contains("SIGMA") || norm.Contains("DG DN")))
-        {
-            distortionK1 = 0.002;
-            vignetteAmount = fNumber >= 8 ? 0.15 : 0.20;
-            profileName = "经验估算（未标定）：Sigma 105mm F2.8 DG DN Macro";
-            return true;
-        }
-
-        // Sigma 70mm F2.8 DG Macro | Art
-        if (norm.Contains("70MM") && norm.Contains("MACRO") && norm.Contains("SIGMA"))
-        {
-            distortionK1 = 0.000;
-            vignetteAmount = fNumber >= 8 ? 0.14 : 0.19;
-            profileName = "经验估算（未标定）：Sigma 70mm F2.8 Macro";
-            return true;
-        }
-
-        // Canon RF 100mm F2.8 L MACRO IS USM
-        if (norm.Contains("100MM") && norm.Contains("MACRO") && norm.Contains("RF"))
-        {
-            distortionK1 = -0.003;
-            vignetteAmount = fNumber >= 8 ? 0.14 : 0.18;
-            profileName = "经验估算（未标定）：Canon RF 100mm F2.8 L Macro";
-            return true;
-        }
-
-        // Canon EF 100mm f/2.8L Macro IS USM
-        if (norm.Contains("100MM") && norm.Contains("MACRO") && norm.Contains("EF"))
-        {
-            distortionK1 = -0.002;
-            vignetteAmount = fNumber >= 8 ? 0.15 : 0.20;
-            profileName = "经验估算（未标定）：Canon EF 100mm F2.8 L Macro";
-            return true;
-        }
-
-        // Nikon NIKKOR Z MC 105mm f/2.8 VR S
-        if (norm.Contains("105MM") && norm.Contains("MC") && norm.Contains("NIKKOR"))
-        {
-            distortionK1 = 0.001;
-            vignetteAmount = fNumber >= 8 ? 0.12 : 0.17;
-            profileName = "经验估算（未标定）：Nikkor Z MC 105mm F2.8";
-            return true;
-        }
-
-        // Nikon AF-S Micro Nikkor 60mm f/2.8G ED
-        if (norm.Contains("60MM") && norm.Contains("MICRO") && norm.Contains("NIKKOR"))
-        {
-            distortionK1 = 0.001;
-            vignetteAmount = fNumber >= 8 ? 0.15 : 0.22;
-            profileName = "经验估算（未标定）：Micro-Nikkor 60mm F2.8G";
-            return true;
-        }
-
-        return false;
-    }
 }

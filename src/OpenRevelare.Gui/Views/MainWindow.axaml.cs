@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -1844,24 +1844,28 @@ public partial class MainWindow : Window
     // the in-progress draft and the locked ratio, so an edit in flight survives a 90° turn
     // instead of snapping back to the pre-turn shape.
     private void OnApplyGeometryClick(object? sender, RoutedEventArgs e) => Vm?.ApplyGeometryToFrames();
+    private void OnRestoreAutoCropRecoveryClick(object? sender, RoutedEventArgs e)
+    {
+        ExitMode(); Vm?.RestoreAutoCropRecovery();
+    }
     private async void OnAutoCropCurrentClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(false);
     private async void OnAutoCropRollClick(object? sender, RoutedEventArgs e) => await AutoCrop135Async(true);
     private void OnCancelAutoCropClick(object? sender, RoutedEventArgs e) => Vm?.CancelAutoCrop();
     private async Task AutoCrop135Async(bool wholeRoll)
     {
         if (Vm is null) return;
-        var mode = OpenRevelare.Gui.Models.CropAspectPresets.AutoMode(CropPresetCombo.SelectedIndex);
-        if (mode is null)
-        {
-            Vm.StatusText = Loc.T("135 自动裁切请选择内容 (3:2) 或含边框 (37:35)；其他比例可使用拖框裁切。");
-            return;
-        }
+        var mode = Vm.AutoCropIncludeSprockets ? FilmCropMode.WithSprockets : FilmCropMode.ImageArea;
         ExitMode();
-        await Vm.AutoCrop135Async(mode.Value, wholeRoll);
+        Vm.AllowAutoCropSuggestions = false;
+        await Vm.AutoCrop135Async(mode, wholeRoll);
         SyncCropPreset(Vm);
     }
 
-    private void OnApplyCropClick(object? sender, RoutedEventArgs e) => Vm?.ApplyCropToFrames();
+    private void OnApplyCropClick(object? sender, RoutedEventArgs e)
+    {
+        if (_mode == SampleMode.Crop) CommitCrop();
+        Vm?.ApplyCropToFrames();
+    }
 
     private void OnRotateCwClick(object? sender, RoutedEventArgs e)
     {
@@ -2803,8 +2807,16 @@ public partial class MainWindow : Window
 
     private async void OnAutoLensCorrectionRollClick(object? sender, RoutedEventArgs e)
     {
-        if (Vm is { } vm) await vm.AutoLensCorrectionAsync(wholeRoll: true);
+        if (Vm is { } vm) await vm.AutoLensCorrectionAsync(true);
     }
+
+    private void OnDisableAutoLensCurrentClick(object? sender, RoutedEventArgs e) => Vm?.DisableAutoLensCorrection(false);
+    private void OnDisableAutoLensRollClick(object? sender, RoutedEventArgs e) => Vm?.DisableAutoLensCorrection(true);
+
+    private void OnSyncLensSelectedClick(object? sender, RoutedEventArgs e) => Vm?.SyncLensSliders(false);
+    private void OnSyncLensRollClick(object? sender, RoutedEventArgs e) => Vm?.SyncLensSliders(true);
+    private void OnResetLensCurrentClick(object? sender, RoutedEventArgs e) => Vm?.ResetLensSliders(false);
+    private void OnResetLensRollClick(object? sender, RoutedEventArgs e) => Vm?.ResetLensSliders(true);
 
     private async void OnLoadLccClick(object? sender, RoutedEventArgs e)
     {

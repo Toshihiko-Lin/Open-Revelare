@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -53,7 +53,7 @@ public partial class MainViewModel
             nameof(HasOtherFrames), nameof(CanApplySceneToRoll), nameof(ContextTargetCount),
             nameof(CanApplyContextTargets), nameof(BroadcastSourceText), nameof(BroadcastTargetText),
             nameof(CalibrationApplyLabel), nameof(SceneApplyLabel), nameof(CompositionTargetLabel),
-            nameof(CropSyncLabel), nameof(GeometrySyncLabel), nameof(SprocketSyncLabel) }) OnPropertyChanged(property);
+            nameof(CropBatchDetectionLabel), nameof(CanSyncReferenceCrop), nameof(CropSyncLabel), nameof(GeometrySyncLabel), nameof(SprocketSyncLabel) }) OnPropertyChanged(property);
     }
     private bool HasSceneSyncGroups => Sync.SceneWb || Sync.SceneExposure || Sync.SceneTone || Sync.SceneCurves;
     private bool CheckSceneSyncGroups(bool scene)
@@ -174,7 +174,12 @@ public partial class MainViewModel
     /// <summary>Broadcast the current crop as an explicit framing operation.</summary>
     public void ApplyCropToFrames()
     {
-        if (CurrentFrame is null) return;
+        if (CurrentFrame is null || IsBusy || !_paramsLoaded) return;
+        if (CurrentCrop is null)
+        {
+            StatusText = Loc.T("请先拖框设定本帧裁切，再同步参考框。");
+            return;
+        }
         bool hadSelection = Frames.Any(f => f.IsSelected);
         FrameParams source = LiveParams.ForStorage(BuildParams(), _cropEditing, _cropRect);
         var targets = FrameScope.OtherFrames(Frames, CurrentFrame, hadSelection);
@@ -254,7 +259,7 @@ public partial class MainViewModel
                 d.DMaxPerChannel = (double[])s.DMaxPerChannel.Clone();
             }
             if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }
-            if (Sync.CalLens) { d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; d.Lensfun = s.Lensfun; d.LensfunEnabled = s.LensfunEnabled; }
+            if (Sync.CalLens) { d.LensCorrectionDiagnostic = s.LensCorrectionDiagnostic; d.EmbeddedLens = s.EmbeddedLens?.Copy(); d.LensCorrectionOrigin = s.LensCorrectionOrigin; d.LensCorrectionHasVignette = s.LensCorrectionHasVignette; d.DistortionK1 = s.DistortionK1; d.VignetteAmount = s.VignetteAmount; d.VignetteFalloff = s.VignetteFalloff; d.LccFlatField = s.LccFlatField; d.Lensfun = s.Lensfun; d.LensfunEnabled = s.LensfunEnabled; }
             d.OutputIntent = s.OutputIntent;   // intent is roll-uniform
         }
         if (scene)

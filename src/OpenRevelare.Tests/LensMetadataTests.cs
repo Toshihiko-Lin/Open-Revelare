@@ -27,11 +27,11 @@ public sealed class LensMetadataTests
     }
 
     [Fact]
-    public void UnsupportedTangentialWarpIsRejected()
+    public void TangentialWarpIsAcceptedByTheNativeModel()
     {
         var data = WarpRectilinearPayload(1, 0.03);
         BinaryPrimitives.WriteDoubleBigEndian(data.AsSpan(4 + 4 * 8), 0.001);
-        Assert.False(LensMetadata.TryParseDngOpcodeList3(OpcodeList3((1, data)), out _, out _, out _));
+        Assert.True(LensMetadata.TryParseDngOpcodeList3(OpcodeList3((1, data)), out _, out _, out _));
     }
 
     [Fact]
@@ -327,11 +327,11 @@ public sealed class LensMetadataTests
     }
 
     [Theory]
-    [InlineData("FE 90mm F2.8 Macro G OSS", 90.0, 8.0, 0.0, 0.12)]
-    [InlineData("Sigma 105mm F2.8 DG DN Macro | Art", 105.0, 8.0, 0.002, 0.15)]
-    [InlineData("Canon RF 100mm F2.8 L MACRO IS USM", 100.0, 8.0, -0.003, 0.14)]
-    [InlineData("NIKKOR Z MC 105mm f/2.8 VR S", 105.0, 8.0, 0.001, 0.12)]
-    public void EstimateCorrections_KnownLenses_FallbacksAccurately(string lens, double focal, double fNumber, double expectedK1, double expectedVignette)
+    [InlineData("FE 90mm F2.8 Macro G OSS", 90.0, 8.0)]
+    [InlineData("Sigma 105mm F2.8 DG DN Macro | Art", 105.0, 8.0)]
+    [InlineData("Canon RF 100mm F2.8 L MACRO IS USM", 100.0, 8.0)]
+    [InlineData("NIKKOR Z MC 105mm f/2.8 VR S", 105.0, 8.0)]
+    public void EstimateCorrections_KnownLensNamesNeverInventUncalibratedCorrections(string lens, double focal, double fNumber)
     {
         var subIfd = new ExifSubIfdDirectory();
         subIfd.Set(0xa434, lens);
@@ -340,9 +340,9 @@ public sealed class LensMetadataTests
 
         var estimate = LensMetadata.EstimateCorrections([subIfd]);
         Assert.NotNull(estimate);
-        Assert.Equal(expectedK1, estimate.DistortionK1);
-        Assert.Equal(expectedVignette, estimate.VignetteAmount);
-        Assert.Contains("经验估算", estimate.SourceDescription);
+        Assert.Equal(0, estimate.DistortionK1);
+        Assert.Equal(0, estimate.VignetteAmount);
+        Assert.Equal("未内置校正曲线", estimate.SourceDescription);
     }
 
     [Theory]
@@ -366,7 +366,7 @@ public sealed class LensMetadataTests
     }
 
     [Fact]
-    public void EstimateCorrections_Sony50mmMacro_MatchesThePresetItUsedToMiss()
+    public void EstimateCorrections_Sony50mmMacroWithoutEmbeddedDataDoesNotInventAProfile()
     {
         // 索尼在 EXIF 里写的是 "FE 50mm F2.8 Macro"，并不含 "SONY"；旧条件要求含 SONY，
         // 于是这条预设永远不命中，用户静默地拿到"未内置校正曲线"。改用索尼专有前缀判定。
@@ -378,9 +378,9 @@ public sealed class LensMetadataTests
         var estimate = LensMetadata.EstimateCorrections([subIfd]);
 
         Assert.NotNull(estimate);
-        Assert.Equal(0.001, estimate.DistortionK1);
-        Assert.Equal(0.14, estimate.VignetteAmount);
-        Assert.Contains("经验估算", estimate.SourceDescription);
+        Assert.Equal(0, estimate.DistortionK1);
+        Assert.Equal(0, estimate.VignetteAmount);
+        Assert.Equal("未内置校正曲线", estimate.SourceDescription);
     }
 
     [Fact]

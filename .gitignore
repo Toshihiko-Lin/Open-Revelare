@@ -19,6 +19,8 @@ Library/
 
 # Local scratch
 /scratch/
+/artifacts/
+/.claude/worktrees/
 *.log
 
 # 发版产物：publish = dotnet publish 输出（含 .app / AppDir 装配现场），

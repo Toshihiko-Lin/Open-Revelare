@@ -580,7 +580,7 @@ public partial class MainViewModel
                             lock (preparedPreviews) preparedPreviews.Add((path, working, width, height, stamp));
                         },
                         identifyRgbFromMeans: identifyFromMeans,
-                        lensfun: cfg.LensfunEnabled ? cfg.Lensfun : null);
+                        lensfun: cfg.LensfunEnabled ? cfg.Lensfun : null, autoLens: true);
                 }
                 ReportBackground("");
             });
@@ -671,8 +671,7 @@ public partial class MainViewModel
         // Bake into every frame's stored params so export / thumbnails carry them.
         foreach (RollFrame f in Frames)
         {
-            f.Params.Lensfun = cfg.Lensfun;
-            f.Params.LensfunEnabled = cfg.LensfunEnabled;
+            // Lens selection was resolved per frame in LoadRollAsync; retain that choice.
             f.Params.DecoupleMatrix = dm;
             f.Params.DecoupleMode = DecoupleMode.Linear;
             f.Params.DecoupleChromaMatrix = cm;
@@ -718,7 +717,7 @@ public partial class MainViewModel
         ImageBuffer? lccField = null,
         Action<string, WorkingFrame, int, int, SourceStamp>? previewReady = null,
         bool identifyRgbFromMeans = false,
-        LensfunCalibration? lensfun = null)
+        LensfunCalibration? lensfun = null, bool autoLens = false)
     {
         int nF = Math.Min(6, paths.Count);
         string[] samplePaths = EvenlySpacedPaths(paths, nF);
@@ -809,6 +808,17 @@ public partial class MainViewModel
             if (neg is null) continue;
             if (lccField is not null)
                 Lcc.Apply(neg.Data, neg.Width, neg.Height, lccField);
+            else if (autoLens)
+            {
+                var embedded = LensMetadata.EstimateCorrections(samplePaths[fi]);
+                var choice = AutoLensCorrection.Select(embedded, AutoLensCorrection.IsUsable(embedded) ? null
+                    : AutoLensCorrection.MatchLensfun(samplePaths[fi]));
+                if (choice.Embedded is { Native.HasVignette: true } e)
+                    EmbeddedLensCorrections.ApplyVignetting(neg, e.Native);
+                else if (choice.Embedded is { HasVignette: true } e2)
+                    LensCorrections.ApplyVignette(neg.Data, neg.Width, neg.Height, e2.VignetteAmount, e2.VignetteFalloff);
+                else if (choice.Lensfun is { } c) LensfunCorrections.ApplyVignetting(neg, c);
+            }
             else if (lensfun is { IsUsable: true })
                 LensfunCorrections.ApplyVignetting(neg, lensfun);
             var dec = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone());
@@ -928,11 +938,19 @@ public partial class MainViewModel
         // rather than the finished frames keeps each split scan's virtual copies next to their
         // parent, since they are all contributed by one path.
         foreach (string p in SortedByName(paths)) AddFramesForPath(p);
-        foreach (var frame in Frames)
+        // Select per source before the first decode, inversion, thumbnail, or project registration.
+        var incomingFrames = Frames.ToArray();
+        long lensGeneration = _previews.Generation;
+        var choices = new Dictionary<string, AutoLensCorrection>();
+        foreach (string path in incomingFrames.Select(f => f.Path).Distinct())
         {
-            frame.Params.Lensfun = _lensfunCalibration;
-            frame.Params.LensfunEnabled = LensfunEnabled;
+            var embedded = await _readLensCorrectionAsync(path);
+            var calibration = AutoLensCorrection.IsUsable(embedded) ? null : await _matchLensfunAsync(path);
+            choices[path] = AutoLensCorrection.Select(embedded, calibration);
+            if (lensGeneration != _previews.Generation || !incomingFrames.SequenceEqual(Frames)) return;
         }
+        foreach (var frame in incomingFrames)
+            choices[frame.Path].Apply(frame.Params, LccEnabled && LccAvailable);
         // D-027: a new roll starts at the HDR tier this display shows in full. Seeded on the
         // frames BEFORE the first switch, so LoadParams adopts it like any stored value, and
         // before RegisterRoll, so the first .ncproj carries it — a default that lived only in the
@@ -1092,9 +1110,15 @@ public partial class MainViewModel
     /// <summary>Push a frame's stored FrameParams into all the UI controls (suppressing renders).</summary>
     private void LoadParams(FrameParams p)
     {
+        LoadAutoCropReview(p);
         _suppressRender = true;
         AdoptLensfun(p.Lensfun, p.LensfunEnabled);
         // Stage 1 — lens / sprocket / intent
+        _lensCorrectionDiagnostic = p.LensCorrectionDiagnostic;
+        _embeddedLens = p.EmbeddedLens;
+        _lensCorrectionOrigin = p.LensCorrectionOrigin;
+        _lensCorrectionHasVignette = p.LensCorrectionHasVignette;
+        LensCorrectionStatusText = LensOriginText();
         DistortionK1 = p.DistortionK1; VignetteAmount = p.VignetteAmount; VignetteFalloff = p.VignetteFalloff;
         // A missing runtime buffer must not erase the roll's declared enable choice.
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
@@ -1145,6 +1169,7 @@ public partial class MainViewModel
         // Geometry
         Rotation = p.Rotation; _quarterTurns = p.QuarterTurns; _flipH = p.FlipH; _flipV = p.FlipV;
         _cropRect = p.CropRect;
+        OnPropertyChanged(nameof(CanSyncReferenceCrop));
         _splitCell = p.SplitCell;
         if (!_calibrationDiagnosticsRollWide)
         {

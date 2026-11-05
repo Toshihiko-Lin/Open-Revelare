@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using OpenRevelare.Gui.Models;
 
 namespace OpenRevelare.Gui.ViewModels;
@@ -27,7 +27,9 @@ public partial class MainViewModel
     public string CompositionTargetLabel => Frames.Any(f => f.IsSelected)
         ? Loc.F($"勾选 {FrameScope.OtherFrames(Frames, CurrentFrame, true).Count} 帧")
         : Loc.F($"其余 {FrameScope.OtherFrames(Frames, CurrentFrame, false).Count} 帧");
-    public string CropSyncLabel => Loc.F($"同步裁切到{CompositionTargetLabel}");
+    public string CropSyncLabel => Loc.F($"同步本帧裁切到{CompositionTargetLabel}");
+    public bool CanSyncReferenceCrop => HasImage && !IsBusy && CurrentCrop is not null
+        && FrameScope.OtherFrames(Frames,CurrentFrame,Frames.Any(f=>f.IsSelected)).Count > 0;
     public string GeometrySyncLabel => Loc.F($"同步旋转、翻转和拉直到{CompositionTargetLabel}");
     public string SprocketSyncLabel => Loc.F($"同步齿孔遮罩到{CompositionTargetLabel}");
 

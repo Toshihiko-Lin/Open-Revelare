@@ -791,8 +791,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowProgress), nameof(HasTaskCenterContent), nameof(TaskCenterForegroundText), nameof(TaskCenterSummary))]
+    [NotifyPropertyChangedFor(nameof(CanEditLensCorrection))]
+    [NotifyPropertyChangedFor(nameof(CanAutoCrop))]
+    [NotifyPropertyChangedFor(nameof(CanSyncReferenceCrop))]
     private bool _isBusy;
-    [ObservableProperty] private bool _hasImage;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditLensCorrection))]
+    [NotifyPropertyChangedFor(nameof(CanAutoCrop))]
+    [NotifyPropertyChangedFor(nameof(CanSyncReferenceCrop))]
+    private bool _hasImage;
     [ObservableProperty] private string _fileName = "";
     [ObservableProperty] private HistogramData? _histogram;   // RGB histogram of the rendered positive
 
@@ -1015,6 +1022,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _lccStatus = Loc.T("未载入平场校正");
     partial void OnLccEnabledChanged(bool value)
     {
+        if (value && LccAvailable && !_restoring && !_configLoad && !_suppressRender
+            && (_lensCorrectionHasVignette || Frames.Any(f => !ReferenceEquals(f, CurrentFrame) && f.Params.LensCorrectionHasVignette)))
+        {
+            _lccEnabled = false;
+            OnPropertyChanged(nameof(LccEnabled));
+            StatusText = Loc.T("仍有元数据暗角校正：请先重置整卷滑块，再启用 LCC。");
+            return;
+        }
         NotifyLensfunInfo();
         foreach (RollFrame frame in Frames)
             frame.Params.LccFlatField = value && LccAvailable ? _lccFlatField : null;
@@ -1044,7 +1059,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             LccAvailable = true;
             bool wasEnabled = LccEnabled;
             LccEnabled = true;   // triggers render
-            foreach (RollFrame frame in Frames) frame.Params.LccFlatField = ff;
+            foreach (RollFrame frame in Frames) frame.Params.LccFlatField = LccEnabled ? ff : null;
             // Replacing an already-enabled field does not change the boolean property, but it
             // still changes the optical domain the stored endpoints were measured in.
             if (wasEnabled)
@@ -2020,6 +2035,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _sprocketOverlayDirty = true;
         _cropRect = FromDisplay(rect);
+        ClearAutoCropReviewAfterManualEdit();
+        OnPropertyChanged(nameof(CanSyncReferenceCrop));
         var s = _cropRect.Value;
         StatusText = Loc.F($"裁切 {s.X:F2},{s.Y:F2},{s.W:F2},{s.H:F2}");
         // A split frame's new rect moves its margin box, so the region on hand is the wrong part of
@@ -2030,6 +2047,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _sprocketOverlayDirty = true;
         _cropRect = null;
+        ClearAutoCropReviewAfterManualEdit();
+        OnPropertyChanged(nameof(CanSyncReferenceCrop));
         StatusText = Loc.T("已清除裁切");
         // Clearing a split frame's crop means it now owns the WHOLE scan — back to the strip.
         if (!ResyncSplitPreview()) ScheduleRender();
@@ -2220,8 +2239,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         PrintLutOutput = _printLutIndex > 0 ? PrintLutOutputName : "",
         // Stage 1 — lens corrections (pre-inversion, linear domain)
         DistortionK1 = DistortionK1,
+        LensCorrectionDiagnostic = _lensCorrectionDiagnostic,
+        EmbeddedLens = _embeddedLens,
         Lensfun = _lensfunCalibration,
         LensfunEnabled = LensfunEnabled,
+        LensCorrectionOrigin = _lensCorrectionOrigin,
+        LensCorrectionHasVignette = _lensCorrectionHasVignette,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
@@ -2259,6 +2282,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         FlipV = _flipV,
         // Suppressed while the crop frame is being positioned — see CropEditing. This is a RENDER
         // value; CommitLiveParams puts the real rect back before anything is STORED.
+        AutoCropReviewReason = _autoCropReviewReason,
+        AutoCropRecovery = _autoCropRecovery,
         CropRect = _cropEditing ? null : _cropRect,
         // Not suppressed with the crop above: the cell is where this frame's negative sits in the
         // strip, which does not stop being true while the crop tool is open.
@@ -2545,12 +2570,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         CalibrationSources.RequireCurrent(BuildParams());
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
         bool lensfunVignette = LensfunEnabled && _lensfunCalibration is { IsUsable: true, Vignetting: not null } && lcc is null;
-        if (lcc is null && !lensfunVignette && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
+        if (lcc is null && _embeddedLens is not { HasVignette: true } && !lensfunVignette && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
 
         var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone())
             .InheritSourceFrom(neg);
         if (lcc is not null)
             Lcc.Apply(src.Data, src.Width, src.Height, lcc);
+        else if (_embeddedLens is { HasVignette: true } embedded)
+            EmbeddedLensCorrections.ApplyVignetting(src, embedded);
         else if (lensfunVignette)
             LensfunCorrections.ApplyVignetting(src, _lensfunCalibration!);
         if (VignetteAmount != 0.0)
@@ -4172,7 +4199,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // a rendered positive and that render has to be the one the user is looking at.
         DMaxPerChannel = (double[])highlight.Clone(),
         DistortionK1 = DistortionK1, VignetteAmount = VignetteAmount, VignetteFalloff = VignetteFalloff,
+        LensCorrectionDiagnostic = _lensCorrectionDiagnostic,
+        EmbeddedLens = _embeddedLens,
         Lensfun = _lensfunCalibration, LensfunEnabled = LensfunEnabled,
+        LensCorrectionOrigin = _lensCorrectionOrigin,
+        LensCorrectionHasVignette = _lensCorrectionHasVignette,
         LccFlatField = LccEnabled && LccAvailable ? _lccFlatField : null,
         // Path A decoupling — MUST match BuildParams. The net judges a rendered positive and its
         // gains are folded straight into the highlight endpoint, which is then applied to a
@@ -4715,6 +4746,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _renderCts?.Cancel();
         // Stage 1 — lens / sprocket
+        _lensCorrectionDiagnostic = ""; _embeddedLens = null; _lensCorrectionOrigin = ""; _lensCorrectionHasVignette = false;
         DistortionK1 = 0; VignetteAmount = 0; VignetteFalloff = 2.5;
         SprocketEnabled = false; SprocketThreshold = 0.9;
         // Stage 1 — film base
@@ -4826,6 +4858,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void RetranslateText()
     {
+        OnPropertyChanged(nameof(AutoCropOutputHint));
+        OnPropertyChanged(nameof(CropBatchDetectionLabel));
+        NotifyAutoCropFailure();
         NotifyLensfunInfo();
         NotifyRollBroadcastHints();
         OnPropertyChanged(nameof(SmartCastFeedbackText));

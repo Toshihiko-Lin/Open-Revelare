@@ -20,10 +20,13 @@ public sealed class LensfunRollTests
         var config = new ImportConfig { AutoInvert = false, Lensfun = calibration, LensfunEnabled = enabled };
         config.Paths.AddRange(new[] { first, second });
         using var vm = new MainViewModel();
+        typeof(MainViewModel).GetField("_matchLensfunAsync", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(vm, (Func<string, Task<LensfunCalibration?>>)(p => Task.FromResult<LensfunCalibration?>(p == first || p == second ? calibration : null)));
         await vm.LoadRollWithConfigAsync(config);
         await Settle(vm);
         Assert.True(vm.LensfunAvailable);
-        Assert.Equal(enabled, vm.LensfunEnabled);
+        Assert.True(vm.LensfunEnabled); // automatic per-frame fallback ignores the old import enable switch
+        vm.LensfunEnabled = enabled;
         Assert.Contains(calibration.Profile, vm.LensfunProfileText);
         Assert.All(vm.Frames, f =>
         {
@@ -53,6 +56,45 @@ public sealed class LensfunRollTests
         Assert.False(vm.LensfunAvailable);
         Assert.False(vm.LensfunEnabled);
         Assert.All(vm.Frames, f => { Assert.Null(f.Params.Lensfun); Assert.False(f.Params.LensfunEnabled); });
+    }
+
+    [Fact]
+    public async Task MixedRollChoosesEachSourceIndependentlyAndReopenKeepsSavedEdits()
+    {
+        string folder = Path.Combine(TestDataIsolation.Root, "auto-lens-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string first = WriteTiff(folder, "a.tif"), second = WriteTiff(folder, "b.tif"), third = WriteTiff(folder, "c.tif");
+        var embedded = new LensCorrectionEstimate("Camera", 100, 8, 0.01, 0.2, 2.5, "Embedded");
+        var calibration = LensfunCorrectionTests.Calibration();
+        using var vm = new MainViewModel();
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        int reads = 0;
+        typeof(MainViewModel).GetField("_readLensCorrectionAsync", flags)!.SetValue(vm,
+            (Func<string, Task<LensCorrectionEstimate?>>)(p => { reads++; return Task.FromResult<LensCorrectionEstimate?>(p == first ? embedded : null); }));
+        typeof(MainViewModel).GetField("_matchLensfunAsync", flags)!.SetValue(vm,
+            (Func<string, Task<LensfunCalibration?>>)(p =>
+            {
+                Assert.NotEqual(first, p); // embedded wins without consulting Lensfun
+                return Task.FromResult<LensfunCalibration?>(p == second ? calibration : null);
+            }));
+        var config = new ImportConfig { AutoInvert = false }; config.Paths.AddRange(new[] { first, second });
+        await vm.LoadRollWithConfigAsync(config); await Settle(vm);
+        Assert.Equal(0.01, vm.Frames[0].Params.DistortionK1);
+        Assert.False(vm.Frames[0].Params.LensfunEnabled);
+        Assert.True(vm.Frames[1].Params.LensfunEnabled);
+        await vm.AddImagesAsync(new[] { third });
+        Assert.False(vm.Frames[2].Params.LensfunEnabled);
+        Assert.Equal(0, vm.Frames[2].Params.DistortionK1);
+        Assert.Equal(0, vm.Frames[2].Params.VignetteAmount);
+        vm.DistortionK1 = 0.03;
+        string project = Path.Combine(folder, "saved.ncproj");
+        Assert.True(await vm.SaveProjectAsync(project));
+        int before = reads;
+        await vm.OpenProjectAsync(project); await Settle(vm);
+        Assert.Equal(before, reads); // reopening restores saved parameters rather than reselecting
+        Assert.Equal(0.03, vm.DistortionK1);
+        Assert.True(vm.Frames[1].Params.LensfunEnabled);
+        Assert.False(vm.Frames[2].Params.LensfunEnabled);
     }
 
     private static async Task Settle(MainViewModel vm)

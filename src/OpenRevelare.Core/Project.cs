@@ -511,8 +511,12 @@ public static class Project
             ["dust_enabled"] = p.DustEnabled,
             ["dust_spots"] = DustSpots(p.DustSpots),
             ["lensfun_override"] = null, // reserved for legacy Python project compatibility
+            ["embedded_lens"] = p.EmbeddedLens is null ? null : JsonSerializer.SerializeToNode(p.EmbeddedLens),
             ["lensfun_calibration"] = p.Lensfun is null ? null : JsonSerializer.SerializeToNode(p.Lensfun),
             ["lensfun_enabled"] = p.LensfunEnabled,
+            ["lens_correction_diagnostic"] = p.LensCorrectionDiagnostic,
+            ["lens_correction_origin"] = p.LensCorrectionOrigin,
+            ["lens_correction_has_vignette"] = p.LensCorrectionHasVignette,
             ["vignette_amount"] = p.VignetteAmount,
             ["vignette_falloff"] = p.VignetteFalloff,
             ["distortion_k1"] = p.DistortionK1,
@@ -534,6 +538,8 @@ public static class Project
             ["curve_preserve_hue"] = p.CurvePreserveHue,
             ["curve_has_endpoints"] = p.CurveHasEndpoints,
             // Geometry
+            ["auto_crop_review"] = p.AutoCropReviewReason,
+            ["auto_crop_recovery"] = p.AutoCropRecovery is null ? null : JsonSerializer.SerializeToNode(p.AutoCropRecovery),
             ["crop_rect"] = p.CropRect is { } c ? new JsonArray(c.X, c.Y, c.W, c.H) : null,
             // The frame's cell of a split strip, which its crop overwrites and so cannot imply.
             // Reopening a roll has to restore it or a broadcast crop would collapse the copies.
@@ -596,8 +602,12 @@ public static class Project
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),
             VignetteFalloff = Dbl(d, "vignette_falloff", 2.5),
             DistortionK1 = Dbl(d, "distortion_k1", 0.0),
+            EmbeddedLens = d["embedded_lens"]?.Deserialize<EmbeddedLensCalibration>() is { IsUsable: true } embedded ? embedded : null,
             Lensfun = d["lensfun_calibration"]?.Deserialize<LensfunCalibration>(),
             LensfunEnabled = Bool(d, "lensfun_enabled", false),
+            LensCorrectionDiagnostic = Str(d, "lens_correction_diagnostic", ""),
+            LensCorrectionOrigin = Str(d, "lens_correction_origin", ""),
+            LensCorrectionHasVignette = Bool(d, "lens_correction_has_vignette", false),
             WbGains = Vec3(d, "wb_gains", 1, 1, 1),
             ExposureEv = Dbl(d, "exposure_ev", 0.0),
             BlackPoint = Dbl(d, "black_point", 0.0),
@@ -614,6 +624,8 @@ public static class Project
             // Absent in projects written before endpoints were draggable: those curves have
             // interior points only and must keep ramping into the corners.
             CurveHasEndpoints = Bool(d, "curve_has_endpoints", false),
+            AutoCropReviewReason = Str(d,"auto_crop_review",""),
+            AutoCropRecovery = d["auto_crop_recovery"]?.Deserialize<AutoCropRecovery>(),
             CropRect = DesRect(d["crop_rect"]),
             // Absent in projects written before the cell was recorded; those fall back to the
             // frame's crop, which for an untouched split import is exactly the cell.

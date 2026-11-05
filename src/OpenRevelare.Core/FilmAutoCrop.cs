@@ -1,10 +1,10 @@
-namespace OpenRevelare.Core;
+﻿namespace OpenRevelare.Core;
 
 public enum FilmCropMode { ImageArea, WithSprockets }
 public enum FilmPolarity { Negative, Positive }
 
 /// <summary>135 frame detection in uncropped, oriented, linear pixels. No render or mask is used.</summary>
-public static class FilmAutoCrop
+public static partial class FilmAutoCrop
 {
     // SMPTE ST 93 / ISO 491: lateral displacement between the two perforation rows.
     // 29.5 mm was not the row spacing and biased the transverse ruler and base samples.
@@ -17,15 +17,17 @@ public static class FilmAutoCrop
         public double RotationCorrection { get; init; }
         public FilmPolarity Polarity { get; init; }
         public bool HasPerforationRuler { get; init; }
-        /// <summary>Centre of the perforation row pair across the strip, normalised on the same
-        /// frame as <see cref="Image"/>. The film is physically centred on that pair, while an
-        /// exposed gate can sit up to a millimetre off it — and on a reversal film the resulting
-        /// sliver of light table above the border crop is glaring. NaN when no ruler was found.</summary>
+        /// <summary>Strip centre across the film, normalised on the same frame as
+        /// <see cref="Image"/>. Measured outer edges take precedence over the hole-pair estimate.
+        /// NaN when neither can be measured.</summary>
         public double AcrossCentre { get; init; } = double.NaN;
-        /// <summary>35 mm film width normalised on the across axis of the same frame. Caps the
-        /// border crop so an overestimated gate scale can never grow it past the film. NaN when
-        /// unknown.</summary>
+        /// <summary>Film width normalised on the across axis. Measured from the outer edges
+        /// when visible, otherwise estimated from the ruler. Caps the border crop.</summary>
         public double FilmWidth { get; init; } = double.NaN;
+        public bool UsedRollReference { get; init; }
+        /// <summary>Existing straighten angle applied before detection; roll comparisons use
+        /// the total angle rather than mistaking a saved manual adjustment for an outlier.</summary>
+        public double AppliedRotation { get; init; }
     }
     /// <summary>A starting box for a frame the detector could not confirm, with the angle that
     /// levels its strip. <see cref="Rect"/> is expressed in the frame rotated by
@@ -36,12 +38,16 @@ public static class FilmAutoCrop
     /// fill is a display convention, not sensor light: it must not become the hole threshold.</summary>
     public static ImageBuffer Prepare(ImageBuffer source, FrameParams parameters)
     {
-        var image = parameters.DistortionK1 == 0 ? source : LensCorrections.ApplyDistortion(source, parameters.DistortionK1);
+        var image = LensCorrections.ApplyGeometry(source, parameters);
         image = Geometry.ApplyOrientation(image, parameters.QuarterTurns, parameters.FlipH, parameters.FlipV);
         return Geometry.ApplyRotation(image, parameters.Rotation, fill: 0);
     }
 
-    public static Detection? Detect(ImageBuffer source) => DetectCore(source, straighten: true);
+    public static Detection? Detect(ImageBuffer source)
+    {
+        var detection = DetectCore(source, straighten: true);
+        return detection is null ? null : MeasureFilmEdges(source, detection);
+    }
 
     /// <summary>
     /// Best-effort frame for a scan the detector could not confirm — a slide photographed on a
@@ -150,7 +156,8 @@ public static class FilmAutoCrop
 
 
     private static Detection? DetectCore(ImageBuffer source, bool straighten,
-        (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? knownRuler = null)
+        (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? knownRuler = null,
+        bool rollSupported = false)
     {
         if (source.Width < 64 || source.Height < 64) return null;
         var image = Resample.Box(source, 1200);
@@ -204,11 +211,14 @@ public static class FilmAutoCrop
                 double correction = -ruler.Angle;
                 // Rotation can join a clipped hole to the board or split an edge component.
                 // The measured ruler is already known; do not rediscover it after resampling.
-                var aligned = DetectCore(Geometry.ApplyRotation(source, correction, fill: 0), straighten: false,
-                    (ruler.Horizontal, ruler.Scale, ruler.Centre, 0, ruler.AcrossScale));
+                // Prefer a fresh ruler in the corrected coordinate system. If rotation clips
+                // holes, transform the original row centre about the image centre instead.
+                var levelled = Geometry.ApplyRotation(source, correction, fill: 0);
+                var aligned = DetectCore(levelled, straighten: false,
+                    RulerAfterRotation(Resample.Box(levelled, 1200), ruler));
                 return aligned is null ? null : aligned with { RotationCorrection = correction };
             }
-            if (FindFrameGutters(image, ruler.Horizontal, ruler.Scale, ruler.AcrossScale, ruler.Centre, out var stableBase, out var shoulderTone, out bool darkBase) is { } gutterFrame)
+            if (FindFrameGutters(image, ruler.Horizontal, ruler.Scale, ruler.AcrossScale, ruler.Centre, out var stableBase, out var shoulderTone, out bool darkBase, rollSupported) is { } gutterFrame)
                 return gutterFrame with { Width = source.Width, Height = source.Height };
             bool horizontal = ruler.Horizontal;
             int along = horizontal ? w : h, across = horizontal ? h : w;
@@ -336,13 +346,14 @@ public static class FilmAutoCrop
     }
 
     private static Detection? FindFrameGutters(ImageBuffer image, bool horizontal, double scale, double acrossScale, double centre,
-        out Func<int, int, bool> stableBase, out double[] shoulderTone, out bool darkBase)
+        out Func<int, int, bool> stableBase, out double[] shoulderTone, out bool darkBase, bool rollSupported = false)
     {
         stableBase = (_, _) => true;
         shoulderTone = Array.Empty<double>();
         darkBase = false;
         int w = image.Width, h = image.Height, along = horizontal ? w : h, across = horizontal ? h : w;
         int low = (int)Math.Round(centre - 12 * acrossScale), high = (int)Math.Round(centre + 12 * acrossScale);
+        (low, high) = AcrossGateBounds(image, horizontal, acrossScale, centre, low, high);
         if (low < 2 || high >= across - 2) return null;
         var baseColour = new double[along * 3];
         shoulderTone = new double[along];
@@ -358,13 +369,13 @@ public static class FilmAutoCrop
             for (int c = 0; c < 3; c++)
             {
                 var values = new double[6];
-                // The unexposed shoulder is only ~0.69 mm wide: outside the 24 mm picture,
-                // inside the nearest perforation edge at ~12.69 mm from the strip centre.
+                // Sample just outside the observed gate, inside the perforations. Sampling
+                // only at nominal 24 mm bounds can enter the exposure on a real, wider gate.
                 for (int j = 0; j < 3; j++)
                 {
-                    int offset = (int)Math.Round((12.20 + .15 * j) * acrossScale);
-                    values[j] = LogAt(a, Math.Clamp((int)Math.Round(centre) - offset, 0, across - 1), c);
-                    values[j + 3] = LogAt(a, Math.Clamp((int)Math.Round(centre) + offset, 0, across - 1), c);
+                    int offset = Math.Max(1, (int)Math.Round((.20 + .15 * j) * acrossScale));
+                    values[j] = LogAt(a, Math.Clamp(low - offset, 0, across - 1), c);
+                    values[j + 3] = LogAt(a, Math.Clamp(high + offset, 0, across - 1), c);
                 }
                 Array.Sort(values); baseColour[a * 3 + c] = (values[2] + values[3]) / 2;
             }
@@ -421,29 +432,59 @@ public static class FilmAutoCrop
         int rowHigh = Math.Clamp((int)Math.Round(centre + PerforationRowSpacing / 2 * acrossScale), 0, across - 1);
         int pitch = Math.Max(4, (int)Math.Round(4.75 * scale));
         var leftVisible = new bool[along]; var rightVisible = new bool[along];
+        var rowLowLight = new double[along]; var rowHighLight = new double[along];
+        int rowRadius = Math.Max(1, (int)Math.Round(acrossScale * .6));
+        for (int a = 0; a < along; a++)
+            for (int offset = -rowRadius; offset <= rowRadius; offset++)
+            {
+                rowLowLight[a] = Math.Max(rowLowLight[a], LightAt(a, Math.Clamp(rowLow + offset, 0, across - 1)));
+                rowHighLight[a] = Math.Max(rowHighLight[a], LightAt(a, Math.Clamp(rowHigh + offset, 0, across - 1)));
+            }
         bool RowsLit(int x0, int x1)
         {
             double maxLow = 0, maxHigh = 0;
             for (int x = Math.Max(0, x0); x <= Math.Min(along - 1, x1); x++)
             {
-                maxLow = Math.Max(maxLow, LightAt(x, rowLow));
-                maxHigh = Math.Max(maxHigh, LightAt(x, rowHigh));
+                maxLow = Math.Max(maxLow, rowLowLight[x]);
+                maxHigh = Math.Max(maxHigh, rowHighLight[x]);
             }
             return Math.Min(maxLow, maxHigh) >= referenceWhite * .35;
         }
         for (int a = 0; a < along; a++)
         {
-            leftVisible[a] = RowsLit(a - pitch, a - edge);
-            rightVisible[a] = RowsLit(a + edge, a + pitch);
+            leftVisible[a] = RowsLit(a - pitch, a - edge)
+                || a < pitch && RowsLit(a + edge, a + pitch);
+            rightVisible[a] = RowsLit(a + edge, a + pitch)
+                || a + pitch >= along && RowsLit(a - pitch, a - edge);
         }
 
         var basePrefix = new double[(along + 1) * 3];
         for (int a = 0; a < along; a++) for (int c = 0; c < 3; c++) basePrefix[(a + 1) * 3 + c] = basePrefix[a * 3 + c] + baseColour[a * 3 + c];
+        bool ContinuousAtBoundary(int at)
+        {
+            int l0 = Math.Max(0, at - 2 * edge), l1 = Math.Max(1, at - edge);
+            int r0 = Math.Min(along - 1, at + edge), r1 = Math.Min(along, at + 2 * edge);
+            double jump = 0, relative = 0;
+            for (int c = 0; c < 3; c++)
+            {
+                double left = (basePrefix[l1 * 3 + c] - basePrefix[l0 * 3 + c]) / (l1 - l0);
+                double right = (basePrefix[r1 * 3 + c] - basePrefix[r0 * 3 + c]) / (r1 - r0);
+                double a = Math.Exp(left), b = Math.Exp(right);
+                jump += Math.Abs(left - right);
+                relative += Math.Abs(a - b) / Math.Max(referenceWhite * .01, Math.Max(a, b));
+            }
+            return jump / 3 <= .35 || relative / 3 <= .2;
+        }
         // Burned leaders can combine clear and dark bases inside a nominal frame. Check both
         // local steps and quarter-frame averages so gradual optical burn transitions cannot slip by.
         bool HasStableBase(int a, int b)
         {
-            if (!leftVisible[a] || !rightVisible[b]) return false;
+            // With an independently established roll size, an inward hole pair can validate
+            // a boundary whose outward holes are hidden by the holder or gap phase. The base
+            // must remain continuous ACROSS that boundary, so an opaque holder edge cannot
+            // impersonate an exposure edge simply by ending at the expected frame length.
+            if (!leftVisible[a] && !(rollSupported && RowsLit(a + edge, a + pitch) && ContinuousAtBoundary(a))) return false;
+            if (!rightVisible[b] && !(rollSupported && RowsLit(b - pitch, b - edge) && ContinuousAtBoundary(b))) return false;
             for (int x = a + 2 * edge; x < b - 2 * edge; x += edge)
             {
                 double jump = 0, linearShift = 0;
@@ -562,8 +603,23 @@ public static class FilmAutoCrop
         var polarity = frameBaseLinear < referenceWhite * .06
             ? FilmPolarity.Positive
             : signedTone >= 0 ? FilmPolarity.Negative : FilmPolarity.Positive;
-        var rect = horizontal ? new Rect(start / (double)w, low / (double)h, (end - start) / (double)w, (high - low) / (double)h)
-            : new Rect(low / (double)w, start / (double)h, (high - low) / (double)w, (end - start) / (double)h);
+        // A step produces a flat maximum over several samples. Taking the first winning
+        // sample shifts BOTH edges left, making the narrow 37 mm margins visibly unequal.
+        // Locate the transition itself, independently on each side, with pixel-edge coordinates.
+        double Refine(int at, int sign)
+        {
+            double weighted = 0, weight = 0;
+            int radius = Math.Max(2, (int)Math.Ceiling(scale * .5));
+            for (int x = Math.Max(1, at - radius); x <= Math.Min(along - 1, at + radius); x++)
+            {
+                double v = Math.Max(0, sign * (profile[x] - profile[x - 1]));
+                weighted += x * v; weight += v;
+            }
+            return weight > .01 ? weighted / weight : at;
+        }
+        double refinedStart = Refine(start, 1), refinedEnd = Refine(end, -1);
+        var rect = horizontal ? new Rect(refinedStart / w, low / (double)h, (refinedEnd - refinedStart) / w, (high - low) / (double)h)
+            : new Rect(low / (double)w, refinedStart / h, (high - low) / (double)w, (refinedEnd - refinedStart) / h);
         return new Detection(rect, Math.Max(.12, best * 2), image.Width, image.Height)
         {
             Polarity = polarity,
@@ -577,20 +633,27 @@ public static class FilmAutoCrop
     {
         // A thin negative can be almost as bright as its holes; a fixed low threshold merges
         // them into the film base. Each threshold must independently recover both periodic rows.
+        var (light, white) = PerforationLight(image);
         foreach (double fraction in new[] { .72, .84, .92, .97, .60 })
-            if (PerforationRulerAtThreshold(image, fraction) is { } ruler) return ruler;
+            if (PerforationRulerAtThreshold(image, fraction, light, white) is { } ruler) return ruler;
         return null;
     }
 
-    private static (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? PerforationRulerAtThreshold(ImageBuffer image, double fraction)
+    private static (double[] Light, double White) PerforationLight(ImageBuffer image)
     {
-        int w = image.Width, h = image.Height;
-        var light = new double[w * h];
+        var light = new double[image.Width * image.Height];
         for (int i = 0; i < light.Length; i++) light[i] = (image.Data[3 * i] + image.Data[3 * i + 1] + image.Data[3 * i + 2]) / 3;
         var sorted = light.Order().ToArray();
-        double cut = sorted[(int)(sorted.Length * 0.99)] * fraction;
+        return (light, sorted[(int)(sorted.Length * .99)]);
+    }
+
+    private static (bool Horizontal, double Scale, double Centre, double Angle, double AcrossScale)? PerforationRulerAtThreshold(
+        ImageBuffer image, double fraction, double[] light, double white)
+    {
+        int w = image.Width, h = image.Height;
+        double cut = white * fraction;
         var seen = new bool[light.Length];
-        var points = new List<(double X, double Y)>();
+        var points = new List<(double X, double Y, int X0, int Y0, int X1, int Y1)>();
         var queue = new Queue<int>();
         for (int i = 0; i < light.Length; i++)
         {
@@ -606,21 +669,25 @@ public static class FilmAutoCrop
                 if (y > 0) Visit(p - w); if (y + 1 < h) Visit(p + w);
             }
             int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
-            if (x0 == 0 || y0 == 0 || x1 == w - 1 || y1 == h - 1 || cw < 3 || ch < 3
+            bool clipped = x0 == 0 || y0 == 0 || x1 == w - 1 || y1 == h - 1;
+            if ((x0 == 0 || x1 == w - 1) && (y0 == 0 || y1 == h - 1) || cw < 3 || ch < 3
                 || cw > w * .08 || ch > h * .12 || count < cw * ch * .55) continue;
             double ratio = (double)cw / ch;
-            if (ratio < .45 || ratio > 2.2) continue;
-            points.Add(((x0 + x1) / 2.0, (y0 + y1) / 2.0));
+            if (ratio < (clipped ? .2 : .45) || ratio > (clipped ? 5 : 2.2)) continue;
+            points.Add(((x0 + x1) / 2.0, (y0 + y1) / 2.0, x0, y0, x1, y1));
         }
         foreach (bool horizontal in new[] { true, false })
         {
-            double A((double X, double Y) p) => horizontal ? p.X : p.Y;
-            double C((double X, double Y) p) => horizontal ? p.Y : p.X;
+            double A((double X, double Y, int X0, int Y0, int X1, int Y1) p) => horizontal ? p.X : p.Y;
+            double C((double X, double Y, int X0, int Y0, int X1, int Y1) p) => horizontal ? p.Y : p.X;
             int across = horizontal ? h : w;
-            var rows = new List<(double Centre, double Pitch, int Count, double Slope)>();
+            var rows = new List<(double Centre, double Pitch, int Count, double Slope, bool Clipped, double Inner)>();
             foreach (var seed in points)
             {
                 var row = points.Where(p => Math.Abs(C(p) - C(seed)) < across * .045).OrderBy(A).ToArray();
+                // Only accept clipping across the strip. A component touching an along edge
+                // may be the light board/holder rather than an individual perforation.
+                row = row.Where(p => horizontal ? p.X0 > 0 && p.X1 < w - 1 : p.Y0 > 0 && p.Y1 < h - 1).ToArray();
                 if (row.Length < 4) continue;
                 double centre = row.Average(C);
                 if (rows.Any(r => Math.Abs(r.Centre - centre) < across * .045)) continue;
@@ -629,11 +696,21 @@ public static class FilmAutoCrop
                 if (pitch < 5 || gaps.Count(g => Math.Abs(g / pitch - 1) < .15) < gaps.Length * .7) continue;
                 double meanA = row.Average(A);
                 double variance = row.Sum(p => Math.Pow(A(p) - meanA, 2));
-                double slope = row.Sum(p => (A(p) - meanA) * (C(p) - centre)) / Math.Max(1, variance);
-                double residual = Math.Sqrt(row.Average(p => Math.Pow(C(p) - centre - slope * (A(p) - meanA), 2)));
+                bool lowClipped = row.Any(p => horizontal ? p.Y0 == 0 : p.X0 == 0);
+                bool highClipped = row.Any(p => horizontal ? p.Y1 == h - 1 : p.X1 == w - 1);
+                if (lowClipped && highClipped) continue;
+                bool rowClipped = lowClipped || highClipped;
+                // A clipped component's visible centroid moves with the clipping. Its inner
+                // edge stays measurable and supplies an unbiased line/angle.
+                double Line((double X, double Y, int X0, int Y0, int X1, int Y1) p) => !rowClipped ? C(p)
+                    : lowClipped ? (horizontal ? p.Y1 + 1 : p.X1 + 1) : (horizontal ? p.Y0 : p.X0);
+                double lineCentre = row.Average(Line);
+                double slope = row.Sum(p => (A(p) - meanA) * (Line(p) - lineCentre)) / Math.Max(1, variance);
+                double residual = Math.Sqrt(row.Average(p => Math.Pow(Line(p) - lineCentre - slope * (A(p) - meanA), 2)));
                 if (residual > pitch * .12) continue;
                 centre += slope * ((horizontal ? w : h) / 2.0 - meanA);
-                rows.Add((centre, pitch, row.Length, slope));
+                lineCentre += slope * ((horizontal ? w : h) / 2.0 - meanA);
+                rows.Add((centre, pitch, row.Length, slope, rowClipped, lineCentre));
             }
             foreach (var a in rows.OrderByDescending(r => r.Count)) foreach (var b in rows.OrderByDescending(r => r.Count))
             {
@@ -641,7 +718,19 @@ public static class FilmAutoCrop
                 if (distance < across * .25 || Math.Abs(distance / (scale * PerforationRowSpacing) - 1) > .12
                     || Math.Abs(a.Pitch / b.Pitch - 1) > .10 || Math.Abs(a.Slope - b.Slope) > .025) continue;
                 double angle = Math.Atan((a.Slope + b.Slope) / 2) * 180 / Math.PI * (horizontal ? 1 : -1);
-                return (horizontal, scale, (a.Centre + b.Centre) / 2, angle, distance / PerforationRowSpacing);
+                double centre = (a.Centre + b.Centre) / 2;
+                double acrossScale = distance / PerforationRowSpacing;
+                if (a.Clipped || b.Clipped)
+                {
+                    // Pitch still gives a physical scale when the source cuts through a row.
+                    // Two inner edges locate the strip centre without inventing hole extents;
+                    // with one complete row, use that row and the known row spacing.
+                    acrossScale = scale;
+                    centre = a.Clipped && b.Clipped ? (a.Inner + b.Inner) / 2
+                        : a.Clipped ? b.Centre - PerforationRowSpacing * scale / 2
+                        : a.Centre + PerforationRowSpacing * scale / 2;
+                }
+                return (horizontal, scale, centre, angle, acrossScale);
             }
         }
         return null;

@@ -28,12 +28,23 @@ public sealed class CropAspectPresetTests
     public void Custom_or_unknown_dimensions_show_free(double width, double height)
         => Assert.Equal((0, (double?)null), CropAspectPresets.Match(width, height));
     [Fact]
+    public void Automatic135OutputChoiceIsIndependentOfTheManualAspectPreset()
+    {
+        using var vm = new OpenRevelare.Gui.ViewModels.MainViewModel();
+        Assert.True(vm.AutoCropContentMode); Assert.False(vm.AutoCropIncludeSprockets);
+        vm.AutoCropIncludeSprockets = true; Assert.False(vm.AutoCropContentMode);
+        Assert.Contains("35:37", vm.AutoCropOutputHint); Assert.Contains("37:35", vm.AutoCropOutputHint);
+        vm.AutoCropContentMode = true; Assert.False(vm.AutoCropIncludeSprockets);
+        Assert.Contains("3:2", vm.AutoCropOutputHint);
+    }
+
+    [Fact]
     public void Automatic_crop_uses_the_shared_preset_and_does_not_silently_replace_other_ratios()
     {
         Assert.Equal(OpenRevelare.Core.FilmCropMode.ImageArea, CropAspectPresets.AutoMode(0));
         Assert.Equal(OpenRevelare.Core.FilmCropMode.ImageArea, CropAspectPresets.AutoMode(1));
         Assert.Equal(OpenRevelare.Core.FilmCropMode.WithSprockets, CropAspectPresets.AutoMode(2));
-        Assert.Equal(OpenRevelare.Core.FilmCropMode.ImageArea, CropAspectPresets.AutoMode(8));
+        Assert.Null(CropAspectPresets.AutoMode(8));
         foreach (int index in new[] { -1, 3, 4, 5, 6, 7, 9, 10 }) Assert.Null(CropAspectPresets.AutoMode(index));
     }
 

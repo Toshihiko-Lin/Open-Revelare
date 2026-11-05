@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
 using MetadataExtractor;
@@ -13,7 +13,11 @@ public sealed record LensCaptureInfo(string Make, string Camera, string Lens, do
     /// <summary>Reads metadata only. Never unpacks or demosaics the RAW image.</summary>
     public static LensCaptureInfo Read(string path)
     {
-        var directories = ImageMetadataReader.ReadMetadata(path);
+        return Read(ImageMetadataReader.ReadMetadata(path));
+    }
+
+    public static LensCaptureInfo Read(IReadOnlyList<MetadataExtractor.Directory> directories)
+    {
         var camera = directories.OfType<ExifIfd0Directory>().FirstOrDefault();
         var exposure = directories.OfType<ExifSubIfdDirectory>().FirstOrDefault(d =>
             d.ContainsTag(0xa434) || d.ContainsTag(0x920a) || d.ContainsTag(0x829d));

@@ -1,4 +1,4 @@
-namespace OpenRevelare.Core;
+﻿namespace OpenRevelare.Core;
 
 /// <summary>
 /// Manual copy-lens corrections applied to the linear RAW BEFORE inversion —
@@ -7,6 +7,25 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class LensCorrections
 {
+    /// <summary>Source-to-crop geometry only: the same base maps and manual residual as rendering.
+    /// Detection intentionally excludes LCC/vignette/exposure to preserve physical perforation contrast.</summary>
+    public static ImageBuffer ApplyGeometry(ImageBuffer source, FrameParams parameters)
+    {
+        ImageBuffer result = source;
+        if (parameters.EmbeddedLens is { IsUsable: true } native)
+        {
+            if (native.HasDistortion)
+                result = EmbeddedLensCorrections.Apply(source, new FrameParams {
+                    EmbeddedLens = native with { VignetteKnots = null, VignettePolynomial = null } });
+        }
+        else if (LensfunCorrections.IsActive(parameters) && parameters.Lensfun!.Distortion is not null)
+            result = LensfunCorrections.Apply(source, new FrameParams {
+                LensfunEnabled = true, Lensfun = parameters.Lensfun with { Vignetting = null } });
+        if (parameters.DistortionK1 != 0)
+            result = ApplyDistortion(result, parameters.DistortionK1);
+        return result;
+    }
+
     /// <summary>
     /// Single-parameter radial distortion correction (backward map, bilinear).
     /// k1&lt;0 corrects barrel, k1&gt;0 pincushion; 0 = pass-through. Out-of-bounds

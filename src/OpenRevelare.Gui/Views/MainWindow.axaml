@@ -1380,19 +1380,31 @@
                                     <StackPanel Spacing="4">
                                         <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
                                         <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T 'Lensfun 按首张拍摄参数校正整卷；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。'}" />
+                                                   Text="{i18n:T '自动来源按帧保存；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。'}" />
                                         <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
                                                   IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}" />
                                         <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
                                         <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                   Text="{i18n:T '内嵌完整曲线优先，其次 Lensfun；滑块仅作额外微调。重新自动选择会重置微调；关闭自动校正保留微调。操作可撤销。'}" />
+                                        <Button Content="{i18n:T '自动选择当前帧校正'}" Click="OnAutoLensCorrectionCurrentClick"
+                                                HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                        <Button Content="{i18n:T '逐帧自动校正整卷'}" Click="OnAutoLensCorrectionRollClick" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                        <TextBlock Classes="groupHint" IsVisible="{Binding IsReadingLensCorrection}" Text="{i18n:T '正在读取镜头参数…'}" />
                                         <Grid ColumnDefinitions="*,*" Margin="0,4,0,2">
-                                            <Button Grid.Column="0" Content="{i18n:T '自动读取镜头校正'}" Click="OnAutoLensCorrectionCurrentClick"
-                                                    HorizontalAlignment="Stretch" Margin="0,0,3,0" IsEnabled="{Binding HasImage}" />
-                                            <Button Grid.Column="1" Content="{i18n:T '应用到整卷'}" Click="OnAutoLensCorrectionRollClick"
-                                                    HorizontalAlignment="Stretch" Margin="3,0,0,0" IsEnabled="{Binding HasImage}" />
+                                            <Button Grid.Column="0" Content="{i18n:T '同步滑块到选中帧'}" Click="OnSyncLensSelectedClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '同步滑块到整卷'}" Click="OnSyncLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,*" Margin="0,0,0,2">
+                                            <Button Grid.Column="0" Content="{i18n:T '重置当前帧滑块'}" Click="OnResetLensCurrentClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '重置整卷滑块'}" Click="OnResetLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
                                         </Grid>
                                         <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap" Margin="0,2,0,2"
                                                    IsVisible="{Binding HasLensCorrectionStatus}" />
+                                        <Grid ColumnDefinitions="*,*" Margin="0,0,0,2">
+                                            <Button Grid.Column="0" Content="{i18n:T '关闭当前帧自动校正'}" Click="OnDisableAutoLensCurrentClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '关闭整卷自动校正'}" Click="OnDisableAutoLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                        </Grid>
                                         <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
@@ -1579,13 +1591,12 @@
                             <!-- Crop and straightening controls. Orientation sync lives by the preview tools. -->
                             <Expander Header="{i18n:T '裁切'}">
                                 <StackPanel Spacing="6">
-                                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                               Text="{i18n:T '135 自动裁切：自动识别正片 / 负片并拉直；整卷统一尺度，无法可靠识别的帧保留原裁切。'}" />
+                                    <TextBlock Classes="fieldLabel" FontWeight="SemiBold" Text="{i18n:T '手动裁切 · 所有片幅'}" />
                                     <Grid ColumnDefinitions="Auto,*">
                                         <TextBlock Grid.Column="0" Classes="fieldLabel spine" Text="{i18n:T '比例预设'}" />
                                         <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
-                                                  SelectedIndex="0" SelectionChanged="OnCropPresetChanged"
-                                                  ToolTip.Tip="{i18n:T '自动裁切与拖框共用此比例；自由时自动裁切按 135 内容 (3:2)。其他片幅比例用于手动裁切。'}">
+                                                  SelectedIndex="0" SelectionChanged="OnCropPresetChanged" IsEnabled="{Binding CanAutoCrop}"
+                                                  ToolTip.Tip="{i18n:T '选择拖框比例；自由不锁定比例。'}">
                                             <ComboBoxItem Content="{i18n:T '自由'}" />
                                             <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
                                             <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
@@ -1598,24 +1609,12 @@
                                             <ComboBoxItem Content="{i18n:T '6×12 全景 (2:1)'}" />
                                         </ComboBox>
                                     </Grid>
-                                    <Grid ColumnDefinitions="*,*">
-                                        <Button Grid.Column="0" Content="{i18n:T '自动裁切本帧'}" Click="OnAutoCropCurrentClick"
-                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Column="1" Content="{i18n:T '自动裁切选中 / 整卷'}" Click="OnAutoCropRollClick" Margin="6,0,0,0"
-                                                IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
-                                                ToolTip.Tip="{i18n:T '有勾选时只处理勾选帧，否则处理整卷；相同源尺寸与方向使用统一裁切尺度。'}" />
-                                    </Grid>
-                                    <Button Content="{i18n:T '取消自动裁切'}" Click="OnCancelAutoCropClick" IsVisible="{Binding IsAutoCropping}" />
-                                    <Button Click="OnApplyCropClick" IsEnabled="{Binding HasImage}"
-                                            Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
-                                            ToolTip.Tip="{i18n:T '把本帧的裁切应用到勾选帧，未勾选则整卷；会按各帧底片重定位'}" />
-
                                     <Grid ColumnDefinitions="*,Auto">
                                         <ToggleButton Name="CropBtn" Grid.Column="0" Classes="sampling"
                                                       Click="OnCropClick" IsEnabled="{Binding HasImage}">
                                             <Grid ColumnDefinitions="Auto,*">
                                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCrop}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '裁切（拖框）'}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '拖框裁切'}" VerticalAlignment="Center" />
                                             </Grid>
                                         </ToggleButton>
                                         <Button Grid.Column="1" Content="{i18n:T '清除'}" Click="OnClearCropClick"
@@ -1641,6 +1640,37 @@
                                             </Grid>
                                         </ToggleButton>
                                     </Grid>
+                                    <Button Name="ApplyReferenceCropButton" Click="OnApplyCropClick" IsEnabled="{Binding CanSyncReferenceCrop}"
+                                            Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
+                                            ToolTip.Tip="{i18n:T '回车应用拖框后，以本帧为参考同步裁切；有勾选只处理勾选帧，否则处理其余帧。同步后逐帧检查，可撤销。'}" />
+                                    <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{i18n:T '先调好本帧，再同步；位置有变化的帧单独微调。'}" />
+                                    <Expander Name="AutoCrop135Expander" Header="{i18n:T '135 辅助识别'}"
+                                              Theme="{StaticResource SubExpander}" IsExpanded="False" Margin="0,8,0,0">
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Classes="groupHint" Text="{i18n:T '仅适用于 135 全幅；其它片幅请使用上方手动裁切。'}" TextWrapping="Wrap" />
+                                            <Grid ColumnDefinitions="*,*">
+                                                <RadioButton Grid.Column="0" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropContentMode}" IsEnabled="{Binding CanAutoCrop}">
+                                                    <TextBlock TextWrapping="Wrap" Text="{i18n:T '仅画面 3:2'}" />
+                                                </RadioButton>
+                                                <RadioButton Grid.Column="1" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropIncludeSprockets}" IsEnabled="{Binding CanAutoCrop}">
+                                                    <TextBlock TextWrapping="Wrap" Text="{i18n:T '含齿孔 35:37'}" />
+                                                </RadioButton>
+                                            </Grid>
+                                            <Grid ColumnDefinitions="*,*">
+                                                <Button Grid.Column="0" Name="Find135BoundaryButton" Content="{i18n:T '识别本帧'}" Click="OnAutoCropCurrentClick"
+                                                        IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch" />
+                                                <Button Grid.Column="1" Content="{Binding CropBatchDetectionLabel}" Click="OnAutoCropRollClick" Margin="6,0,0,0"
+                                                        IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch"
+                                                        ToolTip.Tip="{i18n:T '逐帧定位，可靠帧辅助校验尺寸；有勾选只处理勾选帧，否则处理整卷。'}" />
+                                            </Grid>
+                                            <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropOutputHint}" />
+                                            <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropFailureText}" IsVisible="{Binding HasAutoCropFailure}" />
+                                            <Button Content="{i18n:T '恢复识别前'}" Click="OnRestoreAutoCropRecoveryClick"
+                                                    IsVisible="{Binding HasAutoCropRecovery}" IsEnabled="{Binding CanAutoCrop}"
+                                                    ToolTip.Tip="{i18n:T '恢复上次识别前的裁切、方向和拉直，不改变镜头与成片设置。'}" />
+                                            <Button Content="{i18n:T '取消识别'}" Click="OnCancelAutoCropClick" IsVisible="{Binding IsAutoCropping}" />
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </Expander>
                         </StackPanel>

@@ -352,8 +352,13 @@ public sealed class FrameParams
 
 
     // ── Pre-inversion linear-domain corrections (before density inversion) ─────
+    public EmbeddedLensCalibration? EmbeddedLens { get; set; }
     public LensfunCalibration? Lensfun { get; set; }
     public bool LensfunEnabled { get; set; }
+    /// <summary>Provenance of the values filled into manual sliders; retained after fine tuning.</summary>
+    public string LensCorrectionDiagnostic { get; set; } = "";
+    public string LensCorrectionOrigin { get; set; } = "";
+    public bool LensCorrectionHasVignette { get; set; }
     /// <summary>Manual radial distortion coefficient. k1&lt;0 barrel, k1&gt;0 pincushion; 0 = off.</summary>
     public double DistortionK1 { get; set; } = 0.0;
     /// <summary>Manual radial vignette corner gain strength. 0 = pass-through.</summary>
@@ -528,6 +533,8 @@ public sealed class FrameParams
     /// </summary>
     public (double X, double Y, double W, double H)? SplitCell { get; set; }
     /// <summary>Straighten rotation in degrees (clockwise). 0 = none.</summary>
+    public string AutoCropReviewReason { get; set; } = "";
+    public AutoCropRecovery? AutoCropRecovery { get; set; }
     public double Rotation { get; set; } = 0.0;
     /// <summary>Discrete 90° clockwise turns (0–3), applied before straighten + crop.</summary>
     public int QuarterTurns { get; set; } = 0;
@@ -552,8 +559,12 @@ public sealed class FrameParams
         PrintLut = PrintLut,
         PrintLutOutput = PrintLutOutput,
         DistortionK1 = DistortionK1,
+        EmbeddedLens = EmbeddedLens?.Copy(),
         Lensfun = Lensfun,
         LensfunEnabled = LensfunEnabled,
+        LensCorrectionDiagnostic = LensCorrectionDiagnostic,
+        LensCorrectionOrigin = LensCorrectionOrigin,
+        LensCorrectionHasVignette = LensCorrectionHasVignette,
         VignetteAmount = VignetteAmount,
         VignetteFalloff = VignetteFalloff,
         LccFlatField = LccFlatField,
@@ -583,6 +594,8 @@ public sealed class FrameParams
         CurvePointsB = new List<(double, double)>(CurvePointsB),
         CurvePreserveHue = CurvePreserveHue,
         CurveHasEndpoints = CurveHasEndpoints,
+        AutoCropReviewReason = AutoCropReviewReason,
+        AutoCropRecovery = AutoCropRecovery,
         CropRect = CropRect,
         SplitCell = SplitCell,
         Rotation = Rotation,

@@ -1,4 +1,4 @@
-namespace OpenRevelare.Gui.Models;
+﻿namespace OpenRevelare.Gui.Models;
 
 internal static class CropAspectPresets
 {
@@ -10,12 +10,12 @@ internal static class CropAspectPresets
 
     internal static OpenRevelare.Core.FilmCropMode? AutoMode(int index)
     {
-        if (index < 0 || index >= Aspects.Length) return null;
-        // Free has no manual lock; automatic 135 framing still needs its physical 3:2 format.
-        if (Aspects[index] is null || Aspects[index] == OpenRevelare.Core.FilmAutoCrop.ImageAspect)
-            return OpenRevelare.Core.FilmCropMode.ImageArea;
-        return Aspects[index] == OpenRevelare.Core.FilmAutoCrop.SprocketAspect
-            ? OpenRevelare.Core.FilmCropMode.WithSprockets : null;
+        return index switch
+        {
+            0 or 1 => OpenRevelare.Core.FilmCropMode.ImageArea,
+            2 => OpenRevelare.Core.FilmCropMode.WithSprockets,
+            _ => null,
+        };
     }
 
     internal static (int Index, double? Aspect) Match(double width, double height)

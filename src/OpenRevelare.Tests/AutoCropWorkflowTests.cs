@@ -7,6 +7,102 @@ namespace OpenRevelare.Tests;
 
 public sealed class AutoCropWorkflowTests
 {
+    [Theory]
+    [InlineData(FilmCropMode.ImageArea)]
+    [InlineData(FilmCropMode.WithSprockets)]
+    public async Task Roll_can_apply_an_occluded_hole_frame_with_one_undo(FilmCropMode mode)
+    {
+        string directory = Path.Combine(TestDataIsolation.Root, "auto-crop-occluded-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var frames = new List<Project.Frame>();
+        for (int i = 0; i < 4; i++)
+        {
+            string path = Path.Combine(directory, $"frame{i}.tif");
+            TiffIO.ExportTiff16(i == 3 ? FilmAutoCropOccludedRowsTests.HiddenOutwardHoles(true, true) : FilmAutoCropTests.Perforated(true), path);
+            frames.Add(new() { SourcePath = path });
+        }
+        string project = Path.Combine(directory, "roll.ncproj");
+        Project.Save(project, new Project.Data { Meta = new() { InputType = "tiff", TiffIsLinear = true }, Frames = frames });
+        using var vm = new MainViewModel();
+        await vm.OpenProjectAsync(project);
+        for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
+        Assert.True(vm.HasImage);
+        await vm.AutoCrop135Async(mode, wholeRoll: true);
+        Assert.All(vm.Frames, f => Assert.NotNull(f.Params.CropRect));
+        Assert.Contains("整卷互校", vm.Frames[3].Params.AutoCropReviewReason);
+        var crop = vm.Frames[3].Params.CropRect!.Value;
+        vm.Undo(); Assert.All(vm.Frames, f => Assert.Null(f.Params.CropRect));
+        vm.Redo(); Assert.Equal(crop, vm.Frames[3].Params.CropRect);
+    }
+
+    [Fact]
+    public async Task Tight_captures_explain_missing_film_and_can_be_retried_as_image_only()
+    {
+        string directory = Path.Combine(TestDataIsolation.Root, "auto-crop-tight-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var frames = new List<Project.Frame>();
+        var saved = (X: .2, Y: .2, W: .5, H: .5);
+        for (int i = 0; i < 3; i++)
+        {
+            string path = Path.Combine(directory, $"frame{i}.tif");
+            TiffIO.ExportTiff16(FilmAutoCropClippedRowsTests.TightCapture(false), path);
+            frames.Add(new() { SourcePath = path, Params = new() { CropRect = saved } });
+        }
+        string project = Path.Combine(directory, "roll.ncproj");
+        Project.Save(project, new Project.Data { Meta = new() { InputType = "tiff", TiffIsLinear = true }, Frames = frames });
+        using var vm = new MainViewModel();
+        await vm.OpenProjectAsync(project);
+        for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
+        Assert.True(vm.HasImage);
+        await vm.AutoCrop135Async(FilmCropMode.WithSprockets, wholeRoll: true);
+        Assert.All(vm.Frames, f =>
+        {
+            Assert.Equal(saved, f.Params.CropRect);
+            Assert.Contains("未完整拍入", f.Params.AutoCropReviewReason);
+        });
+        await vm.AutoCrop135Async(FilmCropMode.ImageArea, wholeRoll: true);
+        Assert.All(vm.Frames, f =>
+        {
+            Assert.NotEqual(saved, f.Params.CropRect);
+            var r = f.Params.CropRect!.Value;
+            Assert.Equal(1.5, r.W * 400 / (r.H * 290), 8);
+        });
+        vm.Undo(); Assert.All(vm.Frames, f => Assert.Equal(saved, f.Params.CropRect));
+    }
+
+    [Theory]
+    [InlineData(FilmCropMode.ImageArea)]
+    [InlineData(FilmCropMode.WithSprockets)]
+    public async Task Roll_reference_repairs_a_weak_frame_and_is_undoable(FilmCropMode mode)
+    {
+        string directory = Path.Combine(TestDataIsolation.Root, "auto-crop-reference-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var frames = new List<Project.Frame>();
+        for (int i = 0; i < 4; i++)
+        {
+            string path = Path.Combine(directory, $"frame{i}.tif");
+            TiffIO.ExportTiff16(i == 3 ? FilmAutoCropReferenceTests.OneEdge(false) : FilmAutoCropTests.Perforated(false), path);
+            frames.Add(new() { SourcePath = path });
+        }
+        string project = Path.Combine(directory, "roll.ncproj");
+        Project.Save(project, new Project.Data { Meta = new() { InputType = "tiff", TiffIsLinear = true }, Frames = frames });
+        using var vm = new MainViewModel();
+        await vm.OpenProjectAsync(project);
+        for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
+        Assert.True(vm.HasImage);
+        await vm.AutoCrop135Async(mode, wholeRoll: true);
+        var weak = vm.Frames[3].Params;
+        Assert.Contains("整卷互校", weak.AutoCropReviewReason);
+        Assert.NotNull(weak.CropRect);
+        var crop = weak.CropRect.Value;
+        Assert.InRange((crop.X + crop.W / 2) * 640, 329, 331);
+        Assert.Equal(mode == FilmCropMode.ImageArea ? 1.5 : 37d / 35, crop.W * 640 / (crop.H * 480), 10);
+        vm.Undo(); Assert.All(vm.Frames, f => Assert.Null(f.Params.CropRect));
+        vm.Redo(); Assert.Equal(weak.CropRect, vm.Frames[3].Params.CropRect);
+        Assert.True(await vm.SaveProjectAsync(project));
+        Assert.Contains("整卷互校", Project.Load(project).Frames[3].Params.AutoCropReviewReason);
+    }
+
     // The detector alone cannot protect the live controls, undo snapshots or project writer.
     // Both modes must reach the exported/stored frame rather than just change a preview overlay.
     [Theory]
@@ -89,7 +185,7 @@ public sealed class AutoCropWorkflowTests
                 new() { SourcePath = edited, Params = new FrameParams { CropRect = saved } },
             },
         });
-        using var vm = new MainViewModel();
+        using var vm = new MainViewModel { AllowAutoCropSuggestions = true };
         await vm.OpenProjectAsync(project);
         for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
         Assert.True(vm.HasImage);
@@ -124,7 +220,7 @@ public sealed class AutoCropWorkflowTests
             Meta = new() { InputType = "tiff", TiffIsLinear = true },
             Frames = new() { new() { SourcePath = source } },
         });
-        using var vm = new MainViewModel();
+        using var vm = new MainViewModel { AllowAutoCropSuggestions = true };
         await vm.OpenProjectAsync(project);
         for (int i = 0; i < 400 && (vm.IsBusy || vm.RollAnalysisPending); i++) await Task.Delay(25);
         Assert.True(vm.HasImage);

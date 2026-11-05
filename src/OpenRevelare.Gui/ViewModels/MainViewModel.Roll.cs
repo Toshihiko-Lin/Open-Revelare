@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -1139,12 +1139,22 @@ public partial class MainViewModel
         // are different files, so the current frame's place in ITS strip says nothing about them.
         template.CropRect = null; template.SplitCell = null; template.Rotation = 0;
 
-        // The batch is sorted, but appended rather than merged into the existing frames: the roll's
-        // order is the user's to own once they have dragged anything, and re-sorting the whole
-        // strip on every add would undo that silently.
+        // Resolve each new source independently; never inherit the previous frame's lens profile.
+        var rollBefore = _roll;
+        var appendVersion = _editVersion;
+        var framesBefore = Frames.ToArray();
+        var added = new List<RollFrame>();
+        foreach (string path in SortedByName(toAdd))
+        {
+            var embedded = await _readLensCorrectionAsync(path);
+            var calibration = AutoLensCorrection.IsUsable(embedded) ? null : await _matchLensfunAsync(path);
+            var next = template.Clone();
+            AutoLensCorrection.Select(embedded, calibration).Apply(next, LccEnabled && LccAvailable);
+            added.Add(new RollFrame(path) { Params = next });
+        }
+        if (!ReferenceEquals(rollBefore, _roll) || appendVersion != _editVersion || !framesBefore.SequenceEqual(Frames)) return;
         BeginStructuralEdit();
-        foreach (string p in SortedByName(toAdd))
-            Frames.Add(new RollFrame(p) { Params = template.Clone() });
+        foreach (var frame in added) Frames.Add(frame);
 
         ResetUndoAfterStructural();
         StatusText = Loc.F($"已添加 {toAdd.Count} 帧（共 {Frames.Count} 帧）");
