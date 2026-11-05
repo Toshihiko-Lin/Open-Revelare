@@ -29,6 +29,7 @@ static int Run(string[] args)
             case "--input-srgb": flags.Add("input-srgb"); break;
             case "--input-linear": flags.Add("input-linear"); break;
             case "--monochrome": flags.Add("monochrome"); break;
+            case "--positive": flags.Add("positive"); break;
             case "--intent": opts["intent"] = Next(args, ref i, a); break;
             case "--compress": opts["compress"] = Next(args, ref i, a); break;
             case "--bench": opts["bench"] = Next(args, ref i, a); break;
@@ -138,7 +139,11 @@ static int Run(string[] args)
         return 2;
     }
 
-    var cal = new FrameParams { Monochrome = flags.Contains("monochrome") };
+    var cal = new FrameParams
+    {
+        Monochrome = flags.Contains("monochrome"),
+        IsPositiveFilm = flags.Contains("positive")
+    };
     if (opts.TryGetValue("t-base", out var tb)) cal.TBase = ParseTriple(tb);
     // --grade / --pivot / --d-max / --scan-exposure-ev are accepted and ignored. The inversion
     // is two endpoints and a constant output range now, so none of them names a parameter that
@@ -470,7 +475,7 @@ static int Run(string[] args)
                 // reasoning is on FilmBase.EstimateTBaseFromRoll.
                 FilmBaseEstimate baseEstimate =
                     FilmBase.EstimateTBaseFromRollDetailed(
-                        frames, thr, vals, allowNeutralCarrier: flags.Contains("monochrome"));
+                        frames, thr, vals, allowNeutralCarrier: flags.Contains("monochrome") || flags.Contains("positive"));
                 Console.WriteLine("t_base_roll " + Fmt3(baseEstimate.TBase));
                 Console.WriteLine("t_base_roll_evidence " + FormatEvidence(baseEstimate.Evidence));
                 Console.WriteLine("t_base_roll_confidence " + Fmt1(baseEstimate.Confidence));
@@ -819,6 +824,8 @@ static void PrintUsage()
         "                              and reject --input-linear\n" +
         "  --monochrome                fold linear RGB to one silver-image signal and allow\n" +
         "                              colourless physical-carrier detection\n" +
+        "  --positive                  positive (slide / reversal) film mode: D_min maps to white,\n" +
+        "                              D_max maps to black\n" +
         "  --intent <basic|none>       output intent (default: basic)\n" +
         "  --t-base <r,g,b>            film base transmittance (e.g. 0.82,0.51,0.29)\n" +
         "  --d-max <v>                 accepted for legacy scripts; no-op in the endpoint model\n" +

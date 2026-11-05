@@ -1130,8 +1130,8 @@ public partial class MainViewModel
         UpdateDustOverlay();
         // Adopted through the field, not the property: the property is the USER's switch and
         // rebuilds every thumbnail, which is not what loading a roll that was always black and
-        // white should do.
-        SyncMonochrome(p.Monochrome);
+        // white or positive should do.
+        SyncFilmType(p.IsPositiveFilm, p.Monochrome);
         // p.OutputIntent is deliberately NOT adopted: a roll saved with the old NONE intent would
         // otherwise load with a blank-looking preview and no control left to change it back.
         // The preview is always the full render now; linear is an export-time choice.

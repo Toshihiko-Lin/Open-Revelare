@@ -207,13 +207,15 @@ public sealed partial class MainViewModel
         // roll of having sampled the light board. What matters there is which reading is used, so
         // that is what it says instead.
         bool cameraNative = CurrentFrame is { } frame && RawDecode.IsRawExtension(frame.Path);
-        sb.AppendLine(Monochrome
-            ? Loc.F($"  形态　　黑白卷，不适用色罩次序；渲染只用 G 的读数 {tb[1]:F4}（三通道已折成一路）")
-            : cameraNative
-                ? Loc.T("  形态　　相机原生 RAW 通道不适用 R ≥ G ≥ B 校验；应以灯板众数 / 边缘拓扑证据判断片基")
-            : tb[0] >= tb[1] && tb[1] >= tb[2]
-                ? Loc.T("  形态　　R ≥ G ≥ B，与彩负橙色片基一致")
-                : Loc.T("  形态　　不是 R ≥ G ≥ B —— 彩负片基不该是这个次序，请确认采样取到的是片基而非灯板或画面"));
+        sb.AppendLine(IsPositiveFilm
+            ? Loc.T("  形态　　正片（反转片）卷，D_min 为高光透光端，不适用橙色片基次序")
+            : Monochrome
+                ? Loc.F($"  形态　　黑白卷，不适用色罩次序；渲染只用 G 的读数 {tb[1]:F4}（三通道已折成一路）")
+                : cameraNative
+                    ? Loc.T("  形态　　相机原生 RAW 通道不适用 R ≥ G ≥ B 校验；应以灯板众数 / 边缘拓扑证据判断片基")
+                : tb[0] >= tb[1] && tb[1] >= tb[2]
+                    ? Loc.T("  形态　　R ≥ G ≥ B，与彩负橙色片基一致")
+                    : Loc.T("  形态　　不是 R ≥ G ≥ B —— 彩负片基不该是这个次序，请确认采样取到的是片基而非灯板或画面"));
         sb.AppendLine(dmin.All(v => Math.Abs(v) < 1e-9)
             ? Loc.T("  来源　　默认值 1/1/1（未采样：色罩由黑端承载，或这卷尚未标定）")
             : Loc.T("  来源　　本卷标定所得（采样或自动分析）"));
@@ -232,8 +234,12 @@ public sealed partial class MainViewModel
         {
             // The stored triples are whatever the roll last measured; the render collapses them
             // onto green. Printing all six here would show numbers the picture does not use.
-            sb.AppendLine(Loc.F($"  D_min　 {dmin[1]:F3}　（黑端，片基一侧）"));
-            sb.AppendLine(Loc.F($"  D_max　 {dmax[1]:F3}　（亮端；自动值为场景代理）"));
+            sb.AppendLine(IsPositiveFilm
+                ? Loc.F($"  D_min　 {dmin[1]:F3}　（白端，高光一侧）")
+                : Loc.F($"  D_min　 {dmin[1]:F3}　（黑端，片基一侧）"));
+            sb.AppendLine(IsPositiveFilm
+                ? Loc.F($"  D_max　 {dmax[1]:F3}　（黑端，暗部一侧；自动值为场景代理）")
+                : Loc.F($"  D_max　 {dmax[1]:F3}　（亮端；自动值为场景代理）"));
             sb.AppendLine(Loc.F($"  跨度　　{dmax[1] - dmin[1]:F3}　（两端之差＝反差；黑白卷没有通道间之差可言）"));
             if (dmax[1] - dmin[1] <= 0)
                 sb.AppendLine(Loc.T("  ⚠ 白端不高于黑端，无法反相，请重新标定两端"));
@@ -243,8 +249,12 @@ public sealed partial class MainViewModel
             return;
         }
 
-        sb.AppendLine(Loc.F($"  D_min　 R {dmin[0]:F3} · G {dmin[1]:F3} · B {dmin[2]:F3}　（黑端，片基一侧）"));
-        sb.AppendLine(Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（亮端；自动值为场景代理）"));
+        sb.AppendLine(IsPositiveFilm
+            ? Loc.F($"  D_min　 R {dmin[0]:F3} · G {dmin[1]:F3} · B {dmin[2]:F3}　（白端，高光一侧）")
+            : Loc.F($"  D_min　 R {dmin[0]:F3} · G {dmin[1]:F3} · B {dmin[2]:F3}　（黑端，片基一侧）"));
+        sb.AppendLine(IsPositiveFilm
+            ? Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（黑端，暗部一侧；自动值为场景代理）")
+            : Loc.F($"  D_max　 R {dmax[0]:F3} · G {dmax[1]:F3} · B {dmax[2]:F3}　（亮端；自动值为场景代理）"));
 
         double[] span = { dmax[0] - dmin[0], dmax[1] - dmin[1], dmax[2] - dmin[2] };
         sb.AppendLine(Loc.F($"  跨度　　R {span[0]:F3} · G {span[1]:F3} · B {span[2]:F3}　（两端之差＝反差；通道间之差＝色彩平衡）"));

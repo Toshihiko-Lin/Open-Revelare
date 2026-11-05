@@ -1538,17 +1538,23 @@ public partial class MainWindow : Window
     // ── Sampling button handlers ────────────────────────────────────────────────
     private void OnSampleFilmBaseClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.FilmBase,
-            Loc.T("片基采样：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
+            Vm?.IsPositiveFilm == true
+                ? Loc.T("白端采样：预览已切到原始正片。对准【最亮的高光或透明片基】拖框，松开即采样。按 Esc 取消。")
+                : Loc.T("片基采样：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DMax,
-            Loc.T("高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
+            Vm?.IsPositiveFilm == true
+                ? Loc.T("黑端采样：预览已切到原始正片。对准【最暗的暗部或黑边】拖框，松开即采样。按 Esc 取消。")
+                : Loc.T("高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleNeutralGreyClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.NeutralGrey,
-            Loc.T("中性灰采样：预览已切到负片。对准画面里的【灰卡 / 中性物】拖框，松开即采样。按 Esc 取消。"),
+            Vm?.IsPositiveFilm == true
+                ? Loc.T("中性灰采样：预览已切到原始正片。对准画面里的【灰卡 / 中性物】拖框，松开即采样。按 Esc 取消。")
+                : Loc.T("中性灰采样：预览已切到负片。对准画面里的【灰卡 / 中性物】拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleDisplayNeutralClick(object? sender, RoutedEventArgs e) =>

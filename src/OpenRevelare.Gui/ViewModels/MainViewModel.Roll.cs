@@ -129,88 +129,184 @@ public partial class MainViewModel
     /// <summary>The roll's output space — what an export will be written in.</summary>
     public ColorSpaceDef CurrentOutputSpace => OutputSpaces[_outputSpaceIndex];
 
-    // ══ 黑白负片 ═══════════════════════════════════════════════════════════════
+    // ══ 底片类型（负片 / 正片 · 彩色 / 黑白） ═══════════════════════════════════
     //
-    // 与【输出空间】一样是卷级的：一卷要么整卷是黑白片，要么整卷不是。打开后三通道在进密度域
-    // 之前折成一路亮度信号，反相只用一对端点，输出按构造中性——见 Core 的 Monochrome。
-    // 界面上随之收起所有对黑白片没有意义的控件（白平衡、色偏修正、逐通道端点、R/G/B 曲线）：
-    // 留着它们既无处可用，又会让人以为这张片子有色彩可调。
+    // 卷级判断：
+    //   0: 彩色负片
+    //   1: 彩色正片（反转片）
+    //   2: 黑白负片
+    //   3: 黑白正片
+    //
+    // 打开后，黑白片三通道在进密度域前折成一路亮度信号，反相只用一对端点；
+    // 正片反向映射端点（D_min 为白端高光，D_max 为黑端暗部）。
     private bool _monochrome;
+    private bool _isPositiveFilm;
 
-    /// <summary>This roll is black-and-white negative film.</summary>
+    /// <summary>This roll is positive (slide / reversal) film.</summary>
+    public bool IsPositiveFilm
+    {
+        get => _isPositiveFilm;
+        set => SetFilmType(value, _monochrome);
+    }
+
+    public bool IsNegativeFilm => !_isPositiveFilm;
+
+    /// <summary>This roll is black-and-white film.</summary>
     public bool Monochrome
     {
         get => _monochrome;
+        set => SetFilmType(_isPositiveFilm, value);
+    }
+
+    /// <summary>Film type index for ComboBox: 0=Color Neg, 1=Color Slide, 2=B&W Neg, 3=B&W Slide.</summary>
+    public int FilmTypeIndex
+    {
+        get
+        {
+            if (!_isPositiveFilm && !_monochrome) return 0;
+            if (_isPositiveFilm && !_monochrome) return 1;
+            if (!_isPositiveFilm && _monochrome) return 2;
+            return 3;
+        }
         set
         {
-            if (_monochrome == value) return;
-            _monochrome = value;
-            OnPropertyChanged(nameof(Monochrome));
-            OnPropertyChanged(nameof(IsColourRoll));
-            OnPropertyChanged(nameof(MonochromeHint));
-            OnPropertyChanged(nameof(CastCardHeader));
-            OnPropertyChanged(nameof(CastCardHint));
-            OnPropertyChanged(nameof(GreyCardSpan));
-            NotifyCalibrationInfo();
-
-            foreach (RollFrame f in Frames) f.Params.Monochrome = value;
-            if (Frames.Count > 0)
-            {
-                MarkRollDirty();
-                // Colour and monochrome calibration do not merely render the same endpoints
-                // differently: monochrome folds the three Stage-1 channels before density, and
-                // its carrier detector deliberately waives the orange-mask test. Evidence from
-                // the previous mode therefore cannot describe the current one.
-                _calibrationDiagnosticsRollWide = false;
-                _rollBaseCalibration = null;
-                _rollHighlightCalibration = null;
-                _rollUsedFallbackHighlight = false;
-                FilmBaseText = Loc.T("片基：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
-                HighlightConfidenceText = Loc.T("高光：整卷类型已更改 · 原端点诊断已失效");
-                NeedsRecalibration = true;
-            }
-
-            // Every thumbnail is now a different picture, exactly as an output-space change makes
-            // them: a strip still showing the colour render of a black-and-white roll would be
-            // showing something the export will not produce.
-            foreach (RollFrame f in Frames) SetThumbnail(f, null);
-            RestartThumbnails();
-            ScheduleRender();
+            if (value < 0 || value > 3) return;
+            bool newPositive = value is 1 or 3;
+            bool newMono = value is 2 or 3;
+            SetFilmType(newPositive, newMono);
         }
     }
 
-    /// <summary>Adopt a loaded roll's mode without treating it as a change the user made: no
-    /// dirty mark, no thumbnail rebuild, no render — the caller is already doing all three.</summary>
-    private void SyncMonochrome(bool value)
+    private void SetFilmType(bool isPositive, bool monochrome)
     {
-        if (_monochrome == value) return;
-        _monochrome = value;
+        if (_isPositiveFilm == isPositive && _monochrome == monochrome) return;
+        _isPositiveFilm = isPositive;
+        _monochrome = monochrome;
+        NotifyFilmTypeProperties();
+
+        foreach (RollFrame f in Frames)
+        {
+            f.Params.IsPositiveFilm = isPositive;
+            f.Params.Monochrome = monochrome;
+        }
+
+        if (Frames.Count > 0)
+        {
+            MarkRollDirty();
+            _calibrationDiagnosticsRollWide = false;
+            _rollBaseCalibration = null;
+            _rollHighlightCalibration = null;
+            _rollUsedFallbackHighlight = false;
+            FilmBaseText = Loc.T("端点：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
+            HighlightConfidenceText = Loc.T("端点：整卷类型已更改 · 原端点诊断已失效");
+            NeedsRecalibration = true;
+        }
+
+        foreach (RollFrame f in Frames) SetThumbnail(f, null);
+        RestartThumbnails();
+        ScheduleRender();
+    }
+
+    /// <summary>Adopt a loaded roll's film type without treating it as a user edit.</summary>
+    private void SyncFilmType(bool isPositive, bool monochrome)
+    {
+        if (_isPositiveFilm == isPositive && _monochrome == monochrome) return;
+        _isPositiveFilm = isPositive;
+        _monochrome = monochrome;
+        NotifyFilmTypeProperties();
+    }
+
+    private void SyncMonochrome(bool value) => SyncFilmType(_isPositiveFilm, value);
+
+    private void NotifyFilmTypeProperties()
+    {
+        OnPropertyChanged(nameof(IsPositiveFilm));
+        OnPropertyChanged(nameof(IsNegativeFilm));
         OnPropertyChanged(nameof(Monochrome));
         OnPropertyChanged(nameof(IsColourRoll));
+        OnPropertyChanged(nameof(CanUseDeepWb));
+        OnPropertyChanged(nameof(FilmTypeIndex));
         OnPropertyChanged(nameof(MonochromeHint));
+        OnPropertyChanged(nameof(FilmTypeHint));
+        OnPropertyChanged(nameof(FilmBaseHeader));
+        OnPropertyChanged(nameof(FilmBaseToolTip));
+        OnPropertyChanged(nameof(FilmBaseBtnText));
+        OnPropertyChanged(nameof(AutoFilmBaseBtnText));
+        OnPropertyChanged(nameof(AutoFilmBaseToolTip));
+        OnPropertyChanged(nameof(DMaxHeader));
+        OnPropertyChanged(nameof(DMaxToolTip));
+        OnPropertyChanged(nameof(DMaxBtnText));
+        OnPropertyChanged(nameof(AutoDMaxBtnText));
+        OnPropertyChanged(nameof(AutoDMaxToolTip));
+        OnPropertyChanged(nameof(AutoRollBtnText));
+        OnPropertyChanged(nameof(AutoFrameBtnText));
         OnPropertyChanged(nameof(CastCardHeader));
         OnPropertyChanged(nameof(CastCardHint));
         OnPropertyChanged(nameof(GreyCardSpan));
+        NotifyCalibrationInfo();
     }
 
     /// <summary>The inverse, for binding visibility of the colour-only controls.</summary>
     public bool IsColourRoll => !_monochrome;
 
-    // The 色偏修正 card holds two tools that are NOT the same kind of thing, and hiding the card
-    // wholesale on a black-and-white roll took the wrong one away. Deep-WB infers a COLOUR cast and
-    // has nothing to infer here. The grey card is an EXPOSURE anchor — it puts a measured neutral on
-    // Cineon's standard grey — and a black-and-white roll needs that more than a colour one does,
-    // because it has no colour left to judge exposure by. So the card stays and only Deep-WB goes.
+    /// <summary>Deep-WB is only valid for C-41 color negatives.</summary>
+    public bool CanUseDeepWb => !_monochrome && !_isPositiveFilm;
 
-    /// <summary>What the card is FOR, which is not the same thing on the two kinds of film.</summary>
+    public string FilmTypeHint => FilmTypeIndex switch
+    {
+        0 => Loc.T("彩色负片：橙色片基为黑端，画面高光为白端；三层染料各自独立，两端各三个密度共六个自由度。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
+        1 => Loc.T("彩色正片（反转片）：画面透光处（高光）为白端，深黑乳剂为黑端——两端与负片正好相反。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
+        2 => Loc.T("黑白负片：三通道折成一路亮度，反相只用一对端点。"),
+        _ => Loc.T("黑白正片：黑白反转片，三通道折成一路亮度，透光处为白端。"),
+    };
+
+    /// <summary>Which end D_min IS, which is the film type's whole point: on a negative the film
+    /// base reads as black, on a positive it reads as white. The header names the end rather than
+    /// the field, matching the 黑端/白端 wording the rest of the panel already uses.</summary>
+    public string FilmBaseHeader => _isPositiveFilm ? Loc.T("白端") : Loc.T("黑端");
+
+    /// <summary>The other end. D_max is the highlight on a negative and the shadow on a positive.</summary>
+    public string DMaxHeader => _isPositiveFilm ? Loc.T("黑端") : Loc.T("白端");
+
+    public string FilmBaseToolTip => _isPositiveFilm
+        ? Loc.T("每个通道读作白的密度（相对完全透光 T=1）。正片里透光最多的地方——画面高光、未被乳剂覆盖的透明片基——就是白端。展开三个分量可调高光色偏。")
+        : Loc.T("每个通道读作黑的密度（相对完全透光 T=1）。负片的橙色片基必然 R<G<B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。");
+
+    public string FilmBaseBtnText => _isPositiveFilm ? Loc.T("白端采样") : Loc.T("片基采样");
+
+    public string AutoFilmBaseBtnText => _isPositiveFilm ? Loc.T("自动白点") : Loc.T("自动黑点");
+
+    public string AutoFilmBaseToolTip => _isPositiveFilm
+        ? Loc.T("自动找出正片里透光最多的地方（画面高光、透明片基）并写入白端。")
+        : Loc.T("自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。");
+
+    public string DMaxToolTip => _isPositiveFilm
+        ? Loc.T("每个通道读作黑的密度，典型 1.8–2.8。正片里最厚、最不透光的地方——深黑乳剂、画面暗部——就是黑端。与 D_min 的距离即反差，三通道之差即暗部色偏。")
+        : Loc.T("每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。");
+
+    public string DMaxBtnText => _isPositiveFilm ? Loc.T("黑端采样") : Loc.T("高光采样");
+
+    public string AutoDMaxBtnText => _isPositiveFilm ? Loc.T("自动黑点") : Loc.T("自动白点");
+
+    public string AutoDMaxToolTip => _isPositiveFilm
+        ? Loc.T("自动找到画面最暗处，把它当作纯黑来解出暗端三个密度")
+        : Loc.T("自动找到画面最亮点，把它当作纯白来解出亮端三个密度");
+
+    public string AutoRollBtnText => _isPositiveFilm ? Loc.T("自动整卷（正片）") : Loc.T("自动（整卷）");
+
+    public string AutoFrameBtnText => _isPositiveFilm ? Loc.T("自动单张（正片）") : Loc.T("自动（单张）");
+
+    /// <summary>What the card is FOR, which is not the same thing on the different kinds of film.</summary>
     public string CastCardHeader => _monochrome ? Loc.T("灰卡锚点") : Loc.T("色偏修正");
 
     public string CastCardHint => _monochrome
         ? Loc.T("把画面里拍到的灰卡定为 Cineon 标准灰（码值 470），也就是确定这一卷的曝光位置。黑白片没有色偏可解，但灰卡仍然是唯一客观的曝光参照。")
-        : Loc.T("解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入 D_max 的三个密度，与高光采样互为替代，后执行者生效。");
+        : _isPositiveFilm
+            ? Loc.T("把画面里拍到的灰卡定为 Cineon 标准灰（码值 470），同时定下黑端位置与高光/暗部色偏。与黑端采样互为替代，后执行者生效。")
+            : Loc.T("解这一卷的色偏——胶片、扫描与片基留在两端上的偏差。灰卡是测量，智能色偏修正是推测。结果写入白端（D_max）的三个密度，与高光采样互为替代，后执行者生效。");
 
     /// <summary>The grey-card button takes the whole row once Deep-WB is gone from beside it.</summary>
-    public int GreyCardSpan => _monochrome ? 2 : 1;
+    public int GreyCardSpan => (_monochrome || _isPositiveFilm) ? 2 : 1;
 
     public string MonochromeHint => _monochrome
         ? Loc.T("三通道折成一路亮度后反相，只用一对端点；白平衡与逐通道端点对银影没有意义，已收起。印片风格仍会叠加它自己的色偏。")

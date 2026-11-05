@@ -440,7 +440,8 @@ public static class Pipeline
             InputTransform.Apply(src.Data, inputMatrix);
 
         // ── Path A: RGB-light decoupling (linear domain, after vignette) ──────────
-        if (cal.DecoupleMatrix != null)
+        // Only applies to C-41 negative rolls; positive film (E-6) does not use C-41 dye decoupling.
+        if (cal.DecoupleMatrix != null && !cal.IsPositiveFilm)
             Decouple.Apply(src.Data, cal.DecoupleMatrix, cal.DecoupleMode);
 
         // ── Stage 1: density inversion (chroma_amp / chroma_matrix from decouple) ─
@@ -461,8 +462,9 @@ public static class Pipeline
         // read as three dye layers). See Monochrome.
         if (cal.Monochrome) Monochrome.FoldInPlace(src.Data);
 
-        ImageBuffer result = Inversion.Invert(src, cal, cal.DecoupleChromaAmp,
-                                              ResolveChromaMatrix(cal));
+        double[]? chromaAmp = cal.IsPositiveFilm ? null : cal.DecoupleChromaAmp;
+        double[,]? chromaMatrix = cal.IsPositiveFilm ? null : ResolveChromaMatrix(cal);
+        ImageBuffer result = Inversion.Invert(src, cal, chromaAmp, chromaMatrix);
 
         // Apply sprocket mask after inversion + black floor: fill masked pixels white.
         if (sprocketMask != null)

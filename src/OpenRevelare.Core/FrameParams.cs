@@ -168,6 +168,14 @@ public sealed class FrameParams
     /// </summary>
     public bool Monochrome { get; set; }
 
+    /// <summary>
+    /// 这卷是正片（反转片）：透明片基/高光处透光最多，乳剂深厚/暗部处透光最少。
+    ///
+    /// 打开后，反相将 D_min 映射到白端（Cineon 码值 1032，D_adj = 0），
+    /// 将 D_max 映射到黑端（Cineon 码值 95，D_adj = -OutputRange）。
+    /// </summary>
+    public bool IsPositiveFilm { get; set; }
+
     /// <summary>Per-channel chroma compression for the RGB-decouple path (× before chroma_grade).</summary>
     public double[] ChromaChannelScale { get; set; } = { 1.0, 1.0, 1.0 };
 
@@ -553,6 +561,7 @@ public sealed class FrameParams
         DMinPerChannel = (double[])DMinPerChannel.Clone(),
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
         Monochrome = Monochrome,
+        IsPositiveFilm = IsPositiveFilm,
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,

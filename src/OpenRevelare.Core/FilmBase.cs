@@ -217,6 +217,7 @@ public static class FilmBase
 
         var tb = new[] { m0, m1, m2 };
         Quantise(tb);
+        ClampToPhysicalBase(tb);
         return tb.Any(x => x <= 0) ? null : tb;
     }
 
@@ -278,6 +279,7 @@ public static class FilmBase
 
         var tBase = new[] { sum[0] / count, sum[1] / count, sum[2] / count };
         Quantise(tBase);
+        ClampToPhysicalBase(tBase);
         return tBase.Any(x => x <= 0) ? null : tBase;
     }
 
@@ -311,6 +313,7 @@ public static class FilmBase
         var tBase = new double[3];
         for (int c = 0; c < 3; c++) tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
         Quantise(tBase);
+        ClampToPhysicalBase(tBase);
         return tBase.Any(x => x <= 0) ? null : tBase;
     }
 
@@ -338,6 +341,7 @@ public static class FilmBase
         var tBase = new double[3];
         for (int c = 0; c < 3; c++) tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
         Quantise(tBase);
+        ClampToPhysicalBase(tBase);
         return tBase.Any(x => x <= 0) ? null : tBase;
     }
 
@@ -591,6 +595,162 @@ public static class FilmBase
         => DetectDMaxPerChannelFromRollDetailed(
             images, tBase, rollPercentile, masks, sprocketThreshold, edgeInset,
             protectIndependentChannelExtrema)?.Density;
+
+    /// <summary>
+    /// The two border insets the endpoint detector chooses between. 0.05 is the long-standing
+    /// value and is right for a NEGATIVE: its frame margin is the brightest thing on the film
+    /// (bare orange base), so it never competes for the densest-content endpoint, and the inset only
+    /// has to clear the hard film-edge line. A POSITIVE is the opposite — reversal processing fogs
+    /// the unexposed margin, making the rebate the DENSEST thing in the frame, denser than any
+    /// shadow in the picture — so a scan that still contains that margin needs a wider inset.
+    /// </summary>
+    public const double TightBorderInsetForMeasurement = 0.05;   // clears the film-edge line
+    public const double WideBorderInsetForMeasurement = 0.15;    // also clears a slide's unexposed margin
+
+    /// <summary>How much denser the outer band's endpoint must be before it is believed to be
+    /// non-picture content (the margin) rather than the picture's own densest tone.</summary>
+    private const double BorderEvidenceDelta = 0.15;
+
+    /// <summary>
+    /// How far the solved endpoint may sit ABOVE the picture's own densest interior tone before the
+    /// wide inset is judged to have cut picture away. 0.30 D ≈ 150 Cineon codes, i.e. gross error.
+    ///
+    /// NOT a tuned-to-the-sample number: measured on the 81-frame slide roll,
+    /// the share of uncropped frames that fall back is 10% at EVERY threshold from 0.05 to 0.80 —
+    /// the failures are all ~1 D collapses, so the exact value is not load-bearing anywhere in that
+    /// range, and 0.30 sits in the middle of it. What it must catch is the plateau collapse: on a
+    /// frame whose picture is a few flat tiers, the tail guard withholds the densest tier and the
+    /// wide inset returns a midtone (measured span 0.52 against an interior 1.70). On real
+    /// continuous-tone film the solved endpoint sits 0.1–0.3 D DEEPER than the interior, so it does
+    /// not fire.
+    /// </summary>
+    private const double InteriorCredibilityMargin = 0.30;
+
+    /// <summary>
+    /// <see cref="DetectDMaxPerChannelFromRollDetailed"/> with the border inset RESOLVED from the
+    /// frame instead of assumed, plus a credibility fallback so a wrong choice cannot silently win.
+    ///
+    /// WHY THIS IS NOT A CONSTANT. Whether the unexposed margin is still in the measured buffer is
+    /// a property of the SCAN, not of the film type: a frame cropped to the picture has none, and a
+    /// strip capture that still shows rebate and sprocket gaps has a lot. Measured on the real
+    /// 81-frame slide roll: uncropped, the solved D_max had median 3.59 against a picture-black of
+    /// 2.97 and the picture's own black landed at median Cineon code 287 (95–130 is correct) —
+    /// flat, washed-out shadows. At 0.15 the same frames land near 125. But cropped, 0.15 is worse
+    /// than 0.05: frames whose black end comes out SHALLOWER than the picture's own black (blacks
+    /// clipped) rise from 20% to 33%, because 15% of an already-tight crop is real shadow.
+    ///
+    /// THE RULE, in two steps:
+    ///  1. Solve at the wide inset. If the tight inset's endpoint is not materially denser than the
+    ///     wide one, the outer band was carrying nothing but picture — keep the tight, more accurate
+    ///     inset. (This is what makes cropped frames, and frames whose picture fills them, keep 0.05.)
+    ///  2. Otherwise the band WAS carrying non-picture density, so the wide answer is the candidate —
+    ///     but verify it against an independent reference: the densest 0.1% of the frame's CENTRAL
+    ///     70%, which cannot see the margin. If the wide endpoint comes out shallower than that
+    ///     reference by more than <see cref="InteriorCredibilityMargin"/>, the wide inset cut picture
+    ///     content away (the plateau collapse above) and the tight answer is used instead.
+    ///
+    /// Step 2's inputs are density statistics of the image alone — no sample roll, no film-type
+    /// guess — which is what lets it be pinned by a synthetic fixture as well as by real frames.
+    /// </summary>
+    /// <param name="positiveFilm">False keeps this method exactly equivalent to the tight-inset
+    /// detector, so negatives are untouched.</param>
+    public static HighlightEndpointEstimate? DetectDMaxPerChannelResolvingBorderInset(
+        IReadOnlyList<ImageBuffer> images, double[] tBase, double rollPercentile = 90.0,
+        IReadOnlyList<ImageBuffer>? masks = null, double? sprocketThreshold = null,
+        bool protectIndependentChannelExtrema = true, bool positiveFilm = false)
+    {
+        HighlightEndpointEstimate? tight = DetectDMaxPerChannelFromRollDetailed(
+            images, tBase, rollPercentile, masks, sprocketThreshold, TightBorderInsetForMeasurement,
+            protectIndependentChannelExtrema);
+        if (!positiveFilm) return tight;
+
+        HighlightEndpointEstimate? wide = DetectDMaxPerChannelFromRollDetailed(
+            images, tBase, rollPercentile, masks, sprocketThreshold, WideBorderInsetForMeasurement,
+            protectIndependentChannelExtrema);
+        if (wide is null) return tight;
+        if (tight is null) return wide;
+
+        // Step 1: did excluding the outer band actually change the endpoint?
+        double delta = 0.0;
+        for (int c = 0; c < 3; c++) delta = Math.Max(delta, tight.Density[c] - wide.Density[c]);
+        if (delta <= BorderEvidenceDelta) return tight;
+
+        // Step 2: is the wide answer credible against the picture's own interior?
+        double[]? interior = InteriorDensestSpan(images, tBase, masks, sprocketThreshold);
+        if (interior is null) return tight;
+        for (int c = 0; c < 3; c++)
+            if (wide.Density[c] < interior[c] - InteriorCredibilityMargin) return tight;
+        return wide;
+    }
+
+    /// <summary>
+    /// Per frame, the densest 0.1% of the CENTRAL 70% — the picture's own deepest tone, measured
+    /// from a window that cannot contain the frame margin. Pooled across frames by per-channel
+    /// maximum, because the endpoint must clear the deepest picture content anywhere on the roll:
+    /// a frame that goes deeper than the endpoint has its shadows clipped.
+    ///
+    /// Deliberately does NOT apply the endpoint detector's plateau/tail guard. Its job here is to
+    /// be an independent witness of "how dense the picture really gets", and the guard is exactly
+    /// what the fallback is meant to catch being wrong.
+    ///
+    /// Densities are relative to <paramref name="tBase"/>, the same units the detector reports, so
+    /// the two are directly comparable.
+    /// </summary>
+    private static double[]? InteriorDensestSpan(
+        IReadOnlyList<ImageBuffer> images, double[] tBase,
+        IReadOnlyList<ImageBuffer>? masks, double? sprocketThreshold)
+    {
+        double[]? worst = null;
+        for (int f = 0; f < images.Count; f++)
+        {
+            ImageBuffer img = images[f];
+            ImageBuffer mask = masks is not null && f < masks.Count ? masks[f] : img;
+
+            int w0 = img.Width, h0 = img.Height;
+            int yi = RoundHalfEven(h0 * WideBorderInsetForMeasurement), xi = RoundHalfEven(w0 * WideBorderInsetForMeasurement);
+            if (w0 - 2 * xi < 4 || h0 - 2 * yi < 4) continue;
+            ImageBuffer inner = Crop(img, xi, yi, w0 - 2 * xi, h0 - 2 * yi);
+
+            // NO mask cuts here, deliberately — not even HighDensityKeepMask. This reference has
+            // to be independent of the detector's own admission rules, because the failure it
+            // exists to catch is those rules going wrong: on a picture made of a few flat tiers the
+            // detector's dark-valley cut classifies the DENSEST tier as an opaque card and drops
+            // it, and a reference that made the same call would agree with it and never fire. What
+            // is kept is only the physically impossible: pixels at the encoding ceiling / clamped
+            // (IsEndpointSample), which are not film tones at all.
+            double step = SourceStep(inner);
+            var stepN = new double[3];
+            for (int c = 0; c < 3; c++) stepN[c] = step / Math.Max(tBase[c], 1e-10);
+
+            var totals = new List<(double Total, double R, double G, double B)>();
+            int n = inner.PixelCount;
+            for (int p = 0; p < n; p++)
+            {
+                double t0 = inner.Data[p * 3] / Math.Max(tBase[0], 1e-10);
+                double t1 = inner.Data[p * 3 + 1] / Math.Max(tBase[1], 1e-10);
+                double t2 = inner.Data[p * 3 + 2] / Math.Max(tBase[2], 1e-10);
+                if (step > 0 && !(IsResolved(t0, stepN[0]) && IsResolved(t1, stepN[1])
+                                  && IsResolved(t2, stepN[2])))
+                    continue;
+                double d0 = FrameParams.DensityOf(t0);
+                double d1 = FrameParams.DensityOf(t1);
+                double d2 = FrameParams.DensityOf(t2);
+                if (!IsEndpointSample(d0, d1, d2)) continue;
+                totals.Add(((d0 + d1 + d2) / 3.0, d0, d1, d2));
+            }
+            if (totals.Count == 0) continue;
+            totals.Sort((a, b) => b.Total.CompareTo(a.Total));
+            int k = Math.Max(1, (int)Math.Ceiling(totals.Count * 0.001));
+            if (k > totals.Count) k = totals.Count;
+            var tail = new double[3];
+            for (int i = 0; i < k; i++) { tail[0] += totals[i].R; tail[1] += totals[i].G; tail[2] += totals[i].B; }
+            for (int c = 0; c < 3; c++) tail[c] /= k;
+
+            worst ??= tail;
+            for (int c = 0; c < 3; c++) worst[c] = Math.Max(worst[c], tail[c]);
+        }
+        return worst;
+    }
 
     /// <summary>
     /// Detailed form of <see cref="DetectDMaxPerChannelFromRoll"/>. The endpoint remains a
@@ -1758,6 +1918,262 @@ public static class FilmBase
     /// sampling the base raw but dividing a decoupled image would mismatch the two. White-light
     /// rolls pass null.
     /// </param>
+    /// <summary>
+    /// The white end for a POSITIVE roll, measured where the reference actually lives: on the
+    /// CROPPED picture, pooled across the roll, with gross outliers skipped.
+    ///
+    /// THE ROLE REVERSAL, STATED. A negative measures its base on the UNCROPPED frame, because a
+    /// negative's base is the bare orange margin that a crop removes (see the roll pass's own note:
+    /// "the base lives in the margin a crop removes"). A positive is the mirror image: its
+    /// unexposed margin develops to DENSE black, so it is not a white reference at all — the white
+    /// reference is the clear/transparent highlight INSIDE the picture. Measuring a positive the
+    /// negative's way therefore points the estimator at exactly the content it must ignore: light
+    /// board, sprocket gaps and rebate, all of which sit outside the frame the user cropped to.
+    ///
+    /// WHY POOLED, NOT PER FRAME. A roll is one strip of one film under one light, so its white end
+    /// is one number; a per-frame answer makes the same film render bright on one frame and dark on
+    /// the next, which is the inconsistency reported as "自动分析的白点不准确". Pooling by MEDIAN is
+    /// the same rule <see cref="EstimateTBaseFromRoll"/> already uses for negatives.
+    ///
+    /// WHY OUTLIERS ARE SKIPPED. A leader frame (fogged, or shot off the film entirely) reads as one
+    /// bright nothing; letting it vote drags the whole roll. A frame whose bright end deviates from
+    /// the roll median by more than <paramref name="outlierFactor"/> is dropped and the median is
+    /// taken again — the median already resists a single bad frame, and this keeps a roll with
+    /// several from drifting.
+    /// </summary>
+    /// <param name="pictures">Per-frame buffers of the KEPT PICTURE (cropped where a crop exists).</param>
+    /// <param name="outlierFactor">A frame votes only if its bright end is within this factor of the
+    /// roll median, per channel.</param>
+    public static double[]? EstimatePositiveWhiteEndFromRoll(
+        IReadOnlyList<ImageBuffer> pictures, double outlierFactor = 1.6)
+    {
+        if (pictures.Count == 0) return null;
+        var picks = new List<double[]>();
+        for (int f = 0; f < pictures.Count; f++)
+        {
+            if (pictures[f] is not { } pic || pic.PixelCount == 0) continue;
+            try { picks.Add(EstimateTBaseFromRoll(new[] { pic })); }
+            catch (ArgumentException) { /* no usable bright end in this frame */ }
+        }
+        if (picks.Count == 0) return null;
+
+        double[] MedianOf(List<double[]> set)
+        {
+            var m = new double[3];
+            for (int c = 0; c < 3; c++)
+            {
+                var vals = set.Select(p => p[c]).OrderBy(v => v).ToArray();
+                m[c] = vals[vals.Length / 2];
+            }
+            return m;
+        }
+
+        double[] first = MedianOf(picks);
+        var kept = picks.Where(p => Enumerable.Range(0, 3).All(c =>
+            p[c] > 0 && p[c] <= first[c] * outlierFactor && p[c] >= first[c] / outlierFactor)).ToList();
+        double[] tBase = kept.Count > 0 ? MedianOf(kept) : first;
+        Quantise(tBase);
+        ClampToPhysicalBase(tBase);
+        return tBase.Any(x => x <= 0) ? null : tBase;
+    }
+
+    /// <summary>
+    /// The white end for a POSITIVE roll, measured where the reference physically is: through the
+    /// perforations.
+    ///
+    /// A positive's white end is <c>D_min</c>, the clearest material on the strip. The picture's
+    /// own brightest patch is the wrong witness — it is whatever was in front of the camera (a
+    /// white wall, fog, a specular highlight), it changes from frame to frame, and it may be
+    /// coloured. The perforations are punched through the film, so the light recorded in them saw
+    /// no dye at all, and every frame of a roll saw the same lamp through the same holes. That is a
+    /// white reference by construction, and it is roll-constant without any pooling argument.
+    ///
+    /// The frames must be UNCROPPED previews. A 3:2 crop removes the perforations entirely, and
+    /// that is the same reason a negative's base is measured before the crop: the reference lives
+    /// in the margin the crop takes away.
+    ///
+    /// Values are camera-native and therefore NOT equal across channels — see
+    /// <see cref="FilmPerforations"/>; the channel ratios are the lamp's colour as the sensor
+    /// recorded it, and they are what the inversion divides out.
+    ///
+    /// Frames without a perforation pair are skipped. If none has one the method returns null and
+    /// the caller keeps the picture-based estimator; that is the fallback for a cropped scan or a
+    /// camera whose holder hid the edges. Pooling and gross-outlier rejection are the same rules
+    /// <see cref="EstimatePositiveWhiteEndFromRoll"/> uses, so the two answers are interchangeable
+    /// in level and only differ in where they were measured.
+    /// </summary>
+    /// <param name="uncroppedFrames">Per-frame buffers BEFORE any crop; crop removes the holes.</param>
+    /// <param name="outlierFactor">A frame votes only if every channel is within this factor of the
+    /// first roll median.</param>
+    public static double[]? EstimateWhiteEndFromPerforations(
+        IReadOnlyList<ImageBuffer> uncroppedFrames, double outlierFactor = 1.6)
+    {
+        ArgumentNullException.ThrowIfNull(uncroppedFrames);
+        if (uncroppedFrames.Count == 0) return null;
+        var picks = new List<double[]>();
+        for (int f = 0; f < uncroppedFrames.Count; f++)
+        {
+            if (uncroppedFrames[f] is not { } frame || frame.PixelCount == 0) continue;
+            try
+            {
+                if (FilmPerforations.MeasureWhiteEnd(frame) is { } pick) picks.Add(pick);
+            }
+            catch (ArgumentException) { /* no usable perforation pair in this frame */ }
+        }
+        if (picks.Count == 0) return null;
+
+        double[] MedianOf(List<double[]> set)
+        {
+            var m = new double[3];
+            for (int c = 0; c < 3; c++)
+            {
+                var vals = set.Select(p => p[c]).OrderBy(v => v).ToArray();
+                m[c] = vals[vals.Length / 2];
+            }
+            return m;
+        }
+
+        double[] first = MedianOf(picks);
+        var kept = picks.Where(p => Enumerable.Range(0, 3).All(c =>
+            p[c] > 0 && p[c] <= first[c] * outlierFactor && p[c] >= first[c] / outlierFactor)).ToList();
+        double[] tBase = kept.Count > 0 ? MedianOf(kept) : first;
+        Quantise(tBase);
+        ClampToPhysicalBase(tBase);
+        return tBase.Any(x => !(x > 0) || !double.IsFinite(x)) ? null : tBase;
+    }
+
+    /// <summary>
+    /// The black end for a POSITIVE roll, measured as the unexposed film in the perforation band:
+    /// the density distance from the white end down to the darkest 2% of the band's non-hole
+    /// pixels, pooled across the roll.
+    ///
+    /// <para>WHY THE EDGE AND NOT THE PICTURE. On a reversal film the unexposed area outside the
+    /// camera gate is the film's true D_max: the densest material on the strip. The picture's own
+    /// darkest patch is scene content, and on a strip that still shows the gaps between frames or
+    /// the black surround it is the GAP, not the film, that wins — which is the "black end dragged
+    /// to 2.9–3.2" failure. The film bridges between the perforations are known to be unexposed
+    /// and are locked to the row geometry, so they are the physical reference.</para>
+    ///
+    /// <para>THE SPAN IS RELATIVE, NOT ABSOLUTE. Both the hole light and the edge are scaled by
+    /// the copy-stand exposure, so their ratio is a film property that survives exposure drift
+    /// across a roll. The returned values are densities ABOVE the white end; the caller adds its
+    /// roll D_min. That is the same unit <see cref="DetectDMaxPerChannelFromRoll"/> reports, so the
+    /// two are directly comparable.</para>
+    ///
+    /// <para>THE DATA DECIDES WHETHER THE EDGE IS UNEXPOSED. A clear (negative) edge, a fogged
+    /// edge, or one lifted by stray light is not a black reference. Each frame is gated by
+    /// <see cref="FilmPerforations.MeasureBlackSpan"/> — genuinely dark complement, at least
+    /// <see cref="FilmPerforations.MinBlackSpanD"/> below white, channels within
+    /// <see cref="FilmPerforations.MaxBlackSpanSpread"/> — and the roll is rejected if the pooled
+    /// result fails the same tests. On the real 81-frame folder those tests keep a 43-frame
+    /// positive segment (2.85/2.80/2.78 D, spread 1.04) and reject a 38-frame clear-edge segment
+    /// (1.19/1.22/1.30 D) instead of reporting it as black.</para>
+    ///
+    /// <para>The frames must be UNCROPPED: a 3:2 crop removes the perforation band. The roll path
+    /// measures it on the same uncropped Stage-1 buffers as the white end (the 512 px analysis
+    /// preview on the sample). The gate is not resolution-fragile here: on the sample it kept the
+    /// same 43 positive frames at 512 and 1600 px, and the pooled span differed by 0.004 D.</para>
+    /// </summary>
+    public static double[]? EstimateBlackSpanFromPerforations(
+        IReadOnlyList<ImageBuffer> uncroppedFrames, double outlierFactor = 1.6)
+    {
+        ArgumentNullException.ThrowIfNull(uncroppedFrames);
+        var picks = new List<double[]>();
+        for (int f = 0; f < uncroppedFrames.Count; f++)
+        {
+            if (uncroppedFrames[f] is not { } frame || frame.PixelCount == 0) continue;
+            try
+            {
+                if (FilmPerforations.MeasureBlackSpan(frame) is { } pick) picks.Add(pick);
+            }
+            catch (ArgumentException) { /* no usable perforation band in this frame */ }
+        }
+        return PoolBlackSpans(picks, outlierFactor);
+    }
+
+    /// <summary>
+    /// Pool already-measured relative black spans (see
+    /// <see cref="EstimateBlackSpanFromPerforations"/>). Exposed so a caller that already holds
+    /// per-frame spans can pool them without measuring again.
+    /// </summary>
+    public static double[]? PoolBlackSpans(
+        IReadOnlyList<double[]> blackSpans, double outlierFactor = 1.6)
+    {
+        ArgumentNullException.ThrowIfNull(blackSpans);
+        var picks = blackSpans.Where(p => p is { Length: >= 3 }).ToList();
+        if (picks.Count == 0) return null;
+
+        double[] MedianOf(List<double[]> set)
+        {
+            var m = new double[3];
+            for (int c = 0; c < 3; c++)
+            {
+                var vals = set.Select(p => p[c]).OrderBy(v => v).ToArray();
+                m[c] = vals[vals.Length / 2];
+            }
+            return m;
+        }
+
+        double[] first = MedianOf(picks);
+        var kept = picks.Where(p => Enumerable.Range(0, 3).All(c =>
+            p[c] > 0 && p[c] <= first[c] * outlierFactor && p[c] >= first[c] / outlierFactor)).ToList();
+        double[] span = kept.Count > 0 ? MedianOf(kept) : first;
+        Quantise(span);
+        if (span.Any(x => !(x > 0) || !double.IsFinite(x))) return null;
+        if (span.Min() < FilmPerforations.MinBlackSpanD) return null;
+        if (span.Max() / span.Min() > FilmPerforations.MaxBlackSpanSpread) return null;
+        return span;
+    }
+
+    /// <summary>
+    /// Keep a POSITIVE's white end at or above the frame's own bright end.
+    ///
+    /// The base estimators were written for negatives, where the frame margin is bare orange base:
+    /// the BRIGHTEST material on the film, and therefore the natural thing to find. On a positive
+    /// the margin is unexposed and therefore DENSE, so the brightest material is the picture's own
+    /// highlight (or the light table). That inverts the assumption the board cut rests on: the cut
+    /// is supposed to remove the light table, but on a slide the table and the film's clear areas
+    /// are within a stop of each other, so the estimator can place the cut BELOW the film's clear
+    /// base and then report some dense interior as "the base".
+    ///
+    /// When that happens the white end lands INSIDE the picture, which is overexposure by
+    /// construction: every film density from there up to the real bright end is at or above Cineon
+    /// white and clips. Measured on the real slide roll, frame DSC02016 read
+    /// t_base 0.066 where its film's bright end is 0.485 — a white end of D_min 1.183 against 0.31,
+    /// and the rendered picture came back with a median luminance of 0.99. With the clamp it is
+    /// 0.48 and the highlights carry tone again.
+    ///
+    /// The clamp can only RAISE the white end toward the frame's bright end; it never moves it
+    /// below what the estimator measured, so a roll whose base really is darker than its highlights
+    /// (nothing in frame brighter than the picture) is left alone.
+    /// </summary>
+    /// <param name="tBase">The estimated base transmittance, for a positive roll.</param>
+    /// <param name="image">The frame the base was measured on.</param>
+    public static double[] KeepWhiteEndAtBrightEnd(double[] tBase, ImageBuffer image)
+    {
+        ArgumentNullException.ThrowIfNull(tBase);
+        ArgumentNullException.ThrowIfNull(image);
+        double[] bright = EstimateTBaseFromRoll(new[] { image });
+
+        // ONE TRIPLE OR THE OTHER, never a mix. Both candidates are CO-SITED — three channels read
+        // off one physical patch of film — and that is the property that makes them meaningful:
+        // their channel RATIOS are what the white end's colour balance is. Taking a per-channel max
+        // of two co-sited triples produces a third triple that corresponds to NO patch of film at
+        // all, and a neutral base can come out with a large channel spread purely from the splice.
+        // (Measured: base [0.50, 0.30, 0.66] against bright [0.32, 0.69, 0.41] splices to
+        // [0.50, 0.69, 0.66] — a spread the film never had.)
+        //
+        // Which one wins is decided by a single scalar over the whole triple: whichever is
+        // brighter overall. The bright-tail estimate is only used to rescue a base that landed
+        // inside the picture (which is what the overexposure was), and "brighter overall" is the
+        // same question asked once instead of three times.
+        double totalBright = bright.Take(3).Sum();
+        double totalBase = tBase.Take(3).Sum();
+        var res = (double[])(totalBright > totalBase ? bright : tBase).Clone();
+        ClampToPhysicalBase(res);
+        return res;
+    }
+
     public static double[] EstimateTBaseFromRoll(IReadOnlyList<ImageBuffer> images,
                                                  double? sprocketThreshold = null,
                                                  IReadOnlyList<ImageBuffer>? valueImages = null)
@@ -1807,6 +2223,7 @@ public static class FilmBase
         for (int c = 0; c < 3; c++)
             tBase[c] = Median(perFrame.Select(x => x[c]).ToArray());
         Quantise(tBase);
+        ClampToPhysicalBase(tBase);
         if (tBase.Any(x => x <= 0))
             throw new ArgumentException("EstimateTBaseFromRoll: estimated T_base contains non-positive values");
         return tBase;
@@ -2541,5 +2958,52 @@ public static class FilmBase
     private static void Quantise(double[] v)
     {
         for (int i = 0; i < v.Length; i++) v[i] = (float)v[i];
+    }
+
+    /// <summary>
+    /// The largest transmittance a film base can physically have: 1.0, i.e. "fully transmissive".
+    /// A value above it is not a base — it is a saturated highlight, a RAW overshoot above clip, or
+    /// two different estimates spliced together — and <c>D_min = -log10(t)</c> turns it into a
+    /// NEGATIVE density, which puts the white end above every real pixel.
+    ///
+    /// This is not hypothetical. Read out of a real user project (42 cropped frames, "自动（整卷）"):
+    ///
+    ///   D_min = [0.297, -0.045, 0.180]  ->  t_base = [0.505, 1.109, 0.661]
+    ///
+    /// Green is 2.2x red and above unity. A neutral base cannot do that, and the whole picture then
+    /// sits above its own white end: the overexposure and the cast arrive together. 39 of those 42
+    /// frames had at least one channel below zero, with a median channel spread of 0.342.
+    ///
+    /// The estimators below all checked only <c>&lt;= 0</c>. Clamping here is the one place that
+    /// cannot be bypassed, and it is deliberately applied to NEGATIVE rolls too: their base is a
+    /// real transmittance just like a slide's, and the same impossibility applies.
+    /// </summary>
+    private static void ClampToPhysicalBase(double[] tBase)
+    {
+        // A channel that reached the ceiling was CLIPPED, not measured: the sensor had nothing left
+        // to report, so its value is a lower bound on t_base rather than a reading. Such a channel
+        // carries no colour information, and keeping its ceiling value while the unclipped channels
+        // report their real base manufactures a channel spread the film never had — measured on the
+        // real roll, 4 of 8 frames hit the ceiling (the ones with 12-23% clipped pixels) and their
+        // spread reached 0.495 D, i.e. a strong cast.
+        //
+        // So the colour of a clipped channel is taken from the reliable ones: all reliable channels
+        // are set to their geometric mean, keeping the LEVEL (which is what a clipped channel still
+        // bounds from below) while dropping a colour it cannot have measured.
+        int clipped = 0, reliable = 0;
+        for (int c = 0; c < tBase.Length; c++)
+        {
+            if (!(tBase[c] > 0)) continue;                      // rejected by the caller's own check
+            if (tBase[c] >= 1.0) { tBase[c] = 1.0; clipped++; }
+            else reliable++;
+        }
+        if (clipped == 0 || reliable == 0) return;
+
+        double logSum = 0;
+        for (int c = 0; c < tBase.Length; c++)
+            if (tBase[c] > 0 && tBase[c] < 1.0) logSum += Math.Log(tBase[c]);
+        double neutral = Math.Exp(logSum / reliable);
+        for (int c = 0; c < tBase.Length; c++)
+            if (tBase[c] > 0 && tBase[c] < 1.0) tBase[c] = neutral;
     }
 }

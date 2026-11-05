@@ -88,11 +88,15 @@ public readonly struct DensityEndpoints
     /// point — it is what makes the two ends independent, so solving one cannot disturb the other
     /// and calibration order stops mattering.
     /// </summary>
-    /// <param name="dMaxPerChannel">Per-channel HIGHLIGHT density (the white end). Absolute.</param>
-    /// <param name="dMinPerChannel">Per-channel SHADOW density (the black end), null = all zero,
-    /// i.e. black sits at the film base where <c>t_base</c> put it. Absolute.</param>
+    /// <param name="dMaxPerChannel">Per-channel HIGHLIGHT density for negative film (the white end),
+    /// or SHADOW density for positive film (the black end). Absolute.</param>
+    /// <param name="dMinPerChannel">Per-channel SHADOW density for negative film (the black end),
+    /// or HIGHLIGHT density for positive film (the white end), null = all zero. Absolute.</param>
+    /// <param name="isPositiveFilm">Whether the film is positive (slide/reversal). When true,
+    /// dMin maps to Cineon 1032 (0.0, white) and dMax maps to Cineon 95 (-outRange, black).</param>
     public static DensityEndpoints FromMeasured(double[] dMaxPerChannel, double outRange,
-                                                double[]? dMinPerChannel = null)
+                                                double[]? dMinPerChannel = null,
+                                                bool isPositiveFilm = false)
     {
         var scale = new double[3];
         var offset = new double[3];
@@ -100,13 +104,22 @@ public readonly struct DensityEndpoints
         {
             double dMin = dMinPerChannel is { Length: 3 } ? dMinPerChannel[c] : 0.0;
             double dMax = dMaxPerChannel[c];
-            // Deriving the slope from the SPAN is what keeps both ends pinned: black lands at
-            // -outRange and white at 0 for every channel, whatever the two endpoints are.
+            // Deriving the slope from the SPAN is what keeps both ends pinned:
+            // Negative: dMin lands at -outRange and dMax at 0.
+            // Positive: dMin lands at 0 and dMax at -outRange.
             // Subtracting a constant instead would drag the white end along with the black one,
             // turning a colour control into a per-channel gain.
             double span = Math.Max(dMax - dMin, 1e-6);
-            scale[c] = outRange / span;
-            offset[c] = -outRange - scale[c] * dMin;
+            if (isPositiveFilm)
+            {
+                scale[c] = -outRange / span;
+                offset[c] = -scale[c] * dMin;
+            }
+            else
+            {
+                scale[c] = outRange / span;
+                offset[c] = -outRange - scale[c] * dMin;
+            }
         }
         return new DensityEndpoints(scale, offset);
     }
@@ -114,12 +127,13 @@ public readonly struct DensityEndpoints
     /// <summary>
     /// The endpoints the post-LUT inversion slot should use: the roll's two measured ends, one
     /// pair per channel, and nothing else. <see cref="FrameParams.DMaxPerChannel"/> is the white
-    /// end and <see cref="FrameParams.DMinPerChannel"/> is the black end — both absolute
+    /// end (for negative) or black end (for positive), and <see cref="FrameParams.DMinPerChannel"/>
+    /// is the black end (for negative) or white end (for positive) — both absolute
     /// densities, so each simply IS its endpoint and there is no second parameter left to double
     /// it with. The range is a constant, so it cannot compete with them either.
     /// </summary>
     public static DensityEndpoints For(FrameParams cal) =>
-        FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel);
+        FromMeasured(cal.DMaxPerChannel, FrameParams.OutputRange, cal.DMinPerChannel, cal.IsPositiveFilm);
 
     /// <summary>
     /// The Cineon code an absolute density lands on in one channel — <see cref="Apply"/> read in
@@ -157,19 +171,83 @@ public readonly struct DensityEndpoints
     /// <c>s_c = x_c · outRange / (outRange − (1032 − code)·0.002)</c>. For 470 the factor is
     /// 1.874/0.750 ≈ 2.50 — a typical C-41 card at 0.6–0.9 above base gives spans of 1.5–2.2,
     /// the same range roll calibration measures.
+    ///
+    /// For positive film, the card sits at D_adj = −dropBelowWhite, so
+    /// <c>−outRange · x_c / s_c = −(1032 − code)·0.002</c>, yielding
+    /// <c>s_c = x_c · outRange / ((1032 − code)·0.002)</c>.
     /// </summary>
-    public static double[] HighlightFromNeutralAtCode(double[] dGrey, double[] dMin, double code)
+    public static double[] HighlightFromNeutralAtCode(double[] dGrey, double[] dMin, double code,
+                                                     bool isPositiveFilm = false)
     {
         double dropBelowWhite = (FrameParams.CineonWhiteCode - code) * FrameParams.CineonDensityPerCode;
-        double denom = FrameParams.OutputRange - dropBelowWhite;
-        if (!(code > FrameParams.CineonBlackCode) || !(denom > 1e-6))
+        if (!(code > FrameParams.CineonBlackCode && code < FrameParams.CineonWhiteCode))
             throw new ArgumentOutOfRangeException(nameof(code), code,
-                "target code must lie inside the Cineon domain (95, 1032]");
+                "target code must lie inside the Cineon domain (95, 1032)");
         double[] x = SpanAbove(dGrey, dMin);
-        double factor = FrameParams.OutputRange / denom;
         var dMax = new double[3];
-        for (int c = 0; c < 3; c++) dMax[c] = dMin[c] + factor * x[c];
+        if (isPositiveFilm)
+        {
+            if (dropBelowWhite <= 1e-6)
+                throw new ArgumentOutOfRangeException(nameof(code), code,
+                    "target code must lie below Cineon white code (1032)");
+            double factor = FrameParams.OutputRange / dropBelowWhite;
+            for (int c = 0; c < 3; c++) dMax[c] = dMin[c] + factor * x[c];
+        }
+        else
+        {
+            double denom = FrameParams.OutputRange - dropBelowWhite;
+            if (denom <= 1e-6)
+                throw new ArgumentOutOfRangeException(nameof(code), code,
+                    "target code must lie inside the Cineon domain (95, 1032)");
+            double factor = FrameParams.OutputRange / denom;
+            for (int c = 0; c < 3; c++) dMax[c] = dMin[c] + factor * x[c];
+        }
         return dMax;
+    }
+
+    /// <summary>
+    /// Give BOTH ends one shared span, so the endpoint pair carries colour at the WHITE end only.
+    ///
+    /// NEGATIVE FILM NEEDS THE PER-CHANNEL SPANS. The three dye layers sit behind an orange mask
+    /// whose density differs per channel, so "each channel's span" is exactly the mask + highlight
+    /// balance being solved — dividing them out is the 去色罩 this model exists to do.
+    ///
+    /// POSITIVE FILM DOES NOT. There is no mask: the clear base is the neutral reference, and it is
+    /// already pinned by D_min at Cineon white, per channel, in <see cref="FromMeasured"/>. What is
+    /// left over in the measured D_max triple is NOT a film property — the densest content on a
+    /// slide is dense dye (not a neutral), mixed with whatever the frame's frame margin and the
+    /// scene's own colour happen to be. Feeding those differences in as per-channel contrast tints
+    /// every tone between the ends.
+    ///
+    /// Measured on the real slide roll, frame DSC02015 solved spans of
+    /// (0.61, 0.93, 1.73) — blue nearly 3x red — and rendered a deep cyan-blue wash; the same frame
+    /// with a shared span (1.09) renders as an ordinary neutral interior. Frame DSC02016 was the
+    /// mild case (spans 2.70, 2.66, 2.62) where the two answers coincide.
+    ///
+    /// The shared value is the MEAN of the measured spans: it is the least-squares estimate of the
+    /// one contrast the film really has, and it neither inflates the range (which would clip the
+    /// deepest shadow) nor shrinks it (which would flatten the picture) the way max/min would.
+    ///
+    /// A grey card does NOT go through here: <see cref="HighlightFromNeutralAtCode"/> solves
+    /// per-channel spans from a measured neutral, which is a real colour measurement and must be
+    /// kept.
+    /// </summary>
+    /// <param name="dMaxPerChannel">Absolute black-end densities.</param>
+    /// <param name="dMinPerChannel">Absolute white-end densities, the anchor the span is added to.</param>
+    /// <param name="isPositiveFilm">False returns the input untouched, so negatives keep their
+    /// per-channel mask solve.</param>
+    public static double[] SharedSpanEndpoints(double[] dMaxPerChannel, double[] dMinPerChannel,
+                                               bool isPositiveFilm)
+    {
+        if (!isPositiveFilm) return (double[])dMaxPerChannel.Clone();
+        if (dMaxPerChannel.Length != 3 || dMinPerChannel.Length != 3)
+            throw new ArgumentException("DensityEndpoints requires 3 channels");
+        double mean = 0.0;
+        for (int c = 0; c < 3; c++) mean += dMaxPerChannel[c] - dMinPerChannel[c];
+        mean /= 3.0;
+        var res = new double[3];
+        for (int c = 0; c < 3; c++) res[c] = dMinPerChannel[c] + mean;
+        return res;
     }
 
     /// <summary>A patch's density above the black end, per channel; rejects a patch that is not
