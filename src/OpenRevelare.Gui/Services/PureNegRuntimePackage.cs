@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 
@@ -11,6 +10,7 @@ internal static class PureNegRuntimePackage
 {
     internal const string Release = "pureneg-cbcc9fc825ba-v1";
     internal const string ReleaseRoot = "https://github.com/Toshihiko-Lin/openrevelare-models/releases/download/" + Release + "/";
+    internal const string MirrorRoot = "https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/" + Release + "/";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     internal sealed record Index(string Revision, Dictionary<string, Package> Platforms);
     internal sealed record Package(string File, string Sha256, long Size, string ModelFormat);
@@ -38,39 +38,39 @@ internal static class PureNegRuntimePackage
             File.Exists(Path.Combine(component, "runtime", "FibreNet.onnx"))) &&
         File.Exists(Path.Combine(component, "vendor", "film-dust", "native", "build", "filmdust.node"));
 
-    public static async Task InstallAsync(HttpClient client, string component, IProgress<int> progress, CancellationToken ct)
+    public static async Task InstallAsync(HttpClient client, string component, IProgress<int> progress, CancellationToken ct,
+        bool preferMirror = false)
     {
-        var index = JsonSerializer.Deserialize<Index>(await client.GetStringAsync(ReleaseRoot + "components.json", ct), Json)
-            ?? throw new InvalidDataException("Missing PURENeg platform component index.");
-        if (index.Revision != PureNegComponent.Revision || !index.Platforms.TryGetValue(CurrentPlatform, out var package))
-            throw new InvalidDataException("PURENeg model package is unavailable for the running platform.");
-        if (Path.GetFileName(package.File) != package.File || !package.File.EndsWith(".zip", StringComparison.Ordinal) ||
-            package.Size <= 0 || package.Size > 512L * 1024 * 1024 ||
-            package.Sha256.Length != 64 || package.ModelFormat != (OperatingSystem.IsMacOS() ? "coreml" : "onnx"))
-            throw new InvalidDataException("Invalid PURENeg platform component index.");
+        var package = await PureNegDownload.FromSourcesAsync("components.json", preferMirror, ct, async (url, token) =>
+        {
+            using var response = await PureNegDownload.GetAsync(client, url, token);
+            await using var input = await response.Content.ReadAsStreamAsync(token);
+            using var bounded = new MemoryStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = await input.ReadAsync(buffer, token)) > 0)
+            {
+                if (bounded.Length + count > 65536) throw new InvalidDataException("PURENeg index exceeds its size limit.");
+                bounded.Write(buffer, 0, count);
+            }
+            var index = JsonSerializer.Deserialize<Index>(bounded.ToArray(), Json)
+                ?? throw new InvalidDataException("Missing PURENeg platform component index.");
+            if (index.Revision != PureNegComponent.Revision || index.Platforms is null ||
+                !index.Platforms.TryGetValue(CurrentPlatform, out var selected) || selected is null)
+                throw new InvalidDataException("PURENeg model package is unavailable for the running platform.");
+            if (string.IsNullOrEmpty(selected.File) || Path.GetFileName(selected.File) != selected.File ||
+                !selected.File.EndsWith(".zip", StringComparison.Ordinal) || selected.Size <= 0 ||
+                selected.Size > 512L * 1024 * 1024 || selected.Sha256 is null ||
+                selected.Sha256.Length != 64 || !selected.Sha256.All(Uri.IsHexDigit) ||
+                selected.ModelFormat != (OperatingSystem.IsMacOS() ? "coreml" : "onnx"))
+                throw new InvalidDataException("Invalid PURENeg platform component index.");
+            return selected;
+        });
         string archive = Path.Combine(component, "runtime.zip");
         try
         {
-            using (var response = await client.GetAsync(ReleaseRoot + Uri.EscapeDataString(package.File), HttpCompletionOption.ResponseHeadersRead, ct))
-            {
-                response.EnsureSuccessStatusCode();
-                await using var input = await response.Content.ReadAsStreamAsync(ct);
-                await using var output = new FileStream(archive, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true);
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                byte[] buffer = new byte[81920];
-                long size = 0;
-                int count;
-                while ((count = await input.ReadAsync(buffer, ct)) > 0)
-                {
-                    size += count;
-                    if (size > package.Size) throw new InvalidDataException("PURENeg runtime exceeds its declared size.");
-                    hash.AppendData(buffer, 0, count);
-                    await output.WriteAsync(buffer.AsMemory(0, count), ct);
-                    progress.Report(65 + (int)(30 * size / package.Size));
-                }
-                if (size != package.Size || !Convert.ToHexString(hash.GetHashAndReset()).Equals(package.Sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("PURENeg model runtime checksum mismatch.");
-            }
+            await PureNegDownload.DownloadAsync(client, package.File, archive, package.Sha256, package.Size,
+                preferMirror, ct, new RuntimeProgress(progress), package.Size);
             await ExtractAsync(archive, component, ct);
             string host = Path.Combine(component, "runtime", OperatingSystem.IsMacOS() ? "image-codec" :
                 OperatingSystem.IsWindows() ? "pureneg-model-host.exe" : "pureneg-model-host");
@@ -82,6 +82,11 @@ internal static class PureNegRuntimePackage
                     UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
         finally { File.Delete(archive); }
+    }
+
+    private sealed class RuntimeProgress(IProgress<int> target) : IProgress<int>
+    {
+        public void Report(int value) => target.Report(65 + 30 * value / 100);
     }
 
     internal static async Task ExtractAsync(string archive, string destination, CancellationToken ct)

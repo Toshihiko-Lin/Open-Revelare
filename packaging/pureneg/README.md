@@ -8,6 +8,14 @@
 
 `.github/workflows/pureneg-components.yml` 生成四个平台的组件包和 `components.json`，Mac 任务对同一数值修正后的 CoreML 与 ONNX 做一致性检查。四个平台构建和检查均通过，组件已发布为独立[预发布版](https://github.com/Toshihiko-Lin/openrevelare-models/releases/tag/pureneg-cbcc9fc825ba-v1)，供新安装逻辑自动下载；不改变主软件的正式发行版。已在 Windows 使用全新缓存完成匿名下载、哈希校验、原生模块加载和实际模型推理验证。
 
+## 双源安装资产
+
+GitHub 与 [Gitee 镜像](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/tag/pureneg-cbcc9fc825ba-v1) 使用同一独立组件仓库与版本标签，每侧提供完整的十个安装资产：`components.json`、四个平台的模型运行库 ZIP、四个平台的官方 Node 归档，以及共用的 `engine-sources.zip`。安装器可以优先使用任一源，失败、超时或校验不符时自动尝试另一源；取消操作不会触发镜像重试。不再依赖客户端访问 Node 官方站或 GitHub raw 文件域名。
+
+发布前运行 `python packaging/pureneg/pack-bootstrap.py --source /src/PURENeg --output /build/packages --include-node`。源文件逐项匹配应用内清单，Node 匹配固定 SHA-256；源归档使用固定元数据，并校验应用中固定的归档 SHA-256。CI 的完整候选产物包含这十个资产。随后在发布环境配置 `GITEE_TOKEN` 与 GitHub Git 凭据（或 `GH_TOKEN`），运行 `python packaging/pureneg/sync-downloads.py /build/packages` 同步。令牌只从环境读取，不写入资产或日志。
+
+未安装时的 PURENeg 入口沿用智能色偏修正的置灰样式和同位置下载标识，安装期间由全局任务中心显示进度并支持取消；安装完成后点击入口才开始检测。训练数据包入口位于顶部「文件」菜单，不占用修片工具栏。
+
 ## 构建矩阵
 
 | 应用目标 | 原生引擎 | FibreNet 推理首选方案 | 回退与构建主机 |

@@ -25,6 +25,7 @@ public partial class MainWindow
     private DustReviewDraft? _dustReviewDraft;
     private readonly List<DustTrainingSample> _dustTrainingSamples = [];
     private bool _exportingDustTraining;
+    private bool _installingPureNeg;
     private CancellationTokenSource? _dustReviewOperation;
     private DustView _dustView = DustView.After;
     private IPointer? _dustComparisonPointer;
@@ -152,16 +153,16 @@ public partial class MainWindow
         DustRedoBtn.IsEnabled = idle && (reviewing ? _dustReviewDraft!.Editor.CanRedo : Vm?.CanRedo == true);
         DustRadiusButton.IsEnabled = idle;
         DustOptionsBtn.IsEnabled = idle;
-        DustTrainingBtn.IsEnabled = idle && (_dustReviewDraft?.Sample is not null || _dustTrainingSamples.Count > 0);
+        DustTrainingMenuItem.IsEnabled = idle && Vm?.HasLongTask != true &&
+            (_dustReviewDraft?.Sample is not null || _dustTrainingSamples.Count > 0);
         DustDetectionOptions.IsEnabled = idle && PureNegComponent.IsSupported;
         DustClearActions.IsVisible = !reviewing;
-        DustDetectBtn.IsEnabled = idle && PureNegComponent.IsSupported;
-        DustDetectLabel.Text = Loc.T("PURENeg 自动除尘");
-        DustDownloadIcon.IsVisible = !installed;
-        DustDetectIcon.IsVisible = installed;
+        DustDetectEntry.IsEnabled = idle && !_installingPureNeg && Vm?.HasLongTask != true && Vm?.IsBusy != true && PureNegComponent.IsSupported;
+        DustDetectBtn.IsEnabled = installed;
+        PureNegDownloadButton.IsVisible = !installed;
         ToolTip.SetTip(DustDetectBtn, !PureNegComponent.IsSupported
             ? Loc.T("当前平台没有可用的自动除尘组件。")
-            : !installed ? Loc.T("首次使用会下载可选组件，完成后自动检测并预览修复效果。")
+            : !installed ? Loc.T("点击下载当前平台的除尘组件和模型。GitHub 不可用时自动尝试 Gitee 国内镜像。")
             : reviewing ? Loc.T("重新检测灰尘，完成后预览修复效果。")
             : Loc.T("自动检测灰尘，完成后预览修复效果。"));
         DustViewSelector.IsEnabled = idle;
@@ -179,9 +180,42 @@ public partial class MainWindow
         DustReviewStatus.IsVisible = open;
     }
 
+    private async void OnInstallPureNegClick(object? sender, RoutedEventArgs e)
+    {
+        if (_installingPureNeg || _dustReviewOperation is not null || PureNegComponent.IsInstalled ||
+            !PureNegComponent.IsSupported || Vm is not { HasLongTask: false, IsBusy: false } vm) return;
+        bool accepted = false, preferMirror = false;
+        await new InfoDialog(Loc.T("安装可选 PURENeg 除尘组件"),
+            Loc.T("将下载当前平台的 PURENeg 除尘引擎、模型和运行库。GitHub 不可用时自动尝试 Gitee 国内镜像。组件保存在用户数据目录，升级后保留。"))
+            .WithAction(Loc.T("从 GitHub 下载"), Loc.T("取消"), () => accepted = true)
+            .WithSecondaryAction(Loc.T("从 Gitee 国内镜像下载"), () => { accepted = true; preferMirror = true; })
+            .ShowDialog(this);
+        if (!accepted || !vm.TryBeginLongTask(Loc.T("正在下载 PURENeg 除尘"), out var owner)) return;
+        _installingPureNeg = true;
+        UpdateDustToolbar();
+        try
+        {
+            var progress = new Progress<int>(value =>
+            {
+                if (_installingPureNeg && !owner.IsCancellationRequested)
+                    vm.ReportLongTask(Loc.F($"正在下载 PURENeg 除尘（{value}%）"));
+            });
+            await PureNegComponent.InstallAsync(progress, owner.Token, preferMirror);
+            vm.StatusText = Loc.T("PURENeg 除尘已安装，可使用自动除尘。");
+        }
+        catch (OperationCanceledException) when (owner.IsCancellationRequested) { vm.StatusText = Loc.T("PURENeg 除尘下载已取消"); }
+        catch (Exception ex) { vm.StatusText = Loc.T("PURENeg 除尘下载失败") + " · " + ex.Message; }
+        finally
+        {
+            _installingPureNeg = false;
+            vm.EndLongTask(owner);
+            UpdateDustToolbar();
+        }
+    }
+
     private async void OnPureNegReviewClick(object? sender, RoutedEventArgs e)
     {
-        if (_dustReviewOperation is not null || !PureNegComponent.IsSupported ||
+        if (_dustReviewOperation is not null || !PureNegComponent.IsSupported || !PureNegComponent.IsInstalled ||
             Vm is not { CurrentFrame: { } frame, HasLongTask: false, IsBusy: false } vm) return;
         string[] categories = new[] {
             DetectDustKind.IsChecked == true ? "dust" : "",
@@ -215,7 +249,6 @@ public partial class MainWindow
         var elapsed = new Stopwatch();
         PureNegComponent.DetectionProgress detection = new(0, null, null);
         bool detecting = false;
-        bool installing = false;
         void DetectionStatus()
         {
             if (!detecting) return;
@@ -233,19 +266,6 @@ public partial class MainWindow
         try
         {
             ct.ThrowIfCancellationRequested();
-            if (!PureNegComponent.IsInstalled)
-            {
-                installing = true;
-                Status(Loc.T("正在下载 PURENeg 除尘"));
-                var downloadProgress = new Progress<int>(value =>
-                {
-                    if (installing) Status(Loc.F($"正在下载 PURENeg 除尘（{value}%）"));
-                });
-                await PureNegComponent.InstallAsync(downloadProgress, ct);
-                installing = false;
-                if (!IsCurrent()) return;
-                ct.ThrowIfCancellationRequested();
-            }
             workspace = Directory.CreateTempSubdirectory("openrevelare-pureneg-");
             string path = Path.Combine(workspace.FullName, "input.tiff");
             Status(Loc.T("正在渲染全分辨率照片"));
@@ -302,13 +322,12 @@ public partial class MainWindow
         {
             if (IsCurrent())
             {
-                DustReviewStatus.Text = Loc.T(installing ? "PURENeg 除尘下载失败" : "自动除尘失败") + " · " + ex.Message;
+                DustReviewStatus.Text = Loc.T("自动除尘失败") + " · " + ex.Message;
                 UpdateDustToolbar();
             }
         }
         finally
         {
-            installing = false;
             detecting = false;
             clock.Stop();
             if (workspace is not null) PureNegComponent.DeleteTemporaryDirectory(workspace.FullName);

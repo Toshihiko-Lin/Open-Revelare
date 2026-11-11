@@ -1640,5 +1640,12 @@
   "清除已保留样本": "Clear retained samples",
   "通过完整画面缩略图选择要分享的训练样本": "Choose training samples to share using full-frame thumbnails",
   "请先运行 PURENeg 检测，再选择训练样本。": "Run PURENeg detection first, then choose training samples.",
-  "正在生成纤维概率图": "Generating fibre probability map"
+  "正在生成纤维概率图": "Generating fibre probability map",
+  "点击下载当前平台的除尘组件和模型。GitHub 不可用时自动尝试 Gitee 国内镜像。": "Download the dust removal component and model for this platform. If GitHub is unavailable, Gitee is tried automatically.",
+  "安装可选 PURENeg 除尘组件": "Install optional PURENeg component",
+  "将下载当前平台的 PURENeg 除尘引擎、模型和运行库。GitHub 不可用时自动尝试 Gitee 国内镜像。组件保存在用户数据目录，升级后保留。": "Download the PURENeg engine, model and runtime for this platform. If GitHub is unavailable, Gitee is tried automatically. Components are stored in your user data folder and retained across upgrades.",
+  "从 GitHub 下载": "Download from GitHub",
+  "从 Gitee 国内镜像下载": "Download from Gitee",
+  "PURENeg 除尘已安装，可使用自动除尘。": "PURENeg is installed. Automatic dust removal is ready.",
+  "PURENeg 除尘下载已取消": "PURENeg download cancelled"
 }

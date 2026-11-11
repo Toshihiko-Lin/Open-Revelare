@@ -101,6 +101,12 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Toshihiko-Lin/PURENeg
+          ref: cbcc9fc825ba9aaf12304c7e9524643995faf4dd
+          path: upstream-pureneg
       - uses: actions/download-artifact@v4
         with: { pattern: 'pureneg-*', merge-multiple: true, path: packages }
       - name: Generate complete component download index
@@ -116,5 +122,7 @@ jobs:
               index['platforms'].update(entry['platforms'])
           assert set(index['platforms']) == {'win-x64', 'linux-x64', 'osx-arm64', 'osx-x64'}
           (root / 'components.json').write_text(json.dumps(index, indent=2) + '\n')
+      - name: Package engine sources and verified Node archives for both mirrors
+        run: python packaging/pureneg/pack-bootstrap.py --source upstream-pureneg --output packages --include-node
       - uses: actions/upload-artifact@v4
         with: { name: pureneg-release-candidate, path: 'packages/*' }

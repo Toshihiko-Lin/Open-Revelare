@@ -36,7 +36,7 @@ internal static class PureNegComponent
         _ => null,
     };
 
-    public static bool IsSupported => Runtime.HasValue;
+    public static bool IsSupported => Runtime is { Platform: "win-x64" or "darwin-x64" or "darwin-arm64" or "linux-x64" };
 
     private static string? ResolveBundledNative()
     {
@@ -64,17 +64,18 @@ internal static class PureNegComponent
         }
     }
 
-    public static async Task InstallAsync(IProgress<int> progress, CancellationToken ct)
+    public static async Task InstallAsync(IProgress<int> progress, CancellationToken ct, bool preferMirror = false)
     {
         await InstallGate.WaitAsync(ct).ConfigureAwait(false);
-        try { await InstallCoreAsync(progress, ct).ConfigureAwait(false); }
+        try { await InstallCoreAsync(progress, ct, preferMirror).ConfigureAwait(false); }
         finally { InstallGate.Release(); }
     }
 
-    private static async Task InstallCoreAsync(IProgress<int> progress, CancellationToken ct)
+    private static async Task InstallCoreAsync(IProgress<int> progress, CancellationToken ct, bool preferMirror)
     {
         if (IsInstalled) return;
-        var runtime = Runtime ?? throw new PlatformNotSupportedException();
+        if (!IsSupported) throw new PlatformNotSupportedException();
+        var runtime = Runtime!.Value;
         string stage = Root + ".install-" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(stage);
         try
@@ -82,8 +83,8 @@ internal static class PureNegComponent
             string prefix = $"node-{NodeVersion}-{runtime.Platform}";
             string name = prefix + (OperatingSystem.IsWindows() ? ".zip" : ".tar.gz");
             string archive = Path.Combine(stage, name);
-            await DownloadAsync($"https://nodejs.org/dist/{NodeVersion}/{name}", archive,
-                runtime.Hash, 80 * 1024 * 1024, ct, new InstallProgress(progress)).ConfigureAwait(false);
+            await PureNegDownload.DownloadAsync(Client, name, archive, runtime.Hash, 80 * 1024 * 1024,
+                preferMirror, ct, new InstallProgress(progress)).ConfigureAwait(false);
             await ExtractRuntimeAsync(archive, prefix, stage, ct).ConfigureAwait(false);
             File.Delete(archive);
             progress.Report(40);
@@ -91,17 +92,14 @@ internal static class PureNegComponent
             using var manifest = typeof(PureNegComponent).Assembly.GetManifestResourceStream("PureNegFiles")
                 ?? throw new InvalidOperationException("PURE Neg download manifest is missing.");
             var files = JsonSerializer.Deserialize<Dictionary<string, string>>(manifest)!;
-            int completed = 0;
-            await Parallel.ForEachAsync(files, new ParallelOptions { MaxDegreeOfParallelism = 6, CancellationToken = ct },
-                async (entry, token) =>
-                {
-                    string destination = Path.Combine(stage, entry.Key);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    await DownloadAsync($"https://raw.githubusercontent.com/Toshihiko-Lin/PURENeg/{Revision}/{entry.Key}",
-                        destination, entry.Value, 8 * 1024 * 1024, token).ConfigureAwait(false);
-                    progress.Report(40 + 25 * Interlocked.Increment(ref completed) / files.Count);
-                }).ConfigureAwait(false);
-            await PureNegRuntimePackage.InstallAsync(Client, stage, progress, ct).ConfigureAwait(false);
+            archive = Path.Combine(stage, "engine-sources.zip");
+            await PureNegDownload.DownloadAsync(Client, "engine-sources.zip", archive,
+                "d98b36439a111089b12d6ac311b9d730df1469ced800d996e3582485fa0d57da", 32 * 1024 * 1024,
+                preferMirror, ct).ConfigureAwait(false);
+            await ExtractSourcesAsync(archive, stage, files, ct).ConfigureAwait(false);
+            File.Delete(archive);
+            progress.Report(65);
+            await PureNegRuntimePackage.InstallAsync(Client, stage, progress, ct, preferMirror).ConfigureAwait(false);
             // A component is ready only after the model actually performs inference.
             await RunAsync(stage, stage, "result", null, ct, "--eval", RuntimeProbe, "--", stage).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(stage, "runtime-ready"), PureNegRuntimePackage.Release, ct).ConfigureAwait(false);
@@ -131,7 +129,7 @@ internal static class PureNegComponent
 
     private sealed class InstallProgress(IProgress<int> target) : IProgress<int>
     {
-        public void Report(int value) => target.Report(value * 40 / 50);
+        public void Report(int value) => target.Report(value * 40 / 100);
     }
 
     private const string RuntimeProbe = """
@@ -156,36 +154,27 @@ internal static class PureNegComponent
         })().catch(e => { process.stderr.write(e.message+'\n'); process.exitCode = 1; });
         """;
 
-    private static async Task DownloadAsync(string url, string path, string sha256, int limit, CancellationToken ct,
-        IProgress<int>? progress = null)
+    internal static async Task ExtractSourcesAsync(string archive, string destination,
+        IReadOnlyDictionary<string, string> manifest, CancellationToken ct)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromMinutes(3));
-        using var response = await Client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        await using var input = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-        await using var output = File.Create(path);
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[65536];
-        long total = response.Content.Headers.ContentLength ?? 0;
-        int lastPercent = 0;
-        int size = 0;
-        int count;
-        while ((count = await input.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) > 0)
+        using var zip = ZipFile.OpenRead(archive);
+        var remaining = manifest.Keys.ToHashSet(StringComparer.Ordinal);
+        foreach (var entry in zip.Entries)
         {
-            size += count;
-            if (size > limit) throw new IOException("PURE Neg download exceeds its size limit.");
-            hash.AppendData(buffer.AsSpan(0, count));
-            await output.WriteAsync(buffer.AsMemory(0, count), timeout.Token).ConfigureAwait(false);
-            if (progress is not null && total > 0)
-            {
-                int percent = (int)Math.Min(49, 50L * size / total);
-                if (percent > lastPercent) progress.Report(lastPercent = percent);
-            }
+            ct.ThrowIfCancellationRequested();
+            if (!remaining.Remove(entry.FullName) || entry.Length > 8 * 1024 * 1024 ||
+                (entry.ExternalAttributes >> 16 & 0xF000) == 0xA000)
+                throw new InvalidDataException("Invalid PURENeg engine source archive.");
+            string target = Path.Combine(destination, entry.FullName);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            await using var input = entry.Open();
+            await using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                await input.CopyToAsync(output, ct).ConfigureAwait(false);
+            await using var file = File.OpenRead(target);
+            if (!Convert.ToHexString(await SHA256.HashDataAsync(file, ct)).Equals(manifest[entry.FullName], StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("PURENeg engine source checksum mismatch.");
         }
-        if (!Convert.ToHexString(hash.GetHashAndReset()).Equals(sha256, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("PURE Neg download SHA-256 mismatch.");
+        if (remaining.Count != 0) throw new InvalidDataException("PURENeg engine source archive is incomplete.");
     }
 
     private static async Task ExtractRuntimeAsync(string archive, string prefix, string stage, CancellationToken ct)

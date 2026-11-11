@@ -115,6 +115,7 @@ public partial class MainWindow
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("导出当前帧…"), OnExportClick, gesture: "E"), nameof(Vm.HasImage)),
                 Bind(Item(Loc.T("导出整卷…"), OnExportRollClick), nameof(Vm.HasImage)),
+                Item(Loc.T("导出训练数据包…"), OnExportDustTrainingClick),
                 Bind(Item(Loc.T("查看上次批量导出结果…"), OnBatchExportReportClick), nameof(Vm.CanShowBatchExportReport)),
                 Bind(Item(Loc.T("导出印样…"), OnContactSheetClick), nameof(Vm.HasImage)),
             },

@@ -52,6 +52,9 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" IsEnabled="{Binding HasImage}" />
+                        <MenuItem Name="DustTrainingMenuItem" Header="{i18n:T '导出训练数据包…'}"
+                                  Click="OnExportDustTrainingClick"
+                                  ToolTip.Tip="{i18n:T '通过完整画面缩略图选择要分享的训练样本'}" />
                         <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
                                   IsEnabled="{Binding CanShowBatchExportReport}" />
                         <MenuItem Header="{i18n:T '导出印样…'}" Click="OnContactSheetClick" IsEnabled="{Binding HasImage}">
@@ -608,19 +611,27 @@
                                     <TextBlock Grid.Column="1" Classes="toolCaption" Text="{i18n:T '除尘'}" VerticalAlignment="Center" />
                                 </Grid>
                             </ToggleButton>
-                        <Button Name="DustTrainingBtn" Content="{i18n:T '导出训练数据包…'}"
-                                Click="OnExportDustTrainingClick" Padding="7,4" Margin="6,0,0,0"
-                                ToolTip.Tip="{i18n:T '通过完整画面缩略图选择要分享的训练样本'}" />
                         <StackPanel Name="DustToolbar" IsVisible="False" Orientation="Horizontal"
                                     Spacing="10" Margin="10,0,0,0">
-                            <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"
-                                    AutomationProperties.Name="{i18n:T 'PURENeg 自动除尘'}" Padding="7,4">
-                                <StackPanel Orientation="Horizontal" Spacing="5">
-                                    <ctl:Icon Name="DustDetectIcon" Data="{StaticResource IcoWand}" />
-                                    <ctl:Icon Name="DustDownloadIcon" Data="{StaticResource IcoDownload}" IsVisible="False" />
-                                    <TextBlock Name="DustDetectLabel" Text="{i18n:T 'PURENeg 自动除尘'}" TextWrapping="NoWrap" />
-                                </StackPanel>
-                            </Button>
+                            <!-- Same overlaid download affordance as SmartCastButton: one visible feature entry. -->
+                            <Grid Name="DustDetectEntry">
+                                <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"
+                                        AutomationProperties.Name="{i18n:T 'PURENeg 自动除尘'}" Padding="7,4">
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <ctl:Icon Data="{StaticResource IcoWand}" />
+                                        <TextBlock Text="{i18n:T 'PURENeg 自动除尘'}" TextWrapping="NoWrap" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Name="PureNegDownloadButton" IsVisible="False"
+                                        Background="Transparent" BorderThickness="0" HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left" Padding="5" Click="OnInstallPureNegClick"
+                                        AutomationProperties.Name="{i18n:T '下载 PURENeg 除尘'}"
+                                        ToolTip.Tip="{i18n:T '点击下载当前平台的除尘组件和模型。GitHub 不可用时自动尝试 Gitee 国内镜像。'}">
+                                    <Border Background="{DynamicResource PanelBrush}" CornerRadius="5" Padding="4" Opacity="0.85">
+                                        <ctl:Icon Data="{StaticResource IcoDownload}" />
+                                    </Border>
+                                </Button>
+                            </Grid>
                             <Border Name="DustViewSelector" Background="{DynamicResource PanelBrush}"
                                     CornerRadius="4" Padding="1">
                                 <StackPanel Orientation="Horizontal" Spacing="1">
@@ -1142,7 +1153,6 @@
                                       RenderTransform="rotate(-90deg)" />
                             <Button.Flyout>
                                 <MenuFlyout Placement="TopEdgeAlignedRight">
-                                    <MenuItem Header="{i18n:T '导出训练数据包…'}" Click="OnExportDustTrainingClick" />
                                     <MenuItem Name="ExportRollButton" Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" />
                                     <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
                                               IsEnabled="{Binding CanShowBatchExportReport}" />

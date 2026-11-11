@@ -157,6 +157,8 @@ public partial class MainWindow : Window
                         CloseDustToolbar();
                     if (DustToolbar.IsVisible && args.PropertyName is (nameof(MainViewModel.CanUndo) or nameof(MainViewModel.CanRedo)))
                         UpdateDustToolbar();
+                    if (args.PropertyName is nameof(MainViewModel.HasLongTask) or nameof(MainViewModel.IsBusy))
+                        UpdateDustToolbar();
                     OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>
