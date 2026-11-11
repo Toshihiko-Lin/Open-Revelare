@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>pureneg-model-host</AssemblyName>
+    <PureNegProvider Condition="'$(PureNegProvider)' == ''">Cpu</PureNegProvider>
+    <DefineConstants Condition="'$(PureNegProvider)' == 'DirectML'">$(DefineConstants);PURENEG_DML</DefineConstants>
+    <DefineConstants Condition="'$(PureNegProvider)' == 'Cuda'">$(DefineConstants);PURENEG_CUDA</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" Condition="'$(PureNegProvider)' == 'Cpu'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" Condition="'$(PureNegProvider)' == 'DirectML'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.20.1" Condition="'$(PureNegProvider)' == 'Cuda'" />
+    <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.660" />
+  </ItemGroup>
+</Project>

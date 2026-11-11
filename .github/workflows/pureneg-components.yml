@@ -1,0 +1,96 @@
+name: PURENeg platform inference components
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-2022, rid: win-x64 }
+          - { runner: ubuntu-24.04, rid: linux-x64 }
+          - { runner: macos-latest, rid: osx-arm64 }
+          - { runner: macos-15-intel, rid: osx-x64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Toshihiko-Lin/PURENeg
+          ref: cbcc9fc825ba9aaf12304c7e9524643995faf4dd
+          path: upstream-pureneg
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.14.1' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build native engine on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/pureneg/build-windows.ps1 -ForkSource upstream-pureneg -OutputDir artifacts/native
+      - name: Build native engine on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash packaging/pureneg/build-unix.sh upstream-pureneg artifacts/native
+      - name: Build CoreML runtime and model
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p artifacts/runtime
+          xcrun swiftc -O upstream-pureneg/macos/ImageCodec.swift -o artifacts/runtime/image-codec
+          xcrun coremlcompiler compile upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/runtime
+      - name: Validate converted model against original CoreML
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python -m pip install numpy==2.2.6 onnx==1.23.2 coremltools==9.0 onnxruntime==1.20.1
+          python packaging/pureneg/convert-fibrenet.py upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/model.mlmodel upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/weights/weight.bin artifacts/FibreNet.onnx
+          python packaging/pureneg/check-coreml-parity.py upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/FibreNet.onnx artifacts/runtime/model-parity.json
+      - name: Convert portable ONNX model
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          python -m pip install numpy==2.2.6 onnx==1.23.2 coremltools==9.0
+          python packaging/pureneg/convert-fibrenet.py upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/model.mlmodel upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/weights/weight.bin artifacts/FibreNet.onnx
+      - name: Publish isolated ONNX model host
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          provider=Cpu
+          if [ "$RUNNER_OS" = Windows ]; then provider=DirectML; fi
+          dotnet publish src/OpenRevelare.PureNeg.ModelHost -c Release -r '${{ matrix.rid }}' --self-contained true -p:PureNegProvider="$provider" -o artifacts/runtime
+          cp artifacts/FibreNet.onnx artifacts/runtime/FibreNet.onnx
+          artifacts/runtime/pureneg-model-host --probe
+      - name: Package platform component
+        shell: bash
+        run: |
+          cp upstream-pureneg/LICENSE artifacts/runtime/LICENSE-PURENeg.txt
+          python packaging/pureneg/pack-runtime.py --rid '${{ matrix.rid }}' --runtime artifacts/runtime --native artifacts/native/filmdust.node --output artifacts/packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pureneg-${{ matrix.rid }}
+          path: artifacts/packages/*
+  index:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'pureneg-*', merge-multiple: true, path: packages }
+      - name: Generate complete component download index
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          root = Path('packages')
+          index = {'revision': 'cbcc9fc825ba9aaf12304c7e9524643995faf4dd', 'platforms': {}}
+          for file in sorted(root.glob('*.json')):
+              entry = json.loads(file.read_text())
+              assert entry['revision'] == index['revision']
+              index['platforms'].update(entry['platforms'])
+          assert set(index['platforms']) == {'win-x64', 'linux-x64', 'osx-arm64', 'osx-x64'}
+          (root / 'components.json').write_text(json.dumps(index, indent=2) + '\n')
+      - uses: actions/upload-artifact@v4
+        with: { name: pureneg-release-candidate, path: 'packages/*' }
