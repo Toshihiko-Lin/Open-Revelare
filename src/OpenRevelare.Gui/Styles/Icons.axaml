@@ -32,6 +32,10 @@
     <StreamGeometry x:Key="IcoTranslate">M1.5 13L4.5 3L7.5 13M2.5 9.5H6.5M9 4.5H14M11.5 2.5V4.5M9.5 7C10.5 9.5 12 11.5 14 13M14 7C13 9.5 11.5 11.5 9 13</StreamGeometry>
 
     <!-- ── Tools ───────────────────────────────────────────────────────────── -->
+    <StreamGeometry x:Key="IcoBrush">M6.5 9.5L11.5 2.5Q12.5 1.5 13.5 2.5Q14.5 3.5 13.5 4.5L8.5 11.5M6.5 9.5Q3.5 9 3.5 12L2 14Q7 14.5 8.5 11.5Z</StreamGeometry>
+    <StreamGeometry x:Key="IcoEraser">M2.5 9L9 2.5L13.5 7L7 13.5H5L2.5 11ZM6 5.5L10.5 10M7 13.5H14</StreamGeometry>
+    <StreamGeometry x:Key="IcoBrushSize">M8 2.5A5.5 5.5 0 1 0 8 13.5A5.5 5.5 0 1 0 8 2.5M6 8H10M8 6V10</StreamGeometry>
+    <StreamGeometry x:Key="IcoSettings">M2 4H5M9 4H14M2 8H9M13 8H14M2 12H4M8 12H14M7 2V6M11 6V10M6 10V14</StreamGeometry>
     <!-- marquee = every 框选 sampling toggle -->
     <StreamGeometry x:Key="IcoMarquee">M2.5 5.5V3.5A1 1 0 0 1 3.5 2.5H5.5M10.5 2.5H12.5A1 1 0 0 1 13.5 3.5V5.5M13.5 10.5V12.5A1 1 0 0 1 12.5 13.5H10.5M5.5 13.5H3.5A1 1 0 0 1 2.5 12.5V10.5M7.3 2.5H8.7M7.3 13.5H8.7M2.5 7.3V8.7M13.5 7.3V8.7</StreamGeometry>
     <!-- wand = every 自动/智能 action -->

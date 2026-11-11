@@ -179,7 +179,6 @@ public partial class MainWindow
                 Bind(Item(Loc.T("修片"), OnDevelopModeClick, gesture: "D", bare: true), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("查看负片"), OnMenuViewNegClick, gesture: "N", bare: true), nameof(Vm.HasImage)),
-                Bind(Item(Loc.T("前后对比"), OnMenuCompareClick, gesture: "K", bare: true), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("适合窗口"), OnFitClick, gesture: "F", bare: true), nameof(Vm.HasImage)),
                 Bind(Item(Loc.T("实际像素 100%"), OnActualSizeClick, gesture: "D1"), nameof(Vm.HasImage)),

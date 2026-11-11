@@ -1124,7 +1124,9 @@ public partial class MainViewModel
         SprocketEnabled = p.SprocketEnabled; SprocketThreshold = p.SprocketThreshold ?? 0.9;
         DustEnabled = p.DustEnabled;
         _dustSpots = new List<DustSpot>(p.DustSpots);
+        _automaticDustMask = p.AutomaticDustMask;
         OnPropertyChanged(nameof(DustSpotCount));
+        OnPropertyChanged(nameof(HasAutomaticDust));
         UpdateDustOverlay();
         // Adopted through the field, not the property: the property is the USER's switch and
         // rebuilds every thumbnail, which is not what loading a roll that was always black and

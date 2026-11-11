@@ -86,6 +86,10 @@ public sealed class PreparedPreviewTests
         string cropped = PreviewParametersKey.Create(p);
         p.DustSpots.Add(new DustSpot(0.3, 0.4, 0.01));
         Assert.NotEqual(cropped, PreviewParametersKey.Create(p));
+        p.AutomaticDustMask = new DustMask(100, 100, (0, 0, 1, 1), [new(20, 10, 15)]);
+        string masked = PreviewParametersKey.Create(p);
+        p.AutomaticDustMask = new DustMask(100, 100, (0, 0, 1, 1), [new(21, 10, 15)]);
+        Assert.NotEqual(masked, PreviewParametersKey.Create(p));
         p.LccFlatField = new ImageBuffer(2, 2);
         string flat = PreviewParametersKey.Create(p);
         Assert.Equal(flat, PreviewParametersKey.Create(p.Clone()));

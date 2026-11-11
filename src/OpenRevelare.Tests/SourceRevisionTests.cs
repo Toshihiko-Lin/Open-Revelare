@@ -78,8 +78,8 @@ public sealed class SourceRevisionTests : IDisposable
         var tileMethod = typeof(MainViewModel).GetMethod("TileFor", BindingFlags.NonPublic | BindingFlags.Instance)!;
         WorkingFrame? Tile() => (WorkingFrame?)tileMethod.Invoke(vm, new object[] { new RollFrame(path) });
         var fullMethod = typeof(MainViewModel).GetMethod("LoadFullWorking", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        WorkingFrame Full() => (WorkingFrame)fullMethod.Invoke(vm,
-            new object[] { path, ColorPipelineVersion.ManagedV2, TiffInputAssumption.Linear })!;
+        WorkingFrame Full((double, double, double, double)? box = null) => (WorkingFrame)fullMethod.Invoke(vm,
+            new object?[] { path, ColorPipelineVersion.ManagedV2, TiffInputAssumption.Linear, box })!;
 
         var task = Preview();
         var concurrent = Preview();
@@ -90,6 +90,12 @@ public sealed class SourceRevisionTests : IDisposable
         Assert.NotNull(oldTile);
         var full = Full();
         Assert.Same(full, Full());
+        var split = Full((0, 0, .5, 1));
+        Assert.Equal(8, split.Pixels.Width);
+        Assert.Equal(Geometry.ApplyCrop(full.Pixels, (0, 0, .5, 1)).Data, split.Pixels.Data);
+        Assert.Same(split, Full((0, 0, .5, 1)));
+        full = Full();
+        Assert.Equal(16, full.Pixels.Width);
 
         WriteTiff(path, 200);
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));

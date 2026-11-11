@@ -229,7 +229,7 @@ public partial class MainViewModel
         // alternative is a second whole-file decode of the same pixels.
         FullSlot? full;
         lock (_fullSlotGate) full = _fullSlot;
-        if (full is not null
+        if (full is { Box: null }
             && full.Source == stamp
             && string.Equals(full.Path, path, StringComparison.OrdinalIgnoreCase)
             && full.PipelineVersion == pipelineVersion
@@ -348,7 +348,7 @@ public partial class MainViewModel
         // background render — the patch must carry the same gain as the preview it lands on.
         double[]? negativeWb = negative ? CurrentNegativeWb() : null;
 
-        FrameParams p = BuildParams();
+        FrameParams p = WithDustReviewPreview(BuildParams());
         string srcPath = frame.Path;
         int frameW, frameH;
 
@@ -399,7 +399,7 @@ public partial class MainViewModel
 
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
-        bool needsDecode = _fullSlot is null
+        bool needsDecode = _fullSlot is null || _fullSlot.Box is not null
                            || _fullSlot.PipelineVersion != pipelineVersion
                            || _fullSlot.TiffInputAssumption != tiffInputAssumption
                            || !string.Equals(_fullSlot.Path, srcPath, StringComparison.OrdinalIgnoreCase);

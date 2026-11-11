@@ -153,6 +153,10 @@ public partial class MainWindow : Window
                         UpdatePatchLayout();
                     if (args.PropertyName is nameof(MainViewModel.IsLibraryMode) or nameof(MainViewModel.ShowRollProgressBanner))
                         UpdateRollProgressPlacement();
+                    if (args.PropertyName is nameof(MainViewModel.CurrentFrame) or nameof(MainViewModel.IsLibraryMode))
+                        CloseDustToolbar();
+                    if (DustToolbar.IsVisible && args.PropertyName is (nameof(MainViewModel.CanUndo) or nameof(MainViewModel.CanRedo)))
+                        UpdateDustToolbar();
                     OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>
@@ -172,6 +176,7 @@ public partial class MainWindow : Window
                 SetUpNativeMenu();
             }
         };
+        InitializeDustToolbar();
         // Onboarding is an inline, dismissible task cue; it never blocks the workspace or an
         // update notice behind a modal document window.
         Opened += async (_, _) =>
@@ -187,22 +192,26 @@ public partial class MainWindow : Window
         // percentage both go stale unless the transform is recomputed.
         ViewPort.SizeChanged += (_, _) => ApplyTransform();
         WindowsPreview.NativePointerMoved += OnNativePreviewPointerMoved;
-        Activated += (_, _) => { Vm?.RefreshDeepWbAvailability(); RequestDustAnimationFrame(); };
+        Activated += (_, _) =>
+        {
+            Vm?.RefreshDeepWbAvailability();
+            if (DustToolbar.IsVisible) UpdateDustToolbar();
+            RequestDustAnimationFrame();
+        };
         Deactivated += (_, _) =>
         {
+            EndOverlayGesture();
             DustBrushRing.IsVisible = false;
             QueueDustPresentation();
         };
 
         // If the pointer capture is stolen (another window, a touch cancel), the drag flags would
         // otherwise stay stuck true and the next click would behave as a continued drag.
-        Overlay.PointerCaptureLost += (_, _) =>
+        Overlay.PointerCaptureLost += (_, e) =>
         {
-            _panning = false;
-            EndDustStroke();
-            _dragging = false;
-            SelRect.IsVisible = false;
-            UpdatePanCursor();
+            if (_overlayPointer is not null && !ReferenceEquals(_overlayPointer, e.Pointer)) return;
+            _overlayPointer = null;
+            EndOverlayGesture();
         };
 
         // Right-clicking a thumbnail must first make it the current frame — otherwise the
@@ -357,6 +366,7 @@ public partial class MainWindow : Window
     private double _zoom = 1.0;          // 1.0 = fit-to-window
     private Point _pan;                  // translate in viewport space
     private bool _panning;
+    private IPointer? _overlayPointer;
     private Point _panLast;
     private readonly ScaleTransform _scale = new(1, 1);
     private readonly TranslateTransform _translate = new(0, 0);
@@ -994,6 +1004,8 @@ public partial class MainWindow : Window
 
     private void OnPreviewBitmapChanged()
     {
+        if (_dustReviewDraft is not null)
+            Dispatcher.UIThread.Post(CheckDustReviewGeometry, DispatcherPriority.Background);
         PixelSize size = Vm?.PreviewImage?.PixelSize ?? default;
         if (size != _lastPreviewSize)
         {
@@ -1054,13 +1066,6 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    // ── Before/after compare (hold shows the un-graded positive) ─────────────────
-    private void OnCompareToggle(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton { IsChecked: { } on }) return;
-        if (on) Vm?.ShowBeforeEdits(); else Vm?.ShowAfterEdits();
-    }
-
     private ToggleButton[] AllToggles() => new[]
     {
         FilmBaseBtn, DMaxBtn, GreyBtn, BlackBtn, WhiteBtn, CropBtn, DustAddBtn, DustEraseBtn,
@@ -1075,6 +1080,8 @@ public partial class MainWindow : Window
 
     private void EnterMode(SampleMode mode, string banner, bool useNegative)
     {
+        EndOverlayGesture();
+        if (mode is not (SampleMode.DustAdd or SampleMode.DustErase)) CloseDustToolbar();
         // Arming another tool straight from the crop tool goes through here WITHOUT passing
         // ExitMode, so the crop-editing state had nothing to tear it down: CropEditing stayed
         // true and the preview kept hiding the applied crop for the rest of the session, with a
@@ -1083,6 +1090,13 @@ public partial class MainWindow : Window
         bool leavingDust = IsDustMode && mode is not SampleMode.DustAdd and not SampleMode.DustErase;
         if (_negativeShown) { Vm?.ShowPositiveView(); _negativeShown = false; }
         _mode = mode;
+        if (IsDustMode)
+        {
+            BeginAppliedDustReview();
+            DustToolBtn.IsChecked = true;
+            DustToolbar.IsVisible = true;
+            SetDustView(DustView.Mask);
+        }
         if (leavingCrop) DiscardCropDraft();   // after _mode, so the frame actually hides
         else if (leavingDust)
         {
@@ -1096,8 +1110,15 @@ public partial class MainWindow : Window
         // A dismissal applies to the banner the user dismissed, not to every future one: arming a
         // tool is a fresh request for its instructions, and in crop mode the hint is now the only
         // place 回车/Esc are stated. ApplyBannerVisibility owns the buttons.
-        _bannerHintDismissed = false;
+        _bannerHintDismissed = IsDustMode;
         ApplyBannerVisibility(crop);
+        if (IsDustMode)
+        {
+            bool restore = mode == SampleMode.DustErase;
+            DustStrokePath.Stroke = DustStrokeStart.Fill = restore
+                ? PreviewOverlayStyle.DustRestoreFillBrush : PreviewOverlayStyle.DustStrokeFillBrush;
+            DustBrushRing.Stroke = restore ? PreviewOverlayStyle.DustRestoreBrush : PreviewOverlayStyle.DustBrushBrush;
+        }
         if (useNegative)
         {
             Vm?.ShowNegativeView();
@@ -1141,12 +1162,12 @@ public partial class MainWindow : Window
 
     private void OnDustAddClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DustAdd,
-            Loc.T("修复笔：拖动标记修复范围；[ 缩小、] 放大笔刷。"),
+            Loc.T("添加除尘：涂画需要修补的灰尘或漏检区域。[ 缩小、] 放大笔刷。"),
             useNegative: false);
 
     private void OnDustEraseClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DustErase,
-            Loc.T("擦除笔：拖动擦除红色修复范围；[ 缩小、] 放大笔刷。"),
+            Loc.T("恢复原图：从除尘蒙版中减去涂画部分，保留原有细节。"),
             useNegative: false);
 
     private void OnClearAllDustClick(object? sender, RoutedEventArgs e) => Vm?.ClearAllDust();
@@ -1228,7 +1249,7 @@ public partial class MainWindow : Window
 
     private void ExitMode()
     {
-        EndDustStroke();
+        EndOverlayGesture();
         _mode = SampleMode.None;
         DiscardCropDraft();
         Banner.IsHitTestVisible = false;
@@ -1274,7 +1295,12 @@ public partial class MainWindow : Window
         if (Vm?.HasImage != true) { if (btn is not null) btn.IsChecked = false; return; }
 
         bool arm = sender is ToggleButton tb ? tb.IsChecked == true : _mode != mode;
-        if (!arm) { ExitMode(); return; }
+        if (!arm)
+        {
+            ExitMode();
+            if (DustToolbar.IsVisible) UpdateDustReviewDisplay();
+            return;
+        }
 
         SetTogglesExcept(btn);
         if (btn is not null) btn.IsChecked = true;   // programmatic set does not re-fire Click
@@ -1400,14 +1426,28 @@ public partial class MainWindow : Window
         // A bare letter must not fire while the user is typing in 卷注释 / a numeric field.
         bool typing = FocusManager?.GetFocusedElement() is TextBox;
 
-        if (e.Key == Key.Escape && _mode == SampleMode.Crop) { CancelCropDraft(); e.Handled = true; }
+        if (e.Key == Key.Escape && IsDustComparing) { EndDustComparison(); e.Handled = true; }
+        else if (e.Key == Key.Escape && _mode == SampleMode.Crop) { CancelCropDraft(); e.Handled = true; }
+        else if (e.Key == Key.Escape && IsDustMode)
+        { ExitMode(); UpdateDustReviewDisplay(); e.Handled = true; }
+        else if (e.Key == Key.Escape && _panning)
+        { EndOverlayGesture(); UpdatePanCursor(); e.Handled = true; }
+        else if (e.Key == Key.Escape && HasDustReview) { ResetDustReview(); e.Handled = true; }
         else if (e.Key == Key.Escape && _mode != SampleMode.None) { ExitMode(); e.Handled = true; }
         else if ((e.Key == Key.Enter || e.Key == Key.Return) && _mode == SampleMode.Crop)
         { CommitCrop(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.G) { OnLibraryModeClick(this, e); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.D && img) { Vm?.EnterDevelop(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.F && img) { ResetZoom(); e.Handled = true; }
-        else if (bare && !typing && e.Key == Key.K && img) { ToggleCompare(); e.Handled = true; }
+        else if (bare && !typing && e.Key == Key.K && img && DustToolbar.IsVisible)
+        {
+            if (CanCompareDust && !_dustComparisonKeyDown)
+            {
+                _dustComparisonKeyDown = true;
+                ShowDustComparison();
+            }
+            e.Handled = true;
+        }
         else if (bare && !typing && e.Key == Key.N && img) { ToggleNegative(); e.Handled = true; }
         else if (bare && !typing && e.Key == Key.J && img) { if (Vm is { } v) v.ShowClipping = !v.ShowClipping; e.Handled = true; }
         else if (bare && !typing && IsDustMode && Vm is { } dustVm &&
@@ -1428,8 +1468,8 @@ public partial class MainWindow : Window
         else if (ctrl && !typing && !shift && e.Key == Key.V && img && Vm?.IsLibraryMode == false)
         { OnPasteActiveClick(this, e); e.Handled = true; }
         else if (ctrl && e.Key == Key.D1 && img) { OnActualSizeClick(this, e); e.Handled = true; }
-        else if (ctrl && e.Key == Key.Z && !shift) { Vm?.Undo(); e.Handled = true; }
-        else if (ctrl && (e.Key == Key.Y || (e.Key == Key.Z && shift))) { Vm?.Redo(); e.Handled = true; }
+        else if (ctrl && !typing && e.Key == Key.Z && !shift) { OnUndoClick(this, e); e.Handled = true; }
+        else if (ctrl && !typing && (e.Key == Key.Y || (e.Key == Key.Z && shift))) { OnRedoClick(this, e); e.Handled = true; }
         else if (ctrl && e.Key == Key.N) { OnOpenClick(this, e); e.Handled = true; }
         else if (ctrl && e.Key == Key.O && img) { OnAddImagesClick(this, e); e.Handled = true; }
         else if (ctrl && e.Key == Key.E && img) { OnExportClick(this, e); e.Handled = true; }
@@ -1475,8 +1515,17 @@ public partial class MainWindow : Window
     private void OnPasteSceneToCurrentClick(object? sender, RoutedEventArgs e) =>
         Vm?.PasteSceneToCurrent();
 
-    private void OnUndoClick(object? sender, RoutedEventArgs e) => Vm?.Undo();
-    private void OnRedoClick(object? sender, RoutedEventArgs e) => Vm?.Redo();
+    private void OnUndoClick(object? sender, RoutedEventArgs e)
+    {
+        if (_dustReviewDraft is not null) OnUndoDustMaskClick(sender, e);
+        else Vm?.Undo();
+    }
+
+    private void OnRedoClick(object? sender, RoutedEventArgs e)
+    {
+        if (_dustReviewDraft is not null) OnRedoDustMaskClick(sender, e);
+        else Vm?.Redo();
+    }
 
     // ── Sampling button handlers ────────────────────────────────────────────────
     private void OnSampleFilmBaseClick(object? sender, RoutedEventArgs e) =>
@@ -1563,7 +1612,11 @@ public partial class MainWindow : Window
 
     private void OnViewNegToggle(object? sender, RoutedEventArgs e)
     {
-        if (sender is ToggleButton { IsChecked: true }) Vm?.ShowNegativeView();
+        if (sender is ToggleButton { IsChecked: true })
+        {
+            CloseDustToolbar();
+            Vm?.ShowNegativeView();
+        }
         else Vm?.ShowPositiveView();
     }
 
@@ -1576,14 +1629,7 @@ public partial class MainWindow : Window
         OnViewNegToggle(ViewNegBtn, new RoutedEventArgs());
     }
 
-    private void ToggleCompare()
-    {
-        CompareBtn.IsChecked = !(CompareBtn.IsChecked ?? false);
-        OnCompareToggle(CompareBtn, new RoutedEventArgs());
-    }
-
     private void OnMenuViewNegClick(object? sender, RoutedEventArgs e) { if (Vm?.HasImage == true) ToggleNegative(); }
-    private void OnMenuCompareClick(object? sender, RoutedEventArgs e) { if (Vm?.HasImage == true) ToggleCompare(); }
 
     private void OnQuitClick(object? sender, RoutedEventArgs e) => Close();
 
@@ -2047,7 +2093,7 @@ public partial class MainWindow : Window
 
     private void UpdateDustBrushRing(Point overlayPoint)
     {
-        Point? normal = IsDustMode ? NormFromOverlay(overlayPoint) : null;
+        Point? normal = IsDustMode && !IsDustComparing ? NormFromOverlay(overlayPoint) : null;
         if (normal is not { } n || n.X < 0 || n.X > 1 || n.Y < 0 || n.Y > 1 ||
             LetterboxRect() is not { } box || Vm is not { } vm)
         {
@@ -2111,10 +2157,15 @@ public partial class MainWindow : Window
 
     private void EndDustStroke()
     {
-        foreach (Point sample in _dustStrokeSamples)
-            _dustStrokeChanged |= Vm?.PaintDustAt(sample.X, sample.Y, erase: _mode == SampleMode.DustErase) == true;
-        if (_dustStrokeChanged && Vm is { } vm)
-            vm.CommitDustStroke(added: _mode == SampleMode.DustAdd);
+        if (_dustReviewDraft is not null && _dustStrokeSamples.Count > 0)
+            EditDustReviewStroke(_dustStrokeSamples, restore: _mode == SampleMode.DustErase);
+        else
+        {
+            foreach (Point sample in _dustStrokeSamples)
+                _dustStrokeChanged |= Vm?.PaintDustAt(sample.X, sample.Y, erase: _mode == SampleMode.DustErase) == true;
+            if (_dustStrokeChanged && Vm is { } vm)
+                vm.CommitDustStroke(added: _mode == SampleMode.DustAdd);
+        }
         _dustStrokeChanged = false;
         _dustStrokeLast = null;
         _dustStrokeSamples.Clear();
@@ -2135,8 +2186,32 @@ public partial class MainWindow : Window
     }
 
     // ── Rubber-band drag on the overlay ─────────────────────────────────────────
+    private void CaptureOverlayPointer(IPointer pointer)
+    {
+        _overlayPointer = pointer;
+        pointer.Capture(Overlay);
+    }
+
+    private void ReleaseOverlayPointer()
+    {
+        var pointer = _overlayPointer;
+        _overlayPointer = null;
+        if (ReferenceEquals(pointer?.Captured, Overlay)) pointer.Capture(null);
+    }
+
+    private void EndOverlayGesture()
+    {
+        _panning = false;
+        _dragging = false;
+        EndDustStroke();
+        ReleaseOverlayPointer();
+        SelRect.IsVisible = SelLine.IsVisible = false;
+        UpdatePanCursor();
+    }
+
     private void OnOverlayPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsDustComparing) return;
         var props = e.GetCurrentPoint(Overlay).Properties;
         // Pan on middle drag from any mode, and on LEFT drag while browsing — left-drag is what
         // people actually reach for, and with no sampling tool armed it had no other job.
@@ -2146,13 +2221,17 @@ public partial class MainWindow : Window
                           || (props.IsLeftButtonPressed && _mode == SampleMode.None);
         if (panGesture)
         {
+            if (_panning || _dragging) EndOverlayGesture();
+            Overlay.Focusable = true;
+            Overlay.Focus();
             if (CanPan())
             {
                 _panning = true;
                 _panLast = e.GetPosition(ViewPort);
-                e.Pointer.Capture(Overlay);
+                CaptureOverlayPointer(e.Pointer);
                 UpdatePanCursor();
             }
+            e.Handled = true;
             return;
         }
         if (_mode == SampleMode.None || Vm is null || PreviewBitmap is null) return;
@@ -2168,12 +2247,13 @@ public partial class MainWindow : Window
             _cropDragStartRect = _cropDraft ?? (n.X, n.Y, 0, 0);
             if (_cropHandle == "new") _cropDraft = (n.X, n.Y, 0, 0);
             _dragging = true;
-            e.Pointer.Capture(Overlay);
+            CaptureOverlayPointer(e.Pointer);
             return;
         }
 
         if (_mode is SampleMode.DustAdd or SampleMode.DustErase)
         {
+            if (_dustView != DustView.Mask) SetDustView(DustView.Mask);
             if (NormFromOverlay(_dragStart) is not { } normal ||
                 normal.X < 0 || normal.X > 1 || normal.Y < 0 || normal.Y > 1) return;
             _dragging = true;
@@ -2181,7 +2261,7 @@ public partial class MainWindow : Window
             _dustStrokeChanged = false;
             PaintDustSegment(normal);
             UpdateDustBrushRing(_dragStart);
-            e.Pointer.Capture(Overlay);
+            CaptureOverlayPointer(e.Pointer);
             return;
         }
 
@@ -2200,7 +2280,7 @@ public partial class MainWindow : Window
             SelRect.Height = 0;
             SelRect.IsVisible = true;
         }
-        e.Pointer.Capture(Overlay);
+        CaptureOverlayPointer(e.Pointer);
     }
 
     private void OnOverlayMoved(object? sender, PointerEventArgs e)
@@ -2265,7 +2345,7 @@ public partial class MainWindow : Window
         // cancel and restart a render that never finishes.
         if (_panning)
         {
-            _panning = false; e.Pointer.Capture(null); UpdatePanCursor();
+            _panning = false; ReleaseOverlayPointer(); UpdatePanCursor();
             SyncSharpPatch();
             return;
         }
@@ -2282,12 +2362,12 @@ public partial class MainWindow : Window
                 PaintDustSegment(point);
             EndDustStroke();
             _dragging = false;
-            e.Pointer.Capture(null);
+            ReleaseOverlayPointer();
             return;
         }
 
         _dragging = false;
-        e.Pointer.Capture(null);
+        ReleaseOverlayPointer();
         SelRect.IsVisible = false;
         SelLine.IsVisible = false;
 

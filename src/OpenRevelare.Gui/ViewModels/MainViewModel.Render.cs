@@ -87,7 +87,7 @@ public partial class MainViewModel
         NotifyProjectDependencies();
     }
 
-    private async void ScheduleRender()
+    private async void ScheduleRender(bool markEdit = true)
     {
         CancelPreviewWarmup();
         if (_suppressRender || _previewLinear is null) return;
@@ -95,7 +95,7 @@ public partial class MainViewModel
         // The sprocket overlay is drawn in the FINISHED preview's geometry, so a rotation, a flip
         // or a crop moves it too. Refreshing here catches all of them at once — they each land in
         // this method, and hooking them individually is how one gets missed.
-        if (!_restoring) MarkEdit();   // a real, user-driven param change → undo-committable
+        if (markEdit && !_restoring) MarkEdit();
         // The negative view owns the screen while it is up, so a render must not push a positive
         // into it — rotating mid-sampling did exactly that, replacing the negative being sampled
         // with the finished picture. It is re-derived rather than skipped because the view follows
@@ -186,7 +186,7 @@ public partial class MainViewModel
         CancelPreviewWarmup();
         using var totalTrace = RenderTrace.Scope("preview.total");
         WorkingFrame source = interactiveSource ?? _previewWorking!;
-        p = ForPreview(p).Clone();
+        p = ForPreview(WithDustReviewPreview(p)).Clone();
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
         // Captured now, not read at apply time: if the user switches frames while this render is
         // in flight, the thumbnail it produces still belongs to the frame it was rendered from.
@@ -197,7 +197,8 @@ public partial class MainViewModel
 
         bool wantClipping = ShowClipping;
 
-        bool wantThumbnail = interactiveSource is null && frame is not null && !RollAnalysisPending;
+        bool wantThumbnail = interactiveSource is null && frame is not null && !RollAnalysisPending
+            && !HasDustPreviewOverride;
 
         (Bitmap bmp, HistogramData hist, Bitmap? thumb, WriteableBitmap? clip,
          PresentationScene scene, PresentationScene? clipScene, RenderedFrame rendered) = await Task.Run(async () =>
@@ -291,7 +292,7 @@ public partial class MainViewModel
                 RenderTrace.Observe("frame.switch.first-publication", switchTrace.Elapsed.TotalMilliseconds);
                 _frameSwitchTrace = null;
             }
-            if (interactiveSource is null) SchedulePreviewWarmup();
+            if (interactiveSource is null && !HasDustPreviewOverride) SchedulePreviewWarmup();
         }
         if (Dispatcher.UIThread.CheckAccess()) Apply();
         else await Dispatcher.UIThread.InvokeAsync(Apply);

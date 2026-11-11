@@ -1437,6 +1437,13 @@ public partial class MainViewModel
     {
         using var decodeTrace = RenderTrace.Scope("export.decode");
         SourceStamp stamp = SourceStamp.Capture(sourcePath);
+        if (sharedSlot)
+        {
+            var cachedBox = box is not null && !RawDecode.IsRawExtension(sourcePath) ? box : null;
+            WorkingFrame working = LoadFullWorking(sourcePath, pipelineVersion, tiffInputAssumption, cachedBox);
+            stamp.RequireCurrent();
+            return (working, cachedBox is { } split ? ForBox(ep, split) : ep);
+        }
         if (box is { } bx
             && ImageIo.LoadWorkingTiffRegionFull(
                 sourcePath, bx, pipelineVersion, ColorManagement, tiffInputAssumption) is { } window)
@@ -1445,9 +1452,7 @@ public partial class MainViewModel
             return (DecodedSources.Track(window, stamp), ForBox(ep, bx));
         }
 
-        WorkingFrame full = sharedSlot
-            ? LoadFullWorking(sourcePath, pipelineVersion, tiffInputAssumption)
-            : ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement, tiffInputAssumption);
+        WorkingFrame full = ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement, tiffInputAssumption);
         stamp.RequireCurrent();
         return (DecodedSources.Track(full, stamp), ep);
     }
@@ -1460,9 +1465,11 @@ public partial class MainViewModel
     /// </summary>
     private static FrameParams ForBox(FrameParams p, (double X, double Y, double W, double H) box)
     {
-        if (p.CropRect is not { } rect) return p;
+        if (p.CropRect is null && p.AutomaticDustMask is null) return p;
         p = p.Clone();
-        p.CropRect = OrientRect(Relative(UnorientRect(rect, p)!.Value, box), p);
+        p.AutomaticDustMask = p.AutomaticDustMask?.RelativeTo(box);
+        if (p.CropRect is { } rect)
+            p.CropRect = OrientRect(Relative(UnorientRect(rect, p)!.Value, box), p);
         return p;
     }
 
@@ -2079,25 +2086,38 @@ public partial class MainViewModel
     private WorkingFrame LoadFullWorking(
         string sourcePath,
         ColorPipelineVersion pipelineVersion,
-        TiffInputAssumption tiffInputAssumption)
+        TiffInputAssumption tiffInputAssumption,
+        (double X, double Y, double W, double H)? box = null)
     {
         lock (_fullSlotGate)
         {
             SourceStamp stamp = SourceStamp.Capture(sourcePath);
-            if (_fullSlot is { } slot
+            FullSlot? current = _fullSlot is { } slot
                 && slot.Source == stamp
                 && slot.PipelineVersion == pipelineVersion
                 && slot.TiffInputAssumption == tiffInputAssumption
-                && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
-                return slot.Working;
-            WorkingFrame full = ImageIo.LoadWorking(
-                sourcePath,
-                pipelineVersion,
-                ColorManagement,
-                tiffInputAssumption);
+                && string.Equals(slot.Path, sourcePath, StringComparison.OrdinalIgnoreCase) ? slot : null;
+            if (current is not null && current.Box == box)
+            {
+                RenderTrace.Count("full.decode.hit");
+                return current.Working;
+            }
+            WorkingFrame full;
+            if (box is { } crop && current is { Box: null })
+            {
+                RenderTrace.Count("full.decode.crop-hit");
+                full = current.Working.WithPixels(Geometry.ApplyCrop(current.Working.Pixels, crop));
+            }
+            else
+            {
+                RenderTrace.Count("full.decode.miss");
+                full = box is { } rect
+                    ? ImageIo.LoadWorkingTiffRegionFull(sourcePath, rect, pipelineVersion, ColorManagement, tiffInputAssumption)!
+                    : ImageIo.LoadWorking(sourcePath, pipelineVersion, ColorManagement, tiffInputAssumption);
+            }
             stamp.RequireCurrent();
             DecodedSources.Track(full, stamp);
-            _fullSlot = new FullSlot(sourcePath, pipelineVersion, tiffInputAssumption, full, stamp);
+            _fullSlot = new FullSlot(sourcePath, pipelineVersion, tiffInputAssumption, full, stamp, box);
             return full;
         }
     }

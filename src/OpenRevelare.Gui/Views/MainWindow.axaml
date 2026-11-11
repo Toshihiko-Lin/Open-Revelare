@@ -144,11 +144,6 @@
                                 <ctl:Icon Data="{StaticResource IcoFilm}" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="{i18n:T '前后对比'}" InputGesture="K" Click="OnMenuCompareClick" IsEnabled="{Binding HasImage}">
-                            <MenuItem.Icon>
-                                <ctl:Icon Data="{StaticResource IcoCompare}" />
-                            </MenuItem.Icon>
-                        </MenuItem>
                         <Separator />
                         <MenuItem Header="{i18n:T '适合窗口'}" InputGesture="F" Click="OnFitClick" IsEnabled="{Binding HasImage}">
                             <MenuItem.Icon>
@@ -590,7 +585,7 @@
                      Tools wrap on narrow viewports; zoom keeps its own stable group. -->
                 <Border Name="PreviewToolbar" Grid.Row="0" Padding="8,4" Background="{DynamicResource ChromeBrush}"
                         BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,0,1">
-                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
                         <StackPanel Grid.Row="2" Grid.ColumnSpan="2" IsVisible="{Binding HasProjectDependencyWarning}" Margin="0,6,0,0">
                             <TextBlock Text="{Binding ProjectDependencyWarning}" TextWrapping="Wrap" />
                             <Button Content="{i18n:T '恢复工程参考…'}" Click="OnRestoreProjectReferencesClick"
@@ -605,15 +600,41 @@
                                     <TextBlock Classes="toolCaption" Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '负片'}" VerticalAlignment="Center" />
                                 </Grid>
                             </ToggleButton>
-                            <ToggleButton Name="CompareBtn" Classes="viewMode" AutomationProperties.Name="{i18n:T '对比'}" Click="OnCompareToggle" IsEnabled="{Binding HasImage}"
-                                          Padding="9,5" Margin="6,0,0,0"
-                                          ToolTip.Tip="{i18n:T '显示未经帧编辑的画面，用于前后对比（K）'}">
+                            <ToggleButton Name="DustToolBtn" Classes="viewMode" Click="OnDustToolClick"
+                                          IsEnabled="{Binding HasImage}" Margin="6,0,0,0"
+                                          AutomationProperties.Name="{i18n:T '除尘'}" ToolTip.Tip="{i18n:T '除尘'}">
                                 <Grid ColumnDefinitions="Auto,*">
-                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCompare}" />
-                                    <TextBlock Classes="toolCaption" Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '对比'}" VerticalAlignment="Center" />
+                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoBrush}" />
+                                    <TextBlock Grid.Column="1" Classes="toolCaption" Text="{i18n:T '除尘'}" VerticalAlignment="Center" />
                                 </Grid>
                             </ToggleButton>
-                            <Border Classes="orientationTools" Margin="4,0,0,0" Padding="6,0,0,0">
+                        <StackPanel Name="DustToolbar" IsVisible="False" Orientation="Horizontal"
+                                    Spacing="10" Margin="10,0,0,0">
+                            <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"
+                                    AutomationProperties.Name="{i18n:T 'PURENeg 自动除尘'}" Padding="7,4">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <ctl:Icon Name="DustDetectIcon" Data="{StaticResource IcoWand}" />
+                                    <ctl:Icon Name="DustDownloadIcon" Data="{StaticResource IcoDownload}" IsVisible="False" />
+                                    <TextBlock Name="DustDetectLabel" Text="{i18n:T 'PURENeg 自动除尘'}" TextWrapping="NoWrap" />
+                                </StackPanel>
+                            </Button>
+                            <Border Name="DustViewSelector" Background="{DynamicResource PanelBrush}"
+                                    CornerRadius="4" Padding="1">
+                                <StackPanel Orientation="Horizontal" Spacing="1">
+                                    <ToggleButton Name="DustMaskViewBtn" Classes="dustView" Click="OnDustReviewViewClick"
+                                                  Content="{i18n:T '蒙版'}" ToolTip.Tip="{i18n:T '显示并编辑除尘范围'}" />
+                                    <Button Name="DustCompareBtn" Classes="dustView" MinWidth="96"
+                                            ToolTip.Tip="{i18n:T '按住显示除尘前，松开预览修复（K）'}"
+                                            AutomationProperties.Name="{i18n:T '除尘前后'}">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <ctl:Icon Data="{StaticResource IcoCompare}" />
+                                            <TextBlock Name="DustCompareLabel" Text="{i18n:T '对比'}" TextWrapping="NoWrap" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                            <Border Name="PreviewOrientationTools" Classes="orientationTools" Margin="4,0,0,0" Padding="6,0,0,0">
                                 <StackPanel Orientation="Horizontal" Spacing="2">
                                     <Button Classes="icon" Click="OnRotateCcwClick" IsEnabled="{Binding HasImage}"
                                             AutomationProperties.Name="{i18n:T '逆时针 90°'}"
@@ -645,13 +666,14 @@
                             </Border>
                         </WrapPanel>
 
+
                         <!-- Outside the native-preview airspace: legacy projects retain their
                              v1 look until this explicit L2 migration is confirmed. -->
                         <!-- Closable, like every other notice in this window. It was the one
                              exception, so a roll deliberately kept on v1 wore this bar for the
                              life of the project. Dismissal is per roll and per session: reopening
                              the project offers the migration again. -->
-                        <Border Grid.Row="1" Grid.ColumnSpan="2" IsVisible="{Binding ShowLegacyColorPipelineNotice}"
+                        <Border Grid.Row="3" Grid.ColumnSpan="2" IsVisible="{Binding ShowLegacyColorPipelineNotice}"
                                 Margin="0,4,0,0" Padding="8,3" CornerRadius="4"
                                 Background="{DynamicResource AccentSoftBrush}"
                                 BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
@@ -802,11 +824,6 @@
                                     <ctl:Icon Data="{StaticResource IcoFilm}" />
                                 </MenuItem.Icon>
                             </MenuItem>
-                            <MenuItem Header="{i18n:T '前后对比'}" InputGesture="K" Click="OnMenuCompareClick">
-                                <MenuItem.Icon>
-                                    <ctl:Icon Data="{StaticResource IcoCompare}" />
-                                </MenuItem.Icon>
-                            </MenuItem>
                             <MenuItem Header="{i18n:T '过曝 / 欠曝指示'}" InputGesture="J" ToggleType="CheckBox"
                                       IsChecked="{Binding ShowClipping, Mode=TwoWay}" />
                             <Separator />
@@ -853,105 +870,190 @@
                             <MenuItem Header="{i18n:T '全部快捷键…'}" Click="OnHelpClick" />
                         </ContextMenu>
                     </Border.ContextMenu>
-                    <Grid Name="ViewPort" PointerWheelChanged="OnViewportWheel">
-                        <!-- Windows color-critical surface. The fixed native child presents only
-                             the final shared scene; ZoomGrid remains the common pointer/controller
-                             layer and the non-Windows/unavailable fallback. -->
-                        <ctl:WindowsPreviewHost Name="WindowsPreview"
-                                                HorizontalAlignment="Stretch"
-                                                VerticalAlignment="Stretch" />
-                        <!-- macOS colour-critical surface: the same contract-bound buffer on a
-                             CAMetalLayer. Each host hides itself off its own platform, so only
-                             one of the two ever materialises a native view. -->
-                        <ctl:MacOSPreviewHost Name="MacOSPreview"
-                                              HorizontalAlignment="Stretch"
-                                              VerticalAlignment="Stretch" />
-                        <Grid Name="ZoomGrid" RenderTransformOrigin="0,0"
-                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                            <!-- ctl:ColorManagedImage, not Image: the preview must be drawn through Skia WITH its
-                                 colour space declared, which Avalonia's Image cannot do. See
-                                 Controls/ColorManagedImage.cs. -->
-                            <ctl:ColorManagedImage Name="PreviewImg" Source="{Binding PreviewImage}" Stretch="Uniform"
-                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-                            <!-- Sharp patch: the visible slice re-rendered from the ORIGINAL
-                                 pixels, laid over the (6x downsampled) preview. Positioned in
-                                 code from the letterbox rect, so it rides the same zoom/pan
-                                 transform as everything else in ZoomGrid. -->
-                            <!-- Stretch is explicit on both Canvases below for the same reason it
-                                 is on the Images: everything in them is positioned by code from
-                                 LetterboxRect(), and the frame is only where it looks if that box
-                                 is the one the Canvas actually occupies. A Canvas measures to its
-                                 CONTENT, so it fills ZoomGrid only by the Grid's default
-                                 alignment — leaving that implicit let the drawn overlay and the
-                                 pointer coordinates disagree on macOS, where the applied crop
-                                 came out with neither the ratio nor the position the frame had. -->
-                            <Canvas Name="PatchLayer" IsHitTestVisible="False"
-                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                                <ctl:ColorManagedImage Name="PatchImg" Stretch="Fill" />
-                            </Canvas>
-                            <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
-                                   IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"
-                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-                            <Image Source="{Binding DustMaskOverlay}" Stretch="Uniform"
-                                   IsVisible="{Binding ShowDustMask}" IsHitTestVisible="False"
-                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-                            <Image Source="{Binding ClippingOverlay}" Stretch="Uniform"
-                                   IsVisible="{Binding ShowClipping}" IsHitTestVisible="False"
-                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-                            <Canvas Name="Overlay" Background="Transparent"
-                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                                    PointerPressed="OnOverlayPressed"
-                                    PointerMoved="OnOverlayMoved"
-                                    PointerReleased="OnOverlayReleased"
-                                    PointerExited="OnOverlayExited">
-                                <Rectangle Name="SelRect" IsVisible="False"
-                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
-                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}"
-                                           StrokeDashArray="{x:Static views:PreviewOverlayStyle.MarqueeDash}"
-                                           Fill="{x:Static views:PreviewOverlayStyle.MarqueeFillBrush}" />
-                                <!-- Editable crop frame. Four dim bands rather than one
-                                     even-odd path: the bands are plain rectangles the layout
-                                     can position directly, and what is outside the crop wants
-                                     to read as "excluded", not as a shape. Handles and stroke
-                                     are re-sized by 1/zoom in code so they stay a constant size
-                                     on screen — everything here lives inside ZoomGrid and would
-                                     otherwise grow with the picture. -->
-                                <Rectangle Name="CropDimT" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
-                                <Rectangle Name="CropDimB" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
-                                <Rectangle Name="CropDimL" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
-                                <Rectangle Name="CropDimR" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
-                                <Rectangle Name="CropFrame" IsVisible="False"
-                                           Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
-                                           StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}" />
-                                <!-- Thirds guides: a crop frame without them is a box; with them
-                                     it is a composition tool. -->
-                                <Line Name="CropV1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
-                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
-                                <Line Name="CropV2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
-                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
-                                <Line Name="CropH1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
-                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
-                                <Line Name="CropH2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
-                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
-                                <!-- Straighten reference line. Warm, not the neutral marquee grey:
-                                     it is a transient guide laid over the picture, not a selection. -->
-                                <Line Name="SelLine" IsVisible="False"
-                                      Stroke="{x:Static views:PreviewOverlayStyle.StraightenBrush}"
-                                      StrokeThickness="{x:Static views:PreviewOverlayStyle.StraightenStrokeThickness}" />
-                                <Polyline Name="DustStrokePath" IsVisible="False" IsHitTestVisible="False"
-                                          Stroke="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}"
-                                          StrokeLineCap="Round"
-                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}" />
-                                <Ellipse Name="DustStrokeStart" IsVisible="False" IsHitTestVisible="False"
-                                         Fill="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}" />
-                                <!-- Live repair/erase footprint. The Windows native presenter also
-                                     receives this ring as line primitives; this Ellipse is the
-                                     platform-neutral/fallback rendering path. -->
-                                <Ellipse Name="DustBrushRing" IsVisible="False" IsHitTestVisible="False"
-                                         Stroke="{x:Static views:PreviewOverlayStyle.DustBrushBrush}"
-                                         StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}"
-                                         Fill="{x:Static views:PreviewOverlayStyle.DustBrushFillBrush}" />
-                            </Canvas>
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Border Name="DustToolRail" IsVisible="False" Width="48" Margin="-10,-10,8,-10"
+                            Padding="4,8" Background="{DynamicResource ChromeBrush}"
+                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,0,1,0">
+                            <DockPanel LastChildFill="False">
+                                <Button Name="DustOptionsBtn" Classes="dustRail" DockPanel.Dock="Bottom"
+                                    ToolTip.Tip="{i18n:T '除尘设置'}" AutomationProperties.Name="{i18n:T '除尘设置'}">
+                                    <ctl:Icon Data="{StaticResource IcoSettings}" />
+                                    <Button.Flyout>
+                                        <Flyout Placement="RightEdgeAlignedBottom">
+                                            <StackPanel Width="240" Spacing="7">
+                                                <StackPanel Name="DustDetectionOptions" Spacing="6">
+                                                    <TextBlock Classes="fieldLabel" Text="{i18n:T '检测设置'}" FontWeight="SemiBold" />
+                                                    <CheckBox Name="DetectDustKind" Content="{i18n:T '灰尘'}" IsChecked="True" />
+                                                    <CheckBox Name="DetectFiberKind" Content="{i18n:T '毛发 / 纤维'}" IsChecked="True" />
+                                                    <CheckBox Name="DetectScratchKind" Content="{i18n:T '划痕'}" IsChecked="True" />
+                                                    <ComboBox Name="DustPolarity" SelectedIndex="0" AutomationProperties.Name="{i18n:T '灰尘亮暗'}">
+                                                        <ComboBoxItem Content="{i18n:T '自动'}" />
+                                                        <ComboBoxItem Content="{i18n:T '亮尘'}" />
+                                                        <ComboBoxItem Content="{i18n:T '暗尘'}" />
+                                                    </ComboBox>
+                                                    <TextBlock Text="{i18n:T '灵敏度'}" />
+                                                    <Slider Name="DustSensitivity" Minimum="0.5" Maximum="2" Value="1"
+                                                        AutomationProperties.Name="{i18n:T '灵敏度'}" />
+                                                </StackPanel>
+                                                <StackPanel Name="DustClearActions" Spacing="4" Margin="0,8,0,0">
+                                                    <Button Content="{i18n:T '清除自动除尘'}" Click="OnClearAutomaticDustClick"
+                                                        IsEnabled="{Binding HasAutomaticDust}" />
+                                                    <Button Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                                <StackPanel Spacing="3">
+                                    <ToggleButton Name="DustAddBtn" Classes="dustRail" Click="OnDustAddClick"
+                                        ToolTip.Tip="{i18n:T '添加除尘：涂画需要修补的灰尘或漏检区域。[ 缩小、] 放大笔刷。'}"
+                                        AutomationProperties.Name="{i18n:T '添加除尘'}">
+                                        <StackPanel Spacing="2">
+                                            <ctl:Icon Data="{StaticResource IcoBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock Classes="dustToolCaption" Text="{i18n:T '补画'}" />
+                                        </StackPanel>
+                                    </ToggleButton>
+                                    <ToggleButton Name="DustEraseBtn" Classes="dustRail" Click="OnDustEraseClick"
+                                        ToolTip.Tip="{i18n:T '恢复原图：从除尘蒙版中减去涂画部分，保留原有细节。'}"
+                                        AutomationProperties.Name="{i18n:T '恢复原图'}">
+                                        <StackPanel Spacing="2">
+                                            <ctl:Icon Data="{StaticResource IcoEraser}" HorizontalAlignment="Center" />
+                                            <TextBlock Classes="dustToolCaption" Text="{i18n:T '恢复'}" />
+                                        </StackPanel>
+                                    </ToggleButton>
+                                    <Button Name="DustRadiusButton" Classes="dustRail" ToolTip.Tip="{i18n:T '笔刷大小（[ / ]）'}"
+                                        AutomationProperties.Name="{i18n:T '笔刷大小'}">
+                                        <ctl:Icon Data="{StaticResource IcoBrushSize}" />
+                                        <Button.Flyout>
+                                            <Flyout Placement="RightEdgeAlignedTop">
+                                                <StackPanel Width="190" Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="{i18n:T '笔刷大小'}" />
+                                                        <TextBlock Grid.Column="1" Classes="readout" Text="{Binding DustBrushSize, StringFormat={}{0:P1}}" />
+                                                    </Grid>
+                                                    <Slider Name="DustRadiusSlider" Minimum="0.001" Maximum="0.03"
+                                                        Value="{Binding DustBrushSize}" AutomationProperties.Name="{i18n:T '笔刷大小'}" />
+                                                    <TextBlock Classes="groupHint" Text="{i18n:T '[ 缩小，] 放大'}" />
+                                                </StackPanel>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                    <Border Height="1" Margin="5,6" Background="{DynamicResource BorderSoftBrush}" />
+                                    <Button Name="DustUndoBtn" Classes="dustRail" Click="OnUndoClick"
+                                        ToolTip.Tip="{i18n:T '撤销'}" AutomationProperties.Name="{i18n:T '撤销'}">
+                                        <ctl:Icon Data="{StaticResource IcoUndo}" />
+                                    </Button>
+                                    <Button Name="DustRedoBtn" Classes="dustRail" Click="OnRedoClick"
+                                        ToolTip.Tip="{i18n:T '重做'}" AutomationProperties.Name="{i18n:T '重做'}">
+                                        <ctl:Icon Data="{StaticResource IcoRedo}" />
+                                    </Button>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <Grid Name="ViewPort" Grid.Column="1" ClipToBounds="True" PointerWheelChanged="OnViewportWheel">
+                            <!-- Windows color-critical surface. The fixed native child presents only
+                                 the final shared scene; ZoomGrid remains the common pointer/controller
+                                 layer and the non-Windows/unavailable fallback. -->
+                            <ctl:WindowsPreviewHost Name="WindowsPreview"
+                                                    HorizontalAlignment="Stretch"
+                                                    VerticalAlignment="Stretch" />
+                            <!-- macOS colour-critical surface: the same contract-bound buffer on a
+                                 CAMetalLayer. Each host hides itself off its own platform, so only
+                                 one of the two ever materialises a native view. -->
+                            <ctl:MacOSPreviewHost Name="MacOSPreview"
+                                                  HorizontalAlignment="Stretch"
+                                                  VerticalAlignment="Stretch" />
+                            <Grid Name="ZoomGrid" RenderTransformOrigin="0,0"
+                                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                <!-- ctl:ColorManagedImage, not Image: the preview must be drawn through Skia WITH its
+                                     colour space declared, which Avalonia's Image cannot do. See
+                                     Controls/ColorManagedImage.cs. -->
+                                <ctl:ColorManagedImage Name="PreviewImg" Source="{Binding PreviewImage}" Stretch="Uniform"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <!-- Sharp patch: the visible slice re-rendered from the ORIGINAL
+                                     pixels, laid over the (6x downsampled) preview. Positioned in
+                                     code from the letterbox rect, so it rides the same zoom/pan
+                                     transform as everything else in ZoomGrid. -->
+                                <!-- Stretch is explicit on both Canvases below for the same reason it
+                                     is on the Images: everything in them is positioned by code from
+                                     LetterboxRect(), and the frame is only where it looks if that box
+                                     is the one the Canvas actually occupies. A Canvas measures to its
+                                     CONTENT, so it fills ZoomGrid only by the Grid's default
+                                     alignment — leaving that implicit let the drawn overlay and the
+                                     pointer coordinates disagree on macOS, where the applied crop
+                                     came out with neither the ratio nor the position the frame had. -->
+                                <Canvas Name="PatchLayer" IsHitTestVisible="False"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                    <ctl:ColorManagedImage Name="PatchImg" Stretch="Fill" />
+                                </Canvas>
+                                <Image Source="{Binding SprocketMaskOverlay}" Stretch="Uniform"
+                                       IsVisible="{Binding ShowSprocketMask}" IsHitTestVisible="False"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <Image Source="{Binding DustMaskOverlay}" Stretch="Uniform"
+                                       RenderOptions.BitmapInterpolationMode="HighQuality"
+                                       IsVisible="{Binding !IsDustReviewActive}" IsHitTestVisible="False"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <Image Source="{Binding DustReviewOverlay}" Stretch="Uniform" IsHitTestVisible="False"
+                                       RenderOptions.BitmapInterpolationMode="HighQuality"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <Image Source="{Binding ClippingOverlay}" Stretch="Uniform"
+                                       IsVisible="{Binding ShowClipping}" IsHitTestVisible="False"
+                                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                <Canvas Name="Overlay" Background="Transparent"
+                                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                        PointerPressed="OnOverlayPressed"
+                                        PointerMoved="OnOverlayMoved"
+                                        PointerReleased="OnOverlayReleased"
+                                        PointerExited="OnOverlayExited">
+                                    <Rectangle Name="SelRect" IsVisible="False"
+                                               Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                               StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}"
+                                               StrokeDashArray="{x:Static views:PreviewOverlayStyle.MarqueeDash}"
+                                               Fill="{x:Static views:PreviewOverlayStyle.MarqueeFillBrush}" />
+                                    <!-- Editable crop frame. Four dim bands rather than one
+                                         even-odd path: the bands are plain rectangles the layout
+                                         can position directly, and what is outside the crop wants
+                                         to read as "excluded", not as a shape. Handles and stroke
+                                         are re-sized by 1/zoom in code so they stay a constant size
+                                         on screen — everything here lives inside ZoomGrid and would
+                                         otherwise grow with the picture. -->
+                                    <Rectangle Name="CropDimT" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                    <Rectangle Name="CropDimB" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                    <Rectangle Name="CropDimL" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                    <Rectangle Name="CropDimR" IsVisible="False" Fill="{x:Static views:PreviewOverlayStyle.CropDimBrush}" />
+                                    <Rectangle Name="CropFrame" IsVisible="False"
+                                               Stroke="{x:Static views:PreviewOverlayStyle.MarqueeBrush}"
+                                               StrokeThickness="{x:Static views:PreviewOverlayStyle.FrameStrokeThickness}" />
+                                    <!-- Thirds guides: a crop frame without them is a box; with them
+                                         it is a composition tool. -->
+                                    <Line Name="CropV1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                    <Line Name="CropV2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                    <Line Name="CropH1" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                    <Line Name="CropH2" IsVisible="False" Stroke="{x:Static views:PreviewOverlayStyle.GuideBrush}"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.GuideStrokeThickness}" />
+                                    <!-- Straighten reference line. Warm, not the neutral marquee grey:
+                                         it is a transient guide laid over the picture, not a selection. -->
+                                    <Line Name="SelLine" IsVisible="False"
+                                          Stroke="{x:Static views:PreviewOverlayStyle.StraightenBrush}"
+                                          StrokeThickness="{x:Static views:PreviewOverlayStyle.StraightenStrokeThickness}" />
+                                    <Polyline Name="DustStrokePath" IsVisible="False" IsHitTestVisible="False"
+                                              Stroke="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}"
+                                              StrokeLineCap="Round"
+                                              StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}" />
+                                    <Ellipse Name="DustStrokeStart" IsVisible="False" IsHitTestVisible="False"
+                                             Fill="{x:Static views:PreviewOverlayStyle.DustStrokeFillBrush}" />
+                                    <!-- Live repair/erase footprint. The Windows native presenter also
+                                         receives this ring as line primitives; this Ellipse is the
+                                         platform-neutral/fallback rendering path. -->
+                                    <Ellipse Name="DustBrushRing" IsVisible="False" IsHitTestVisible="False"
+                                             Stroke="{x:Static views:PreviewOverlayStyle.DustBrushBrush}"
+                                             StrokeThickness="{x:Static views:PreviewOverlayStyle.DustBrushStrokeThickness}"
+                                             Fill="{x:Static views:PreviewOverlayStyle.DustBrushFillBrush}" />
+                                </Canvas>
+                            </Grid>
                         </Grid>
                     </Grid>
                 </Border>
@@ -970,7 +1072,15 @@
                      file option. -->
                 <Border Grid.Row="3" Padding="8,5" Background="{DynamicResource ChromeBrush}">
                     <Grid Name="OutputToolbar" ColumnDefinitions="*,8,Auto,Auto">
-                        <Button Grid.Column="0" Classes="renderSummary" HorizontalAlignment="Stretch"
+                        <TextBlock Name="DustReviewStatus" Grid.Column="0" IsVisible="False"
+                                   VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource TextDimBrush}"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                   ToolTip.Tip="{Binding Text, RelativeSource={RelativeSource Self}}" />
+                        <Button Name="DustCancelBtn" Grid.Column="2" IsVisible="False" Classes="quiet"
+                                Margin="0,0,8,0" Click="OnCancelDustReviewClick" Content="{i18n:T '取消'}" />
+                        <Button Name="DustApplyBtn" Grid.Column="3" IsVisible="False" Classes="primary"
+                                Padding="14,4" Click="OnApplyDustReviewClick" Content="{i18n:T '完成'}" />
+                        <Button Name="RenderSummaryButton" Grid.Column="0" Classes="renderSummary" HorizontalAlignment="Stretch"
                                 HorizontalContentAlignment="Left" ToolTip.Tip="{i18n:T '整卷渲染设置会改变画面和导出，并随工程保存。'}">
                             <TextBlock Text="{Binding RenderSettingsSummary}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                             <Button.Flyout>
@@ -1564,29 +1674,6 @@
                                 </StackPanel>
                             </Expander>
 
-                            <!-- Non-destructive source-domain dust repair. -->
-                            <Expander Header="{i18n:T '除尘 / 修复'}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '使用修复笔标记灰尘，邻近纹理会非破坏性补入；预览与导出结果一致。'}" />
-                                    <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <CheckBox Content="{i18n:T '启用除尘'}" IsChecked="{Binding DustEnabled}" IsEnabled="{Binding HasImage}" />
-                                        <CheckBox Content="{i18n:T '显示修复范围'}" IsChecked="{Binding ShowDustMask}" IsEnabled="{Binding HasImage}" />
-                                    </StackPanel>
-                                    <ctl:SliderRow Label="{i18n:T '笔刷半径'}" Minimum="0.001" Maximum="0.03" Decimals="4" Increment="0.001" DefaultValue="0.006" Value="{Binding DustBrushSize}" />
-                                    <Grid Classes="pairedActions" ColumnDefinitions="*,*">
-                                        <ToggleButton Name="DustAddBtn" Grid.Column="0" Classes="sampling"
-                                                      Click="OnDustAddClick" IsEnabled="{Binding HasImage}"
-                                                      Content="{i18n:T '修复笔'}" />
-                                        <ToggleButton Name="DustEraseBtn" Grid.Column="1" Classes="sampling" Margin="6,0,0,0"
-                                                      Click="OnDustEraseClick" IsEnabled="{Binding HasImage}"
-                                                      Content="{i18n:T '擦除笔'}" />
-                                    </Grid>
-                                    <TextBlock Classes="groupHint">
-                                        <Run Text="{i18n:T '修复点：'}" /><Run Text="{Binding DustSpotCount}" />
-                                    </TextBlock>
-                                    <Button Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick" IsEnabled="{Binding HasImage}" />
-                                </StackPanel>
-                            </Expander>
 
                             <!-- Crop and straightening controls. Orientation sync lives by the preview tools. -->
                             <Expander Header="{i18n:T '裁切'}">

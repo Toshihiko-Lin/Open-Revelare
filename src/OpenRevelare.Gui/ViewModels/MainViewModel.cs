@@ -197,6 +197,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (_previewMargin is null) return p;                  // plain whole-file preview
         p = p.Clone();
         p.DustSpots = DustSpotsRelativeTo(p.DustSpots, _previewMargin.Value);
+        p.AutomaticDustMask = p.AutomaticDustMask?.RelativeTo(_previewMargin.Value);
         if (p.CropRect is null && _previewFrameRect is null) return p;
         // Oriented to match the pixels: ApplyCrop runs AFTER orientation, and _previewFrameRect is
         // measured in the raw file's axes.
@@ -236,6 +237,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (margin is not { } box) return p;
         p = p.Clone();
         p.DustSpots = DustSpotsRelativeTo(p.DustSpots, box);
+        p.AutomaticDustMask = p.AutomaticDustMask?.RelativeTo(box);
         if (f.Params.CropRect is not { } rect) return p;
         // Down to file space, in against the box, back out to oriented space — the box itself is a
         // file-space rect, so the middle step cannot happen in the oriented frame.
@@ -673,7 +675,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ColorPipelineVersion PipelineVersion,
         TiffInputAssumption TiffInputAssumption,
         WorkingFrame Working,
-        SourceStamp Source);
+        SourceStamp Source,
+        (double X, double Y, double W, double H)? Box);
     private FullSlot? _fullSlot;
 
     [ObservableProperty] private Bitmap? _previewImage;
@@ -1161,8 +1164,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _showDustMask;
     [ObservableProperty] private double _dustBrushSize = 0.006;
     private List<DustSpot> _dustSpots = new();
+    private DustMask? _automaticDustMask;
 
     public int DustSpotCount => _dustSpots.Count;
+    public bool HasAutomaticDust => _automaticDustMask is not null;
 
     partial void OnDustEnabledChanged(bool value) => DustChanged(render: true);
     partial void OnShowDustMaskChanged(bool value)
@@ -1174,6 +1179,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void DustChanged(bool render)
     {
         OnPropertyChanged(nameof(DustSpotCount));
+        OnPropertyChanged(nameof(HasAutomaticDust));
         UpdateDustOverlay();
         if (render) ScheduleRender();
     }
@@ -1252,8 +1258,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     public void ClearAllDust()
     {
-        if (_dustSpots.Count == 0) return;
+        if (_dustSpots.Count == 0 && !HasAutomaticDust) return;
         _dustSpots.Clear();
+        _automaticDustMask = null;
+        MarkEdit();
+        DustChanged(render: true);
+    }
+
+    public void ClearAutomaticDust()
+    {
+        if (!HasAutomaticDust) return;
+        _automaticDustMask = null;
         MarkEdit();
         DustChanged(render: true);
     }
@@ -1339,7 +1354,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void UpdateDustOverlay()
     {
-        if (!ShowDustMask || _previewLinear is null || _dustSpots.Count == 0)
+        if (!ShowDustMask || _previewLinear is null || (_dustSpots.Count == 0 && !HasAutomaticDust))
         {
             DustMaskOverlay = null;
             DustMaskScene = null;
@@ -1349,6 +1364,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         FrameParams p = ForPreview(BuildParams());
         bool[] raw = DustRemoval.MakeMask(_previewLinear.Width, _previewLinear.Height, p.DustSpots);
         var flags = new ImageBuffer(_previewLinear.Width, _previewLinear.Height);
+        if (p.AutomaticDustMask is { } automatic)
+        {
+            var mask = DustMaskDisplay.Coverage(automatic, flags.Width, flags.Height);
+            for (int i = 0; i < mask.Length; i++)
+                flags.Data[i * 3] = flags.Data[i * 3 + 1] = flags.Data[i * 3 + 2] = mask[i];
+            flags = LensCorrections.ApplyGeometry(flags, p);
+        }
         for (int i = 0; i < raw.Length; i++)
         {
             if (!raw[i]) continue;
@@ -1362,12 +1384,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (p.CropRect is { } crop)
             flags = Geometry.ApplyCrop(flags, crop);
 
-        var shaped = new bool[flags.PixelCount];
-        for (int i = 0; i < shaped.Length; i++) shaped[i] = flags.Data[i * 3] > 0.15f;
-        DustMaskOverlay = BitmapConvert.ToMaskOverlay(
-            shaped, flags.Width, flags.Height, r: 255, g: 64, b: 64, a: 150);
-        DustMaskScene = BuildMaskPresentationScene(
-            shaped, flags.Width, flags.Height, red: 255, green: 64, blue: 64, alpha: 150);
+        var rgba = new byte[checked(flags.PixelCount * 4)];
+        for (int i = 0; i < flags.PixelCount; i++)
+            DustMaskDisplay.WritePixel(rgba, i, flags.Data[i * 3]);
+        DustMaskOverlay = BitmapConvert.ToRgbaOverlay(rgba, flags.Width, flags.Height);
+        DustMaskScene = PresentationSceneFactory.FromSrgbRgba8(rgba,
+            new PixelSize(flags.Width, flags.Height), CanonicalPreviewReferenceWhiteScale);
     }
 
     // 输出意图不再是胶卷级模式：预览恒为完整渲染，"线性" 是单次导出的属性
@@ -2255,6 +2277,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         SprocketThreshold = SprocketThreshold,
         DustEnabled = DustEnabled,
         DustSpots = new List<DustSpot>(_dustSpots),
+        AutomaticDustMask = _automaticDustMask,
         Monochrome = Monochrome,
         // Stage 1 — 反相的全部自由度：片基 + 两端各三个绝对密度
         TBase = TBaseArr(),

@@ -82,6 +82,17 @@ public static class BitmapConvert
     public static WriteableBitmap ToMaskOverlay(bool[] mask, int w, int h)
         => ToMaskOverlay(mask, w, h, r: 230, g: 0, b: 0, a: 140);
 
+    public static WriteableBitmap ToRgbaOverlay(byte[] rgba, int width, int height)
+    {
+        var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
+            PixelFormat.Rgba8888, AlphaFormat.Unpremul);
+        using var framebuffer = bitmap.Lock();
+        for (int y = 0; y < height; y++)
+            System.Runtime.InteropServices.Marshal.Copy(rgba, y * width * 4,
+                framebuffer.Address + y * framebuffer.RowBytes, width * 4);
+        return bitmap;
+    }
+
     /// <summary>Boolean mask → translucent colour Bgra8888 overlay (masked = colour, else transparent).</summary>
     public static WriteableBitmap ToMaskOverlay(bool[] mask, int w, int h, byte r, byte g, byte b, byte a)
     {

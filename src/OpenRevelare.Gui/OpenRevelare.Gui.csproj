@@ -33,7 +33,17 @@
     <!-- The .ico is a build input for ApplicationIcon and the .svg is the vector master;
          neither is loadable by Avalonia, so keep them out of the embedded resources. -->
     <AvaloniaResource Remove="Assets\icons\app.ico" />
+    <AvaloniaResource Remove="Assets\pureneg-files.json" />
+    <AvaloniaResource Remove="Assets\pureneg-analyze.cjs" />
+    <EmbeddedResource Include="Assets\pureneg-files.json" LogicalName="PureNegFiles" />
+    <EmbeddedResource Include="Assets\pureneg-analyze.cjs" LogicalName="PureNegAnalyze" />
     <AvaloniaResource Remove="Assets\icons\app.svg" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PureNegNativeDirectory)' != ''">
+    <Content Include="$(PureNegNativeDirectory)/*"
+             Link="optional/pureneg/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

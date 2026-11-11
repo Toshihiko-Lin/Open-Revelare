@@ -113,6 +113,94 @@ public sealed class DustRemovalTests
     }
 
     [Fact]
+    public void Automatic_mask_keeps_its_shape_and_coordinates_in_whole_and_split_sources()
+    {
+        var automatic = new DustMask(40, 30, (.25, .25, .5, .5),
+            [new(12, 4, 21), new(13, 20, 22), new(14, 21, 22)]);
+        var whole = new bool[80 * 60];
+        automatic.AddTo(whole, 80, 60);
+        var split = new bool[40 * 30];
+        automatic.RelativeTo((.25, .25, .5, .5)).AddTo(split, 40, 30);
+        Assert.Equal(20, whole.Count(x => x));
+        for (int y = 0; y < 30; y++)
+        for (int x = 0; x < 40; x++)
+            Assert.Equal(whole[(y + 15) * 80 + x + 20], split[y * 40 + x]);
+
+        var source = new ImageBuffer(80, 60);
+        for (int i = 0; i < whole.Length; i++)
+        {
+            source.Data[i * 3] = whole[i] ? .01f : -.2f;
+            source.Data[i * 3 + 1] = whole[i] ? .01f : 1.3f;
+            source.Data[i * 3 + 2] = .4f;
+        }
+        float[] original = (float[])source.Data.Clone();
+        automatic.Repair(source, 80, 60);
+        for (int i = 0; i < whole.Length; i++)
+        {
+            if (whole[i])
+            {
+                Assert.InRange(source.Data[i * 3], -.201f, -.199f);
+                Assert.InRange(source.Data[i * 3 + 1], 1.299f, 1.301f);
+            }
+            else
+                Assert.True(original.AsSpan(i * 3, 3).SequenceEqual(source.Data.AsSpan(i * 3, 3)));
+        }
+    }
+
+    [Fact]
+    public void Automatic_mask_round_trips_and_renders_without_the_detector()
+    {
+        ImageBuffer source = Texture(240, 180);
+        var automatic = new DustMask(240, 180, (0, 0, 1, 1),
+            Enumerable.Range(54, 62).Select(y => new DustMask.Run(y, 106 + y / 6, 110 + y / 6)));
+        var mask = new bool[source.PixelCount];
+        automatic.AddTo(mask, source.Width, source.Height);
+        for (int i = 0; i < mask.Length; i++)
+            if (mask[i]) source.Data.AsSpan(i * 3, 3).Fill(.01f);
+        float[] before = (float[])source.Data.Clone();
+        var p = new FrameParams
+        {
+            DustEnabled = true,
+            DustSpots = [new DustSpot(.2, .3, .03)],
+            AutomaticDustMask = automatic,
+            OutputIntent = OutputIntent.None,
+            DistortionK1 = .07,
+            QuarterTurns = 1,
+            FlipH = true,
+        };
+        string path = Path.Combine(Path.GetTempPath(), $"openrevelare-auto-dust-{Guid.NewGuid():N}.ncproj");
+        try
+        {
+            var project = new Project.Data();
+            project.Frames.Add(new Project.Frame { SourcePath = "frame.tif", Params = p });
+            Project.Save(path, project);
+            Assert.Equal(5, JsonNode.Parse(File.ReadAllText(path))!["version"]!.GetValue<int>());
+            FrameParams saved = Project.Load(path).Frames[0].Params;
+            Assert.Equal(p.DustSpots, saved.DustSpots);
+            Assert.Equal(automatic.PixelCount, saved.AutomaticDustMask!.PixelCount);
+            saved.OutputIntent = OutputIntent.None;
+            var rendered = Pipeline.ProcessFrame(source, saved);
+            var manualOnly = saved.Clone();
+            manualOnly.AutomaticDustMask = null;
+            Assert.False(rendered.Data.SequenceEqual(Pipeline.ProcessFrame(source, manualOnly).Data));
+            Assert.Equal(Pipeline.ProcessFrame(source, p).Data, rendered.Data);
+            Assert.Equal(before, source.Data);
+
+            var roi = new RegionRender.Roi(.4, .4, .3, .25);
+            var region = RegionRender.Render(source, saved, roi);
+            var bounds = RegionRender.RequiredSourceBounds(source.Width, source.Height, saved, roi);
+            var fromSlice = RegionRender.RenderFromSlice(Slice(source, bounds), bounds.X0, bounds.Y0,
+                source.Width, source.Height, saved, roi);
+            Assert.Equal(region.Realised, fromSlice.Realised);
+            Assert.Equal(region.Image.Data, fromSlice.Image.Data);
+            var fromWhole = Geometry.ApplyCrop(rendered, (region.Realised.X, region.Realised.Y,
+                region.Realised.W, region.Realised.H));
+            Assert.Equal(fromWhole.Data, fromSlice.Image.Data);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void A_defect_filling_the_brush_does_not_contaminate_the_colour_match()
     {
         var image = new ImageBuffer(128, 128);

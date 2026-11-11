@@ -270,6 +270,8 @@ public static class RegionRender
             return (negOut, realised);
         }
 
+        if (cal.DustEnabled && cal.AutomaticDustMask is { } automatic)
+            automatic.Repair(slice, frameW, frameH, b.X0, b.Y0);
         var region = new FrameRegion(b.X0, b.Y0, frameW, frameH);
         bool embedded = cal.EmbeddedLens is { IsUsable: true };
         bool lensfun = !embedded && LensfunCorrections.IsActive(cal);
@@ -583,6 +585,11 @@ public static class RegionRender
             var d = LensfunCorrections.SourceBounds(sx0, sy0, sx1, sy1, cal.Lensfun, srcW, srcH);
             sx0 = Math.Min(sx0, d.X0) - 2; sy0 = Math.Min(sy0, d.Y0) - 2;
             sx1 = Math.Max(sx1, d.X1) + 2; sy1 = Math.Max(sy1, d.Y1) + 2;
+        }
+        if (cal.DustEnabled && cal.AutomaticDustMask is not null)
+        {
+            sx0 -= DustMask.RepairHalo; sy0 -= DustMask.RepairHalo;
+            sx1 += DustMask.RepairHalo; sy1 += DustMask.RepairHalo;
         }
         int ix0 = Math.Clamp((int)Math.Floor(sx0), 0, srcW - 1);
         int iy0 = Math.Clamp((int)Math.Floor(sy0), 0, srcH - 1);

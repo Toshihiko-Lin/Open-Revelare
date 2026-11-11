@@ -339,6 +339,11 @@ public static class Pipeline
         // copy the in-place ops then need. Clone only when distortion is inactive and an
         // in-place op still has to write somewhere private.
         ImageBuffer src = img;
+        if (cal.DustEnabled && cal.AutomaticDustMask is { } automatic)
+        {
+            src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone()).InheritSourceFrom(img);
+            automatic.Repair(src, src.Width, src.Height);
+        }
 
         bool embedded = cal.EmbeddedLens is { IsUsable: true };
         bool lensfun = !embedded && LensfunCorrections.IsActive(cal);

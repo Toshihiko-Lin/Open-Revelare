@@ -24,7 +24,7 @@ public static class Project
     // absent key as "legacy", which is right, but would read a NEW file's key as absent too and
     // render it through the v1 pipeline without a word. Refusing to open is the only honest
     // answer an old build can give, and it can only give it if the version says so.
-    private const int FormatVersion = 4;
+    private const int FormatVersion = 5;
 
     /// <summary>Oldest schema this build still reads. v2 files have no colour-pipeline key.</summary>
     private const int MinimumSupportedFormatVersion = 2;
@@ -37,8 +37,8 @@ public static class Project
     /// </summary>
     private static int FormatVersionFor(Data data)
     {
-        bool hasDust = data.Frames.Any(f => f.Params.DustEnabled || f.Params.DustSpots.Count > 0);
-        if (hasDust) return FormatVersion;
+        if (data.Frames.Any(f => f.Params.AutomaticDustMask is not null)) return FormatVersion;
+        if (data.Frames.Any(f => f.Params.DustEnabled || f.Params.DustSpots.Count > 0)) return 4;
         return data.ColorPipelineVersion == ColorPipelineVersion.ManagedV2 ? 3 : MinimumSupportedFormatVersion;
     }
     private const ColorPipelineVersion CurrentColorPipelineVersion = ColorPipelineVersion.ManagedV2;
@@ -510,6 +510,13 @@ public static class Project
             ["sprocket_threshold"] = p.SprocketThreshold,
             ["dust_enabled"] = p.DustEnabled,
             ["dust_spots"] = DustSpots(p.DustSpots),
+            ["automatic_dust_mask"] = p.AutomaticDustMask is { } dust ? new JsonObject
+            {
+                ["width"] = dust.Width,
+                ["height"] = dust.Height,
+                ["bounds"] = new JsonArray(dust.Bounds.X, dust.Bounds.Y, dust.Bounds.W, dust.Bounds.H),
+                ["runs"] = dust.Encode(),
+            } : null,
             ["lensfun_override"] = null, // reserved for legacy Python project compatibility
             ["embedded_lens"] = p.EmbeddedLens is null ? null : JsonSerializer.SerializeToNode(p.EmbeddedLens),
             ["lensfun_calibration"] = p.Lensfun is null ? null : JsonSerializer.SerializeToNode(p.Lensfun),
@@ -599,6 +606,7 @@ public static class Project
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             DustEnabled = Bool(d, "dust_enabled", false),
             DustSpots = DesDustSpots(d["dust_spots"]),
+            AutomaticDustMask = ReadAutomaticDustMask(d["automatic_dust_mask"]),
             VignetteAmount = Dbl(d, "vignette_amount", 0.0),
             VignetteFalloff = Dbl(d, "vignette_falloff", 2.5),
             DistortionK1 = Dbl(d, "distortion_k1", 0.0),
@@ -653,6 +661,16 @@ public static class Project
 
     private static JsonArray DustSpots(List<DustSpot> spots) => new(spots.Select(s =>
         (JsonNode)new JsonArray(s.X, s.Y, s.Radius, s.Automatic, s.Confidence)).ToArray());
+
+    private static DustMask? ReadAutomaticDustMask(JsonNode? node)
+    {
+        if (node is null) return null;
+        if (node is not JsonObject mask || mask["bounds"] is not JsonArray { Count: 4 } b)
+            throw new FormatException("Invalid automatic dust mask in project.");
+        return DustMask.Decode(mask["width"]!.GetValue<int>(), mask["height"]!.GetValue<int>(),
+            (b[0]!.GetValue<double>(), b[1]!.GetValue<double>(), b[2]!.GetValue<double>(), b[3]!.GetValue<double>()),
+            mask["runs"]!.GetValue<string>());
+    }
 
     private static List<DustSpot> DesDustSpots(JsonNode? node)
     {

@@ -88,7 +88,7 @@ public partial class InfoDialog : Window
         "Ctrl+Z / Ctrl+Y    撤销 / 重做\n" +
         "Ctrl+C / Ctrl+V    复制 / 粘贴参数——跟着打开的标签：Cineon 标定或 Display 参数\n" +
         "N                  临时查看负片（对准片基用）\n" +
-        "K                  前后对比（不含 Stage 2）\n" +
+        "K                  按住查看除尘前，松开预览修复\n" +
         "J                  过曝 / 欠曝指示\n" +
         "F / Ctrl+1         适合窗口 / 实际像素 100%\n" +
         "G / D              图库 / 修片 切换\n" +

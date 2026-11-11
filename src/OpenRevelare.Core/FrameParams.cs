@@ -466,6 +466,7 @@ public sealed class FrameParams
     public bool DustEnabled { get; set; } = false;
     /// <summary>Editable manual repairs in source-normalised space.</summary>
     public List<DustSpot> DustSpots { get; set; } = new();
+    public DustMask? AutomaticDustMask { get; set; }
 
     // ── SceneBase adjustments (Stage 2, active only when intent == BASIC) ──────
     /// <summary>Per-channel white-balance gains (linear). Default 1 = pass-through.</summary>
@@ -580,6 +581,7 @@ public sealed class FrameParams
         SprocketThreshold = SprocketThreshold,
         DustEnabled = DustEnabled,
         DustSpots = new List<DustSpot>(DustSpots),
+        AutomaticDustMask = AutomaticDustMask,
         WbGains = (double[])WbGains.Clone(),
         ExposureEv = ExposureEv,
         BlackPoint = BlackPoint,

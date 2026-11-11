@@ -119,12 +119,13 @@ public partial class MainWindow
         // zero height, so moving the strip into the viewer's cell hands that height back to the
         // preview without any conditional markup. ZIndex is required there because a Grid paints
         // in child order and the viewer Border is declared after the strip.
-        bool childWindowCoversViewport = ActivePreview?.IsPresenterAvailable == true;
+        // Dust tools use the viewer's left edge, which a floating notice would cover.
+        bool dockNotices = ActivePreview?.IsPresenterAvailable == true || DustToolbar.IsVisible;
 
-        Grid.SetRow(NoticeStrip, childWindowCoversViewport ? 1 : 2);
-        NoticeStrip.ZIndex = childWindowCoversViewport ? 0 : 1;
+        Grid.SetRow(NoticeStrip, dockNotices ? 1 : 2);
+        NoticeStrip.ZIndex = dockNotices ? 0 : 1;
         // Matches the viewer Border's own padding so a floating card is not flush to the edge.
-        NoticeStrip.Margin = childWindowCoversViewport
+        NoticeStrip.Margin = dockNotices
             ? default
             : new Thickness(10, 10, 10, 0);
     }
@@ -397,10 +398,15 @@ public partial class MainWindow
                     sprocket.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
             }
 
-            if (vm.ShowDustMask && vm.DustMaskScene is { } dust)
+            if (vm.ShowDustMask && !vm.IsDustReviewActive && vm.DustMaskScene is { } dust)
             {
                 overlays.Add(new PresentationOverlay(
                     dust.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
+            }
+            if (vm.DustReviewScene is { } review)
+            {
+                overlays.Add(new PresentationOverlay(
+                    review.WithReferenceWhiteScale(referenceWhiteScale), imageDestination));
             }
 
             if (vm.ShowClipping && vm.ClippingScene is { } clipping)
@@ -526,7 +532,8 @@ public partial class MainWindow
                     TransformOverlayPoint(sample.Centre, renderScaling),
                     sample.Radius * _zoom * renderScaling)).ToArray();
             primitives.Add(new PresentationStrokeArea(
-                samples, SrgbPremultiplied(PreviewOverlayStyle.DustStrokeFill)));
+                samples, SrgbPremultiplied(_mode == SampleMode.DustErase
+                    ? PreviewOverlayStyle.DustRestoreFill : PreviewOverlayStyle.DustStrokeFill)));
         }
 
         if (DustBrushRing.IsVisible && DustBrushRing.Width > 0d && DustBrushRing.Height > 0d)
@@ -538,7 +545,8 @@ public partial class MainWindow
             double rx = DustBrushRing.Width / 2d;
             double ry = DustBrushRing.Height / 2d;
             const int Segments = 48;
-            PremultipliedLinearRgba color = SrgbPremultiplied(PreviewOverlayStyle.DustBrush);
+            PremultipliedLinearRgba color = SrgbPremultiplied(_mode == SampleMode.DustErase
+                ? PreviewOverlayStyle.DustRestore : PreviewOverlayStyle.DustBrush);
             for (int i = 0; i < Segments; i++)
             {
                 double a0 = i * Math.PI * 2d / Segments;
