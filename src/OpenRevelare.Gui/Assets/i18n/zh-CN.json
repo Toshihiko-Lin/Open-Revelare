@@ -1,4 +1,6 @@
 {
+  "PURENeg 项目": "PURENeg 项目",
+  "自动除尘致谢：\n感谢 easonzhangbin 与 PURE Neg 贡献者开放检测引擎，感谢 Magnus Holmes 的 film-dust 提供底层算法。\n自动检测集成使用其 MIT 许可引擎代码，完整许可随可选组件提供。": "自动除尘致谢：\n感谢 easonzhangbin 与 PURE Neg 贡献者开放检测引擎，感谢 Magnus Holmes 的 film-dust 提供底层算法。\n自动检测集成使用其 MIT 许可引擎代码，完整许可随可选组件提供。",
   "PURENeg 自动除尘": "PURENeg 自动除尘",
   "首次使用会下载可选组件，完成后自动检测并预览修复效果。": "首次使用会下载可选组件，完成后自动检测并预览修复效果。",
   "重新检测灰尘，完成后预览修复效果。": "重新检测灰尘，完成后预览修复效果。",

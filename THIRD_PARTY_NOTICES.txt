@@ -12,9 +12,14 @@ Where a component is licensed under the LGPL, users may replace it with a
 compatible (including modified) version by substituting the corresponding
 file in the installation directory.
 
-Automatic dust review downloads PURE Neg's MIT-licensed headless engine from
+Automatic dust review integrates MIT-licensed engine code from PURE Neg,
+maintained by easonzhangbin and the PURE Neg contributors:
+https://github.com/easonzhangbin/PURENeg
+Its underlying film-dust engine is by Magnus Holmes:
+https://github.com/magholmes/film-dust
+OpenRevelare downloads the headless component from its integration fork,
 https://github.com/Toshihiko-Lin/PURENeg at cbcc9fc825ba9aaf12304c7e9524643995faf4dd.
-PURE Neg is maintained by easonzhangbin and uses Magnus Holmes's film-dust.
+Thank you to both projects for making this film-cleaning work available.
 The component directory retains both MIT licenses, upstream third-party and
 model provenance notices, and the license for the runtime from nodejs.org.
 FibreNet and the macOS Vision helper are separate from this download.

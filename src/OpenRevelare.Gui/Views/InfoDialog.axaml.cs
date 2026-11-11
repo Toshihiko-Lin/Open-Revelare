@@ -139,5 +139,11 @@ public partial class InfoDialog : Window
         // OpenRevelare.app/Contents/Resources）。这一行是指路牌，别删。
         "完整第三方声明见随附的 THIRD_PARTY_NOTICES.txt。\n\n" +
         "「智能色偏修正」用到的 net_awb.onnx 权重（Deep White-Balance Editing,\n" +
-        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。默认安装包不含模型权重，首次使用时确认许可后从 GitHub／Gitee 另行下载；ONNX 推理运行库仍随包提供。")).WithLogo();
+        "CVPR 2020）按 CC BY-NC-SA 4.0 单独授权，不在本程序的 GPL-3.0 范围内。默认安装包不含模型权重，首次使用时确认许可后从 GitHub／Gitee 另行下载；ONNX 推理运行库仍随包提供。") +
+        "\n\n" + Loc.T("自动除尘致谢：\n感谢 easonzhangbin 与 PURE Neg 贡献者开放检测引擎，感谢 Magnus Holmes 的 film-dust 提供底层算法。\n自动检测集成使用其 MIT 许可引擎代码，完整许可随可选组件提供。") +
+        "\nPURE Neg: https://github.com/easonzhangbin/PURENeg" +
+        "\nfilm-dust: https://github.com/magholmes/film-dust")
+        .WithLogo()
+        .WithSecondaryAction(Loc.T("PURENeg 项目"),
+            () => Services.Updater.OpenUrl("https://github.com/easonzhangbin/PURENeg"));
 }

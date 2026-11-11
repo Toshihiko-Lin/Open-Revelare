@@ -258,6 +258,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before development. Calibration experime
 
 The code is licensed under **GPL-3.0-only**; see [LICENSE](LICENSE).
 
+Optional automatic dust detection integrates MIT-licensed engine code from [PURE Neg](https://github.com/easonzhangbin/PURENeg), maintained by easonzhangbin, and its underlying [film-dust engine](https://github.com/magholmes/film-dust) by Magnus Holmes. OpenRevelare uses a pinned revision of its [integration fork](https://github.com/Toshihiko-Lin/PURENeg); component scope, revisions and licence notices are documented in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
 Deep-WB is an optional download: accept the license when first using Smart Cast Correction, or run `OpenRevelare.Cli --install-deep-wb`. Default packages do not include model weights. Downloads automatically fall back to the [Gitee mirror](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx) if GitHub fails; offline installation is also supported. The ONNX runtime remains bundled.
 
 `models/net_awb.onnx` is the Deep White-Balance Editing model, distributed under **CC BY-NC-SA 4.0** and outside this project's GPL scope. See [models/README.md](models/README.md) and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
@@ -265,6 +267,8 @@ Deep-WB is an optional download: accept the license when first using Smart Cast 
 References include [LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple), [DiVERE](https://github.com/flipswitchingmonkey/DiVERE) and darktable `negadoctor`.
 
 ## Project origin and acknowledgements
+
+Special thanks to **[easonzhangbin and the PURE Neg contributors](https://github.com/easonzhangbin/PURENeg)** for sharing the film-cleaning work behind OpenRevelare's automatic dust detection, and to **[Magnus Holmes](https://github.com/magholmes/film-dust)** for the underlying film-dust engine. Visit the original PURE Neg project to explore its complete workflow and support its author.
 
 The project began as a personal film-copying tool. After user feedback and a core rewrite, it was released as a cross-platform open-source project in August 2026. Early development was supported by:
 

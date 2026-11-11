@@ -255,6 +255,8 @@ dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-lin
 
 代码采用 **GPL-3.0-only**，见 [LICENSE](LICENSE)。
 
+可选自动除尘集成使用 [easonzhangbin 的 PURE Neg](https://github.com/easonzhangbin/PURENeg) 及其底层 [Magnus Holmes 的 film-dust](https://github.com/magholmes/film-dust) 引擎的 MIT 许可代码。本软件通过[集成 fork](https://github.com/Toshihiko-Lin/PURENeg) 的固定版本接入；组件范围、版本与许可声明见 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。
+
 Deep-WB 为可选下载：首次点击「智能色偏修正」时确认许可后安装，也可运行 `OpenRevelare.Cli --install-deep-wb`。默认安装包不含模型权重。 GitHub 下载失败时自动尝试 [Gitee 国内镜像](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx)，也可手动下载后离线安装。ONNX 推理运行库仍随包提供。
 
 `models/net_awb.onnx` 为 Deep White-Balance Editing 模型，按 **CC BY-NC-SA 4.0** 单独授权，不属于本项目 GPL 范围。详情见 [models/README.md](models/README.md) 与 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。
@@ -262,6 +264,8 @@ Deep-WB 为可选下载：首次点击「智能色偏修正」时确认许可后
 主要参考：[LightSourceDecouple](https://github.com/karasuyasabou/LightSourceDecouple)、[DiVERE](https://github.com/flipswitchingmonkey/DiVERE) 和 darktable `negadoctor`。
 
 ## 项目来源与致谢
+
+特别感谢 **[easonzhangbin 与 PURE Neg 贡献者](https://github.com/easonzhangbin/PURENeg)** 开放胶片除尘工作，为本软件的自动检测提供基础；也感谢 **[Magnus Holmes](https://github.com/magholmes/film-dust)** 提供底层 film-dust 引擎。欢迎访问 PURE Neg 原项目，了解其完整工作流并支持作者。
 
 项目最初是作者用于个人胶片翻拍的工具，经过用户反馈和底层重构后，于 2026 年 8 月以跨平台开源项目发布。感谢以下用户对早期开发与完善提供的支持：
 
