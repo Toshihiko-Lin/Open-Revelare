@@ -22,7 +22,19 @@ https://github.com/Toshihiko-Lin/PURENeg at cbcc9fc825ba9aaf12304c7e9524643995fa
 Thank you to both projects for making this film-cleaning work available.
 The component directory retains both MIT licenses, upstream third-party and
 model provenance notices, and the license for the runtime from nodejs.org.
-FibreNet and the macOS Vision helper are separate from this download.
+The optional platform download includes FibreNet inference, the native detector
+and runtime dependencies: CoreML on macOS, ONNX Runtime on Windows/Linux.
+The adapted inference host and model conversion sources are in
+src/OpenRevelare.PureNeg.ModelHost and packaging/pureneg in the OpenRevelare
+source repository; OpenRevelare-owned code remains under GPL-3.0.
+PURE Neg and film-dust retain their upstream MIT licenses. Model provenance,
+torchvision/scikit-image BSD notices, and runtime licenses remain in the
+component directory. The application also embeds the pinned engine license
+texts and provenance notices for offline viewing before installation.
+PURE Neg brand artwork supplied with the original project's brand guide is
+used to identify this optional component. Artwork belongs to its original
+rights holders and is not automatically covered by the software MIT license.
+See Assets/pureneg/NOTICE.txt in the GUI source for the supplied artwork origin.
 The OpenRevelare analysis adapter includes the candidate attribution rules
 from PURE Neg's MIT-licensed src/review.cjs.
 Windows distributions built with the optional CPU accelerator include the

@@ -647,6 +647,12 @@
                                     </Button>
                                 </StackPanel>
                             </Border>
+                            <Button Name="PureNegCreditButton" Click="OnPureNegAttributionClick"
+                                    Background="Transparent" BorderThickness="0" Padding="2"
+                                    AutomationProperties.Name="{i18n:T 'PURE Neg · 来源与许可'}"
+                                    ToolTip.Tip="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。点击查看作者、原项目与许可证。'}">
+                                <Image Source="/Assets/pureneg/icon.png" Width="26" Height="26" Stretch="Uniform" />
+                            </Button>
                         </StackPanel>
                             <Border Name="PreviewOrientationTools" Classes="orientationTools" Margin="4,0,0,0" Padding="6,0,0,0">
                                 <StackPanel Orientation="Horizontal" Spacing="2">
@@ -914,6 +920,10 @@
                                                         IsEnabled="{Binding HasAutomaticDust}" />
                                                     <Button Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick" />
                                                 </StackPanel>
+                                                <Separator />
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                    Text="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。'}" />
+                                                <Button Content="{i18n:T 'PURE Neg · 来源与许可'}" Click="OnPureNegAttributionClick" />
                                             </StackPanel>
                                         </Flyout>
                                     </Button.Flyout>

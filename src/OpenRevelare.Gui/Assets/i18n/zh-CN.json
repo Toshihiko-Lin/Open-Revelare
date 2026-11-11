@@ -1647,5 +1647,14 @@
   "从 GitHub 下载": "从 GitHub 下载",
   "从 Gitee 国内镜像下载": "从 Gitee 国内镜像下载",
   "PURENeg 除尘已安装，可使用自动除尘。": "PURENeg 除尘已安装，可使用自动除尘。",
-  "PURENeg 除尘下载已取消": "PURENeg 除尘下载已取消"
+  "PURENeg 除尘下载已取消": "PURENeg 除尘下载已取消",
+  "PURE Neg · 来源与许可": "PURE Neg · 来源与许可",
+  "除尘功能来自 PURE Neg 开源除尘软件。": "除尘功能来自 PURE Neg 开源除尘软件。",
+  "除尘功能来自 PURE Neg 开源除尘软件。点击查看作者、原项目与许可证。": "除尘功能来自 PURE Neg 开源除尘软件。点击查看作者、原项目与许可证。",
+  "除尘功能来自 PURE Neg 开源除尘软件，由 easonzhangbin 与 PURE Neg 贡献者维护；底层 film-dust 引擎由 Magnus Holmes 开发。感谢原作者开放这项工作。": "除尘功能来自 PURE Neg 开源除尘软件，由 easonzhangbin 与 PURE Neg 贡献者维护；底层 film-dust 引擎由 Magnus Holmes 开发。感谢原作者开放这项工作。",
+  "PURE Neg 与 film-dust 检测引擎采用 MIT 许可证。允许在保留版权和许可声明的条件下使用、修改与分发；软件按原样提供，不作担保。标志版权归原权利人所有。": "PURE Neg 与 film-dust 检测引擎采用 MIT 许可证。允许在保留版权和许可声明的条件下使用、修改与分发；软件按原样提供，不作担保。标志版权归原权利人所有。",
+  "PURE Neg 原项目": "PURE Neg 原项目",
+  "film-dust 底层引擎": "film-dust 底层引擎",
+  "模型及运行库的其他第三方许可与来源声明随组件保留，包括 Node.js、ONNX Runtime 和 torchvision 等；不改变 OpenRevelare 自身的 GPL-3.0 许可证。": "模型及运行库的其他第三方许可与来源声明随组件保留，包括 Node.js、ONNX Runtime 和 torchvision 等；不改变 OpenRevelare 自身的 GPL-3.0 许可证。",
+  "查看完整许可证与第三方声明": "查看完整许可证与第三方声明"
 }

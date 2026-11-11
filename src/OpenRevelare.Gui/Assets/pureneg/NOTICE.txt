@@ -1,0 +1,19 @@
+PURE Neg artwork attribution
+
+Icon supplied by the user in PURENEGICON.pdf, from the PURE Neg brand materials.
+Rendered from the complete original page at 256x256 without redrawing or recoloring.
+PDF SHA-256: 45724005eea31c8540b503ad3b8796448dd1c4089baf14151092d9e0361174ce
+Brand guide: PURE Neg · 标志与规范.pdf
+Guide SHA-256: 0f6a2d9adfea5690bfb46c19e4ee671a7224e311a292a3a5e017d445d9faeb62
+
+Brand artwork belongs to its original rights holders. The software MIT license
+does not automatically license project branding; refer to the upstream project
+for artwork permissions. Used here to identify the optional PURE Neg component.
+Original project: https://github.com/easonzhangbin/PURENeg
+
+licenses.txt retains the exact license and provenance notices from the pinned
+PURE Neg integration revision cbcc9fc825ba9aaf12304c7e9524643995faf4dd.
+
+Horizontal lockup extracted without redrawing from the supplied brand guide,
+page 1, PDF rectangle (794,326)-(1055,394), at 3x resolution. The original dark
+background, proportions, lettering and colors are retained in both themes.

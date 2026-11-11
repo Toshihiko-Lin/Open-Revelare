@@ -180,17 +180,16 @@ public partial class MainWindow
         DustReviewStatus.IsVisible = open;
     }
 
+    private async void OnPureNegAttributionClick(object? sender, RoutedEventArgs e) =>
+        await new PureNegInfoDialog().ShowDialog(this);
+
     private async void OnInstallPureNegClick(object? sender, RoutedEventArgs e)
     {
         if (_installingPureNeg || _dustReviewOperation is not null || PureNegComponent.IsInstalled ||
             !PureNegComponent.IsSupported || Vm is not { HasLongTask: false, IsBusy: false } vm) return;
-        bool accepted = false, preferMirror = false;
-        await new InfoDialog(Loc.T("安装可选 PURENeg 除尘组件"),
-            Loc.T("将下载当前平台的 PURENeg 除尘引擎、模型和运行库。GitHub 不可用时自动尝试 Gitee 国内镜像。组件保存在用户数据目录，升级后保留。"))
-            .WithAction(Loc.T("从 GitHub 下载"), Loc.T("取消"), () => accepted = true)
-            .WithSecondaryAction(Loc.T("从 Gitee 国内镜像下载"), () => { accepted = true; preferMirror = true; })
-            .ShowDialog(this);
-        if (!accepted || !vm.TryBeginLongTask(Loc.T("正在下载 PURENeg 除尘"), out var owner)) return;
+        var source = await new PureNegInfoDialog(download: true).ShowDialog<PureNegInfoDialog.DownloadSource?>(this);
+        if (source is null || !vm.TryBeginLongTask(Loc.T("正在下载 PURENeg 除尘"), out var owner)) return;
+        bool preferMirror = source == PureNegInfoDialog.DownloadSource.Gitee;
         _installingPureNeg = true;
         UpdateDustToolbar();
         try
