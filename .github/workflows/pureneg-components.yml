@@ -81,9 +81,11 @@ jobs:
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $vcInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $redist = Get-ChildItem (Join-Path $vcInstall 'VC/Redist/MSVC') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $crt = Join-Path $redist.FullName 'x64/Microsoft.VC143.CRT'
-          if (!(Test-Path -LiteralPath $crt)) { throw 'Missing redistributable C++ runtime' }
+          $crtFile = Get-ChildItem (Join-Path $vcInstall 'VC/Redist/MSVC') -Filter 'vcruntime140.dll' -File -Recurse |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Microsoft\.VC14[0-9]+\.CRT[\\/]' -and $_.FullName -notmatch '[\\/]onecore[\\/]' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if ($null -eq $crtFile) { throw 'Missing redistributable C++ runtime' }
+          $crt = $crtFile.Directory.FullName
           Get-ChildItem -LiteralPath $crt -Filter '*.dll' | Copy-Item -Destination artifacts/runtime
       - name: Package platform component
         shell: bash
