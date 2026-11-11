@@ -8,7 +8,7 @@
     <_RawName Condition="$(_RawRid.StartsWith('linux'))">libOpenRevelare.Raw.Native.so</_RawName>
     <_RawName Condition="$(_RawRid.StartsWith('osx'))">libOpenRevelare.Raw.Native.dylib</_RawName>
     <_RawPath>$(MSBuildThisFileDirectory)native/$(_RawRid)/$(_RawName)</_RawPath>
-    <_NeedsRaw Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe' Or '$(IsTestProject)' == 'true'">true</_NeedsRaw>
+    <_NeedsRaw Condition="'$(UsesOpenRevelareNativeAssets)' != 'false' And ('$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe' Or '$(IsTestProject)' == 'true')">true</_NeedsRaw>
     <MSBuildWarningsNotAsErrors>$(MSBuildWarningsNotAsErrors);ORRAW001</MSBuildWarningsNotAsErrors>
   </PropertyGroup>
   <ItemGroup Condition="'$(_NeedsRaw)' == 'true' And Exists('$(_RawPath)')">

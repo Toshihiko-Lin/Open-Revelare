@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>pureneg-model-host</AssemblyName>
+    <!-- This process reads RGB TIFF only; it does not use RAW, grading GPU or HEIC assets. -->
+    <UsesOpenRevelareNativeAssets>false</UsesOpenRevelareNativeAssets>
     <PureNegProvider Condition="'$(PureNegProvider)' == ''">Cpu</PureNegProvider>
     <DefineConstants Condition="'$(PureNegProvider)' == 'DirectML'">$(DefineConstants);PURENEG_DML</DefineConstants>
     <DefineConstants Condition="'$(PureNegProvider)' == 'Cuda'">$(DefineConstants);PURENEG_CUDA</DefineConstants>
