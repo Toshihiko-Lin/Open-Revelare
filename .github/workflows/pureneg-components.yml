@@ -46,16 +46,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/runtime
+          python -m pip install coremltools==9.0
+          python packaging/pureneg/prepare-fibrenet.py upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/FibreNet.mlpackage
           python packaging/pureneg/prepare-codec.py upstream-pureneg/macos/ImageCodec.swift artifacts/ImageCodec.swift
           xcrun swiftc -parse-as-library -O artifacts/ImageCodec.swift -o artifacts/runtime/image-codec
-          xcrun coremlcompiler compile upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/runtime
+          xcrun coremlcompiler compile artifacts/FibreNet.mlpackage artifacts/runtime
       - name: Validate converted model against original CoreML
         if: runner.os == 'macOS'
         shell: bash
         run: |
           python -m pip install numpy==2.2.6 onnx==1.23.2 coremltools==9.0 onnxruntime==1.20.1
           python packaging/pureneg/convert-fibrenet.py upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/model.mlmodel upstream-pureneg/macos/Models/FibreNet.mlpackage/Data/com.apple.CoreML/weights/weight.bin artifacts/FibreNet.onnx
-          python packaging/pureneg/check-coreml-parity.py upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/FibreNet.onnx artifacts/runtime/model-parity.json
+          python packaging/pureneg/check-coreml-parity.py artifacts/FibreNet.mlpackage artifacts/FibreNet.onnx artifacts/runtime/model-parity.json
       - name: Convert portable ONNX model
         if: runner.os != 'macOS'
         shell: bash

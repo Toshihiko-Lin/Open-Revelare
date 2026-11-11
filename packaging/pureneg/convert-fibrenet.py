@@ -111,6 +111,13 @@ def convert(spec_path: Path, weights_path: Path, output: Path):
             attributes = dict(kernel_shape=attr(op, "kernel_sizes"), strides=attr(op, "strides"),
                               pads=pads(op), ceil_mode=int(attr(op, "ceil_mode")))
             if op.type == "avg_pool": attributes["count_include_pad"] = int(not attr(op, "exclude_padding_from_average"))
+            if op.type == "avg_pool":
+                # Match prepare-fibrenet.py: prevent half-precision accumulation
+                # error across a 31x31 window without changing learned weights.
+                nodes.append(helper.make_node("Cast", [x], [name + "_input32"], to=TensorProto.FLOAT))
+                nodes.append(helper.make_node(kind, [name + "_input32"], [name + "_accum32"], **attributes))
+                nodes.append(helper.make_node("Cast", [name + "_accum32"], [name], to=TensorProto.FLOAT16))
+                continue
         elif op.type == "concat":
             if attr(op, "interleave"): raise ValueError("Interleaved concatenation is unsupported")
             kind, inputs = "Concat", [a.name for a in op.inputs["values"].arguments]
@@ -142,7 +149,7 @@ def convert(spec_path: Path, weights_path: Path, output: Path):
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], producer_name="OpenRevelare")
     model.ir_version = 9
     helper.set_model_props(model, {"source.spec.sha256": SOURCE_SHA, "source.weights.sha256": WEIGHTS_SHA,
-        "precision": "fp16 graph, source weights and intermediate tensor precision preserved; CoreML parity requires validation"})
+        "precision": "fp16 network and exact source weights; 31x31 average pool accumulates in fp32 in both CoreML and ONNX"})
     onnx.checker.check_model(model, full_check=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     onnx.save(model, output)

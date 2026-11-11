@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using BitMiracle.LibTiff.Classic;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -10,6 +11,7 @@ const int tile = 576, keep = 512, pad = 32, plane = tile * tile;
 try
 {
     string model = Path.Combine(AppContext.BaseDirectory, "FibreNet.onnx");
+    string modelSha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(model))).ToLowerInvariant();
     bool probe = args is ["--probe"];
     bool server = args is ["--server"];
     if (!probe && !server && args.Length != 2) throw new ArgumentException("Expected input.tiff output.u8 or --probe.");
@@ -112,7 +114,8 @@ try
             tiles++;
         }
         if (!isProbe) File.WriteAllBytes(request[1], map);
-        Console.WriteLine(JsonSerializer.Serialize(new { type = "model-ready", provider, fallback, tiles, width, height, milliseconds = clock.ElapsedMilliseconds }));
+        Console.WriteLine(JsonSerializer.Serialize(new { type = "model-ready", provider, fallback, tiles, width, height,
+            modelSha256, precision = "fp16-network-fp32-pool-accumulation", milliseconds = clock.ElapsedMilliseconds }));
         }
         void Predict(string[] request, bool isProbe)
         {

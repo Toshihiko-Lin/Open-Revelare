@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 
 REVISION = "cbcc9fc825ba9aaf12304c7e9524643995faf4dd"
-MODEL_SHA = "e62c8fdb9db20ee72ba779e723594802c49b00cd43c8de5a6479bea217437ea0"
+MODEL_SHA = "f424edefac3eddef5c1235a8e3ff1bd358bf8a25298256e5ccd8f1552e36e04b"
 
 
 def pack(rid: str, runtime: Path, native: Path, output: Path):
@@ -42,6 +42,7 @@ def pack(rid: str, runtime: Path, native: Path, output: Path):
             "revision": REVISION, "platform": rid, "modelFormat": model_format,
             "modelSha256": MODEL_SHA if model_format == "onnx" else None,
             "sourceWeightsSha256": "130c1b428eaad69e4ea86684148ebda24ca97d5147026ae2a526f95b95f7868a",
+            "precision": "fp16-network-fp32-pool-accumulation",
         }, indent=2) + "\n", encoding="utf8")
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zip_file:
             for file in sorted(stage.rglob("*")):
