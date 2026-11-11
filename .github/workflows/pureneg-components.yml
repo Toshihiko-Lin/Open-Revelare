@@ -1,6 +1,12 @@
 name: PURENeg platform inference components
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/pureneg-*']
+    paths:
+      - '.github/workflows/pureneg-components.yml'
+      - 'packaging/pureneg/**'
+      - 'src/OpenRevelare.PureNeg.ModelHost/**'
 permissions:
   contents: read
 jobs:
