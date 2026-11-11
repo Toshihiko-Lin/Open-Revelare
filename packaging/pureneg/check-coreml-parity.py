@@ -27,9 +27,9 @@ report = []
 passed = True
 for name, rgb in fixtures.items():
     reference = coreml.predict({"rgb": rgb.astype(np.float16)})["prob"].astype(np.float32)
-    actual = session.run(["prob"], {"rgb": rgb})[0]
+    actual = session.run(["prob"], {"rgb": rgb.astype(np.float16)})[0].astype(np.float32)
     error = np.abs(reference - actual)
-    # FP32 preserves source weights but differs from CoreML's FP16 intermediates.
+    # Backend implementations can differ even with FP16 tensors and the same weights.
     # These are explicit release gates, not a claim of bit identity.
     valid = bool(np.isfinite(actual).all() and error.mean() <= .002 and error.max() <= .05)
     report.append({"fixture": name, "meanError": float(error.mean()), "maxError": float(error.max()), "passed": valid})

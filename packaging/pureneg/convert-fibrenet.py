@@ -79,7 +79,7 @@ def convert(spec_path: Path, weights_path: Path, output: Path):
         name = argument(op, key)
         if name in constants:
             value = constants[name]
-            if value.dtype.kind == "f": value = value.astype(np.float32)
+            if value.dtype.kind == "f": value = value.astype(np.float16)
             initializer(name, value)
         return name
 
@@ -95,7 +95,7 @@ def convert(spec_path: Path, weights_path: Path, output: Path):
             constants[name] = decode(op.attributes["val"])
             continue
         shape = [d.constant.size for d in op.outputs[0].type.tensorType.dimensions]
-        information.append(helper.make_tensor_value_info(name, TensorProto.FLOAT, shape))
+        information.append(helper.make_tensor_value_info(name, TensorProto.FLOAT16, shape))
         x = data(op, "x") if "x" in op.inputs else None
         inputs, attributes = [], {}
         if op.type in ("mul", "add", "sub"):
@@ -136,13 +136,13 @@ def convert(spec_path: Path, weights_path: Path, output: Path):
         else:
             raise ValueError(f"Unsupported MIL operation: {op.type}")
         nodes.append(helper.make_node(kind, inputs, [name], name=name, **attributes))
-    graph = helper.make_graph(nodes, "PURENeg-FibreNet", [helper.make_tensor_value_info("rgb", TensorProto.FLOAT, [1, 3, 576, 576])],
-        [helper.make_tensor_value_info("prob", TensorProto.FLOAT, [1, 1, 576, 576])], list(initializers.values()),
+    graph = helper.make_graph(nodes, "PURENeg-FibreNet", [helper.make_tensor_value_info("rgb", TensorProto.FLOAT16, [1, 3, 576, 576])],
+        [helper.make_tensor_value_info("prob", TensorProto.FLOAT16, [1, 1, 576, 576])], list(initializers.values()),
         value_info=[v for v in information if v.name != "prob"])
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)], producer_name="OpenRevelare")
     model.ir_version = 9
     helper.set_model_props(model, {"source.spec.sha256": SOURCE_SHA, "source.weights.sha256": WEIGHTS_SHA,
-        "precision": "fp32 operations with exact promoted source fp16 weights; CoreML parity requires validation"})
+        "precision": "fp16 graph, source weights and intermediate tensor precision preserved; CoreML parity requires validation"})
     onnx.checker.check_model(model, full_check=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     onnx.save(model, output)

@@ -46,7 +46,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/runtime
-          xcrun swiftc -parse-as-library -O upstream-pureneg/macos/ImageCodec.swift -o artifacts/runtime/image-codec
+          python packaging/pureneg/prepare-codec.py upstream-pureneg/macos/ImageCodec.swift artifacts/ImageCodec.swift
+          xcrun swiftc -parse-as-library -O artifacts/ImageCodec.swift -o artifacts/runtime/image-codec
           xcrun coremlcompiler compile upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/runtime
       - name: Validate converted model against original CoreML
         if: runner.os == 'macOS'

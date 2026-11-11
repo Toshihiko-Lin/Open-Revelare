@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 
 REVISION = "cbcc9fc825ba9aaf12304c7e9524643995faf4dd"
-MODEL_SHA = "2538547d4e7ce5d0b69f53cd55418b2c9bce6b18e4ca4363383313c722415dc5"
+MODEL_SHA = "e62c8fdb9db20ee72ba779e723594802c49b00cd43c8de5a6479bea217437ea0"
 
 
 def pack(rid: str, runtime: Path, native: Path, output: Path):

@@ -73,8 +73,8 @@ try
             }
         }
         var map = new byte[checked(width * height)];
-        float[] input = new float[plane * 3];
-        var named = NamedOnnxValue.CreateFromTensor("rgb", new DenseTensor<float>(input, [1, 3, tile, tile]));
+        Float16[] input = new Float16[plane * 3];
+        var named = NamedOnnxValue.CreateFromTensor("rgb", new DenseTensor<Float16>(input, [1, 3, tile, tile]));
         int tiles = 0;
         for (int ty = 0; ty < height; ty += keep)
         for (int tx = 0; tx < width; tx += keep)
@@ -85,15 +85,15 @@ try
                 for (int x = 0; x < tile; x++)
                 {
                     int sx = Math.Clamp(tx - pad + x, 0, width - 1), s = (sy * width + sx) * 3, d = y * tile + x;
-                    input[d] = rgb[s] / 255f; input[plane + d] = rgb[s + 1] / 255f; input[2 * plane + d] = rgb[s + 2] / 255f;
+                    input[d] = (Float16)(rgb[s] / 255f); input[plane + d] = (Float16)(rgb[s + 1] / 255f); input[2 * plane + d] = (Float16)(rgb[s + 2] / 255f);
                 }
             }
             using var result = session.Run([named]);
-            var tensor = result.First(v => v.Name == "prob").AsTensor<float>();
+            var tensor = result.First(v => v.Name == "prob").AsTensor<Float16>();
             for (int y = 0; y < Math.Min(keep, height - ty); y++)
             for (int x = 0; x < Math.Min(keep, width - tx); x++)
             {
-                float v = tensor[0, 0, y + pad, x + pad];
+                float v = tensor[0, 0, y + pad, x + pad].ToFloat();
                 if (!float.IsFinite(v)) throw new InvalidDataException("FibreNet returned non-finite probability.");
                 map[(ty + y) * width + tx + x] = (byte)Math.Clamp(MathF.Round(v * 255, MidpointRounding.AwayFromZero), 0, 255);
             }
