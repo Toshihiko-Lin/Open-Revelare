@@ -26,6 +26,7 @@ internal sealed class PureNegInfoDialog : Window
             HorizontalAlignment = HorizontalAlignment.Left });
         body.Children.Add(new TextBlock { Text = Title, Classes = { "dialogTitle" }, Margin = new Thickness(0) });
         body.Children.Add(Text(Loc.T("除尘功能来自 PURE Neg 开源除尘软件，由 easonzhangbin 与 PURE Neg 贡献者维护；底层 film-dust 引擎由 Magnus Holmes 开发。感谢原作者开放这项工作。")));
+        body.Children.Add(Text(Loc.T("PURE Neg 也提供独立客户端软件。本软件内置的 PURE Neg 插件仅保留基本除尘功能；欢迎访问原项目，了解并支持独立客户端。")));
         body.Children.Add(Text(Loc.T("PURE Neg 与 film-dust 检测引擎采用 MIT 许可证。允许在保留版权和许可声明的条件下使用、修改与分发；软件按原样提供，不作担保。标志版权归原权利人所有。")));
         body.Children.Add(Text("PURE Neg: Copyright (c) 2026 Film Dust for PhotoCraft contributors\nfilm-dust: Copyright (c) 2026 Magnus Holmes"));
         body.Children.Add(ProjectLink(Loc.T("PURE Neg 原项目"), ProjectUrl));

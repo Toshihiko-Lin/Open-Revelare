@@ -17,3 +17,6 @@ PURE Neg integration revision cbcc9fc825ba9aaf12304c7e9524643995faf4dd.
 Horizontal lockup extracted without redrawing from the supplied brand guide,
 page 1, PDF rectangle (794,326)-(1055,394), at 3x resolution. The original dark
 background, proportions, lettering and colors are retained in both themes.
+
+The toolbar displays the original icon inside a rounded UI clip to hide the
+white PDF page outside the mark. Original colors and lettering are retained.

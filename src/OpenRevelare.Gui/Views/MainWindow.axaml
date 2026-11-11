@@ -618,8 +618,17 @@
                                 <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"
                                         AutomationProperties.Name="{i18n:T 'PURENeg 自动除尘'}" Padding="7,4">
                                     <StackPanel Orientation="Horizontal" Spacing="5">
-                                        <ctl:Icon Data="{StaticResource IcoWand}" />
-                                        <TextBlock Text="{i18n:T 'PURENeg 自动除尘'}" TextWrapping="NoWrap" />
+                                        <Viewbox Name="PureNegButtonLogo" Width="22" Height="22" Stretch="Uniform">
+                                            <!-- Crop the white PDF page with a UI clip; retain the original artwork pixels. -->
+                                            <Grid Width="208" Height="208" ClipToBounds="True">
+                                                <Grid.Clip>
+                                                    <RectangleGeometry Rect="0,0,208,208" RadiusX="68" RadiusY="68" />
+                                                </Grid.Clip>
+                                                <Image Source="/Assets/pureneg/icon.png" Width="256" Height="256"
+                                                       Margin="-24" Stretch="Uniform" />
+                                            </Grid>
+                                        </Viewbox>
+                                        <TextBlock Text="{i18n:T 'PURENeg 自动除尘'}" TextWrapping="NoWrap" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                                 <Button Name="PureNegDownloadButton" IsVisible="False"
@@ -647,12 +656,6 @@
                                     </Button>
                                 </StackPanel>
                             </Border>
-                            <Button Name="PureNegCreditButton" Click="OnPureNegAttributionClick"
-                                    Background="Transparent" BorderThickness="0" Padding="2"
-                                    AutomationProperties.Name="{i18n:T 'PURE Neg · 来源与许可'}"
-                                    ToolTip.Tip="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。点击查看作者、原项目与许可证。'}">
-                                <Image Source="/Assets/pureneg/icon.png" Width="26" Height="26" Stretch="Uniform" />
-                            </Button>
                         </StackPanel>
                             <Border Name="PreviewOrientationTools" Classes="orientationTools" Margin="4,0,0,0" Padding="6,0,0,0">
                                 <StackPanel Orientation="Horizontal" Spacing="2">
@@ -922,7 +925,7 @@
                                                 </StackPanel>
                                                 <Separator />
                                                 <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                    Text="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。'}" />
+                                                    Text="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。内置插件仅保留基本功能，欢迎支持其独立客户端。'}" />
                                                 <Button Content="{i18n:T 'PURE Neg · 来源与许可'}" Click="OnPureNegAttributionClick" />
                                             </StackPanel>
                                         </Flyout>

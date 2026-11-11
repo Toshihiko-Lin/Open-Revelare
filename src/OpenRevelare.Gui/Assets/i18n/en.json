@@ -1656,5 +1656,7 @@
   "PURE Neg 原项目": "Original PURE Neg project",
   "film-dust 底层引擎": "Underlying film-dust engine",
   "模型及运行库的其他第三方许可与来源声明随组件保留，包括 Node.js、ONNX Runtime 和 torchvision 等；不改变 OpenRevelare 自身的 GPL-3.0 许可证。": "Additional model and runtime licenses and provenance notices are retained with the component, including Node.js, ONNX Runtime and torchvision. OpenRevelare itself remains licensed under GPL-3.0.",
-  "查看完整许可证与第三方声明": "View full licenses and third-party notices"
+  "查看完整许可证与第三方声明": "View full licenses and third-party notices",
+  "PURE Neg 也提供独立客户端软件。本软件内置的 PURE Neg 插件仅保留基本除尘功能；欢迎访问原项目，了解并支持独立客户端。": "PURE Neg also offers a standalone application. The PURE Neg plugin built into this software retains only basic dust removal features. Visit the original project to explore and support the standalone application.",
+  "除尘功能来自 PURE Neg 开源除尘软件。内置插件仅保留基本功能，欢迎支持其独立客户端。": "Dust removal is powered by the open-source PURE Neg application. This plugin retains only basic features. Please support its standalone application."
 }
