@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -16,6 +17,15 @@ try
     string? fallback = null;
     var clock = Stopwatch.StartNew();
     InferenceSession session;
+    // The TIFF input is RGB8-normalized. Reuse exact FP16 encodings instead
+    // of performing millions of software Float16 conversions per tile.
+    var normalized = Enumerable.Range(0, 256).Select(v => (Float16)(v / 255f)).ToArray();
+    var quantized = new byte[65536];
+    for (int bits = 0; bits < quantized.Length; bits++)
+    {
+        float value = (float)BitConverter.UInt16BitsToHalf((ushort)bits);
+        if (float.IsFinite(value)) quantized[bits] = (byte)Math.Clamp(MathF.Round(value * 255, MidpointRounding.AwayFromZero), 0, 255);
+    }
     SessionOptions Options() => new()
     {
         EnableMemoryPattern = false, ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
@@ -85,17 +95,19 @@ try
                 for (int x = 0; x < tile; x++)
                 {
                     int sx = Math.Clamp(tx - pad + x, 0, width - 1), s = (sy * width + sx) * 3, d = y * tile + x;
-                    input[d] = (Float16)(rgb[s] / 255f); input[plane + d] = (Float16)(rgb[s + 1] / 255f); input[2 * plane + d] = (Float16)(rgb[s + 2] / 255f);
+                    input[d] = normalized[rgb[s]]; input[plane + d] = normalized[rgb[s + 1]]; input[2 * plane + d] = normalized[rgb[s + 2]];
                 }
             }
             using var result = session.Run([named]);
             var tensor = result.First(v => v.Name == "prob").AsTensor<Float16>();
+            ReadOnlySpan<Float16> values = tensor is DenseTensor<Float16> dense ? dense.Buffer.Span : tensor.ToArray();
+            var bits = MemoryMarshal.Cast<Float16, ushort>(values);
             for (int y = 0; y < Math.Min(keep, height - ty); y++)
             for (int x = 0; x < Math.Min(keep, width - tx); x++)
             {
-                float v = tensor[0, 0, y + pad, x + pad].ToFloat();
-                if (!float.IsFinite(v)) throw new InvalidDataException("FibreNet returned non-finite probability.");
-                map[(ty + y) * width + tx + x] = (byte)Math.Clamp(MathF.Round(v * 255, MidpointRounding.AwayFromZero), 0, 255);
+                ushort v = bits[(y + pad) * tile + x + pad];
+                if ((v & 0x7c00) == 0x7c00) throw new InvalidDataException("FibreNet returned non-finite probability.");
+                map[(ty + y) * width + tx + x] = quantized[v];
             }
             tiles++;
         }

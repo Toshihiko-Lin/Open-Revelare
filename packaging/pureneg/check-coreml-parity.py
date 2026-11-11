@@ -37,4 +37,35 @@ for name, rgb in fixtures.items():
 args.report.write_text(json.dumps({"passed": passed, "fixtures": report,
     "limits": {"meanError": .002, "maxError": .05}}, indent=2) + "\n", encoding="utf8")
 print(args.report.read_text())
-if not passed: raise SystemExit("CoreML/ONNX parity gate rejected the component")
+if not passed:
+    # Expose a few internal tensors to locate a conversion/backend discrepancy.
+    import onnx
+    from coremltools.proto import FeatureTypes_pb2
+    names = ["input_1_cast_fp16", "mean_cast_fp16", "lmean_cast_fp16", "var_88_cast_fp16",
+             "var_92_cast_fp16", "input_3_cast_fp16", "input_7_cast_fp16", "input_15_cast_fp16", "prob"]
+    spec = coreml.get_spec()
+    block = spec.mlProgram.functions["main"].block_specializations["CoreML6"]
+    outputs = {out.name: out for op in block.operations for out in op.outputs}
+    del block.outputs[:]
+    block.outputs.extend(names)
+    spec.description.ClearField("output")
+    for name in names:
+        feature = spec.description.output.add()
+        feature.name = name
+        feature.type.multiArrayType.dataType = FeatureTypes_pb2.ArrayFeatureType.FLOAT16
+        feature.type.multiArrayType.shape.extend(d.constant.size for d in outputs[name].type.tensorType.dimensions)
+    debug_coreml = ct.models.MLModel(spec, weights_dir=str(args.coreml / "Data/com.apple.CoreML/weights"), compute_units=ct.ComputeUnit.CPU_ONLY)
+    graph = onnx.load(args.onnx)
+    values = {v.name: v for v in list(graph.graph.value_info) + list(graph.graph.output)}
+    del graph.graph.output[:]
+    graph.graph.output.extend(values[n] for n in names)
+    debug_ort = ort.InferenceSession(graph.SerializeToString(), providers=["CPUExecutionProvider"])
+    rgb = fixtures["defect-lines"].astype(np.float16)
+    reference = debug_coreml.predict({"rgb": rgb})
+    actual = debug_ort.run(names, {"rgb": rgb})
+    for name, result in zip(names, actual):
+        expected = reference[name].astype(np.float32)
+        result = result.astype(np.float32)
+        print(json.dumps({"stage": name, "coremlMean": float(expected.mean()), "onnxMean": float(result.mean()),
+            "meanError": float(np.abs(expected-result).mean()), "maxError": float(np.abs(expected-result).max())}))
+    raise SystemExit("CoreML/ONNX parity gate rejected the component")
