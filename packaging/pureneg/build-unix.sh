@@ -34,7 +34,22 @@ trap cleanup EXIT
 git -C "$source_root" archive "$revision" LICENSE vendor/film-dust/native/build.sh \
     vendor/film-dust/native/src vendor/film-dust/native/node-api \
     vendor/film-dust/LICENSE.txt vendor/film-dust/NOTICES.txt | tar -xf - -C "$work"
-bash "$work/vendor/film-dust/native/build.sh"
+native_build="$work/vendor/film-dust/native/build.sh"
+if [[ $(uname -s) == Linux ]]; then
+    gcc_version=$(g++ -dumpversion)
+    if (( ${gcc_version%%.*} < 13 )); then
+        # GCC <13 rejects this flag for C++. Our x64/arm64 targets use IEEE
+        # SSE/NEON registers, not x87 excess precision; retain no-fast-math and
+        # no contraction while building against the Ubuntu 22.04 ABI baseline.
+        source_text=$(<"$native_build")
+        [[ $source_text == *-fexcess-precision=standard* ]] || exit 1
+        printf '%s\n' "${source_text//-fexcess-precision=standard/}" > "$work/vendor/film-dust/native/build-compatible.sh"
+        native_build="$work/vendor/film-dust/native/build-compatible.sh"
+    fi
+else
+    export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
+fi
+bash "$native_build"
 cp "$work/vendor/film-dust/native/build/filmdust.node" "$stage/filmdust.node"
 cp "$work/LICENSE" "$stage/LICENSE-PURENeg.txt"
 cp "$work/vendor/film-dust/LICENSE.txt" "$stage/LICENSE-film-dust.txt"

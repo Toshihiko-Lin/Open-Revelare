@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - { runner: windows-2022, rid: win-x64 }
-          - { runner: ubuntu-24.04, rid: linux-x64 }
+          - { runner: ubuntu-22.04, rid: linux-x64 }
           - { runner: macos-latest, rid: osx-arm64 }
           - { runner: macos-15-intel, rid: osx-x64 }
     runs-on: ${{ matrix.runner }}
@@ -49,7 +49,9 @@ jobs:
           python -m pip install coremltools==9.0
           python packaging/pureneg/prepare-fibrenet.py upstream-pureneg/macos/Models/FibreNet.mlpackage artifacts/FibreNet.mlpackage
           python packaging/pureneg/prepare-codec.py upstream-pureneg/macos/ImageCodec.swift artifacts/ImageCodec.swift
-          xcrun swiftc -parse-as-library -O artifacts/ImageCodec.swift -o artifacts/runtime/image-codec
+          arch=arm64
+          if [ '${{ matrix.rid }}' = osx-x64 ]; then arch=x86_64; fi
+          xcrun swiftc -target "$arch-apple-macos14.0" -parse-as-library -O artifacts/ImageCodec.swift -o artifacts/runtime/image-codec
           xcrun coremlcompiler compile artifacts/FibreNet.mlpackage artifacts/runtime
       - name: Validate converted model against original CoreML
         if: runner.os == 'macOS'
@@ -73,10 +75,21 @@ jobs:
           dotnet publish src/OpenRevelare.PureNeg.ModelHost -c Release -r '${{ matrix.rid }}' --self-contained true -p:PureNegProvider="$provider" -o artifacts/runtime
           cp artifacts/FibreNet.onnx artifacts/runtime/FibreNet.onnx
           artifacts/runtime/pureneg-model-host --probe
+      - name: Include the C++ runtime used by ONNX and DirectML
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vcInstall = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $redist = Get-ChildItem (Join-Path $vcInstall 'VC/Redist/MSVC') -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $crt = Join-Path $redist.FullName 'x64/Microsoft.VC143.CRT'
+          if (!(Test-Path -LiteralPath $crt)) { throw 'Missing redistributable C++ runtime' }
+          Get-ChildItem -LiteralPath $crt -Filter '*.dll' | Copy-Item -Destination artifacts/runtime
       - name: Package platform component
         shell: bash
         run: |
           cp upstream-pureneg/LICENSE artifacts/runtime/LICENSE-PURENeg.txt
+          cp LICENSE artifacts/runtime/LICENSE-OpenRevelare.txt
           python packaging/pureneg/pack-runtime.py --rid '${{ matrix.rid }}' --runtime artifacts/runtime --native artifacts/native/filmdust.node --output artifacts/packages
       - uses: actions/upload-artifact@v4
         with:

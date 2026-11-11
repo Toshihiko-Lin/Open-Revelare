@@ -32,9 +32,12 @@ def pack(rid: str, runtime: Path, native: Path, output: Path):
             notices = stage / "runtime/licenses"
             notices.mkdir(exist_ok=True)
             for package in packages.glob("microsoft.ml.onnxruntime*"):
-                for name in ("LICENSE", "ThirdPartyNotices.txt"):
+                for name in ("LICENSE", "LICENSE.txt", "ThirdPartyNotices.txt"):
                     source = package / "1.20.1" / name
                     if source.is_file(): shutil.copyfile(source, notices / (package.name + "-" + name))
+            for source in packages.glob(f"microsoft.netcore.app.runtime.{rid}/*/*"):
+                if source.is_file() and source.name.lower() in ("license.txt", "thirdpartynotices.txt"):
+                    shutil.copyfile(source, notices / ("dotnet-" + source.parent.name + "-" + source.name))
         addon = stage / "vendor/film-dust/native/build/filmdust.node"
         addon.parent.mkdir(parents=True)
         shutil.copyfile(native, addon)
@@ -43,6 +46,8 @@ def pack(rid: str, runtime: Path, native: Path, output: Path):
             "modelSha256": MODEL_SHA if model_format == "onnx" else None,
             "sourceWeightsSha256": "130c1b428eaad69e4ea86684148ebda24ca97d5147026ae2a526f95b95f7868a",
             "precision": "fp16-network-fp32-pool-accumulation",
+            "hostSource": "https://github.com/Toshihiko-Lin/Open-Revelare",
+            "hostCommit": os.environ.get("GITHUB_SHA"),
         }, indent=2) + "\n", encoding="utf8")
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zip_file:
             for file in sorted(stage.rglob("*")):
