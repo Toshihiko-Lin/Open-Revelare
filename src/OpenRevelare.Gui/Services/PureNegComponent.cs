@@ -15,12 +15,14 @@ internal static class PureNegComponent
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(3) };
     private static readonly Lazy<string?> BundledNative = new(ResolveBundledNative);
+    private static readonly SemaphoreSlim InstallGate = new(1, 1);
 
     private static string Root => Path.Combine(Path.GetFullPath(Settings.DataDir), "components",
-        $"pureneg-{Revision[..12]}-{NodeVersion}-{RuntimeInformation.RuntimeIdentifier}-1");
+        $"pureneg-{Revision[..12]}-{NodeVersion}-{RuntimeInformation.RuntimeIdentifier}-2");
     private static string NodeName => OperatingSystem.IsWindows() ? "node.exe" : "node";
     public static bool IsInstalled => File.Exists(Path.Combine(Root, "installed"))
-        && File.Exists(Path.Combine(Root, NodeName)) && File.Exists(Path.Combine(Root, "src", "cli.cjs"));
+        && File.Exists(Path.Combine(Root, NodeName)) && File.Exists(Path.Combine(Root, "src", "cli.cjs"))
+        && PureNegRuntimePackage.IsReady(Root);
 
     private static (string Platform, string Hash)? Runtime => (OperatingSystem.IsWindows(),
         OperatingSystem.IsMacOS(), OperatingSystem.IsLinux(), RuntimeInformation.ProcessArchitecture) switch
@@ -38,15 +40,20 @@ internal static class PureNegComponent
 
     private static string? ResolveBundledNative()
     {
-        if (Runtime is not { Platform: "win-x64" }) return null;
+        if (Runtime is not { Platform: var platform }) return null;
         string directory = Path.Combine(AppContext.BaseDirectory, "optional", "pureneg");
+        return ValidateNativeBundle(directory, platform);
+    }
+
+    internal static string? ValidateNativeBundle(string directory, string platform)
+    {
         string addon = Path.Combine(directory, "filmdust.node");
         string manifest = Path.Combine(directory, "manifest.json");
         if (!File.Exists(addon) || !File.Exists(manifest)) return null;
         try
         {
             var metadata = JsonSerializer.Deserialize<NativeManifest>(File.ReadAllText(manifest), Json);
-            if (metadata is not { Platform: "win-x64" } || metadata.Revision != Revision) return null;
+            if (metadata is null || metadata.Platform != platform || metadata.Revision != Revision) return null;
             using var file = File.OpenRead(addon);
             return Convert.ToHexString(SHA256.HashData(file)).Equals(metadata.Sha256, StringComparison.OrdinalIgnoreCase)
                 ? addon : null;
@@ -59,6 +66,13 @@ internal static class PureNegComponent
 
     public static async Task InstallAsync(IProgress<int> progress, CancellationToken ct)
     {
+        await InstallGate.WaitAsync(ct).ConfigureAwait(false);
+        try { await InstallCoreAsync(progress, ct).ConfigureAwait(false); }
+        finally { InstallGate.Release(); }
+    }
+
+    private static async Task InstallCoreAsync(IProgress<int> progress, CancellationToken ct)
+    {
         if (IsInstalled) return;
         var runtime = Runtime ?? throw new PlatformNotSupportedException();
         string stage = Root + ".install-" + Guid.NewGuid().ToString("N");
@@ -69,10 +83,10 @@ internal static class PureNegComponent
             string name = prefix + (OperatingSystem.IsWindows() ? ".zip" : ".tar.gz");
             string archive = Path.Combine(stage, name);
             await DownloadAsync($"https://nodejs.org/dist/{NodeVersion}/{name}", archive,
-                runtime.Hash, 80 * 1024 * 1024, ct, progress).ConfigureAwait(false);
+                runtime.Hash, 80 * 1024 * 1024, ct, new InstallProgress(progress)).ConfigureAwait(false);
             await ExtractRuntimeAsync(archive, prefix, stage, ct).ConfigureAwait(false);
             File.Delete(archive);
-            progress.Report(50);
+            progress.Report(40);
 
             using var manifest = typeof(PureNegComponent).Assembly.GetManifestResourceStream("PureNegFiles")
                 ?? throw new InvalidOperationException("PURE Neg download manifest is missing.");
@@ -85,17 +99,62 @@ internal static class PureNegComponent
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                     await DownloadAsync($"https://raw.githubusercontent.com/Toshihiko-Lin/PURENeg/{Revision}/{entry.Key}",
                         destination, entry.Value, 8 * 1024 * 1024, token).ConfigureAwait(false);
-                    progress.Report(50 + 50 * Interlocked.Increment(ref completed) / files.Count);
+                    progress.Report(40 + 25 * Interlocked.Increment(ref completed) / files.Count);
                 }).ConfigureAwait(false);
+            await PureNegRuntimePackage.InstallAsync(Client, stage, progress, ct).ConfigureAwait(false);
+            // A component is ready only after the model actually performs inference.
+            await RunAsync(stage, stage, "result", null, ct, "--eval", RuntimeProbe, "--", stage).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(stage, "runtime-ready"), PureNegRuntimePackage.Release, ct).ConfigureAwait(false);
+            if (!PureNegRuntimePackage.IsReady(stage)) throw new InvalidDataException("PURENeg platform installation is incomplete.");
             await RunAsync(stage, stage, "result", null, ct, Path.Combine(stage, "src", "cli.cjs"), "help")
                 .ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(stage, "installed"), Revision, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
+            PureNegModelSession.Shutdown();
+            string? previous = null;
+            if (Directory.Exists(Root))
+            {
+                previous = Root + ".previous-" + Guid.NewGuid().ToString("N");
+                Directory.Move(Root, previous);
+            }
             try { Directory.Move(stage, Root); }
-            catch (IOException) when (IsInstalled) { }
+            catch
+            {
+                if (previous is not null && !Directory.Exists(Root)) Directory.Move(previous, Root);
+                throw;
+            }
+            if (previous is not null) DeleteTemporaryDirectory(previous);
+            progress.Report(100);
         }
         finally { DeleteTemporaryDirectory(stage); }
     }
+
+    private sealed class InstallProgress(IProgress<int> target) : IProgress<int>
+    {
+        public void Report(int value) => target.Report(value * 40 / 50);
+    }
+
+    private const string RuntimeProbe = """
+        const fs = require('node:fs'), path = require('node:path'), cp = require('node:child_process');
+        const root = process.argv[1], runtime = path.join(root, 'runtime');
+        (async () => {
+        const native = require(path.join(root, 'vendor/film-dust/engine/native'));
+        await native.ready();
+        if (!native.available()) throw new Error('PURENeg native accelerator could not load on this system');
+        if (process.platform === 'darwin') {
+          const { encodeTiff } = require(path.join(root, 'src/tiff.cjs'));
+          const input = path.join(root, 'model-probe.tiff'), output = path.join(root, 'model-probe.u8');
+          try {
+            fs.writeFileSync(input, encodeTiff({width: 1, height: 1, channels: 3, depth: 16, data: new Uint16Array([32768,32768,32768])}));
+            cp.execFileSync(path.join(runtime, 'image-codec'), ['fibremap', input, output]);
+            if (fs.statSync(output).size !== 1) throw new Error('CoreML inference probe failed');
+          } finally { fs.rmSync(input, {force:true}); fs.rmSync(output, {force:true}); }
+        } else {
+          cp.execFileSync(path.join(runtime, process.platform === 'win32' ? 'pureneg-model-host.exe' : 'pureneg-model-host'), ['--probe']);
+        }
+        process.stdout.write(JSON.stringify({type:'result',modelReady:true})+'\n');
+        })().catch(e => { process.stderr.write(e.message+'\n'); process.exitCode = 1; });
+        """;
 
     private static async Task DownloadAsync(string url, string path, string sha256, int limit, CancellationToken ct,
         IProgress<int>? progress = null)
@@ -170,8 +229,15 @@ internal static class PureNegComponent
             ?? throw new InvalidOperationException("PURE Neg analysis adapter is missing."));
         string adapter = await script.ReadToEndAsync(ct).ConfigureAwait(false);
         string runs = Path.Combine(workspace, "regions-runs.bin");
+        string fibreMap = "", runtimeInfo = "";
+        if (!OperatingSystem.IsMacOS())
+        {
+            progress.Report(new(1, "正在生成纤维概率图", null));
+            fibreMap = Path.Combine(workspace, "inference-map.u8");
+            runtimeInfo = (await PureNegModelSession.InferAsync(Root, input, fibreMap, ct).ConfigureAwait(false)).GetRawText();
+        }
         var result = await RunAsync(Root, workspace, "review", progress, ct, "--eval", adapter, "--",
-            Root, input, runs, polarity, sensitivity, categories).ConfigureAwait(false);
+            Root, input, runs, polarity, sensitivity, categories, fibreMap, runtimeInfo).ConfigureAwait(false);
         var review = result.GetProperty("review").Deserialize<ReviewImage>(Json)!;
         return review with
         {
@@ -270,7 +336,8 @@ internal static class PureNegComponent
     private sealed record NativeManifest(string Revision, string Platform, string Sha256);
     internal sealed record DetectionProgress(int Percent, string? Message, bool? Native);
     internal sealed record ReviewImage(string SourcePath, string RunsPath, int Width, int Height, Region[] Regions,
-        bool Native, int WorkingFactor = 1);
+        bool Native, int WorkingFactor = 1, JsonElement? TrainingMetadata = null,
+        string? FibreMapPath = null, string? FibreMapSha256 = null);
     internal sealed record Region(int Id, int X, int Y, int Width, int Height, int Pixels, string[]? Kinds);
     internal readonly record struct CandidateRun(int RegionId, DustMask.Run Run);
 }

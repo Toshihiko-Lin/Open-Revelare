@@ -608,6 +608,9 @@
                                     <TextBlock Grid.Column="1" Classes="toolCaption" Text="{i18n:T '除尘'}" VerticalAlignment="Center" />
                                 </Grid>
                             </ToggleButton>
+                        <Button Name="DustTrainingBtn" Content="{i18n:T '导出训练数据包…'}"
+                                Click="OnExportDustTrainingClick" Padding="7,4" Margin="6,0,0,0"
+                                ToolTip.Tip="{i18n:T '通过完整画面缩略图选择要分享的训练样本'}" />
                         <StackPanel Name="DustToolbar" IsVisible="False" Orientation="Horizontal"
                                     Spacing="10" Margin="10,0,0,0">
                             <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"
@@ -1139,6 +1142,7 @@
                                       RenderTransform="rotate(-90deg)" />
                             <Button.Flyout>
                                 <MenuFlyout Placement="TopEdgeAlignedRight">
+                                    <MenuItem Header="{i18n:T '导出训练数据包…'}" Click="OnExportDustTrainingClick" />
                                     <MenuItem Name="ExportRollButton" Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" />
                                     <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
                                               IsEnabled="{Binding CanShowBatchExportReport}" />

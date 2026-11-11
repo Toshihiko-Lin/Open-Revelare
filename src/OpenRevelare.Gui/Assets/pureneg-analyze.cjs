@@ -27,13 +27,15 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const [root, input, output, polarity, sensitivity, categories] = process.argv.slice(1);
+const { createHash } = require('node:crypto');
+const [root, input, output, polarity, sensitivity, categories, fibreMapInput, runtimeInfo] = process.argv.slice(1);
+const { processScan, optionsChecked } = require(path.join(root, 'src/processor.cjs'));
 const { decodeTiff } = require(path.join(root, 'src/tiff.cjs'));
-const { processScan } = require(path.join(root, 'src/processor.cjs'));
 const { connectedRegions } = require(path.join(root, 'src/review.cjs'));
 const native = require(path.join(root, 'vendor/film-dust/engine/native'));
 const emit = event => process.stdout.write(JSON.stringify(event) + '\n');
 const progress = event => emit({ type: 'progress', ...event, native: native.available() });
+const modelAbort = new AbortController();
 
 // Adapted from PURE Neg src/review.cjs (MIT). Keep the same attribution rules
 // so the candidate labels match the standalone review workflow.
@@ -90,26 +92,79 @@ function attributeRegions(regions, runs, marks, width, height) {
 async function main() {
     await native.ready();
     progress({ fraction: .01, message: '读取检测图像' });
-    const image = decodeTiff(await fs.readFile(input));
-    // Keep the full upstream detector, including the repair-assisted second pass. The
-    // source is already a private snapshot and only the run index leaves this worker.
-    const result = await processScan(image, {
+    const began = performance.now(), timings = {};
+    let fibreMapPath = fibreMapInput || null;
+    // Same CoreML protocols as upstream processFile. Keep only the input, map and
+    // run index: writing full cleaned/mask TIFFs here would immediately discard
+    // them and add hundreds of MB of disk I/O to every full-resolution review.
+    const models = (async () => {
+        let eyes = [];
+        if (process.platform === 'darwin') {
+            const { runImageCodec } = require(path.join(root, 'src/image-codec.cjs'));
+            fibreMapPath = path.join(path.dirname(output), 'fibre-map.u8');
+            const eyesPath = path.join(path.dirname(output), 'eyes.json');
+            const eyeTask = (async () => {
+                try {
+                    await runImageCodec(['eyes', input, eyesPath], modelAbort.signal);
+                    const found = JSON.parse(await fs.readFile(eyesPath, 'utf8'));
+                    eyes = Array.isArray(found) ? found.filter(e => [e?.x, e?.y, e?.r].every(Number.isFinite)) : [];
+                } catch { eyes = []; }
+                finally { await fs.rm(eyesPath, { force: true }); }
+            })();
+            await Promise.all([eyeTask, runImageCodec(['fibremap', input, fibreMapPath], modelAbort.signal)]);
+        }
+        const fibreMap = fibreMapPath ? await fs.readFile(fibreMapPath) : null;
+        timings.models_ready_seconds = (performance.now() - began) / 1000;
+        return { eyes, fibreMap };
+    })();
+    models.catch(() => {});
+    let image, sourceSha256;
+    {
+        const bytes = await fs.readFile(input);
+        sourceSha256 = createHash('sha256').update(bytes).digest('hex');
+        image = decodeTiff(bytes);
+    }
+    timings.decode_seconds = (performance.now() - began) / 1000;
+    const modelInputs = await models;
+    if (modelInputs.fibreMap && modelInputs.fibreMap.length !== image.width * image.height)
+        throw new Error('FibreNet changed the source grid.');
+    const options = {
         polarity, sensitivity: Number(sensitivity), detect: categories,
+        ...modelInputs,
         // Use upstream's bounded working grid above 64MP. It retains both passes,
         // full-resolution fibre/scratch refinement and full-resolution mask output.
         conserveMemory: true,
         onProgress: progress,
-    }, { reuseInput: true });
+    };
+    const detectStart = performance.now();
+    const result = await processScan(image, options, { reuseInput: true });
+    timings.detect_seconds = (performance.now() - detectStart) / 1000;
+    const mask = result.mask, marks = result.marks;
     progress({ fraction: .94, message: '整理除尘蒙版' });
-    const { regions, runs } = connectedRegions(result.mask);
-    const labeled = attributeRegions(regions, runs, result.marks, image.width, image.height);
+    const { regions, runs } = connectedRegions(mask);
+    const labeled = attributeRegions(regions, runs, marks, image.width, image.height);
     await fs.writeFile(output, runs, { flag: 'wx', mode: 0o600 });
+    const component = await fs.readFile(path.join(root, 'runtime/component.json'), 'utf8')
+        .then(JSON.parse).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+    const trainingMetadata = {
+        inference: { ...(runtimeInfo ? JSON.parse(runtimeInfo) : { provider: process.platform === 'darwin' ? 'coreml-auto' : 'unavailable' }), component },
+        sourceSha256,
+        settings: optionsChecked(options),
+        timings,
+        marks: (marks ?? []).filter(m => m.verdict === 'defect').map(m => ({
+            kind: m.kind, x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1,
+            area: m.area, learned: m.learned === true || undefined, fibre: m.fibre,
+        })),
+    };
     progress({ fraction: 1, message: '检测完成' });
     emit({ type: 'review', review: { width: image.width, height: image.height, regions: labeled,
-        native: result.stats.native, workingFactor: result.stats.working_factor } });
+        native: result.stats.native, workingFactor: result.stats.working_factor, trainingMetadata,
+        fibreMapPath,
+        fibreMapSha256: modelInputs.fibreMap ? createHash('sha256').update(modelInputs.fibreMap).digest('hex') : null } });
 }
 
 main().catch(error => {
+    modelAbort.abort();
     emit({ type: 'error', message: error.message });
     process.exitCode = 1;
 });

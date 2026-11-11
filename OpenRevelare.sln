@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Presentation.M
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.Presentation.MacOS.Tests", "src\OpenRevelare.Presentation.MacOS.Tests\OpenRevelare.Presentation.MacOS.Tests.csproj", "{6F029D8E-C212-4040-AD20-CA7D0C96B23E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenRevelare.PureNeg.ModelHost", "src\OpenRevelare.PureNeg.ModelHost\OpenRevelare.PureNeg.ModelHost.csproj", "{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -77,6 +79,10 @@ Global
 		{6F029D8E-C212-4040-AD20-CA7D0C96B23E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6F029D8E-C212-4040-AD20-CA7D0C96B23E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6F029D8E-C212-4040-AD20-CA7D0C96B23E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -93,5 +99,6 @@ Global
 		{88D8698C-5C70-46AB-B87D-D024981DA044} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 		{FF5B546E-A489-4E58-9B91-76D4E9DB2BB4} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 		{6F029D8E-C212-4040-AD20-CA7D0C96B23E} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
+		{3B3D57DD-C2B2-4E2E-8978-C811F8C1C086} = {2E91C0D9-0FB4-4347-8B9D-F7FAE75B7F1B}
 	EndGlobalSection
 EndGlobal

@@ -7,9 +7,13 @@ namespace OpenRevelare.Gui.Services;
 internal sealed class DustMaskEditor
 {
     internal readonly record struct Brush(double X, double Y, double Ax, double Ay, double Bx, double By);
+    internal sealed record Stroke(string Kind, Brush[] Brushes);
     private readonly List<DustMask> _undo = [];
     private readonly List<DustMask> _redo = [];
     private readonly string _initialHash;
+    private readonly List<Stroke> _history = [];
+    private readonly List<Stroke> _historyRedo = [];
+    public IReadOnlyList<Stroke> History => _history;
     public DustMask Mask { get; private set; }
     public bool IsModified => Mask.ContentHash != _initialHash;
     public bool CanUndo => _undo.Count > 0;
@@ -23,8 +27,12 @@ internal sealed class DustMaskEditor
 
     public bool Paint(IEnumerable<Brush> brushes, bool restore)
     {
+        var samples = brushes.ToArray();
+        if (_history.Count >= 1024 || samples.Length > 200_000 ||
+            _history.Sum(s => (long)s.Brushes.Length) + samples.Length > 200_000)
+            throw new ArgumentException("Dust brush history exceeds 1024 strokes or 200000 samples.");
         var rows = Rows();
-        foreach (var brush in brushes)
+        foreach (var brush in samples)
         {
             double xx = brush.Ax * brush.Ax + brush.Bx * brush.Bx;
             double xy = brush.Ax * brush.Ay + brush.Bx * brush.By;
@@ -46,7 +54,10 @@ internal sealed class DustMaskEditor
                 ChangeRow(rows, y, start, end, restore);
             }
         }
-        return Commit(rows);
+        if (!Commit(rows)) return false;
+        _history.Add(new(restore ? "erase" : "add", samples));
+        _historyRedo.Clear();
+        return true;
     }
 
     private SortedDictionary<int, List<DustMask.Run>> Rows() =>
@@ -106,6 +117,8 @@ internal sealed class DustMaskEditor
     {
         if (!CanUndo) return false;
         _redo.Add(Mask);
+        _historyRedo.Add(_history[^1]);
+        _history.RemoveAt(_history.Count - 1);
         Mask = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
         return true;
@@ -115,6 +128,8 @@ internal sealed class DustMaskEditor
     {
         if (!CanRedo) return false;
         _undo.Add(Mask);
+        _history.Add(_historyRedo[^1]);
+        _historyRedo.RemoveAt(_historyRedo.Count - 1);
         Mask = _redo[^1];
         _redo.RemoveAt(_redo.Count - 1);
         return true;

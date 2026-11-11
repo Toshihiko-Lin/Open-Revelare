@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Avalonia.Platform.Storage;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Services;
 using OpenRevelare.Gui.ViewModels;
@@ -17,9 +18,13 @@ public partial class MainWindow
 
     private sealed record DustReviewDraft(MainViewModel.PureNegInput Input,
         DustReviewProjection.GeometryKey Geometry,
-        DustReviewProjection Projection, DustMaskEditor Editor, bool Detected = true);
+        DustReviewProjection Projection, DustMaskEditor Editor, bool Detected = true,
+        string? Workspace = null, PureNegComponent.ReviewImage? Detection = null, DustMask? Automatic = null,
+        DustTrainingSample? Sample = null, IReadOnlyList<DustMaskEditor.Stroke>? HistoryPrefix = null);
 
     private DustReviewDraft? _dustReviewDraft;
+    private readonly List<DustTrainingSample> _dustTrainingSamples = [];
+    private bool _exportingDustTraining;
     private CancellationTokenSource? _dustReviewOperation;
     private DustView _dustView = DustView.After;
     private IPointer? _dustComparisonPointer;
@@ -31,7 +36,12 @@ public partial class MainWindow
 
     private void InitializeDustToolbar()
     {
-        Closed += (_, _) => ResetDustReview(refresh: false);
+        Closed += (_, _) =>
+        {
+            ResetDustReview(refresh: false);
+            ClearDustTrainingSamples();
+            PureNegModelSession.Shutdown();
+        };
         Deactivated += (_, _) =>
         {
             _dustComparisonReleaseKey = null;
@@ -113,6 +123,7 @@ public partial class MainWindow
         var operation = _dustReviewOperation;
         _dustReviewOperation = null;
         operation?.Cancel();
+        ReleaseDustDraft(_dustReviewDraft);
         _dustReviewDraft = null;
         _dustView = DustView.After;
         DustReviewStatus.Text = null;
@@ -141,6 +152,7 @@ public partial class MainWindow
         DustRedoBtn.IsEnabled = idle && (reviewing ? _dustReviewDraft!.Editor.CanRedo : Vm?.CanRedo == true);
         DustRadiusButton.IsEnabled = idle;
         DustOptionsBtn.IsEnabled = idle;
+        DustTrainingBtn.IsEnabled = idle && (_dustReviewDraft?.Sample is not null || _dustTrainingSamples.Count > 0);
         DustDetectionOptions.IsEnabled = idle && PureNegComponent.IsSupported;
         DustClearActions.IsVisible = !reviewing;
         DustDetectBtn.IsEnabled = idle && PureNegComponent.IsSupported;
@@ -160,7 +172,8 @@ public partial class MainWindow
         DustApplyBtn.IsEnabled = idle;
         DustApplyBtn.Content = reviewing ? Loc.T("应用修复") : Loc.T("完成");
         DustCancelBtn.IsVisible = open && HasDustReview;
-        DustCancelBtn.Content = idle ? Loc.T("取消") : installed ? Loc.T("取消检测") : Loc.T("取消下载");
+        DustCancelBtn.Content = idle ? Loc.T("取消") : _exportingDustTraining ? Loc.T("取消导出")
+            : installed ? Loc.T("取消检测") : Loc.T("取消下载");
         ToolTip.SetTip(DustCancelBtn, _dustReviewDraft is { Detected: false }
             ? Loc.T("放弃修改") : Loc.T("放弃本次检测"));
         DustReviewStatus.IsVisible = open;
@@ -268,16 +281,16 @@ public partial class MainWindow
                 Status(Loc.T("画面构图已更改，请重新检测。"));
                 return;
             }
-            if (projection.VisibleIds.Count == 0)
-            {
-                ResetDustReview();
-                DustReviewStatus.Text = Loc.T("当前画面内未检测到除尘候选。");
-                UpdateDustToolbar();
-                return;
-            }
+            // Keep zero-detection reviews too: missed defects can be painted in,
+            // and checked clean images are useful training contributions.
             var selected = new DustMask(input.Width, input.Height, input.Bounds,
                 runs.Where(run => projection.VisibleIds.Contains(run.RegionId)).Select(run => run.Run));
-            _dustReviewDraft = new(input, geometry, projection, new(selected));
+            ReleaseDustDraft(_dustReviewDraft);
+            var sample = new DustTrainingSample(frame, frame.Label, workspace.FullName, input, review,
+                selected, geometry, projection.VisibleIds);
+            _dustReviewDraft = new(input, geometry, projection, new(selected), Workspace: workspace.FullName,
+                Detection: review, Automatic: selected, Sample: sample);
+            workspace = null; // The review owns its immutable input until apply/cancel/replacement.
             _dustView = DustView.After;
             vm.IsDustReviewActive = true;
             UpdateDustReviewDisplay();
@@ -401,7 +414,12 @@ public partial class MainWindow
         var runs = applied.Mask.EnumerateRuns().Select(run => new PureNegComponent.CandidateRun(0, run)).ToArray();
         var projection = new DustReviewProjection(geometry, applied.Input.Width, applied.Input.Height,
             applied.Input.Bounds, runs);
-        _dustReviewDraft = new(applied.Input, geometry, projection, new(applied.Mask), Detected: false);
+        var previous = _dustTrainingSamples.FirstOrDefault(s => ReferenceEquals(s.FrameKey, vm.CurrentFrame) &&
+            s.Input.Stamp == applied.Input.Stamp && s.Final.ContentHash == applied.Mask.ContentHash && s.Geometry == geometry);
+        var sample = previous?.ForkReview(applied.Mask, previous.History);
+        _dustReviewDraft = new(applied.Input, geometry, projection, new(applied.Mask), Detected: false,
+            Workspace: sample?.Workspace, Detection: sample?.Detection, Automatic: sample?.Automatic,
+            Sample: sample, HistoryPrefix: previous?.History);
         vm.IsDustReviewActive = true;
     }
 
@@ -461,6 +479,15 @@ public partial class MainWindow
         {
             if (IsDustMode) ExitMode();
             vm.ApplyPureNegMask(draft.Input, draft.Editor.Mask);
+            if (draft.Sample is { } sample)
+            {
+                sample.UpdateReview(draft.Editor.Mask, DustDraftHistory(draft));
+                var previous = _dustTrainingSamples.FirstOrDefault(s => ReferenceEquals(s.FrameKey, sample.FrameKey));
+                if (previous is not null) { _dustTrainingSamples.Remove(previous); previous.Dispose(); }
+                _dustTrainingSamples.Add(sample);
+                // Transfer ownership to the session's thumbnail picker.
+                _dustReviewDraft = draft with { Workspace = null, Sample = null };
+            }
             ResetDustReview(refresh: false);
         }
         catch (Exception ex)
@@ -481,4 +508,73 @@ public partial class MainWindow
     }
 
     private void OnClearAutomaticDustClick(object? sender, RoutedEventArgs e) => Vm?.ClearAutomaticDust();
+
+    private static void ReleaseDustDraft(DustReviewDraft? draft)
+    {
+        if (draft?.Sample is { } sample) sample.Dispose();
+        else if (draft?.Workspace is { } workspace) PureNegComponent.DeleteTemporaryDirectory(workspace);
+    }
+
+    private static DustMaskEditor.Stroke[] DustDraftHistory(DustReviewDraft draft) =>
+        (draft.HistoryPrefix ?? []).Concat(draft.Editor.History).ToArray();
+
+    private void ClearDustTrainingSamples()
+    {
+        foreach (var sample in _dustTrainingSamples) sample.Dispose();
+        _dustTrainingSamples.Clear();
+        UpdateDustToolbar();
+    }
+
+    private async void OnExportDustTrainingClick(object? sender, RoutedEventArgs e)
+    {
+        if (_dustReviewOperation is not null || Vm is not { HasLongTask: false } vm) return;
+        try
+        {
+            CheckDustReviewGeometry();
+            var samples = _dustTrainingSamples.ToList();
+            if (_dustReviewDraft is { Sample: { } current } draft)
+            {
+                current.UpdateReview(draft.Editor.Mask, DustDraftHistory(draft));
+                samples.RemoveAll(s => ReferenceEquals(s.FrameKey, current.FrameKey));
+                samples.Add(current);
+            }
+            if (samples.Count == 0)
+            {
+                vm.StatusText = Loc.T("请先运行 PURENeg 检测，再选择训练样本。");
+                return;
+            }
+            var dialog = new DustTrainingExportDialog(samples);
+            var choices = await dialog.ShowDialog<DustTrainingBatch.Choice[]?>(this);
+            if (dialog.ClearCache) { ClearDustTrainingSamples(); return; }
+            if (choices is not { Length: > 0 }) return;
+            // Hold the selected source snapshots even if a frame change resets the review.
+            using var batch = new DustTrainingBatch(choices);
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = Loc.T("选择训练数据包存放位置"), AllowMultiple = false,
+            });
+            if (folders.FirstOrDefault()?.TryGetLocalPath() is not { } parent || _dustReviewOperation is not null) return;
+            if (!vm.TryBeginLongTask(Loc.T("正在导出训练数据包"), out var owner)) return;
+            _dustReviewOperation = owner;
+            _exportingDustTraining = true;
+            UpdateDustToolbar();
+            DustReviewStatus.Text = Loc.T("正在导出训练数据包");
+            try
+            {
+                string path = await Task.Run(() => batch.Export(parent, owner.Token));
+                vm.StatusText = Loc.T("训练数据包已保存：") + path;
+                if (ReferenceEquals(_dustReviewOperation, owner))
+                    DustReviewStatus.Text = Loc.T("训练数据包已保存：") + path;
+            }
+            catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
+            finally
+            {
+                if (ReferenceEquals(_dustReviewOperation, owner)) _dustReviewOperation = null;
+                _exportingDustTraining = false;
+                vm.EndLongTask(owner);
+                UpdateDustToolbar();
+            }
+        }
+        catch (Exception ex) { vm.StatusText = DustReviewStatus.Text = Loc.T("训练数据包导出失败：") + ex.Message; }
+    }
 }

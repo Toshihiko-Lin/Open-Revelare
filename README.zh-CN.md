@@ -257,6 +257,8 @@ dotnet run --project src/OpenRevelare.Cli -- -i neg.tiff -o pos.tiff --input-lin
 
 可选自动除尘集成使用 [easonzhangbin 的 PURE Neg](https://github.com/easonzhangbin/PURENeg) 及其底层 [Magnus Holmes 的 film-dust](https://github.com/magholmes/film-dust) 引擎的 MIT 许可代码。本软件通过[集成 fork](https://github.com/Toshihiko-Lin/PURENeg) 的固定版本接入；组件范围、版本与许可声明见 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。
 
+除尘工具提供独立的训练数据包导出按钮，可通过完整检测画面的缩略图逐张选择要分享的当前审核或本次会话已应用样本，默认全不选；沿用 PURENeg 的蒙版文件与训练标签结构。使用方式、隐私范围和平台组件方案见[训练数据包说明](docs/pureneg-training-pack.md)。
+
 Deep-WB 为可选下载：首次点击「智能色偏修正」时确认许可后安装，也可运行 `OpenRevelare.Cli --install-deep-wb`。默认安装包不含模型权重。 GitHub 下载失败时自动尝试 [Gitee 国内镜像](https://gitee.com/Toshihiko-Lin/openrevelare-models/releases/download/deep-wb-v1/net_awb.onnx)，也可手动下载后离线安装。ONNX 推理运行库仍随包提供。
 
 `models/net_awb.onnx` 为 Deep White-Balance Editing 模型，按 **CC BY-NC-SA 4.0** 单独授权，不属于本项目 GPL 范围。详情见 [models/README.md](models/README.md) 与 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。

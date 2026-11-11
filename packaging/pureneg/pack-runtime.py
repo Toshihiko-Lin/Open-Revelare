@@ -31,6 +31,7 @@ def pack(rid: str, runtime: Path, native: Path, output: Path):
             packages = Path(os.environ.get("NUGET_PACKAGES", str(Path.home() / ".nuget/packages")))
             notices = stage / "runtime/licenses"
             notices.mkdir(exist_ok=True)
+            shutil.copyfile(Path(__file__).with_name("LibTiff.NET-LICENSE.txt"), notices / "LibTiff.NET-LICENSE.txt")
             for package in packages.glob("microsoft.ml.onnxruntime*"):
                 for name in ("LICENSE", "LICENSE.txt", "ThirdPartyNotices.txt"):
                     source = package / "1.20.1" / name

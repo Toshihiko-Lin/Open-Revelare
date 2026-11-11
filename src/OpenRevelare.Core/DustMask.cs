@@ -120,7 +120,8 @@ public sealed class DustMask
 
     /// <summary>Interpolate along the closest clean, consistent pair of directions. Only
     /// mask pixels are written and a marked pixel is never sampled as a donor.</summary>
-    internal void Repair(ImageBuffer image, int fullWidth, int fullHeight, int ox = 0, int oy = 0)
+    public void Repair(ImageBuffer image, int fullWidth, int fullHeight, int ox = 0, int oy = 0,
+        CancellationToken cancellationToken = default)
     {
         int width = image.Width, height = image.Height;
         var targets = new HashSet<int>();
@@ -130,6 +131,7 @@ public sealed class DustMask
         float[] data = image.Data;
         foreach (int target in targets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int x = target % width, y = target / width;
             int left = -1, right = -1, nearest = -1;
             int nearestDistance = int.MaxValue;

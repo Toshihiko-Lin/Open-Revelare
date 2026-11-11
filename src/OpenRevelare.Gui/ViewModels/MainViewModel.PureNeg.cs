@@ -10,7 +10,7 @@ namespace OpenRevelare.Gui.ViewModels;
 public partial class MainViewModel
 {
     internal sealed record PureNegInput(SourceStamp Stamp, int Width, int Height,
-        (double X, double Y, double W, double H) Bounds);
+        (double X, double Y, double W, double H) Bounds, byte[]? ThumbnailPng = null);
 
     [ObservableProperty] private Bitmap? _dustReviewOverlay;
     [ObservableProperty] private PresentationScene? _dustReviewScene;
@@ -127,7 +127,12 @@ public partial class MainViewModel
                     lock (_fullSlotGate)
                         if (ReferenceEquals(_fullSlot?.Working, working)) _fullSlot = null;
                 }
-                return new PureNegInput(stamp, rendered.Pixels.Width, rendered.Pixels.Height, bounds);
+                // Show the entire detector snapshot in the privacy picker, including areas
+                // outside the current crop. Reusing the film-strip thumbnail could hide them.
+                using var thumbnail = BuildFallbackBitmap(rendered.WithPixels(Resample.Box(rendered.Pixels, 240)));
+                using var thumbnailBytes = new MemoryStream();
+                thumbnail.Save(thumbnailBytes);
+                return new PureNegInput(stamp, rendered.Pixels.Width, rendered.Pixels.Height, bounds, thumbnailBytes.ToArray());
             }, ct);
         }
         finally { ReleaseBulkBuffers(); }
