@@ -1686,5 +1686,19 @@
   "成片曝光：改变最终照片亮度，不重新解释底片曝光位置。": "Finishing exposure changes the final photo's brightness without reinterpreting the negative's exposure placement.",
   "调整照片阴影层次；新版会保留通道余量，避免单通道先溢出。": "Adjust shadow tones while retaining channel headroom to avoid one channel clipping first.",
   "调整照片高光层次；不会改变 Cineon 的亮端标定。": "Adjust photo highlights while keeping the Cineon white-end calibration.",
-  "显示 {0} 项": "Showing {0} items"
+  "显示 {0} 项": "Showing {0} items",
+  "自动校正当前帧": "Auto-correct current frame",
+  "优先使用内嵌参数，其次 Lensfun；重新自动校正会重置当前帧微调。可撤销。": "Prefer embedded data, then Lensfun. Reapplying resets this frame's fine-tuning. Undo is available.",
+  "整卷自动校正 / 关闭自动校正": "Auto-correct roll / disable auto correction",
+  "每帧独立匹配校正来源，并重置整卷微调。可撤销。": "Match a correction source for each frame and reset fine-tuning across the roll. Undo is available.",
+  "手动微调": "Manual fine-tuning",
+  "微调操作": "Fine-tuning actions",
+  "暗角范围": "Falloff",
+  "启用（整卷）": "Enable (roll)",
+  "整卷共用均匀光参考图，用于修正暗角与偏色。": "Use one evenly lit reference for the roll to correct vignetting and colour casts.",
+  "载入 / 更换平场…": "Load / replace flat field…",
+  "校正详情与高级设置": "Details & advanced settings",
+  "自动校正按帧保存；LCC 启用时接管自动暗角校正。滑杆用于额外微调。": "Auto correction is saved per frame. LCC takes over automatic vignetting correction when enabled. Sliders add fine-tuning.",
+  "已有内嵌校正时，请先在「更多」中关闭整卷自动校正。": "If embedded corrections are present, disable auto correction for the roll in More first.",
+  "更多": "More"
 }

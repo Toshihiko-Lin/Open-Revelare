@@ -1522,46 +1522,76 @@
                                 </Expander>
 
                                 <Expander Header="{i18n:T '镜头与平场校正'}" Margin="0,0,0,8">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Classes="fieldLabel" Text="{i18n:T '镜头与平场校正'}" />
-                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T '自动来源按帧保存；启用 LCC 时由平场参考处理暗角。下方滑杆可额外手动调整。'}" />
-                                        <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
-                                                  IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}" />
-                                        <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
-                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T '内嵌完整曲线优先，其次 Lensfun；滑块仅作额外微调。重新自动选择会重置微调；关闭自动校正保留微调。操作可撤销。'}" />
-                                        <Button Content="{i18n:T '自动选择当前帧校正'}" Click="OnAutoLensCorrectionCurrentClick"
-                                                HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                        <Button Content="{i18n:T '逐帧自动校正整卷'}" Click="OnAutoLensCorrectionRollClick" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                    <StackPanel Spacing="6">
+                                        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
+                                            <Button Content="{i18n:T '自动校正当前帧'}" Click="OnAutoLensCorrectionCurrentClick"
+                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0"
+                                                    ToolTip.Tip="{i18n:T '优先使用内嵌参数，其次 Lensfun；重新自动校正会重置当前帧微调。可撤销。'}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '更多'}"
+                                                    ToolTip.Tip="{i18n:T '整卷自动校正 / 关闭自动校正'}">
+                                                <Button.Flyout>
+                                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                        <MenuItem Header="{i18n:T '逐帧自动校正整卷'}" Click="OnAutoLensCorrectionRollClick"
+                                                                  ToolTip.Tip="{i18n:T '每帧独立匹配校正来源，并重置整卷微调。可撤销。'}" />
+                                                        <Separator />
+                                                        <MenuItem Header="{i18n:T '关闭当前帧自动校正'}" Click="OnDisableAutoLensCurrentClick" />
+                                                        <MenuItem Header="{i18n:T '关闭整卷自动校正'}" Click="OnDisableAutoLensRollClick" />
+                                                    </MenuFlyout>
+                                                </Button.Flyout>
+                                            </Button>
+                                        </Grid>
                                         <TextBlock Classes="groupHint" IsVisible="{Binding IsReadingLensCorrection}" Text="{i18n:T '正在读取镜头参数…'}" />
-                                        <Grid ColumnDefinitions="*,*" Margin="0,4,0,2">
-                                            <Button Grid.Column="0" Content="{i18n:T '同步滑块到选中帧'}" Click="OnSyncLensSelectedClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                            <Button Grid.Column="1" Content="{i18n:T '同步滑块到整卷'}" Click="OnSyncLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                        </Grid>
-                                        <Grid ColumnDefinitions="*,*" Margin="0,0,0,2">
-                                            <Button Grid.Column="0" Content="{i18n:T '重置当前帧滑块'}" Click="OnResetLensCurrentClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                            <Button Grid.Column="1" Content="{i18n:T '重置整卷滑块'}" Click="OnResetLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                        </Grid>
-                                        <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap" Margin="0,2,0,2"
+                                        <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap"
                                                    IsVisible="{Binding HasLensCorrectionStatus}" />
-                                        <Grid ColumnDefinitions="*,*" Margin="0,0,0,2">
-                                            <Button Grid.Column="0" Content="{i18n:T '关闭当前帧自动校正'}" Click="OnDisableAutoLensCurrentClick" Margin="0,0,3,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                            <Button Grid.Column="1" Content="{i18n:T '关闭整卷自动校正'}" Click="OnDisableAutoLensRollClick" Margin="3,0,0,0" HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+
+                                        <Grid ColumnDefinitions="*,Auto" Margin="0,6,0,0">
+                                            <TextBlock Classes="fieldLabel" Text="{i18n:T '手动微调'}" VerticalAlignment="Center" />
+                                            <Button Grid.Column="1" Content="{i18n:T '微调操作'}" IsEnabled="{Binding CanEditLensCorrection}">
+                                                <Button.Flyout>
+                                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                        <MenuItem Header="{i18n:T '同步滑块到选中帧'}" Click="OnSyncLensSelectedClick" />
+                                                        <MenuItem Header="{i18n:T '同步滑块到整卷'}" Click="OnSyncLensRollClick" />
+                                                        <Separator />
+                                                        <MenuItem Header="{i18n:T '重置当前帧滑块'}" Click="OnResetLensCurrentClick" />
+                                                        <MenuItem Header="{i18n:T '重置整卷滑块'}" Click="OnResetLensRollClick" />
+                                                    </MenuFlyout>
+                                                </Button.Flyout>
+                                            </Button>
                                         </Grid>
-                                        <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
-                                        <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
-                                        <ctl:SliderRow Label="{i18n:T '范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
-                                        <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                   Text="{i18n:T 'LCC 平场校正：用平场参考图逐像素修正翻拍镜头的暗角/角落偏色（比公式暗角更准）。'}" />
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <Button Grid.Column="0" Content="{i18n:T '载入 LCC 平场…'}" Click="OnLoadLccClick"
-                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0" IsEnabled="{Binding HasImage}" />
-                                            <CheckBox Grid.Column="1" Content="{i18n:T '启用'}" IsChecked="{Binding LccEnabled}"
-                                                      IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
-                                        </Grid>
-                                        <TextBlock Classes="groupHint" Text="{Binding LccStatus}" Margin="0,4,0,0" />
+                                        <StackPanel Spacing="1" IsEnabled="{Binding CanEditLensCorrection}">
+                                            <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
+                                            <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
+                                            <ctl:SliderRow Label="{i18n:T '暗角范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
+                                        </StackPanel>
+
+                                        <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,4,0,0">
+                                            <StackPanel Spacing="6">
+                                                <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
+                                                    <TextBlock Classes="fieldLabel" Text="{i18n:T 'LCC 平场'}" VerticalAlignment="Center" />
+                                                    <CheckBox Grid.Column="1" Content="{i18n:T '启用（整卷）'}" IsChecked="{Binding LccEnabled}"
+                                                              IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
+                                                </Grid>
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                           Text="{i18n:T '整卷共用均匀光参考图，用于修正暗角与偏色。'}" />
+                                                <Button Content="{i18n:T '载入 / 更换平场…'}" Click="OnLoadLccClick"
+                                                        HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LccStatus}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Expander Header="{i18n:T '校正详情与高级设置'}">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                           Text="{i18n:T '自动校正按帧保存；LCC 启用时接管自动暗角校正。滑杆用于额外微调。'}" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
+                                                <StackPanel IsEnabled="{Binding CanEditLensCorrection}">
+                                                    <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
+                                                              IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}"
+                                                              ToolTip.Tip="{i18n:T '已有内嵌校正时，请先在「更多」中关闭整卷自动校正。'}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Expander>
                                     </StackPanel>
                                 </Expander>
                             </StackPanel>

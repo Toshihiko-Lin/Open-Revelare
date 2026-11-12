@@ -1,42 +1,38 @@
 # OpenRevelare — 更新日志
 
-## 未发布（2026-11-12）
+## 未发布（2026-11-13）
 
-- 加快大预览的显示色彩转换，使用独立线程变换并保持原有浮点精度、扩展色彩范围和输出一致性。
-- 调整曝光、反差和曲线时复用底片反转结果，减少重复计算和临时内存分配；修改校准、几何或修复时自动重算。
-- “重置本帧成片调整”保留底片校准、裁切、扫描分格和修复，可一步撤销。
-- 批量导出结果支持按状态筛选、逐帧查看错误与输出路径、回到卷中定位原片，并沿用原任务安全重试失败和未执行项。
-- 批量结果可一键复制完整报告，包含当前筛选隐藏的结果及完整错误信息。
-- 窄窗口保持预览与参数并排，可收起胶片栏；矮窗口可折叠分析区。修复顶部动作和裁切确认按钮在窄窗中被截断或遮挡的问题。
-- 新增 **PURENeg 自动除尘**。首次使用从同一入口下载可选组件并继续检测点尘、纤维和划痕，完成后默认预览修复效果。确认应用后用于预览、工程保存和正常导出；手动除尘仍默认内置。含自动蒙版的工程需用新版打开。
-- 加快自动检测，支持 Windows x64 原生多线程加速和全分辨率解码复用。超过 6400 万像素时在缩小的工作图上检测，再以原始尺寸细化和输出蒙版。检测显示当前阶段、耗时并支持取消。
-- 重做除尘交互：左侧「补画／恢复」增减蒙版，支持逐笔撤销、重做及再次微调已应用的修复。按住带图标的「对比」按钮或 K 查看除尘前，松开预览修复；「蒙版」按需打开，底部确认应用。未选画笔时默认拖动平移，再次点击画笔或按 Esc 退出画笔。
-- 蒙版使用更细腻的半透明边缘，减少方块感及遮挡，恢复区域不再留下候选标记。修复放大画布遮住工具按钮、拖动取消后无法切换工具，以及对比后松开空格误触其他工具的问题。
-- 感谢 [PURE Neg](https://github.com/easonzhangbin/PURENeg) 与 [film-dust](https://github.com/magholmes/film-dust) 项目开放除尘引擎；中英文 README、软件「关于」和第三方声明补充原项目链接与致谢。
-- 新增 **135 全幅正负片自动裁切与拉直**，可选择仅保留画面或保留齿孔，支持单张和批量处理。入口默认折叠，手动裁切仍是主要方式。
-- 改善裁切偏移和误识别，整卷结果更一致，重复识别更快；不确定时保留原框，可撤销或恢复。
-- 镜头校正逐张匹配，优先使用照片内嵌参数，否则尝试 Lensfun；改善部分 Sony／DNG 照片的校正，并保留独立手动微调。
+**新增**
 
-感谢 [i3nit（#10）](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10)提供 135 裁切基础实现。
+- **PURENeg 自动除尘。** 检测点尘、纤维与划痕，支持补画／恢复、逐笔撤销重做和按住对比，确认后保存与导出。组件首次使用按需下载；含自动蒙版的工程需用新版打开。
+- **135 全幅正负片自动裁切与拉直。** 支持单张和整卷处理，可选择保留齿孔；识别结果可撤销，不确定时保留原裁切。
+- **批量导出结果面板。** 按状态筛选，查看逐帧错误与输出路径、定位原片，一键复制完整报告，并重试失败和未执行项。
+
+**修复**
+
+- 改善大图预览和调整曝光、反差、曲线时的响应，减少等待与内存占用。
+- “重置本帧成片调整”保留底片校准、裁切、扫描分格和修复，支持一步撤销。
+- 修复窄窗口中顶部操作和裁切确认按钮被截断、遮挡的问题；胶片栏与分析区可折叠，腾出预览空间。
+- 镜头校正逐帧匹配，优先使用可用的内嵌参数，其次 Lensfun，改善部分 Sony／DNG 照片的校正。精简镜头与平场面板，批量操作和高级设置按需展开，手动微调更直接。
+
+感谢 [PURE Neg](https://github.com/easonzhangbin/PURENeg)、[film-dust](https://github.com/magholmes/film-dust) 开放除尘引擎，以及 [i3nit（#10）](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10) 提供 135 裁切基础实现。
 
 ---
 
-- Faster display color conversion for large previews, with independent worker transforms preserving exact float precision, extended color range and matching output.
-- Reuse film inversion results while adjusting exposure, contrast and curves, reducing repeated work and temporary allocations; calibration, geometry and repair changes trigger recomputation.
-- Resetting this frame's finishing keeps calibration, crop, split-frame identity and repairs, and can be undone in one step.
-- Filter batch export results by status, inspect each frame's error and output path, locate its original in the roll, and safely retry failed or pending items using the existing job.
-- Copy the full batch report, including results hidden by the current filter and complete error messages.
-- Keep the image and controls side by side in narrow windows, with a collapsible film strip and analysis area. Fix clipped navigation actions and obscured crop confirmation buttons.
-- Added **PURENeg Auto dust**. On first use, download the optional component and continue directly into detecting dust, fibers, and scratches from the same action. Repairs appear as a preview by default; apply them for previews, project saves, and normal exports. Manual dust repair remains built in. Projects containing automatic masks require the new version.
-- Faster detection with optional native multithreading on Windows x64 and reuse of full-resolution decodes. Photos above 64MP use a reduced working image with refinement and mask output at original resolution. Detection reports its current stage and elapsed time and can be canceled.
-- Redesigned dust controls: Paint/Restore refine the mask with per-stroke undo/redo, including edits to previously applied repairs. Hold the Compare icon button or K to see before dust removal; release to preview repairs. Open Mask as needed and apply below the image. Drag to pan when no brush is active; click the active brush again or press Escape to leave it.
-- Smoother translucent mask edges reduce blocks and obstruction; restored areas leave no candidate markers. Fixed zoomed images covering tool buttons, canceled drags blocking tool changes, and releasing Space after comparison accidentally activating another tool.
-- Thanks to [PURE Neg](https://github.com/easonzhangbin/PURENeg) and [film-dust](https://github.com/magholmes/film-dust) for their open-source engines. The English/Chinese READMEs, About dialog and third-party notices now credit and link to the original projects.
-- Added **automatic cropping and straightening for 135 full-frame positives and negatives**, with image-only or perforation-inclusive output for individual photos or batches. The section is collapsed by default; manual cropping remains primary.
-- Improved crop positioning and detection, with more consistent roll results and faster repeated detection. Uncertain results keep the previous crop; undo and recovery remain available.
-- Matches lens correction per photo, preferring embedded calibration and falling back to Lensfun. Improves correction for some Sony/DNG photos while keeping manual adjustments independent.
+**Added**
 
-Thanks to [i3nit (#10)](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10) for the initial 135 crop implementation.
+- **PURENeg Auto dust.** Detect dust, fibers and scratches; refine with Paint/Restore, undo or redo each stroke, and hold to compare before applying repairs for saving and export. The optional component downloads on first use. Projects containing automatic masks require the new version.
+- **Automatic cropping and straightening for 135 full-frame positives and negatives.** Process individual photos or a whole roll, with optional perforation retention. Results can be undone; uncertain detections keep the previous crop.
+- **Batch export results panel.** Filter by status, inspect per-frame errors and output paths, locate originals, copy a complete report, and retry failed or pending items.
+
+**Fixed**
+
+- Improved responsiveness for large previews and exposure, contrast and curve adjustments, with less waiting and lower memory use.
+- Resetting this frame's finishing keeps film calibration, crop, split-frame identity and repairs, and can be undone in one step.
+- Fixed clipped navigation actions and obscured crop confirmation buttons in narrow windows. Collapse the film strip and analysis area to make more room for the preview.
+- Match lens correction per photo, preferring usable embedded data and falling back to Lensfun, improving correction for some Sony/DNG photos. Simplified lens and flat-field controls keep batch actions and advanced settings available on demand, with direct access to manual fine-tuning.
+
+Thanks to [PURE Neg](https://github.com/easonzhangbin/PURENeg) and [film-dust](https://github.com/magholmes/film-dust) for their open-source dust-removal engines, and [i3nit (#10)](https://github.com/Toshihiko-Lin/Open-Revelare/pull/10) for the initial 135 crop implementation.
 
 ## v1.9.0（2026-11-04）
 
