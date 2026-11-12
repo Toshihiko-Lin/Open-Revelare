@@ -60,7 +60,11 @@ public partial class MainWindow : Window
         SetUpDropImport();
         SizeChanged += (_, _) => { UpdateWorkspaceLayout(); UpdateRollProgressPlacement(); };
         PreviewWorkspace.SizeChanged += (_, _) =>
+        {
             PreviewWorkspace.Classes.Set("compactTools", PreviewWorkspace.Bounds.Width < 580);
+            Banner.MaxWidth = Math.Max(160, PreviewWorkspace.Bounds.Width - 40);
+            BannerText.MaxWidth = Math.Max(80, Banner.MaxWidth - 26);
+        };
         UpdateWorkspaceLayout();
         PreviewViewport.SizeChanged += (_, _) => UpdateRollProgressPlacement();
         RollProgressOverlay.SizeChanged += (_, _) => UpdateRollProgressPlacement();
@@ -90,6 +94,7 @@ public partial class MainWindow : Window
         Curves.InteractionEnded += (_, _) => Vm?.EndInteractive();
         DataContextChanged += (_, _) =>
         {
+            UpdateWorkspaceLayout();
             if (DataContext is MainViewModel vm)
             {
                 // The engine behind PresentationColorManagement is Lazy ON PURPOSE, and this
@@ -143,6 +148,7 @@ public partial class MainWindow : Window
                 vm.PickFileAsync = PickPrintLutFileAsync;
                 vm.PropertyChanged += (_, args) =>
                 {
+                    if (args.PropertyName == nameof(MainViewModel.HasImage)) UpdateWorkspaceLayout();
                     if (args.PropertyName == nameof(MainViewModel.Histogram))
                         Curves.SetHistogram(vm.Histogram);
                     else if (args.PropertyName == nameof(MainViewModel.PreviewImage))
@@ -2976,47 +2982,17 @@ public partial class MainWindow : Window
     {
         while (Vm is { HasLongTask: false, LastBatchExportJob: { } job } vm && !_closePending && !CloseApproved)
         {
-            string State(BatchExportState state) => state switch
+            bool SameSource(string a, string b) => string.Equals(a, b,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            var dialog = new BatchExportReportDialog(job, path => vm.Frames.Any(f => SameSource(f.Path, path)));
+            var action = await dialog.ShowDialog<BatchReportAction?>(this);
+            if (action?.LocateSource is { } source)
             {
-                BatchExportState.Completed => Loc.T("完成"), BatchExportState.Failed => Loc.T("失败"),
-                BatchExportState.Skipped => Loc.T("跳过"), _ => Loc.T("未执行"),
-            };
-            int completed = job.Items.Count(i => i.State == BatchExportState.Completed);
-            int failed = job.Items.Count(i => i.State == BatchExportState.Failed);
-            int pending = job.Items.Count(i => i.State == BatchExportState.Pending);
-            int skipped = job.Items.Count(i => i.State == BatchExportState.Skipped);
-            string body = string.Join("\n\n", job.Items
-                .OrderBy(i => i.State switch
-                {
-                    BatchExportState.Failed => 0,
-                    BatchExportState.Pending => 1,
-                    BatchExportState.Skipped => 2,
-                    _ => 3,
-                })
-                .Select(i => string.Join("\n", new[]
-                {
-                    $"{State(i.State)} · {System.IO.Path.GetFileName(i.SourcePath)}",
-                    i.Error, i.Detail, i.OutputPath,
-                }.Where(line => !string.IsNullOrWhiteSpace(line)))));
-            body = Loc.T("重试会读取当前原片，沿用任务开始时的调整参数与输出路径。") + "\n\n" + body;
-            body = Loc.F($"卷：{job.RollTitle} · 开始于 {job.StartedAt:yyyy-MM-dd HH:mm:ss}")
-                + "\n" + job.OptionsSummary + "\n"
-                + Loc.F($"完成 {completed} · 失败 {failed} · 未执行 {pending} · 跳过 {skipped}")
-                + "\n\n" + body;
-            if (job.WasCancelled) body = Loc.T("导出已取消，已完成的文件已保留") + "\n\n" + body;
-            if (job.RecoveryBlockedReason.Length > 0) body = job.RecoveryBlockedReason + "\n\n" + body;
-            if (job.SystemError.Length > 0) body = job.SystemError + "\n\n" + body;
-            bool retry = false;
-            var dialog = new InfoDialog(Loc.T("批量导出结果"), body)
-                .WithSecondaryAction(Loc.T("打开输出目录"), () =>
-                {
-                    try { Process.Start(new ProcessStartInfo(job.Folder) { UseShellExecute = true }); }
-                    catch (Exception ex) { vm.StatusText = Loc.T("无法打开输出目录：") + ex.Message; }
-                });
-            dialog.Width = 620;
-            if (job.CanRetry) dialog.WithAction(Loc.T("重试失败和未执行项"), Loc.T("关闭"), () => retry = true);
-            await dialog.ShowDialog(this);
-            if (!retry) return;
+                var frame = vm.Frames.FirstOrDefault(f => SameSource(f.Path, source));
+                if (frame is not null) vm.CurrentFrame = frame;
+                return;
+            }
+            if (action?.Retry != true) return;
             await vm.RetryBatchExportAsync();
         }
     }
@@ -3061,7 +3037,6 @@ public partial class MainWindow : Window
 
     private void OnResetClick(object? sender, RoutedEventArgs e)
     {
-        Curves.ResetAll();
         Vm?.ResetAdjustments();
     }
 

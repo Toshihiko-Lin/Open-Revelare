@@ -9,6 +9,7 @@ namespace OpenRevelare.Gui.ViewModels;
 public partial class MainViewModel
 {
     private readonly PreparedPreviewCache _preparedPreviews;
+    private readonly FilmPreviewCache _filmPreviews;
     private readonly Func<long?> _previewAvailableBytes;
     internal Task PreviewWarmupTask { get; private set; } = Task.CompletedTask;
     private CancellationTokenSource? _previewWarmCts;
@@ -30,11 +31,15 @@ public partial class MainViewModel
     }
 
     private CachedPreviewData PrepareDisplayData(WorkingFrame source, FrameParams p,
-        ColorPipelineVersion pipeline, CancellationToken ct)
+        ColorPipelineVersion pipeline, CancellationToken ct, SourceStamp? sourceStamp = null, bool reuseFilm = false)
     {
+        // Speculative neighbour preparation must not evict the foreground's normal/drag film
+        // stages. It already stores its complete rendered result in the separate bounded cache.
         ct.ThrowIfCancellationRequested();
         RenderedFrame rendered = RenderTrace.Measure("preview.pipeline",
-            () => Pipeline.Render(source, p, pipeline, ColorManagement));
+            () => reuseFilm && FilmPreviewCacheEnabled
+                ? _filmPreviews.Render(source, p, pipeline, ColorManagement, ct, sourceStamp)
+                : Pipeline.Render(source, p, pipeline, ColorManagement));
         ct.ThrowIfCancellationRequested();
         PresentationScene scene = RenderTrace.Measure("preview.scene", () => ConvertPreviewScene(rendered));
         ct.ThrowIfCancellationRequested();
@@ -43,6 +48,7 @@ public partial class MainViewModel
         return new(rendered, scene, histogram);
     }
 
+    private static readonly bool FilmPreviewCacheEnabled = Environment.GetEnvironmentVariable("OPENREVELARE_FILM_CACHE") != "0";
     private static readonly bool PreviewWarmupEnabled = Environment.GetEnvironmentVariable("OPENREVELARE_PREVIEW_WARMUP") != "0";
     private bool MayWarmPreview => PreviewWarmupEnabled && !_disposed && !_interacting && !_showingNegative && !_showingBeforeEdits
         && !_cropEditing && !RollAnalysisPending && !ShowProgress && _paramsLoaded

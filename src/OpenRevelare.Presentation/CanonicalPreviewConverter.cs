@@ -9,6 +9,9 @@ namespace OpenRevelare.Presentation;
 /// </summary>
 public static class CanonicalPreviewConverter
 {
+    private const int ParallelPixelThreshold = 128 * 1024;
+    private const int MinimumPixelsPerWorker = 64 * 1024;
+    private const int MaximumWorkers = 4;
     // Keep the two specified colorimetric steps visible. Both matrices come from the shared Core
     // implementation used to build/read the application's ICC profiles; neither stage clamps.
     private static readonly double[,] D50ToD65 =
@@ -48,7 +51,6 @@ public static class CanonicalPreviewConverter
         if (IsCanonicalCarrier(renderedFrame))
             return PresentationScene.FromOwnedPixels(ToOpaqueRgbaHalf(renderedFrame), size, referenceWhiteScale);
 
-        float[] d50Xyz = new float[renderedFrame.Pixels.Data.Length];
         var request = new ColorTransformRequest(
             renderedFrame.OutputProfile,
             PcsColorProfiles.D50Xyz,
@@ -59,13 +61,46 @@ public static class CanonicalPreviewConverter
             sourceFormat: PixelFormatDescriptor.RgbFloat32,
             destinationFormat: PixelFormatDescriptor.XyzFloat32);
 
-        using (IColorTransformLease lease = colorManagement.Lease(request))
+        var rgba = new Half[checked(size.PixelCount * 4)];
+        // Only the bundled engine guarantees independent thread-local native transforms.
+        // Keep other implementations on their original calling thread. Every worker acquires,
+        // uses and releases its own lease; no native handle or XYZ scratch is shared.
+        int workers = colorManagement is LittleCmsEngine && size.PixelCount >= ParallelPixelThreshold
+            ? Math.Min(MaximumWorkers, Math.Min(Environment.ProcessorCount,
+                (size.PixelCount + MinimumPixelsPerWorker - 1) / MinimumPixelsPerWorker))
+            : 1;
+        if (workers == 1)
         {
-            lease.Apply(renderedFrame.Pixels.Data, d50Xyz, size.PixelCount);
+            ConvertRange(0, size.PixelCount);
+        }
+        else
+        {
+            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            {
+                int first = (int)((long)size.PixelCount * worker / workers);
+                int end = (int)((long)size.PixelCount * (worker + 1) / workers);
+                ConvertRange(first, end - first);
+            });
         }
 
-        var rgba = new Half[checked(size.PixelCount * 4)];
-        for (int pixel = 0; pixel < size.PixelCount; pixel++)
+        return PresentationScene.FromOwnedPixels(rgba, size, referenceWhiteScale);
+
+        void ConvertRange(int firstPixel, int count)
+        {
+            var d50Xyz = new float[checked(count * 3)];
+            using (IColorTransformLease lease = colorManagement.Lease(request))
+            {
+                lease.Apply(renderedFrame.Pixels.Data.AsSpan(firstPixel * 3, count * 3), d50Xyz, count);
+            }
+            PackD50Xyz(d50Xyz, rgba, firstPixel, count);
+        }
+    }
+
+    private static void PackD50Xyz(float[] d50Xyz, Half[] rgba, int firstPixel, int count)
+    {
+        // Retain the scalar operation order and exact CMM precision. Parallelism changes only
+        // which independent pixels run together, never profiles, clipping or rounding.
+        for (int pixel = 0; pixel < count; pixel++)
         {
             int rgbOffset = pixel * 3;
             double x50 = d50Xyz[rgbOffset];
@@ -79,7 +114,7 @@ public static class CanonicalPreviewConverter
             double z65 =
                 D50ToD65[2, 0] * x50 + D50ToD65[2, 1] * y50 + D50ToD65[2, 2] * z50;
 
-            int rgbaOffset = pixel * 4;
+            int rgbaOffset = (firstPixel + pixel) * 4;
             rgba[rgbaOffset] = (Half)(
                 D65XyzToLinearSrgb[0, 0] * x65 +
                 D65XyzToLinearSrgb[0, 1] * y65 +
@@ -94,8 +129,6 @@ public static class CanonicalPreviewConverter
                 D65XyzToLinearSrgb[2, 2] * z65);
             rgba[rgbaOffset + 3] = (Half)1f;
         }
-
-        return PresentationScene.FromOwnedPixels(rgba, size, referenceWhiteScale);
     }
 
     /// <summary>

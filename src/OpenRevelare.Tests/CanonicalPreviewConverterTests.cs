@@ -144,6 +144,64 @@ public class CanonicalPreviewConverterTests
         Assert.Equal((Half)1f, rgba[3]);
     }
 
+    [Theory]
+    [InlineData("sRGB", 131071)]
+    [InlineData("sRGB", 131072)]
+    [InlineData("P3", 262147)]
+    [InlineData("AdobeRGB", 262147)]
+    [InlineData("ACEScg", 262147)]
+    public void Large_conversion_matches_serial_batches_bit_for_bit_including_extended_values(
+        string space, int pixelCount)
+    {
+        ColorProfileRef profile = space switch
+        {
+            "P3" => BuiltInColorProfiles.DisplayP3(ProfileRole.Output),
+            "AdobeRGB" => BuiltInColorProfiles.AdobeRgb(ProfileRole.Output),
+            "ACEScg" => BuiltInColorProfiles.LinearAcesCg(ProfileRole.Output),
+            _ => BuiltInColorProfiles.Srgb(ProfileRole.Output),
+        };
+        var random = new Random(173);
+        float[] rgb = new float[pixelCount * 3];
+        for (int i = 0; i < rgb.Length; i++) rgb[i] = random.NextSingle() * 1.6f - 0.1f;
+        using var cmm = new LittleCmsEngine();
+        var actual = CanonicalPreviewConverter.Convert(Rendered(profile, rgb), cmm, 1.25f);
+        var expected = new Half[pixelCount * 4];
+        // Deliberately use small, uneven batches: these cannot use parallel conversion, and
+        // their boundaries differ from the production worker partitions.
+        const int batchSize = 4093;
+        for (int first = 0; first < pixelCount; first += batchSize)
+        {
+            int count = Math.Min(batchSize, pixelCount - first);
+            var batch = Rendered(profile, rgb.AsSpan(first * 3, count * 3).ToArray());
+            var serial = CanonicalPreviewConverter.Convert(batch, cmm, 1.25f);
+            serial.LinearExtendedSrgbRgba.AsSpan().CopyTo(expected.AsSpan(first * 4));
+        }
+        Assert.True(System.Runtime.InteropServices.MemoryMarshal.AsBytes(expected.AsSpan()).SequenceEqual(
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(actual.LinearExtendedSrgbRgba.AsSpan())));
+        Assert.Equal(1.25f, actual.ReferenceWhiteScale);
+        Assert.Equal(pixelCount, actual.Size.PixelCount);
+        Assert.Equal(0, cmm.GetDiagnostics().ActiveOperations);
+        Assert.Equal(0, cmm.GetDiagnostics().NativeErrors);
+    }
+
+    [Fact]
+    public async Task Concurrent_large_conversions_with_one_engine_keep_independent_pixel_storage()
+    {
+        const int pixelCount = 131073;
+        float[] rgb = new float[pixelCount * 3];
+        for (int i = 0; i < rgb.Length; i++) rgb[i] = (i % 257) / 256f;
+        var rendered = Rendered(BuiltInColorProfiles.DisplayP3(ProfileRole.Output), rgb);
+        float[] original = (float[])rgb.Clone();
+        using var cmm = new LittleCmsEngine();
+        var reference = CanonicalPreviewConverter.Convert(rendered, cmm, 1);
+        var results = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Task.Run(
+            () => CanonicalPreviewConverter.Convert(rendered, cmm, 1))));
+        foreach (var result in results)
+            Assert.True(reference.LinearExtendedSrgbRgba.AsSpan().SequenceEqual(result.LinearExtendedSrgbRgba.AsSpan()));
+        Assert.Equal(original, rgb);
+        Assert.Equal(0, cmm.GetDiagnostics().ActiveOperations);
+    }
+
     private static float[] Transform(
         IColorManagementEngine cmm,
         ColorTransformRequest request,

@@ -31,6 +31,16 @@ internal static class Program
         AppBuilder.Configure<App>().UseSkia()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
             .SetupWithoutStarting();
+        if (args.Contains("--batch-results"))
+        {
+            BatchResultPreview.Run(output);
+            return;
+        }
+        if (args.Contains("--workspace"))
+        {
+            WorkspacePreview.Run(output);
+            return;
+        }
         Loc.Apply("zh");
         string photoPath = Path.GetFullPath("docs/gui-concept/stageshow/src/frame.jpg");
         using var sample = SKBitmap.Decode(photoPath);

@@ -1,7 +1,13 @@
 # OpenRevelare — 更新日志
 
-## 未发布（2026-11-11）
+## 未发布（2026-11-12）
 
+- 加快大预览的显示色彩转换，使用独立线程变换并保持原有浮点精度、扩展色彩范围和输出一致性。
+- 调整曝光、反差和曲线时复用底片反转结果，减少重复计算和临时内存分配；修改校准、几何或修复时自动重算。
+- “重置本帧成片调整”保留底片校准、裁切、扫描分格和修复，可一步撤销。
+- 批量导出结果支持按状态筛选、逐帧查看错误与输出路径、回到卷中定位原片，并沿用原任务安全重试失败和未执行项。
+- 批量结果可一键复制完整报告，包含当前筛选隐藏的结果及完整错误信息。
+- 窄窗口保持预览与参数并排，可收起胶片栏；矮窗口可折叠分析区。修复顶部动作和裁切确认按钮在窄窗中被截断或遮挡的问题。
 - 新增 **PURENeg 自动除尘**。首次使用从同一入口下载可选组件并继续检测点尘、纤维和划痕，完成后默认预览修复效果。确认应用后用于预览、工程保存和正常导出；手动除尘仍默认内置。含自动蒙版的工程需用新版打开。
 - 加快自动检测，支持 Windows x64 原生多线程加速和全分辨率解码复用。超过 6400 万像素时在缩小的工作图上检测，再以原始尺寸细化和输出蒙版。检测显示当前阶段、耗时并支持取消。
 - 重做除尘交互：左侧「补画／恢复」增减蒙版，支持逐笔撤销、重做及再次微调已应用的修复。按住带图标的「对比」按钮或 K 查看除尘前，松开预览修复；「蒙版」按需打开，底部确认应用。未选画笔时默认拖动平移，再次点击画笔或按 Esc 退出画笔。
@@ -15,6 +21,12 @@
 
 ---
 
+- Faster display color conversion for large previews, with independent worker transforms preserving exact float precision, extended color range and matching output.
+- Reuse film inversion results while adjusting exposure, contrast and curves, reducing repeated work and temporary allocations; calibration, geometry and repair changes trigger recomputation.
+- Resetting this frame's finishing keeps calibration, crop, split-frame identity and repairs, and can be undone in one step.
+- Filter batch export results by status, inspect each frame's error and output path, locate its original in the roll, and safely retry failed or pending items using the existing job.
+- Copy the full batch report, including results hidden by the current filter and complete error messages.
+- Keep the image and controls side by side in narrow windows, with a collapsible film strip and analysis area. Fix clipped navigation actions and obscured crop confirmation buttons.
 - Added **PURENeg Auto dust**. On first use, download the optional component and continue directly into detecting dust, fibers, and scratches from the same action. Repairs appear as a preview by default; apply them for previews, project saves, and normal exports. Manual dust repair remains built in. Projects containing automatic masks require the new version.
 - Faster detection with optional native multithreading on Windows x64 and reuse of full-resolution decodes. Photos above 64MP use a reduced working image with refinement and mask output at original resolution. Detection reports its current stage and elapsed time and can be canceled.
 - Redesigned dust controls: Paint/Restore refine the mask with per-stroke undo/redo, including edits to previously applied repairs. Hold the Compare icon button or K to see before dust removal; release to preview repairs. Open Mask as needed and apply below the image. Drag to pan when no brush is active; click the active brush again or press Escape to leave it.

@@ -159,7 +159,7 @@ public partial class MainWindow
                 Bind(Item(Loc.T("撤销"), OnUndoClick, gesture: "Z"), nameof(Vm.CanUndo)),
                 Bind(Item(Loc.T("重做"), OnRedoClick, gesture: "Y"), nameof(Vm.CanRedo)),
                 new NativeMenuItemSeparator(),
-                Bind(Item(Loc.T("重置本帧调整"), OnResetClick), nameof(Vm.HasImage)),
+                Bind(Item(Loc.T("重置本帧成片调整"), OnResetClick), nameof(Vm.HasImage)),
                 new NativeMenuItemSeparator(),
                 Bind(Item(Loc.T("复制（按当前面板）"), OnCopyActiveClick, gesture: "C"), nameof(Vm.HasImage)),
                 Bind(Item(Loc.T("粘贴到本帧（按当前面板）"), OnPasteActiveClick, gesture: "V"), nameof(Vm.HasImage)),

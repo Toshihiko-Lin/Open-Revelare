@@ -247,8 +247,6 @@ public static class Pipeline
         }
         else
         {
-            OutputTarget target = cal.ResolvedOutputTarget;
-
             // Reuse every frozen operation through Stage 1 and geometry, stopping at the existing
             // OutputIntent.None gate. Managed step 4 then produces exact target-encoded pixels
             // before Stage 2. This is the intentional v2 migration of old implicit-false projects
@@ -258,35 +256,82 @@ public static class Pipeline
             // Fill belongs to the finished page, not to the photographed scene. Track it for
             // SDR too: white balance, LUTs and channel curves must never tint sprocket white.
             pixels = ProcessFrame(source.Pixels, scene, trackFill: true, out bool[]? fill);
-            ColorPipeline.ToOutputTargetFor(
-                pixels.Data,
-                cal,
-                target,
-                ColorPipelineVersion.ManagedV2,
-                colorManagement);
-
-            if (target.IsExtended)
-            {
-                // The shoulder itself ran inside step 4, exactly where the SDR rendering runs
-                // its own — they are one family of curves and differ only in where they aim
-                // (D-021). Stage 2 then runs against the roll's own range (D-032), and what is
-                // left is the same guard the display-referred path ends with: exposure is
-                // multiplicative and levels/contrast/curves are open-ended above, so they can push
-                // a rendered value back past the ceiling the shoulder established.
-                Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
-                HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
-
-            }
-            else
-            {
-                Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
-            }
-            // Layout fill is reference white in either encoding, independent of exposure,
-            // channel curves, print look or the HDR ceiling. Nothing was photographed there.
-            if (fill is not null) Sprocket.ApplyMask(pixels.Data, fill);
+            FinishManaged(pixels, fill, cal, colorManagement);
         }
 
         return DescribeRenderedPixels(pixels, cal, ColorPipelineVersion.ManagedV2);
+    }
+
+    /// <summary>Prepare the physical and geometric stage. No output look or creative controls
+    /// are baked in. The caller must invalidate after any change to those upstream inputs.</summary>
+    public static PreparedFilmFrame PrepareFilm(WorkingFrame source, FrameParams cal)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(cal);
+        FrameParams physical = cal.Clone();
+        physical.OutputIntent = OutputIntent.None;
+        ImageBuffer pixels = ProcessFrame(source.Pixels, physical, trackFill: true, out bool[]? fill);
+        return new(pixels, fill);
+    }
+
+    /// <summary>Finish a fixed preparation with output/creative parameters only. Upstream fields
+    /// on <paramref name="cal"/> do not re-prepare the film; their compatibility is the caller's
+    /// responsibility. The preparation is never mutated or exposed through returned pixels.</summary>
+    public static RenderedFrame RenderPreparedFilm(PreparedFilmFrame prepared, FrameParams cal,
+        ColorPipelineVersion version, IColorManagementEngine colorManagement)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        ArgumentNullException.ThrowIfNull(cal);
+        ArgumentNullException.ThrowIfNull(colorManagement);
+        if (version is not (ColorPipelineVersion.ManagedV2 or ColorPipelineVersion.LegacyV1))
+            throw new ArgumentOutOfRangeException(nameof(version));
+        ImageBuffer original = prepared.Pixels;
+        var pixels = new ImageBuffer(original.Width, original.Height, (float[])original.Data.Clone())
+            .InheritSourceFrom(original);
+        if (cal.OutputIntent != OutputIntent.None)
+        {
+            if (version == ColorPipelineVersion.ManagedV2)
+                FinishManaged(pixels, prepared.Fill, cal, colorManagement);
+            else
+            {
+                FrameParams collapsed = Monochrome.Collapse(cal);
+                Stage2.ApplyChain(pixels.Data, collapsed, collapsed.ResolvedOutputSpace, encodeExit: true);
+                if (prepared.Fill is not null) Sprocket.ApplyMask(pixels.Data, prepared.Fill);
+            }
+        }
+        return DescribeRenderedPixels(pixels, cal, version);
+    }
+
+    private static void FinishManaged(ImageBuffer pixels, bool[]? fill, FrameParams cal,
+        IColorManagementEngine colorManagement)
+    {
+        OutputTarget target = cal.ResolvedOutputTarget;
+        ColorPipeline.ToOutputTargetFor(
+            pixels.Data,
+            cal,
+            target,
+            ColorPipelineVersion.ManagedV2,
+            colorManagement);
+
+        if (target.IsExtended)
+        {
+            // The shoulder itself ran inside step 4, exactly where the SDR rendering runs
+            // its own — they are one family of curves and differ only in where they aim
+            // (D-021). Stage 2 then runs against the roll's own range (D-032), and what is
+            // left is the same guard the display-referred path ends with: exposure is
+            // multiplicative and levels/contrast/curves are open-ended above, so they can push
+            // a rendered value back past the ceiling the shoulder established.
+            Stage2.ApplyManagedToExtendedTarget(pixels.Data, cal, target.HighlightHeadroom);
+            HighlightRolloff.BoundAbove(pixels.Data, target.HighlightHeadroom);
+
+        }
+        else
+        {
+            Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
+        }
+        // Layout fill is reference white in either encoding, independent of exposure,
+        // channel curves, print look or the HDR ceiling. Nothing was photographed there.
+        if (fill is not null) Sprocket.ApplyMask(pixels.Data, fill);
     }
 
     /// <summary>

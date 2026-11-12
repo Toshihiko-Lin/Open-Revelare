@@ -78,7 +78,7 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <Separator />
-                        <MenuItem Header="{i18n:T '重置本帧调整'}" Click="OnResetClick" IsEnabled="{Binding HasImage}" />
+                        <MenuItem Header="{i18n:T '重置本帧成片调整'}" Click="OnResetClick" IsEnabled="{Binding HasImage}" />
                         <Separator />
                         <MenuItem Header="{i18n:T '复制（按当前面板）'}" InputGesture="{i18n:Accel 'C'}"
                                   Click="OnCopyActiveClick" IsEnabled="{Binding HasImage}"
@@ -218,7 +218,7 @@
                     </StackPanel>
                 </Border>
 
-                <Grid Grid.Column="2" ColumnDefinitions="Auto,Auto" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Grid Name="NavigationActions" Grid.Column="2" ColumnDefinitions="Auto,Auto" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" Margin="8,0,6,0">
                     <Border Width="1" Margin="4,4" Background="{DynamicResource BorderSoftBrush}" />
                     <Button Name="UndoButton" Classes="icon" Click="OnUndoClick" IsEnabled="{Binding CanUndo}"
@@ -232,8 +232,8 @@
                         <ctl:Icon Data="{StaticResource IcoRedo}" />
                     </Button>
                     <Button Name="ResetButton" Classes="icon" Click="OnResetClick" IsEnabled="{Binding HasImage}"
-                            AutomationProperties.Name="{i18n:T '重置本帧调整'}"
-                            ToolTip.Tip="{i18n:T '编辑：重置本帧调整'}">
+                            AutomationProperties.Name="{i18n:T '重置本帧成片调整'}"
+                            ToolTip.Tip="{i18n:T '重置本帧成片调整，保留底片校准、裁切与修复。'}">
                         <ctl:Icon Data="{StaticResource IcoReset}" />
                     </Button>
                 </StackPanel>
@@ -308,7 +308,7 @@
                 <ProgressBar Grid.Column="0" IsIndeterminate="True" Width="80" Height="3" Margin="0,0,10,0"
                              IsVisible="{Binding ShowProgress}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding DisplayStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           FontSize="{DynamicResource FontXs}" Foreground="{DynamicResource TextDimBrush}" />
+                           ToolTip.Tip="{Binding DisplayStatus}" FontSize="{DynamicResource FontXs}" Foreground="{DynamicResource TextDimBrush}" />
                 <Button Grid.Column="2" Classes="quiet" Padding="6,1" MinHeight="0" Margin="8,0,0,0"
                         ToolTip.Tip="{i18n:T '查看前台任务、后台队列和最近批量结果'}">
                     <TextBlock Text="{Binding TaskCenterSummary}" FontSize="{DynamicResource FontXs}" TextTrimming="CharacterEllipsis" MaxWidth="180" />
@@ -378,7 +378,7 @@
             <!-- Col 0 — film strip. Add / virtual copy / remove used to be a row of three
                  buttons stealing the top of the strip; they are right-click items now
                  (same as the Python build), so the strip is all thumbnails. -->
-            <Border Name="FilmRail" Grid.Column="0" Background="{DynamicResource Panel2Brush}" CornerRadius="12" Margin="0,0,8,0" IsVisible="{Binding HasImage}">
+            <Border Name="FilmRail" Grid.Column="0" Background="{DynamicResource Panel2Brush}" CornerRadius="12" Margin="0,0,8,0" IsVisible="False">
               <DockPanel>
                 <Border DockPanel.Dock="Top" Padding="12,14,12,8">
                     <StackPanel Spacing="4">
@@ -595,6 +595,9 @@
                                     IsEnabled="{Binding CanRestoreProjectReferences}" HorizontalAlignment="Left" />
                         </StackPanel>
                         <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                            <ToggleButton Name="CompactFilmRailButton" IsVisible="False" Content="{i18n:T '胶片栏'}"
+                                          Click="OnCompactFilmRailClick" Margin="0,0,6,0"
+                                          ToolTip.Tip="{i18n:T '显示或收起胶片栏；参数与预览保持并排。'}" />
                             <ToggleButton Name="ViewNegBtn" Classes="viewMode" AutomationProperties.Name="{i18n:T '负片'}" Click="OnViewNegToggle" IsEnabled="{Binding HasImage}"
                                           Padding="9,5"
                                           ToolTip.Tip="{i18n:T '切到负片视图，用于对准片基与齿孔（N）'}">
@@ -752,17 +755,18 @@
                                 Background="{DynamicResource ChromeBrush}"
                                 BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1"
                                 Padding="12,8" MaxWidth="620">
-                            <Grid ColumnDefinitions="*,Auto,Auto">
+                            <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
                                 <TextBlock Grid.Column="0" Name="BannerText" Text=""
+                                           Grid.ColumnSpan="3"
                                            VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextBrush}"
                                            TextWrapping="Wrap" FontSize="12" MaxWidth="440" />
-                                <Button Grid.Column="1" Name="CropApplyBtn"
+                                <Button Grid.Row="1" Grid.Column="1" Name="CropApplyBtn"
                                         Content="{i18n:T '应用'}" Classes="primary"
-                                        Margin="10,0,0,0" IsVisible="False"
+                                        Margin="10,6,0,0" IsVisible="False"
                                         Click="OnCropApplyClick" />
-                                <Button Grid.Column="2" Name="CropCancelBtn"
-                                        Content="{i18n:T '取消'}" Margin="10,0,0,0"
+                                <Button Grid.Row="1" Grid.Column="2" Name="CropCancelBtn"
+                                        Content="{i18n:T '取消'}" Margin="10,6,0,0"
                                         IsVisible="False" Click="OnCropCancelClick" />
                             </Grid>
                         </Border>
@@ -1203,6 +1207,8 @@
                             <TextBlock Grid.Column="1" Text="{Binding CurrentFramePosition}" Margin="12,0,0,0"
                                        FontSize="12" Foreground="{DynamicResource TextDimBrush}" />
                         </Grid>
+                        <Expander Name="AnalysisExpander" Header="{i18n:T '分析'}" IsExpanded="True" Margin="0">
+                            <StackPanel Spacing="4">
                         <TextBlock Text="{Binding SelectionContext}" FontSize="12" Foreground="{DynamicResource TextDimBrush}"
                                    IsVisible="{Binding SelectionContext, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         <!-- One slot, two readings of it. They are not shown together: both answer
@@ -1258,6 +1264,8 @@
                             <ctl:SliderRow Label="{i18n:T '过曝 ≥'}" Minimum="80" Maximum="100" Decimals="0"
                                            Increment="1" DefaultValue="98" Value="{Binding ClipHighlightPercent}" />
                         </StackPanel>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </Border>
 

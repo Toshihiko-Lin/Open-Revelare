@@ -212,7 +212,7 @@ public partial class MainViewModel
                 ct.ThrowIfCancellationRequested();
                 CachedPreviewData? prepared = preparedKey is null ? null : _preparedPreviews.Get(preparedKey);
                 RenderTrace.Count(prepared is null ? "preview.prepared.miss" : "preview.prepared.hit");
-                prepared ??= PrepareDisplayData(source, p, pipelineVersion, ct);
+                prepared ??= PrepareDisplayData(source, p, pipelineVersion, ct, sourceStamp, reuseFilm: true);
                 RenderedFrame rendered = prepared.Rendered;
                 ImageBuffer outImg = rendered.Pixels;
                 PresentationScene scene = prepared.Scene;

@@ -1,5 +1,9 @@
 # 实际界面渲染与检查
 
+完整响应式工作区取证：`dotnet run --project docs/gui-audit/preview/Preview.csproj -c Release -- artifacts/negpy-workspace --workspace`。覆盖中英文、浅深主题和 800×520 至 1440×900 的反复缩放、胶片栏鼠标开关、参数区与动作可达性，以及除尘入口、裁切取消；详见 [工作区记录](../08-responsive-workspace.md)。
+
+批量结果专用取证：`dotnet run --project docs/gui-audit/preview/Preview.csproj -c Release -- artifacts/negpy-batch-results --batch-results`。覆盖 200 帧、状态过滤、长错误详情、空结果选择及恢复阻止状态，保存中英／浅深／480–780px 共 8 张截图，详见 [批量结果记录](../07-batch-results.md)。
+
 此工具直接加载生产 `App` 的主题、XAML 和代码构造窗口；使用与项目一致的 Avalonia.Headless 11.2.3 + Skia。它不启动用户的桌面会话，也不访问用户图库，配置与数据重定向到独立临时目录。
 
 在仓库根目录执行：

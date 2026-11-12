@@ -8,6 +8,17 @@ using OpenRevelare.Gui.Models;
 using OpenRevelare.Gui.Services;
 using OpenRevelare.Presentation;
 
+if (args.FirstOrDefault() == "--canonical")
+{
+    CanonicalBenchmark.Run(args[1], args.ElementAtOrDefault(2));
+    return;
+}
+if (args.FirstOrDefault() == "--film")
+{
+    FilmStageBenchmark.Run(args[1], args.ElementAtOrDefault(2));
+    return;
+}
+
 // This harness uses generated TIFFs and managed display data. It never opens a window or
 // modifies the real catalog. UI presentation, OS-cold disk reads and real RAW are separate runs.
 string output = Path.GetFullPath(args.FirstOrDefault() ?? "scratch/performance/printroom-preview-baseline.json");

@@ -640,6 +640,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _negativeCameraTransforms.Clear();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
+        _filmPreviews.Clear();
         // Keep cache invalidation and tile insertion under one gate: a decode from the previous
         // roll must never repopulate either cache after a switch.
         lock (_tiles)
@@ -4764,38 +4765,29 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return (min, max);
     }
 
-    /// <summary>Reset every adjustment to its neutral default and re-render.</summary>
+    /// <summary>Reset finishing in one undo step without changing calibration, crop or repairs.</summary>
     public void ResetAdjustments()
     {
+        if (!HasImage || CurrentFrame is null || !_paramsLoaded || IsBusy || HasLongTask) return;
+        var current = CurrentParamsForStorage();
+        var reset = current.Clone();
+        RollFrame.ResetScene(reset);
+        if (PreviewParametersKey.Create(current) == PreviewParametersKey.Create(reset)) return;
+        CommitUndo();
         _renderCts?.Cancel();
-        // Stage 1 — lens / sprocket
-        _lensCorrectionDiagnostic = ""; _embeddedLens = null; _lensCorrectionOrigin = ""; _lensCorrectionHasVignette = false;
-        DistortionK1 = 0; VignetteAmount = 0; VignetteFalloff = 2.5;
-        SprocketEnabled = false; SprocketThreshold = 0.9;
-        // Stage 1 — film base
-        TBaseR = TBaseG = TBaseB = 1.0;   // 参考透射率恒为中性；片基由黑端承载
-        // 两端回到一组中性（无色偏）的默认值：黑在片基处，白在输出范围处。
-        // 由自动标定或采样重新测量。
-        DMinR = 0; DMinG = 0; DMinB = 0;
-        DMaxR = DMaxG = DMaxB = FrameParams.OutputRange;
-        // Stage 2
-        Temp = 0; Tint = 0; ExposureEv = 0;
-        Black = 0; White = 0; Contrast = 0; Highlights = 0; Shadows = 0; Saturation = 0;
-        _curveM = new(); _curveR = new(); _curveG = new(); _curveB = new(); _curvePreserveHue = true;
-        _curveHasEndpoints = false;
-        // Geometry
-        Rotation = 0; _quarterTurns = 0; _flipH = false; _flipV = false; _cropRect = null;
-        // The cell goes with the crop here: a full geometry reset says this frame is the whole
-        // file again, and a cell left behind would claim a negative the frame no longer occupies.
-        _splitCell = null;
-        FilmBaseText = "";
-        HighlightConfidenceText = "";
-        _calibrationDiagnosticsRollWide = false;
-        _rollBaseCalibration = null;
-        _rollHighlightCalibration = null;
-        _rollUsedFallbackHighlight = false;
-        _filmBaseSampled = false;
-        ScheduleRender();
+        bool suppressed = _suppressRender;
+        _suppressRender = true;
+        try
+        {
+            Temp = 0; Tint = 0; ExposureEv = 0;
+            Black = 0; White = 0; Contrast = 0; Highlights = 0; Shadows = 0; Saturation = 0;
+            _curveM = new(); _curveR = new(); _curveG = new(); _curveB = new();
+            _curvePreserveHue = true; _curveHasEndpoints = false;
+        }
+        finally { _suppressRender = suppressed; }
+        MarkEdit(); CommitUndo();
+        FrameParamsLoaded?.Invoke(CurrentFrame.Params);
+        ScheduleRender(markEdit: false);
     }
 
     // ══ Catalog: the open roll's index entry + debounced autosave ═══════════════
@@ -4830,6 +4822,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _previewAvailableBytes = previewAvailableBytes ?? (() =>
             SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
         _preparedPreviews = new PreparedPreviewCache(availableBytes: _previewAvailableBytes);
+        _filmPreviews = new FilmPreviewCache(_previewAvailableBytes);
         Frames.CollectionChanged += (_, _) => { RefreshScopeSubscriptions(); NotifyRollBroadcastHints(); };
         Sync.PropertyChanged += (_, _) => NotifyRollBroadcastHints();
         _presentationRevisions.Published += revision => PresentationRevision = revision;
@@ -4856,6 +4849,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         CancelAutoCrop();
         CancelPreviewWarmup();
         _preparedPreviews.Clear();
+        _filmPreviews.Clear();
         RenderTrace.SaveSummary();
         _renderCts?.Cancel();
         _thumbCts?.Cancel();

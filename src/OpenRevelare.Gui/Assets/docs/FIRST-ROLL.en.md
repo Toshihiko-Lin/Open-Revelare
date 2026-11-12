@@ -2,6 +2,8 @@
 
 Start with a roll you can keep editing and recalculate later. Originals stay untouched; edits live in a `.ncproj` project. Use the User Guide for individual controls and Theory for the algorithms.
 
+The menu or toolbar's Reset this frame's finishing adjustments keeps film calibration, crop, split-frame identity and dust repairs, and can be undone in one step.
+
 ## 1. Import one roll
 
 Add the RAW or TIFF files from one roll. The default Path B is for white-light camera copying. Choose Path A only for an RGB narrow-band light source with the three matching reference images. Keep one input family per roll: RAW flat fields for RAW rolls, TIFF flat fields for TIFF rolls.

@@ -1,0 +1,106 @@
+{
+  "Schema": "openrevelare-preview-component-benchmark-v1",
+  "TimestampUtc": "2026-11-11T18:01:22.7201339Z",
+  "Platform": "Microsoft Windows 10.0.26200",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 12,
+  "SourceDimensions": "2400x1600",
+  "PreviewDimensions": "1200x800",
+  "Pipeline": "ManagedV2",
+  "Iterations": 30,
+  "PeakWorkingSetBytes": 452792320,
+  "PreparedResidentBytes": 19204096,
+  "PixelEquality": true,
+  "DragPreparingThreadMedianAllocatedBytes": 8447280,
+  "Scope": "Synthetic TIFF, in-process CPU pipeline/canonical scene/histogram; excludes Avalonia fallback bitmap, compositor and real RAW; OS file cache unspecified.",
+  "Phases": {
+    "first-preview-decode": {
+      "Count": 1,
+      "SampleCount": 1,
+      "TotalMs": 78.7553,
+      "MaximumMs": 78.7553,
+      "P50Ms": 78.7553,
+      "P95Ms": 78.7553
+    },
+    "pipeline": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 662.2359999999998,
+      "MaximumMs": 56.7388,
+      "P50Ms": 19.4182,
+      "P95Ms": 42.3348
+    },
+    "canonical-scene": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 1432.3825000000002,
+      "MaximumMs": 57.1086,
+      "P50Ms": 46.1396,
+      "P95Ms": 53.5802
+    },
+    "histogram": {
+      "Count": 31,
+      "SampleCount": 31,
+      "TotalMs": 45.80369999999999,
+      "MaximumMs": 3.5743,
+      "P50Ms": 1.3529,
+      "P95Ms": 2.2335
+    },
+    "foreground-prepare-without-cache": {
+      "Count": 30,
+      "SampleCount": 30,
+      "TotalMs": 2023.4797000000005,
+      "MaximumMs": 94.4782,
+      "P50Ms": 65.5566,
+      "P95Ms": 92.0239
+    },
+    "foreground-prepared-hit-with-key": {
+      "Count": 30,
+      "SampleCount": 30,
+      "TotalMs": 15.343199999999998,
+      "MaximumMs": 3.7773,
+      "P50Ms": 0.3859,
+      "P95Ms": 0.6311
+    },
+    "uncached-preview-decode-os-cache-unspecified": {
+      "Count": 5,
+      "SampleCount": 5,
+      "TotalMs": 318.1029,
+      "MaximumMs": 83.3138,
+      "P50Ms": 70.8541,
+      "P95Ms": 83.3138
+    },
+    "drag-pipeline-800": {
+      "Count": 12,
+      "SampleCount": 12,
+      "TotalMs": 49.04619999999999,
+      "MaximumMs": 4.3782,
+      "P50Ms": 4.1471,
+      "P95Ms": 4.3782
+    },
+    "drag-prepare-with-fallback-800": {
+      "Count": 12,
+      "SampleCount": 12,
+      "TotalMs": 235.95689999999996,
+      "MaximumMs": 23.1974,
+      "P50Ms": 19.3351,
+      "P95Ms": 23.1974
+    },
+    "zoom-region-render": {
+      "Count": 8,
+      "SampleCount": 8,
+      "TotalMs": 54.047799999999995,
+      "MaximumMs": 10.3763,
+      "P50Ms": 6.1059,
+      "P95Ms": 10.3763
+    },
+    "full-tiff-render-and-write": {
+      "Count": 3,
+      "SampleCount": 3,
+      "TotalMs": 812.6527000000001,
+      "MaximumMs": 309.5327,
+      "P50Ms": 258.055,
+      "P95Ms": 309.5327
+    }
+  }
+}
