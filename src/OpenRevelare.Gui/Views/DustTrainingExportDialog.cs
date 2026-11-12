@@ -14,11 +14,18 @@ internal sealed class DustTrainingExportDialog : Window
 
     public DustTrainingExportDialog(IReadOnlyList<DustTrainingSample> samples)
     {
-        Title = Loc.T("选择训练数据包照片");
+        Title = Loc.T("导出 PURE Neg 训练数据包");
         Width = 820; Height = 620; MinWidth = 400; MinHeight = 320;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var body = new StackPanel { Spacing = 12 };
-        body.Children.Add(new TextBlock { Text = Loc.T("选择要分享的照片"), Classes = { "dialogTitle" } });
+        body.Children.Add(new TextBlock { Text = Title, Classes = { "dialogTitle" } });
+        body.Children.Add(new TextBlock
+        {
+            Text = Loc.T("这些样本来自 PURE Neg 除尘检测和你的人工修正，可自愿分享给原项目继续训练，帮助减少漏检和误修。"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(new TextBlock { Text = Loc.T("PURE Neg 作者反馈邮箱"), TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(new SelectableTextBlock { Text = PureNegFeedback.Email });
         body.Children.Add(new TextBlock
         {
             Text = Loc.T("默认不选择任何照片。缩略图显示完整检测画面；导出的数据包包含该完整图像，包括当前裁切外的区域。仅保存到本地，由你自行分享。"),
@@ -26,7 +33,7 @@ internal sealed class DustTrainingExportDialog : Window
         });
         body.Children.Add(new TextBlock
         {
-            Text = Loc.T("候选包括当前审核和本次会话中已应用的检测；取消的审核不保留。关闭程序后清除临时样本。"),
+            Text = Loc.T("已应用的除尘样本自动保留在本机，重启后仍可导出。当前审核也可导出，取消的审核不保留；可用「清除已保留样本」删除本机样本，不影响照片修复。"),
             TextWrapping = TextWrapping.Wrap, Classes = { "dialogNote" },
         });
         var cards = new WrapPanel();
@@ -55,8 +62,8 @@ internal sealed class DustTrainingExportDialog : Window
             }
             card.Children.Add(image);
             card.Children.Add(new TextBlock { Text = $"{sample.Input.Width} × {sample.Input.Height}", FontSize = 12 });
-            var clean = new CheckBox { Content = Loc.T("这张已修干净（可用于训练）"), IsChecked = false, IsEnabled = false };
-            var test = new CheckBox { Content = Loc.T("保留为测试集（test）"), IsChecked = false, IsEnabled = false };
+            var clean = new CheckBox { Content = Loc.T("整张已检查并修干净"), IsChecked = false, IsEnabled = false };
+            var test = new CheckBox { Content = Loc.T("建议作为评估样本（test）"), IsChecked = false, IsEnabled = false };
             card.Children.Add(clean); card.Children.Add(test);
             selections.Add((sample, select, clean, test));
             select.IsCheckedChanged += (_, _) =>

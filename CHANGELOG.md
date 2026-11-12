@@ -6,6 +6,7 @@
 
 - **PURENeg 自动除尘。** 检测点尘、纤维与划痕，支持补画／恢复、逐笔撤销重做和按住对比，确认后保存与导出。组件首次使用按需下载；含自动蒙版的工程需用新版打开。
 - **135 全幅正负片自动裁切与拉直。** 支持单张和整卷处理，可选择保留齿孔；识别结果可撤销，不确定时保留原裁切。
+- **PURE Neg 训练样本反馈。** 保留检测与人工修正样本，重启后可继续导出训练数据包，并查看原项目反馈渠道；由用户自愿分享。
 - **批量导出结果面板。** 按状态筛选，查看逐帧错误与输出路径、定位原片，一键复制完整报告，并重试失败和未执行项。
 
 **修复**
@@ -23,6 +24,7 @@
 
 - **PURENeg Auto dust.** Detect dust, fibers and scratches; refine with Paint/Restore, undo or redo each stroke, and hold to compare before applying repairs for saving and export. The optional component downloads on first use. Projects containing automatic masks require the new version.
 - **Automatic cropping and straightening for 135 full-frame positives and negatives.** Process individual photos or a whole roll, with optional perforation retention. Results can be undone; uncertain detections keep the previous crop.
+- **PURE Neg training sample feedback.** Preserve detection and manual corrections across restarts, export training datasets, and access upstream feedback channels for voluntary sharing.
 - **Batch export results panel.** Filter by status, inspect per-frame errors and output paths, locate originals, copy a complete report, and retry failed or pending items.
 
 **Fixed**

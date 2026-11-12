@@ -4,14 +4,17 @@ using OpenRevelare.Gui.ViewModels;
 namespace OpenRevelare.Gui.Services;
 
 // Owns one private detector workspace. Export leases outlive frame changes or
-// explicit cache removal; files disappear when the last reader releases them.
+// explicit cache removal. Temporary workspaces disappear with the last reader;
+// restored workspaces survive until the user clears retained samples.
 internal sealed class DustTrainingSample : IDisposable
 {
     private readonly object _gate = new();
     private int _references = 1;
     private bool _ownerDisposed;
     private IDisposable? _sourceLease;
+    private bool _keepWorkspace;
     public object FrameKey { get; }
+    public string Identity { get; }
     public string Label { get; }
     public string Workspace { get; }
     public MainViewModel.PureNegInput Input { get; }
@@ -24,11 +27,13 @@ internal sealed class DustTrainingSample : IDisposable
 
     public DustTrainingSample(object frameKey, string label, string workspace, MainViewModel.PureNegInput input,
         PureNegComponent.ReviewImage detection, DustMask automatic, DustReviewProjection.GeometryKey geometry,
-        IEnumerable<int> visibleIds)
+        IEnumerable<int> visibleIds, bool keepWorkspace = false, string? identity = null)
     {
         FrameKey = frameKey; Label = label; Workspace = workspace; Input = input;
         Detection = detection; Automatic = Final = automatic; Geometry = geometry;
         VisibleIds = visibleIds.ToHashSet();
+        _keepWorkspace = keepWorkspace;
+        Identity = identity ?? Guid.NewGuid().ToString("N");
     }
 
     public void UpdateReview(DustMask final, IEnumerable<DustMaskEditor.Stroke> history)
@@ -39,10 +44,19 @@ internal sealed class DustTrainingSample : IDisposable
 
     public DustTrainingSample ForkReview(DustMask final, IEnumerable<DustMaskEditor.Stroke> history)
     {
-        var fork = new DustTrainingSample(FrameKey, Label, Workspace, Input, Detection, Automatic, Geometry, VisibleIds)
+        var fork = new DustTrainingSample(FrameKey, Label, Workspace, Input, Detection, Automatic, Geometry, VisibleIds, identity: Identity)
         { _sourceLease = Acquire() };
         fork.UpdateReview(final, history);
         return fork;
+    }
+
+    public void DeleteWhenReleased()
+    {
+        lock (_gate)
+        {
+            _keepWorkspace = false;
+            if (_sourceLease is Lease lease) lease.DeleteWhenReleased();
+        }
     }
 
     public IDisposable Acquire()
@@ -71,13 +85,14 @@ internal sealed class DustTrainingSample : IDisposable
             if (--_references == 0)
             {
                 if (_sourceLease is { } source) source.Dispose();
-                else PureNegComponent.DeleteTemporaryDirectory(Workspace);
+                else if (!_keepWorkspace) PureNegComponent.DeleteTemporaryDirectory(Workspace);
             }
     }
 
     private sealed class Lease(DustTrainingSample sample) : IDisposable
     {
         private DustTrainingSample? _sample = sample;
+        public void DeleteWhenReleased() => _sample?.DeleteWhenReleased();
         public void Dispose() => Interlocked.Exchange(ref _sample, null)?.Release();
     }
 }
@@ -116,6 +131,7 @@ internal sealed class DustTrainingBatch : IDisposable
                 PureNegTrainingPack.Export(stage, sample.Detection.SourcePath, sample.Automatic, entry.Final,
                     sample.Detection, sample.VisibleIds, entry.Labels, ct, sample.Geometry, entry.History);
             }
+            File.WriteAllText(Path.Combine(stage, "README-分享给PURENeg.txt"), PureNegFeedback.Readme);
             ct.ThrowIfCancellationRequested();
             Directory.Move(stage, destination);
             return destination;

@@ -36,14 +36,16 @@
                              changes as rolls are imported, so it cannot be a static list. -->
                         <MenuItem Name="RecentRollsMenu" Header="{i18n:T '最近的卷'}" />
                         <MenuItem Header="{i18n:T '打开工程…'}" Click="OnOpenProjectClick" />
-                        <MenuItem Header="{i18n:T '扫描文件夹加入目录…'}" Click="OnScanFolderClick"
-                                  ToolTip.Tip="{i18n:T '找出该文件夹（含子文件夹）里所有 .ncproj 并登记到图库；目录丢了也能这样重建'}" />
-                        <MenuItem Header="{i18n:T '另存工程副本…'}" Click="OnSaveProjectClick" IsEnabled="{Binding HasImage}"
-                                  ToolTip.Tip="{i18n:T '当前卷会自动保存；这里是导出一份副本'}" />
-                        <MenuItem Header="{i18n:T '查看工程依赖…'}" Click="OnProjectDependenciesClick"
-                                  IsEnabled="{Binding CanInspectProjectDependencies}" />
-                        <MenuItem Header="{i18n:T '归档工程与原片…'}" Click="OnArchiveProjectClick"
-                                  IsEnabled="{Binding CanInspectProjectDependencies}" />
+                        <MenuItem Header="{i18n:T '工程管理'}">
+                            <MenuItem Header="{i18n:T '另存工程副本…'}" Click="OnSaveProjectClick" IsEnabled="{Binding HasImage}"
+                                      ToolTip.Tip="{i18n:T '当前卷会自动保存；这里是导出一份副本'}" />
+                            <MenuItem Header="{i18n:T '扫描文件夹加入目录…'}" Click="OnScanFolderClick"
+                                      ToolTip.Tip="{i18n:T '找出该文件夹（含子文件夹）里所有 .ncproj 并登记到图库；目录丢了也能这样重建'}" />
+                            <MenuItem Header="{i18n:T '查看工程依赖…'}" Click="OnProjectDependenciesClick"
+                                      IsEnabled="{Binding CanInspectProjectDependencies}" />
+                            <MenuItem Header="{i18n:T '归档工程与原片…'}" Click="OnArchiveProjectClick"
+                                      IsEnabled="{Binding CanInspectProjectDependencies}" />
+                        </MenuItem>
                         <Separator />
                         <MenuItem Header="{i18n:T '导出当前帧…'}" InputGesture="{i18n:Accel 'E'}"
                                   Click="OnExportClick" IsEnabled="{Binding HasImage}">
@@ -52,11 +54,6 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="{i18n:T '导出整卷…'}" Click="OnExportRollClick" IsEnabled="{Binding HasImage}" />
-                        <MenuItem Name="DustTrainingMenuItem" Header="{i18n:T '导出训练数据包…'}"
-                                  Click="OnExportDustTrainingClick"
-                                  ToolTip.Tip="{i18n:T '通过完整画面缩略图选择要分享的训练样本'}" />
-                        <MenuItem Header="{i18n:T '查看上次批量导出结果…'}" Click="OnBatchExportReportClick"
-                                  IsEnabled="{Binding CanShowBatchExportReport}" />
                         <MenuItem Header="{i18n:T '导出印样…'}" Click="OnContactSheetClick" IsEnabled="{Binding HasImage}">
                             <MenuItem.Icon>
                                 <ctl:Icon Data="{StaticResource IcoGrid}" />
@@ -907,31 +904,55 @@
                                     <ctl:Icon Data="{StaticResource IcoSettings}" />
                                     <Button.Flyout>
                                         <Flyout Placement="RightEdgeAlignedBottom">
-                                            <StackPanel Width="240" Spacing="7">
-                                                <StackPanel Name="DustDetectionOptions" Spacing="6">
-                                                    <TextBlock Classes="fieldLabel" Text="{i18n:T '检测设置'}" FontWeight="SemiBold" />
-                                                    <CheckBox Name="DetectDustKind" Content="{i18n:T '灰尘'}" IsChecked="True" />
-                                                    <CheckBox Name="DetectFiberKind" Content="{i18n:T '毛发 / 纤维'}" IsChecked="True" />
-                                                    <CheckBox Name="DetectScratchKind" Content="{i18n:T '划痕'}" IsChecked="True" />
-                                                    <ComboBox Name="DustPolarity" SelectedIndex="0" AutomationProperties.Name="{i18n:T '灰尘亮暗'}">
+                                            <ScrollViewer MaxHeight="420" HorizontalScrollBarVisibility="Disabled">
+                                            <StackPanel Name="DustSettingsPanel" Width="300" Spacing="6">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <TextBlock Text="PURE Neg" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                    <Button Grid.Column="1" Classes="quiet" Padding="8,3"
+                                                        Content="{i18n:T '来源与许可…'}" Click="OnPureNegAttributionClick" />
+                                                </Grid>
+                                                <StackPanel Name="DustDetectionOptions" Spacing="4">
+                                                    <WrapPanel Orientation="Horizontal">
+                                                        <CheckBox Name="DetectDustKind" Content="{i18n:T '灰尘'}" IsChecked="True" Margin="0,0,12,0" />
+                                                        <CheckBox Name="DetectFiberKind" Content="{i18n:T '毛发 / 纤维'}" IsChecked="True" Margin="0,0,12,0" />
+                                                        <CheckBox Name="DetectScratchKind" Content="{i18n:T '划痕'}" IsChecked="True" />
+                                                    </WrapPanel>
+                                                    <Grid ColumnDefinitions="80,*">
+                                                        <TextBlock Text="{i18n:T '灰尘亮暗'}" VerticalAlignment="Center" />
+                                                        <ComboBox Name="DustPolarity" Grid.Column="1" SelectedIndex="0"
+                                                            HorizontalAlignment="Stretch" AutomationProperties.Name="{i18n:T '灰尘亮暗'}">
                                                         <ComboBoxItem Content="{i18n:T '自动'}" />
                                                         <ComboBoxItem Content="{i18n:T '亮尘'}" />
                                                         <ComboBoxItem Content="{i18n:T '暗尘'}" />
-                                                    </ComboBox>
-                                                    <TextBlock Text="{i18n:T '灵敏度'}" />
-                                                    <Slider Name="DustSensitivity" Minimum="0.5" Maximum="2" Value="1"
-                                                        AutomationProperties.Name="{i18n:T '灵敏度'}" />
+                                                        </ComboBox>
+                                                    </Grid>
+                                                    <Grid ColumnDefinitions="80,*">
+                                                        <TextBlock Text="{i18n:T '灵敏度'}" VerticalAlignment="Center" />
+                                                        <Slider Name="DustSensitivity" Grid.Column="1" Minimum="0.5" Maximum="2" Value="1"
+                                                            AutomationProperties.Name="{i18n:T '灵敏度'}" />
+                                                    </Grid>
                                                 </StackPanel>
-                                                <StackPanel Name="DustClearActions" Spacing="4" Margin="0,8,0,0">
-                                                    <Button Content="{i18n:T '清除自动除尘'}" Click="OnClearAutomaticDustClick"
+                                                <Grid Name="DustClearActions" ColumnDefinitions="*,8,*">
+                                                    <Button Content="{i18n:T '清除自动'}" Click="OnClearAutomaticDustClick"
+                                                        HorizontalAlignment="Stretch" ToolTip.Tip="{i18n:T '清除自动除尘'}"
                                                         IsEnabled="{Binding HasAutomaticDust}" />
-                                                    <Button Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick" />
-                                                </StackPanel>
+                                                    <Button Grid.Column="2" Content="{i18n:T '清除全部'}" Click="OnClearAllDustClick"
+                                                        HorizontalAlignment="Stretch" ToolTip.Tip="{i18n:T '清除全部除尘修复，包括手动补画。'}" />
+                                                </Grid>
                                                 <Separator />
                                                 <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                    Text="{i18n:T '除尘功能来自 PURE Neg 开源除尘软件。内置插件仅保留基本功能，欢迎支持其独立客户端。'}" />
-                                                <Button Content="{i18n:T 'PURE Neg · 来源与许可'}" Click="OnPureNegAttributionClick" />
+                                                    Text="{i18n:T '自愿分享除尘与修正样本，帮助 PURE Neg 改进识别；不会自动上传。'}" />
+                                                <Grid ColumnDefinitions="*,8,*">
+                                                    <Button Name="DustTrainingExportButton" HorizontalAlignment="Stretch" Click="OnExportDustTrainingClick"
+                                                        ToolTip.Tip="{i18n:T '先运行 PURE Neg 检测并检查修复结果，即可选择训练样本。'}">
+                                                        <TextBlock Text="{i18n:T '导出训练包…'}" TextWrapping="Wrap" />
+                                                    </Button>
+                                                    <Button Grid.Column="2" Click="OnPureNegFeedbackClick" HorizontalAlignment="Stretch">
+                                                        <TextBlock Text="{i18n:T '反馈渠道…'}" TextWrapping="Wrap" />
+                                                    </Button>
+                                                </Grid>
                                             </StackPanel>
+                                            </ScrollViewer>
                                         </Flyout>
                                     </Button.Flyout>
                                 </Button>

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Diagnostics;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -24,6 +25,10 @@ public partial class MainWindow
 
     private DustReviewDraft? _dustReviewDraft;
     private readonly List<DustTrainingSample> _dustTrainingSamples = [];
+    private readonly DustTrainingStore _dustTrainingStore = new(Path.Combine(Settings.DataDir, "pureneg-training-samples"));
+    private Task _dustTrainingSaveTask = Task.CompletedTask;
+    private Task _dustTrainingLoadTask = Task.CompletedTask;
+    private bool _dustTrainingClosed;
     private bool _exportingDustTraining;
     private bool _installingPureNeg;
     private CancellationTokenSource? _dustReviewOperation;
@@ -37,8 +42,10 @@ public partial class MainWindow
 
     private void InitializeDustToolbar()
     {
+        _dustTrainingLoadTask = RestoreDustTrainingSamplesAsync();
         Closed += (_, _) =>
         {
+            _dustTrainingClosed = true;
             ResetDustReview(refresh: false);
             ClearDustTrainingSamples();
             PureNegModelSession.Shutdown();
@@ -153,8 +160,11 @@ public partial class MainWindow
         DustRedoBtn.IsEnabled = idle && (reviewing ? _dustReviewDraft!.Editor.CanRedo : Vm?.CanRedo == true);
         DustRadiusButton.IsEnabled = idle;
         DustOptionsBtn.IsEnabled = idle;
-        DustTrainingMenuItem.IsEnabled = idle && Vm?.HasLongTask != true &&
-            (_dustReviewDraft?.Sample is not null || _dustTrainingSamples.Count > 0);
+        bool hasTrainingSamples = _dustReviewDraft?.Sample is not null || _dustTrainingSamples.Count > 0;
+        DustTrainingExportButton.IsEnabled = idle && Vm?.HasLongTask != true && hasTrainingSamples;
+        ToolTip.SetTip(DustTrainingExportButton, Loc.T(hasTrainingSamples
+            ? "已有保留的除尘样本可分享，重启后仍可导出；仅导出所选照片，不会自动上传。"
+            : "先运行 PURE Neg 检测并检查修复结果，即可选择训练样本。"));
         DustDetectionOptions.IsEnabled = idle && PureNegComponent.IsSupported;
         DustClearActions.IsVisible = !reviewing;
         DustDetectEntry.IsEnabled = idle && !_installingPureNeg && Vm?.HasLongTask != true && Vm?.IsBusy != true && PureNegComponent.IsSupported;
@@ -180,8 +190,11 @@ public partial class MainWindow
         DustReviewStatus.IsVisible = open;
     }
 
-    private async void OnPureNegAttributionClick(object? sender, RoutedEventArgs e) =>
+    private async void OnPureNegAttributionClick(object? sender, RoutedEventArgs e)
+    {
+        DustOptionsBtn.Flyout?.Hide();
         await new PureNegInfoDialog().ShowDialog(this);
+    }
 
     private async void OnInstallPureNegClick(object? sender, RoutedEventArgs e)
     {
@@ -305,8 +318,9 @@ public partial class MainWindow
             var selected = new DustMask(input.Width, input.Height, input.Bounds,
                 runs.Where(run => projection.VisibleIds.Contains(run.RegionId)).Select(run => run.Run));
             ReleaseDustDraft(_dustReviewDraft);
+            var previousSample = _dustTrainingSamples.LastOrDefault(s => ReferenceEquals(s.FrameKey, frame));
             var sample = new DustTrainingSample(frame, frame.Label, workspace.FullName, input, review,
-                selected, geometry, projection.VisibleIds);
+                selected, geometry, projection.VisibleIds, identity: previousSample?.Identity);
             _dustReviewDraft = new(input, geometry, projection, new(selected), Workspace: workspace.FullName,
                 Detection: review, Automatic: selected, Sample: sample);
             workspace = null; // The review owns its immutable input until apply/cancel/replacement.
@@ -432,8 +446,9 @@ public partial class MainWindow
         var runs = applied.Mask.EnumerateRuns().Select(run => new PureNegComponent.CandidateRun(0, run)).ToArray();
         var projection = new DustReviewProjection(geometry, applied.Input.Width, applied.Input.Height,
             applied.Input.Bounds, runs);
-        var previous = _dustTrainingSamples.FirstOrDefault(s => ReferenceEquals(s.FrameKey, vm.CurrentFrame) &&
-            s.Input.Stamp == applied.Input.Stamp && s.Final.ContentHash == applied.Mask.ContentHash && s.Geometry == geometry);
+        var previous = _dustTrainingSamples.LastOrDefault(s => s.Label == vm.CurrentFrame?.Label &&
+            s.Input.Stamp == applied.Input.Stamp && s.Input.Bounds == applied.Input.Bounds &&
+            s.Final.ContentHash == applied.Mask.ContentHash && DustTrainingStore.SameGeometry(s.Geometry, geometry));
         var sample = previous?.ForkReview(applied.Mask, previous.History);
         _dustReviewDraft = new(applied.Input, geometry, projection, new(applied.Mask), Detected: false,
             Workspace: sample?.Workspace, Detection: sample?.Detection, Automatic: sample?.Automatic,
@@ -500,13 +515,16 @@ public partial class MainWindow
             if (draft.Sample is { } sample)
             {
                 sample.UpdateReview(draft.Editor.Mask, DustDraftHistory(draft));
-                var previous = _dustTrainingSamples.FirstOrDefault(s => ReferenceEquals(s.FrameKey, sample.FrameKey));
+                var previous = _dustTrainingSamples.FirstOrDefault(s => s.Identity == sample.Identity);
                 if (previous is not null) { _dustTrainingSamples.Remove(previous); previous.Dispose(); }
                 _dustTrainingSamples.Add(sample);
+                _dustTrainingSaveTask = SaveDustTrainingSampleAsync(_dustTrainingSaveTask, sample);
                 // Transfer ownership to the session's thumbnail picker.
                 _dustReviewDraft = draft with { Workspace = null, Sample = null };
             }
             ResetDustReview(refresh: false);
+            if (_dustTrainingSamples.Count > 0)
+                DustReviewStatus.Text = Loc.T("已应用修复。可在「除尘设置」导出 PURE Neg 训练数据包，帮助原项目改进识别。");
         }
         catch (Exception ex)
         {
@@ -543,17 +561,53 @@ public partial class MainWindow
         UpdateDustToolbar();
     }
 
+    private async Task RestoreDustTrainingSamplesAsync()
+    {
+        try
+        {
+            var result = await Task.Run(() =>
+            {
+                var samples = _dustTrainingStore.Load(out int unavailable);
+                return (Samples: samples, Unavailable: unavailable);
+            });
+            foreach (var sample in result.Samples)
+            {
+                if (_dustTrainingClosed || _dustTrainingSamples.Any(s => s.Identity == sample.Identity)) sample.Dispose();
+                else _dustTrainingSamples.Add(sample);
+            }
+            if (result.Unavailable > 0 && !_dustTrainingClosed && Vm is { } vm)
+                vm.StatusText = Loc.T("部分已保留除尘样本无法读取，其余样本仍可导出。");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { if (!_dustTrainingClosed && Vm is { } vm) vm.StatusText = Loc.T("无法读取已保留除尘样本：") + ex.Message; }
+        if (!_dustTrainingClosed) UpdateDustToolbar();
+    }
+
+    private async Task SaveDustTrainingSampleAsync(Task previous, DustTrainingSample sample)
+    {
+        using var lease = sample.Acquire();
+        await previous;
+        try { await Task.Run(() => _dustTrainingStore.Save(sample)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            if (Vm is { } vm)
+                vm.StatusText = Loc.T("除尘修复已应用，但训练样本未能保留；请在退出前导出：") + ex.Message;
+        }
+    }
+
     private async void OnExportDustTrainingClick(object? sender, RoutedEventArgs e)
     {
         if (_dustReviewOperation is not null || Vm is not { HasLongTask: false } vm) return;
+        DustOptionsBtn.Flyout?.Hide();
         try
         {
+            await _dustTrainingLoadTask;
             CheckDustReviewGeometry();
             var samples = _dustTrainingSamples.ToList();
             if (_dustReviewDraft is { Sample: { } current } draft)
             {
                 current.UpdateReview(draft.Editor.Mask, DustDraftHistory(draft));
-                samples.RemoveAll(s => ReferenceEquals(s.FrameKey, current.FrameKey));
+                samples.RemoveAll(s => s.Identity == current.Identity);
                 samples.Add(current);
             }
             if (samples.Count == 0)
@@ -563,26 +617,36 @@ public partial class MainWindow
             }
             var dialog = new DustTrainingExportDialog(samples);
             var choices = await dialog.ShowDialog<DustTrainingBatch.Choice[]?>(this);
-            if (dialog.ClearCache) { ClearDustTrainingSamples(); return; }
+            if (dialog.ClearCache)
+            {
+                await _dustTrainingSaveTask;
+                var leasedSamples = _dustTrainingSamples.Concat(_dustReviewDraft?.Sample is { } draftSample ? [draftSample] : []).ToArray();
+                _dustTrainingStore.Clear(leasedSamples.Select(s => s.Workspace));
+                foreach (var sample in leasedSamples) sample.DeleteWhenReleased();
+                ClearDustTrainingSamples();
+                return;
+            }
             if (choices is not { Length: > 0 }) return;
             // Hold the selected source snapshots even if a frame change resets the review.
             using var batch = new DustTrainingBatch(choices);
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
-                Title = Loc.T("选择训练数据包存放位置"), AllowMultiple = false,
+                Title = Loc.T("选择 PURE Neg 训练数据包存放位置"), AllowMultiple = false,
             });
             if (folders.FirstOrDefault()?.TryGetLocalPath() is not { } parent || _dustReviewOperation is not null) return;
-            if (!vm.TryBeginLongTask(Loc.T("正在导出训练数据包"), out var owner)) return;
+            if (!vm.TryBeginLongTask(Loc.T("正在导出 PURE Neg 训练数据包"), out var owner)) return;
             _dustReviewOperation = owner;
             _exportingDustTraining = true;
             UpdateDustToolbar();
-            DustReviewStatus.Text = Loc.T("正在导出训练数据包");
+            DustReviewStatus.Text = Loc.T("正在导出 PURE Neg 训练数据包");
+            string? savedPath = null;
             try
             {
                 string path = await Task.Run(() => batch.Export(parent, owner.Token));
-                vm.StatusText = Loc.T("训练数据包已保存：") + path;
+                savedPath = path;
+                vm.StatusText = Loc.T("PURE Neg 训练数据包已保存：") + path;
                 if (ReferenceEquals(_dustReviewOperation, owner))
-                    DustReviewStatus.Text = Loc.T("训练数据包已保存：") + path;
+                    DustReviewStatus.Text = Loc.T("PURE Neg 训练数据包已保存：") + path;
             }
             catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
             finally
@@ -592,7 +656,14 @@ public partial class MainWindow
                 vm.EndLongTask(owner);
                 UpdateDustToolbar();
             }
+            if (savedPath is not null) await new PureNegTrainingFeedbackDialog(savedPath).ShowDialog(this);
         }
         catch (Exception ex) { vm.StatusText = DustReviewStatus.Text = Loc.T("训练数据包导出失败：") + ex.Message; }
+    }
+
+    private async void OnPureNegFeedbackClick(object? sender, RoutedEventArgs e)
+    {
+        DustOptionsBtn.Flyout?.Hide();
+        await new PureNegTrainingFeedbackDialog().ShowDialog(this);
     }
 }

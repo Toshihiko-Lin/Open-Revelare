@@ -1348,7 +1348,7 @@ public partial class MainWindow : Window
             {
                 bool saved;
                 IsEnabled = false;
-                try { saved = await vm.PrepareCloseAsync(); }
+                try { await _dustTrainingLoadTask; await _dustTrainingSaveTask; saved = await vm.PrepareCloseAsync(); }
                 finally { IsEnabled = true; }
                 if (saved) { CloseApproved = true; break; }
                 var choice = await new SaveFailureDialog(vm.SaveStatusDetail).ShowDialog<SaveFailureChoice>(this);
