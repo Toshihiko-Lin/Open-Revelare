@@ -8,18 +8,44 @@ using Avalonia.Threading;
 
 namespace OpenRevelare.Gui.Controls;
 
-/// <summary>A themed Avalonia card rendered in an embedded child surface. Unlike a PopupRoot,
-/// it belongs to the main window and can sit above a native preview without changing its HDR path.</summary>
-public sealed class EmbeddedOverlayHost : NativeControlHost
+/// <summary>Uses a child surface over the Windows native preview, and an ordinary Avalonia
+/// child elsewhere. X11 does not support EmbeddableControlRoot.</summary>
+public sealed class EmbeddedOverlayHost : Decorator
 {
     public static readonly StyledProperty<Control?> ContentProperty =
         AvaloniaProperty.Register<EmbeddedOverlayHost, Control?>(nameof(Content));
+    public Control? Content { get => GetValue(ContentProperty); set => SetValue(ContentProperty, value); }
+
+    private readonly WindowsEmbeddedOverlayHost? _nativeHost;
+
+    public EmbeddedOverlayHost()
+    {
+        if (OperatingSystem.IsWindows())
+            Child = _nativeHost = new WindowsEmbeddedOverlayHost();
+    }
+
+    internal void EnsureAboveNativePreview() => _nativeHost?.EnsureAboveNativePreview();
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property != ContentProperty) return;
+        if (_nativeHost is not null) _nativeHost.Content = Content;
+        else Child = Content;
+    }
+}
+
+/// <summary>A themed Avalonia card rendered above the Windows native preview.</summary>
+internal sealed class WindowsEmbeddedOverlayHost : NativeControlHost
+{
+    public static readonly StyledProperty<Control?> ContentProperty =
+        AvaloniaProperty.Register<WindowsEmbeddedOverlayHost, Control?>(nameof(Content));
     public Control? Content { get => GetValue(ContentProperty); set => SetValue(ContentProperty, value); }
     private EmbeddableControlRoot? _root;
     private INotifyPropertyChanged? _context;
 
     private bool _raiseQueued;
-    public EmbeddedOverlayHost() => LayoutUpdated += (_, _) => EnsureAboveNativePreview();
+    public WindowsEmbeddedOverlayHost() => LayoutUpdated += (_, _) => EnsureAboveNativePreview();
 
     internal void EnsureAboveNativePreview()
     {
