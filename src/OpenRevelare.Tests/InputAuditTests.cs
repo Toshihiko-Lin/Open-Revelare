@@ -19,6 +19,13 @@ public sealed class InputAuditTests
             var file = Assert.Single(report.Files);
             Assert.Null(file.Error); Assert.False(file.IsRaw); Assert.True(file.TiffCharacterized);
             Assert.True(file.RepeatPixelsMatch); Assert.Equal(2, file.Runs.Length);
+            Assert.Equal("openrevelare-input-audit-v2", report.Schema);
+            Assert.All(file.Runs, run =>
+            {
+                Assert.Equal(run.Samples.Samples, (long)run.PreviewWidth * run.PreviewHeight * 3);
+            });
+            Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))), file.SourceSha256Before);
+            Assert.Equal(file.SourceSha256Before, file.SourceSha256After);
             Assert.Equal((97, 63), (file.Width, file.Height));
             Assert.NotNull(file.FullComparison);
             Assert.True(file.FullComparison.SameDimensions);
@@ -41,6 +48,8 @@ public sealed class InputAuditTests
                 new(Repeats: 2, PreviewEdge: 80, CompareEdge: 40, CompareFull: true));
             var file = report.Files[0];
             Assert.Null(file.Error); Assert.True(file.IsRaw); Assert.True(file.RepeatPixelsMatch);
+            Assert.Equal(file.SourceSha256Before, file.SourceSha256After);
+            Assert.NotNull(file.SourceSha256Before);
             Assert.NotNull(file.RawMetadata); Assert.NotNull(file.RawMetadata.Levels);
             Assert.Contains("cpu=portable", file.RawMetadata.NativeBuild);
             Assert.Contains(file.Runs[0].Phases, p => p.Name == "raw.unpack");

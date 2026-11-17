@@ -5,6 +5,22 @@ namespace OpenRevelare.Tests;
 
 public sealed class SampleConversionTests
 {
+    [Fact]
+    public void Normalized_float_transfer_preserves_every_16_bit_code_including_both_endpoints()
+    {
+        ushort[] codes = Enumerable.Range(0, 65536).Select(i => (ushort)i).ToArray();
+        var original = (ushort[])codes.Clone();
+        var decoded = new float[codes.Length];
+        var roundtrip = new ushort[codes.Length];
+        SampleConversion.ToFloat(codes, decoded, 1f / 65535f);
+        Assert.Equal(0f, decoded[0]);
+        Assert.Equal(1f, decoded[^1]);
+        for (int i = 1; i < decoded.Length; i++) Assert.True(decoded[i] > decoded[i - 1]);
+        SampleConversion.ToUInt16(decoded, roundtrip);
+        Assert.Equal(original, roundtrip);
+        Assert.Equal(original, codes);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]

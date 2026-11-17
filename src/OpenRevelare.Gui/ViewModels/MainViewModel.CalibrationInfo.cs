@@ -6,6 +6,7 @@ namespace OpenRevelare.Gui.ViewModels;
 
 public sealed partial class MainViewModel
 {
+    private CaptureWorkflowRun? _captureWorkflow;
     // Only publish decoder provenance for the frame that supplied the preview.
     private string? _calibrationInfoFramePath;
 
@@ -14,6 +15,10 @@ public sealed partial class MainViewModel
         get
         {
             if (CurrentFrame is not { } frame) return Loc.T("输入：未载入");
+            if (_captureWorkflow?.Mode == CaptureWorkflowMode.CameraTransmission)
+                return Loc.T("输入：相机相对透射率 · CFA 校正后双线性插值 · 未做颜色表征");
+            if (_captureWorkflow?.Mode == CaptureWorkflowMode.ScannerInputIcc)
+                return Loc.T("输入：扫描仪 ICC 已转换为线性 ACEScg · 不代表物理密度已标定");
             if (RawDecode.IsRawExtension(frame.Path))
                 return Loc.T("输入：相机原生 RAW · 未做设备颜色表征");
             if (_calibrationInfoFramePath != frame.Path || _previewWorking is null)
@@ -32,7 +37,14 @@ public sealed partial class MainViewModel
             ? Loc.T("密度：端点校准 + 本卷分光色度补偿")
             : Loc.T("密度：端点校准 · 未应用分光色度补偿");
 
-    public string CaptureCorrectionText => _decoupleMatrix is not null
+    public string CaptureCorrectionText => _captureWorkflow is { } capture
+        ? capture.Mode switch
+        {
+            CaptureWorkflowMode.CameraTransmission => Loc.T("采集校正：已应用暗场／无片场相对透射率"),
+            CaptureWorkflowMode.ScannerInputIcc => Loc.T("采集校正：已应用扫描仪输入 ICC"),
+            _ => Loc.T("采集校正：已记录上游流程 · 本软件未再次应用"),
+        }
+        : _decoupleMatrix is not null
         ? Loc.T("采集校正：已应用 RGB 分光解耦（反相前）")
         : HasCaptureCorrectionReferences
             ? Loc.T("采集校正：未应用 · 校正参考未成功载入")
@@ -42,7 +54,9 @@ public sealed partial class MainViewModel
         !string.IsNullOrWhiteSpace(_calSourceDir)
         || _calRgbPaths?.Any(p => !string.IsNullOrWhiteSpace(p)) == true;
 
-    public string CaptureCorrectionSourceText => _calRgbPaths is { Length: 3 } rgb
+    public string CaptureCorrectionSourceText => _captureWorkflow is { } capture
+        ? capture.Profile.Name + " · " + capture.Profile.DeviceModel + "\n" + capture.Recipe
+        : _calRgbPaths is { Length: 3 } rgb
         ? string.Join(Environment.NewLine,
             Loc.F($"R 参考：{rgb[0]}"), Loc.F($"G 参考：{rgb[1]}"), Loc.F($"B 参考：{rgb[2]}"))
         : !string.IsNullOrWhiteSpace(_calSourceDir)
@@ -55,7 +69,9 @@ public sealed partial class MainViewModel
         ? Loc.T("色度补偿来源：本卷内容帧解耦前后的色度统计；不是独立标准密度拟合。")
         : Loc.T("密度来源：当前片基与亮端参数；采样或自动分析记录见下方各项。未建立标准密度映射。");
 
-    public string CaptureCorrectionScopeText => Loc.T(
+    public string CaptureCorrectionScopeText => _captureWorkflow is not null
+        ? Loc.T("已随工程保存配置快照、原始与工作文件摘要。重开工程直接使用工作副本，不再次应用校准。相机相对透射率与扫描 ICC 色度表征的含义不同；实体设置、材料适用性和绝对误差仍需独立验证。")
+        : Loc.T(
         "RGB 分光参考须与本卷使用相同设备、光源和采集设置。当前未自动核验硬件或参考内容指纹；更换条件后需重新导入校正参考并校准。LUT 只决定外观，不参与设备标定。");
 
     private void NotifyCalibrationInfo()

@@ -5,6 +5,9 @@ namespace OpenRevelare.Gui.Models;
 /// <summary>Result of the import dialog — port of Python ImportDialog.ImportResult.</summary>
 public sealed class ImportConfig
 {
+    public DeviceCalibrationProfile? CaptureProfile { get; set; }
+    public CaptureWorkflowMode CaptureMode { get; set; }
+    public CaptureWorkflowRun? CaptureWorkflow { get; set; }
     public List<string> Paths { get; } = new();
 
     /// <summary>

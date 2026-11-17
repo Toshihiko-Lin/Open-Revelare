@@ -12,12 +12,20 @@ public sealed record InputAuditOptions(int Repeats = 3, int Workers = 1, int Pre
 public sealed record InputPhase(string Name, double Milliseconds, IReadOnlyDictionary<string, object?> Tags);
 public sealed record InputSampleStatistics(double[] Mean, double[] Minimum, double[] Maximum,
     long NonFiniteSamples, long AtOrBelowZeroSamples, long AtOrAboveOneSamples, long Samples);
-public sealed record InputAuditRun(double Milliseconds, string PixelSha256, InputSampleStatistics Samples, InputPhase[] Phases);
+public sealed record InputAuditRun(double Milliseconds, string PixelSha256, InputSampleStatistics Samples, InputPhase[] Phases)
+{
+    public int PreviewWidth { get; init; }
+    public int PreviewHeight { get; init; }
+}
 public sealed record InputAuditComparison(double[] MeanDifference, double? PixelRmse, bool SameDimensions, string Meaning);
 public sealed record InputFileAudit(string Path, bool IsRaw, RawColorMetadata? RawMetadata,
     string? TiffEvidence, bool? TiffCharacterized, string? DecodeRecipe, int Width, int Height,
     InputAuditRun[] Runs, bool RepeatPixelsMatch, InputAuditComparison? FullComparison,
-    string? ComparisonSkipped, string? Error);
+    string? ComparisonSkipped, string? Error)
+{
+    public string? SourceSha256Before { get; init; }
+    public string? SourceSha256After { get; init; }
+}
 public sealed record InputAuditReport(string Schema, DateTime CreatedUtc, InputAuditOptions Options,
     int EffectiveWorkers, string Runtime, string NativeBuild, InputFileAudit[] Files, string Limitation);
 
@@ -58,10 +66,12 @@ public static class InputAudit
             files[i] = AuditFile(paths[i], options, phases, token);
             return ValueTask.CompletedTask;
         });
-        return new("openrevelare-input-audit-v1", DateTime.UtcNow, options, workers,
+        return new("openrevelare-input-audit-v2", DateTime.UtcNow, options, workers,
             System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, RawDecode.NativeBuildInfo, files,
             "Original-file evidence and internal consistency only. No external colour reference: " +
-            "no absolute colour-error claim, no inferred film/illuminant, no assumed neutral pixels. OS disk cache is unspecified.");
+            "no absolute colour-error claim, no inferred film/illuminant, no assumed neutral pixels. " +
+            "Source hashing precedes decode and warms the OS cache; no cold-disk timing claim. " +
+            "Dark, negative and extended values are described, not rejected as invalid capture data.");
     }
 
     private static InputFileAudit AuditFile(string path, InputAuditOptions options,
@@ -72,6 +82,7 @@ public static class InputAudit
         try
         {
             var revision = RawSourceCache.Revision.Capture(path);
+            string sourceBefore = SourceHash(path, token);
             raw = RawDecode.IsRawExtension(path);
             RawColorMetadata? metadata = raw ? RawDecode.ReadColorMetadata(path) : null;
             TiffInputDetection? tiff = raw ? null : TiffInputDetector.Detect(path);
@@ -111,7 +122,10 @@ public static class InputAudit
                     }
                     double elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
                     string hash = Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(preview.Data.AsSpan())));
-                    runs.Add(new(elapsed, hash, Statistics(preview), timings.ToArray()));
+                    runs.Add(new(elapsed, hash, Statistics(preview), timings.ToArray())
+                    {
+                        PreviewWidth = preview.Width, PreviewHeight = preview.Height,
+                    });
                 }
                 finally { phases.TryRemove(trace.TraceId, out _); }
             }
@@ -140,13 +154,34 @@ public static class InputAudit
                     "Pixel RMSE is omitted when reduction grids have different dimensions or samples are non-finite.");
             }
             if (RawSourceCache.Revision.Capture(path) != revision) throw new IOException("Source changed during audit.");
+            string sourceAfter = SourceHash(path, token);
+            if (sourceBefore != sourceAfter || RawSourceCache.Revision.Capture(path) != revision)
+                throw new IOException("Source changed during audit.");
             return new(path, raw, metadata, tiff is null ? null : $"{tiff.Evidence}: {tiff.Diagnostic}",
                 tiffCharacterized,
-                recipe, width, height, runs.ToArray(), runs.Select(r => r.PixelSha256).Distinct().Count() == 1, comparison, skipped, null);
+                recipe, width, height, runs.ToArray(), runs.Select(r => r.PixelSha256).Distinct().Count() == 1, comparison, skipped, null)
+            {
+                SourceSha256Before = sourceBefore, SourceSha256After = sourceAfter,
+            };
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         { return new(path, raw, null, null, null, null, 0, 0, [], false, null, null, ex.Message); }
+    }
+
+    private static string SourceHash(string path, CancellationToken token)
+    {
+        using var stream = File.OpenRead(path);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[128 * 1024];
+        int count;
+        while ((count = stream.Read(buffer)) > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            hash.AppendData(buffer, 0, count);
+        }
+        token.ThrowIfCancellationRequested();
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
 
     public static InputSampleStatistics Statistics(ImageBuffer image)

@@ -17,6 +17,8 @@ internal static class Native
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int or_raw_open_file(RawHandle raw, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int or_raw_open_file_wide(RawHandle raw, [MarshalAs(UnmanagedType.LPWStr)] string path);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int or_raw_unpack(RawHandle raw);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_mosaic_v1(RawHandle raw, [Out] int[] info, [Out] double[] exposure);
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_body_serial_v1(RawHandle raw);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_error(int error);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern int or_raw_value(RawHandle raw, int key);
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr or_raw_model(RawHandle raw, int model);
@@ -129,6 +131,24 @@ internal sealed class RawContext : IDisposable
         }
     }
     public void Unpack() => Native.Check(Native.or_raw_unpack(_raw));
+    internal unsafe CameraRawMosaic CopyUnprocessedMosaic(string sourcePath, string sessionId)
+    {
+        var info = new int[12]; var exposure = new double[5];
+        IntPtr pointer;
+        try { pointer = Native.or_raw_mosaic_v1(_raw, info, exposure); }
+        catch (EntryPointNotFoundException ex) { throw new NotSupportedException("Rebuild the native RAW bridge for physical CFA capture.", ex); }
+        if (pointer == IntPtr.Zero) throw new NotSupportedException("Physical capture currently requires an unpacked integer Bayer RAW mosaic.");
+        var samples = new ushort[checked(info[0] * info[1])];
+        var source = (ushort*)pointer.ToPointer();
+        for (int y = 0; y < info[1]; y++)
+            new ReadOnlySpan<ushort>(source + checked((long)(y + info[5]) * info[6] + info[4]), info[0])
+                .CopyTo(samples.AsSpan(y * info[0], info[0]));
+        var camera = ImageParams;
+        string serial = Marshal.PtrToStringAnsi(Native.or_raw_body_serial_v1(_raw)) ?? "";
+        return new(samples, new(info[0], info[1], info[2], info[3], info[4], info[5], info[7],
+            string.Join(",", info[8..12]), camera.Make, camera.Model, serial,
+            exposure[0], exposure[1], exposure[2], sessionId, Native.BuildInfo, exposure[3], exposure[4]), Path.GetFullPath(sourcePath));
+    }
     public void Process(int fbdd, bool halfSize, System.Drawing.Rectangle? crop)
     {
         uint[]? box = crop is { } c ? [(uint)c.X, (uint)c.Y, (uint)c.Width, (uint)c.Height] : null;

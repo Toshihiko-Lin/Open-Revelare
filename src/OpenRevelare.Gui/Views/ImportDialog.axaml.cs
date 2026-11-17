@@ -57,6 +57,7 @@ public partial class ImportDialog : Window
     public ImportDialog(IEnumerable<string> initialPaths, bool canAddToCurrent)
     {
         InitializeComponent();
+        ReloadCaptureProfiles();
         RawFormatsHint.Text = string.Join(" · ", RawDecode.RawExtensions
             .OrderBy(extension => extension, StringComparer.Ordinal)
             .Select(extension => extension.ToUpperInvariant()));
@@ -243,6 +244,8 @@ public partial class ImportDialog : Window
         if (!lensDetection.Current) return;
         var cfg = new ImportConfig
         {
+            CaptureProfile = SelectedCaptureProfile,
+            CaptureMode = SelectedCaptureMode,
             PathA = SrcA.IsChecked == true,
             CalDir = SrcA.IsChecked == true ? CalEdit.Text : null,
             LccEnabled = LccChk.IsChecked == true,
@@ -253,6 +256,20 @@ public partial class ImportDialog : Window
             SplitStrips = SplitChk.IsChecked == true,
             // Left at Unspecified on purpose: that is now "detect", not "unanswered".
         };
+        if (!AddToCurrent && cfg.CaptureProfile is { } capture)
+        {
+            try
+            {
+                foreach (string path in Files) CaptureWorkflow.ValidateSelection(capture, cfg.CaptureMode, !IsScan(path));
+                if (cfg.CaptureMode != CaptureWorkflowMode.RecordUpstream && (cfg.PathA || cfg.LccEnabled))
+                    throw new InvalidOperationException(Loc.T("应用采集校准时请关闭独立的 RGB 解耦和 LCC，避免重复或跨域校正。"));
+            }
+            catch (Exception ex)
+            {
+                await new InfoDialog(Loc.T("采集校准配置不适用"), ex.Message).ShowDialog(this);
+                return;
+            }
+        }
         // The dialog's choices become the new defaults, so the next import opens on them.
         if (!AddToCurrent && (Settings.Current.AutoInvertOnImport != cfg.AutoInvert
             || Settings.Current.SplitStripsOnImport != cfg.SplitStrips))

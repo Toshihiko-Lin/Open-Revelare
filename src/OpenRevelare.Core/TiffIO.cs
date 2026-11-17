@@ -21,6 +21,24 @@ namespace OpenRevelare.Core;
 /// </summary>
 public static class TiffIO
 {
+    /// <summary>Explicit scanner input transform. Embedded ICC is rejected to prevent a second conversion.</summary>
+    public static WorkingFrame LoadWithScannerInputProfile(string path, ColorProfileRef profile,
+        IColorManagementEngine colorManagement)
+    {
+        using (var tif = OpenInput(path) ?? throw new IOException("Could not open scanner TIFF."))
+            if (tif.GetField(TiffTag.ICCPROFILE) is not null)
+                throw new InvalidOperationException("Scanner input already contains an ICC profile. Use the recorded upstream workflow instead of applying another input ICC.");
+        return DecodeManagedWithProfile(path, FrameSourceIds.ForPath(path), profile,
+            ColorReference.SceneReferred, "explicit scanner input ICC -> LittleCMS -> linear ACEScg",
+            colorManagement, null, TransformPrecision.Exact)[0];
+    }
+
+    /// <summary>Lossless float capture intermediate, before inversion. Camera channels have no fabricated ICC.</summary>
+    public static void ExportCaptureIntermediate(ImageBuffer pixels, string path, bool linearAcesCg, string description)
+        => ExportFile.Write(path, temporary => WriteTiffFloat32(pixels, temporary, CompressionMode.Deflate,
+            linearAcesCg ? IccProfiles.Build(ColorSpaces.AcesCg) : null, description + "\nOR_CAPTURE_SOURCE_STEP="
+                + pixels.SourceQuantisationStep.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+
     // EXIF UserComment (37510) lives in an EXIF sub-IFD by the spec, so LibTiff refuses
     // SetField for it on the main IFD. tifffile writes it into the main IFD anyway via
     // extratags, and that is what export.py relies on — so mirror it by registering the
@@ -1290,7 +1308,7 @@ public static class TiffIO
         if (spp < 1)
             throw new NotSupportedException($"unexpected SamplesPerPixel {spp}");
 
-        float codeStep = isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        float codeStep = isFloat ? CaptureSourceStep(tif) : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
         float sampleScale = isFloat ? 1.0f : codeStep;
         SampleWindow[] windows = SampleWindow.Resolve(w, h, region);
         float[][] encoded = ReadWindows(tif, path, spp, bps, sampleScale, windows, stage);
@@ -1326,7 +1344,16 @@ public static class TiffIO
     {
         int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
         bool isFloat = ValidateSampleStorage(tif, bps);
-        return isFloat ? 0.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+        return isFloat ? CaptureSourceStep(tif) : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
+    }
+
+    private static float CaptureSourceStep(Tiff tif)
+    {
+        string description = tif.GetField(TiffTag.IMAGEDESCRIPTION)?[0].ToString() ?? "";
+        const string prefix = "OR_CAPTURE_SOURCE_STEP=";
+        string? line = description.Split('\n').FirstOrDefault(v => v.StartsWith(prefix, StringComparison.Ordinal));
+        return line is not null && float.TryParse(line[prefix.Length..], System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float step) && float.IsFinite(step) && step >= 0 ? step : 0;
     }
 
     /// <summary>
@@ -1371,6 +1398,30 @@ public static class TiffIO
 
     /// <summary>Load a TIFF into a linear-light f32 image.</summary>
     public static ImageBuffer LoadTiff(string path, bool inputIsSrgb) => LoadTiff(path, inputIsSrgb, null)[0];
+
+    /// <summary>Explicit scanner-measurement path. Copies device codes without CMM/TRC or inferred primaries.</summary>
+    public static ImageBuffer LoadScannerMeasurementTiff(string path)
+    {
+        SuppressLibTiffWarnings();
+        using Tiff tif = OpenInput(path) ?? throw new IOException("Cannot open scanner measurement TIFF.");
+        int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt(), h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+        int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
+        int spp = tif.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt();
+        if (tif.IsTiled() || spp != 3 || bps is not (16 or 32)
+            || (Photometric)tif.GetField(TiffTag.PHOTOMETRIC)[0].ToInt() != Photometric.RGB
+            || (PlanarConfig)(tif.GetField(TiffTag.PLANARCONFIG)?[0].ToInt() ?? 1) != PlanarConfig.CONTIG
+            || (tif.GetField(TiffTag.ORIENTATION)?[0].ToInt() ?? 1) != 1
+            || tif.GetField(TiffTag.ICCPROFILE) is not null || tif.GetField(TiffTag.TRANSFERFUNCTION) is not null)
+            throw new NotSupportedException("Measurement requires untiled, top-left, 16-bit or float RGB device TIFF without ICC/TRC. Export device data; do not just strip a processed image's profile.");
+        bool floating = ValidateSampleStorage(tif, bps);
+        long bytes = checked((long)w * h * 12);
+        if (w <= 0 || h <= 0 || bytes > int.MaxValue * 4L
+            || (PhysicalMemory.TryGetAvailableBytes(out long free) && bytes + (128L << 20) > free))
+            throw new InvalidOperationException("Scanner measurement image exceeds available memory.");
+        float step = floating ? 1f : 1f / 65535f;
+        SampleWindow[] windows = SampleWindow.Resolve(w, h, null);
+        return Buffers(windows, ReadWindows(tif, path, spp, bps, step, windows, null), floating ? 0 : step)[0];
+    }
 
     /// <summary>
     /// The frozen v1 decode of one PIXEL rectangle at full resolution — the same pixels the whole
@@ -1428,7 +1479,7 @@ public static class TiffIO
         IccTransform icc = ResolveIcc(tif, inputIsSrgb, path, bps);
 
         float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
-        float codeStep = isFloat ? 0.0f : inv;
+        float codeStep = isFloat ? CaptureSourceStep(tif) : inv;
 
         RowTransform? transform = null;
         if (inputIsSrgb)
@@ -1523,7 +1574,7 @@ public static class TiffIO
         int scanlineSize = tif.ScanlineSize();
         byte[] buf = new byte[scanlineSize];
         float inv = isFloat ? 1.0f : bps == 16 ? 1.0f / 65535.0f : 1.0f / 255.0f;
-        float codeStep = isFloat ? 0.0f : inv;
+        float codeStep = isFloat ? CaptureSourceStep(tif) : inv;
 
         int readFrom = CompressionOf(tif) == Compression.NONE ? y0 : y0 / RowsPerStrip(tif) * RowsPerStrip(tif);
         for (int y = readFrom; y < y1; y++)

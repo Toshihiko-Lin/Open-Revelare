@@ -394,6 +394,7 @@ public partial class MainViewModel
         SetColorPipelineVersion(incomingPipelineVersion);
         _useRelativeProjectPaths = data.UseRelativePaths;
         SetTiffInputAssumption(incomingTiffInputAssumption);
+        _captureWorkflow = data.Meta.CaptureWorkflow;
         // 旧模型的工程载入后画面会变——面板顶部据此提示重跑标定。
         _legacyCalibration = data.NeedsRecalibration;
         NeedsRecalibration = data.NeedsRecalibration;
@@ -603,6 +604,7 @@ public partial class MainViewModel
 
         // Retain calibration SOURCE paths so a saved .ncproj can recompute matrices on load.
         _calSourceDir = cfg.PathA ? cfg.CalDir : null;
+        _captureWorkflow = cfg.CaptureWorkflow;
         _declaredPathA = cfg.PathA;
         _calRgbPaths = calRgb;
         _lccSourcePath = (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath)) ? cfg.LccPath : null;
@@ -907,6 +909,7 @@ public partial class MainViewModel
         _pendingSprocketPrompt = true;
         if (!_configLoad)   // config path pre-sets roll-level ops before this call; don't wipe them
         {
+            _captureWorkflow = null;
             _declaredPathA = false;
             _decoupleMatrix = null; _decoupleChromaMatrix = null;
             _calSourceDir = null; _calRgbPaths = null; _lccSourcePath = null;

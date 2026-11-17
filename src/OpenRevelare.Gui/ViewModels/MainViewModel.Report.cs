@@ -147,6 +147,19 @@ public sealed partial class MainViewModel
         if (CurrentFrame is not { } frame) { sb.AppendLine(Loc.T("  —")); return; }
 
         string path = frame.Path;
+        if (_captureWorkflow is { } capture)
+        {
+            sb.AppendLine("  " + CaptureCorrectionText);
+            sb.AppendLine("  " + CaptureCorrectionSourceText);
+            var origin = capture.Sources.FirstOrDefault(s => s.WorkingPath == path);
+            if (origin is not null)
+            {
+                sb.AppendLine("  Original: " + origin.OriginalPath);
+                sb.AppendLine("  Original SHA256: " + origin.OriginalSha256);
+                sb.AppendLine("  Working SHA256: " + origin.WorkingSha256);
+                sb.AppendLine("  Above-open CFA samples: " + origin.AboveOpenSamples);
+            }
+        }
         if (RawDecode.IsRawExtension(path))
         {
             sb.AppendLine(Loc.F($"  路径　　相机 RAW（LibRaw，UniWB 线性解码；后端 {Settings.Current.DecodeBackend}）"));

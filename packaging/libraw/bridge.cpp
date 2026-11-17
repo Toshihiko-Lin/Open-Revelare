@@ -41,6 +41,46 @@ API int or_raw_open_file(LibRaw* r, const char* path) { return r->open_file(path
 API int or_raw_open_file_wide(LibRaw* r, const wchar_t* path) { return r->open_file(path); }
 #endif
 API int or_raw_unpack(LibRaw* r) { return r->unpack(); }
+// Unprocessed, active-area Bayer samples after unpack only. No dcraw_process,
+// black subtraction, WB, normalization, demosaic or orientation is performed.
+// Pointer is borrowed until context disposal; managed code copies it immediately.
+API const unsigned short* or_raw_mosaic_v1(LibRaw* r, int* info, double* exposure) {
+    const auto& s = r->imgdata.sizes;
+    if (!r->imgdata.rawdata.raw_image || r->imgdata.idata.filters < 1000
+        || r->imgdata.idata.colors != 3 || r->is_fuji_rotated()
+        || s.raw_pitch < unsigned(s.raw_width) * 2 || s.raw_pitch % 2
+        || !s.width || !s.height || unsigned(s.left_margin) + s.width > s.raw_width
+        || unsigned(s.top_margin) + s.height > s.raw_height) return nullptr;
+    int counts[4] = {};
+    for (int row = 0; row < 2; ++row)
+        for (int col = 0; col < 2; ++col) {
+            const int channel = r->COLOR(row, col);
+            if (channel < 0 || channel > 3) return nullptr;
+            info[8 + row * 2 + col] = channel;
+            ++counts[channel];
+        }
+    if (counts[0] != 1 || counts[2] != 1 || counts[1] + counts[3] != 2) return nullptr;
+    int red = -1, blue = -1;
+    for (int i = 0; i < 4; ++i) {
+        if (info[8+i] == 0) red = i;
+        if (info[8+i] == 2) blue = i;
+    }
+    if ((red ^ blue) != 3) return nullptr;
+    for (int row = 0; row < 8; ++row)
+        for (int col = 0; col < 2; ++col)
+            if (r->COLOR(row, col) != info[8 + (row % 2) * 2 + col]) return nullptr;
+    info[0] = s.width; info[1] = s.height;
+    info[2] = s.raw_width; info[3] = s.raw_height;
+    info[4] = s.left_margin; info[5] = s.top_margin;
+    info[6] = s.raw_pitch / 2; info[7] = s.flip;
+    exposure[0] = r->imgdata.other.iso_speed;
+    exposure[1] = r->imgdata.other.shutter;
+    exposure[2] = r->imgdata.color.maximum;
+    exposure[3] = r->imgdata.other.aperture;
+    exposure[4] = r->imgdata.other.focal_len;
+    return r->imgdata.rawdata.raw_image;
+}
+API const char* or_raw_body_serial_v1(LibRaw* r) { return r->imgdata.shootinginfo.BodySerial; }
 API const char* or_raw_error(int code) { return libraw_strerror(code); }
 API int or_raw_value(LibRaw* r, int key) {
     const auto& s = r->imgdata.sizes;

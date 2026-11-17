@@ -174,6 +174,7 @@
 
                     <MenuItem Header="{i18n:T '设置(_S)'}">
                         <MenuItem Header="{i18n:T '偏好设置…（Ctrl+,）'}" Click="OnPreferencesClick" />
+                        <MenuItem Header="{i18n:T '设备校准…'}" Click="OnDeviceCalibrationClick" />
                         <Separator />
                         <MenuItem Header="{i18n:T '资源与文件夹'}">
                             <MenuItem Header="{i18n:T '打开 LUT 文件夹'}" Click="OnOpenLutFolderClick" />

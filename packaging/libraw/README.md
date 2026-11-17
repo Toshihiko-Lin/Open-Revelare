@@ -13,6 +13,11 @@ build. Windows uses Visual Studio 2022 with the C++ workload; macOS uses Xcode
 command-line tools; Linux uses GCC or Clang plus make. CMake is available in
 the Visual Studio CMake component or via `python -m pip install cmake`.
 
+The physical-capture trial additionally requires `or_raw_mosaic_v1` and
+`or_raw_body_serial_v1` from the current bridge. It copies unpacked integer Bayer
+active-area samples without invoking `dcraw_process`; unsupported layouts are
+rejected. Older bridge binaries retain normal decoding but cannot run this trial.
+
 ```powershell
 ./packaging/libraw/build-windows.ps1
 ```

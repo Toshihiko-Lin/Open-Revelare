@@ -1115,6 +1115,11 @@ public partial class MainViewModel
     public async Task AddImagesAsync(IReadOnlyList<string> paths)
     {
         if (Frames.Count == 0 || paths.Count == 0) return;
+        if (_captureWorkflow is not null)
+        {
+            StatusText = Loc.T("此卷已绑定采集校准流程。请通过相同配置另建一卷，以免加入未经校准的输入。");
+            return;
+        }
 
         // Type consistency: can't mix RAW and TIFF in one roll (they calibrate differently).
         bool rollRaw = RollIsRaw;

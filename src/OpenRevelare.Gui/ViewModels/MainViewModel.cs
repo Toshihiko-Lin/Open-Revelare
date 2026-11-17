@@ -5015,6 +5015,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             ColorPipelineVersion = _colorPipelineVersion,
             Meta = new Project.RollMeta
             {
+                CaptureWorkflow = _captureWorkflow,
                 InputType = RollIsRaw ? "raw" : "tiff",
                 SourcePath = _declaredPathA ? "A" : "B",
                 TiffIsLinear = RollIsRaw

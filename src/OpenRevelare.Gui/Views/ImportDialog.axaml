@@ -59,6 +59,17 @@
                 <StackPanel Name="ImportProcessingOptions" Spacing="12">
                     <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
                         <StackPanel Spacing="8">
+                            <TextBlock Text="{i18n:T '采集校准'}" FontWeight="SemiBold" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <ComboBox Name="CaptureProfileChoice" HorizontalAlignment="Stretch" SelectionChanged="OnCaptureProfileChanged" />
+                                <Button Grid.Column="1" Content="{i18n:T '管理与采集引导…'}" Click="OnManageCaptureProfiles" Margin="6,0,0,0" />
+                            </Grid>
+                            <ComboBox Name="CaptureModeChoice" HorizontalAlignment="Stretch" SelectionChanged="OnCaptureModeChanged" />
+                            <TextBlock Name="CaptureWorkflowHint" Classes="groupHint" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
+                        <StackPanel Spacing="8">
                             <TextBlock Text="{i18n:T '翻拍校正（相机 RAW）'}" FontWeight="SemiBold" />
                             <Grid ColumnDefinitions="84,*">
                                 <TextBlock Text="{i18n:T '翻拍光源'}" VerticalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />

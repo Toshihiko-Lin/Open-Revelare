@@ -46,6 +46,7 @@ public static class Project
     // ── Public data model ───────────────────────────────────────────────────────
     public sealed class RollMeta
     {
+        public CaptureWorkflowRun? CaptureWorkflow;
         public string InputType = "raw";      // "raw" | "tiff"
         public string SourcePath = "B";       // "A" (RGB light) | "B" (white light)
 
@@ -337,6 +338,7 @@ public static class Project
     // ── roll_meta ─────────────────────────────────────────────────────────────
     private static JsonObject SerRollMeta(RollMeta rm)
     {
+        rm.CaptureWorkflow?.Validate();
         var d = new JsonObject
         {
             ["input_type"] = rm.InputType,
@@ -351,6 +353,8 @@ public static class Project
             d["cal_rgb_paths"] = o;
         }
         if (rm.LccPath is not null) d["lcc_path"] = rm.LccPath;
+        if (rm.CaptureWorkflow is not null)
+            d["capture_workflow"] = JsonSerializer.SerializeToNode(rm.CaptureWorkflow);
         if (rm.LccEnabled is { } enabled) d["lcc_enabled"] = enabled;
         if (SerCalibrationDiagnostics(rm) is { } diagnostics)
             d["calibration_diagnostics"] = diagnostics;
@@ -374,6 +378,7 @@ public static class Project
         }
         var result = new RollMeta
         {
+            CaptureWorkflow = d["capture_workflow"]?.Deserialize<CaptureWorkflowRun>(),
             InputType = Str(d, "input_type", "raw"),
             SourcePath = Str(d, "source_path", "B"),
             TiffIsLinear = d["tiff_is_linear"]?.GetValue<bool>(),
@@ -388,6 +393,7 @@ public static class Project
             RollNote = Str(d, "roll_note", ""), Format = Str(d, "format", ""),
         };
         DesCalibrationDiagnostics(d["calibration_diagnostics"] as JsonObject, result);
+        result.CaptureWorkflow?.Validate();
         return result;
     }
 

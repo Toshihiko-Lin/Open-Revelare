@@ -6,6 +6,35 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow
 {
+    private async Task<bool> PrepareCaptureWorkflowAsync(Models.ImportConfig config)
+    {
+        if (Vm is not { } vm || config.CaptureProfile is not { } profile) return true;
+        var engine = vm.PresentationColorManagement;
+        vm.IsBusy = true;
+        vm.StatusText = Loc.T("正在准备采集校准输入…");
+        try
+        {
+            string directory = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(config.Paths[0]))!, "OpenRevelare-capture");
+            var run = await Task.Run(() => OpenRevelare.Core.CaptureWorkflow.Prepare(profile, config.CaptureMode,
+                config.Paths, directory, engine, (done, count) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    vm.StatusText = Loc.F($"正在准备采集校准输入：{done}/{count}"))));
+            config.CaptureWorkflow = run;
+            if (run.Mode != OpenRevelare.Core.CaptureWorkflowMode.RecordUpstream)
+            {
+                config.Paths.Clear(); config.Paths.AddRange(run.Sources.Select(s => s.WorkingPath));
+                config.TiffInputAssumption = OpenRevelare.Core.TiffInputAssumption.Linear;
+                if (run.Mode == OpenRevelare.Core.CaptureWorkflowMode.CameraTransmission) config.SplitStrips = false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await new InfoDialog(Loc.T("采集校准准备失败"), ex.Message).ShowDialog(this);
+            return false;
+        }
+        finally { vm.IsBusy = false; vm.StatusText = ""; }
+    }
+
     private bool _dropImportPending;
 
     private void SetUpDropImport()

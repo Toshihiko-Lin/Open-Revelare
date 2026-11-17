@@ -88,6 +88,7 @@ public partial class MainWindow
             Item(Loc.T("关于 OpenRevelare"), OnAboutClick),
             new NativeMenuItemSeparator(),
             Item(Loc.T("偏好设置…"), OnPreferencesClick, gesture: "OemComma"),
+            Item(Loc.T("设备校准…"), OnDeviceCalibrationClick),
         },
     };
 

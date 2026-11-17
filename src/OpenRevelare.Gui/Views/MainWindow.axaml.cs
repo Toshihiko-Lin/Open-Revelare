@@ -2538,6 +2538,7 @@ public partial class MainWindow : Window
             }
         }
 
+        if (!await PrepareCaptureWorkflowAsync(cfg)) return;
         if (!await RunSplitPrePassAsync(cfg)) return;
 
         await Vm.LoadRollWithConfigAsync(cfg);
@@ -3039,6 +3040,9 @@ public partial class MainWindow : Window
     {
         Vm?.ResetAdjustments();
     }
+
+    private async void OnDeviceCalibrationClick(object? sender, RoutedEventArgs e)
+        => await new DeviceCalibrationDialog().ShowDialog(this);
 
     private async void OnPreferencesClick(object? sender, RoutedEventArgs e)
     {
