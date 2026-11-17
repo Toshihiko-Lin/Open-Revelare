@@ -26,7 +26,7 @@
                     <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold"
                                ToolTip.Tip="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
                     <TextBlock Name="ScannerDngHint" IsVisible="False" Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '爱普生 VueScan DNG：支持未压缩的 16 位线性 RGB/RGBI，自动读取完整扫描图。建议关闭 Raw save film；红外通道不参与颜色计算，也不用于自动除尘。其他扫描 DNG 请先输出 48 位 RGB 原始 TIFF。'}" />
+                               Text="{i18n:T '爱普生 VueScan DNG：支持未压缩的 16 位线性 RGB/RGBI，自动读取完整扫描图。建议关闭 Raw save film；红外通道不参与颜色计算；RGBI 文件可使用红外除尘。其他扫描 DNG 请先输出 48 位 RGB 原始 TIFF。'}" />
                     <ListBox Name="FileList" Height="112" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
                     <WrapPanel Orientation="Horizontal">

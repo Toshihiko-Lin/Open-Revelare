@@ -15,6 +15,47 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow
 {
+    private async void OnInfraredDustClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { HasImage: true } vm || vm.CurrentFrame is not { } frame ||
+            HasDustReview || vm.IsBusy || vm.HasLongTask) return;
+        using var owner = new CancellationTokenSource();
+        _dustReviewOperation = owner;
+        UpdateDustToolbar();
+        vm.StatusText = Loc.T("正在读取红外通道并检测灰尘…");
+        try
+        {
+            var stamp = SourceStamp.Capture(frame.Path);
+            var mask = await Task.Run(() => InfraredDust.Detect(stamp.Path, owner.Token), owner.Token);
+            owner.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(_dustReviewOperation, owner) || vm.CurrentFrame != frame) return;
+            stamp.RequireCurrent();
+            if (vm.CurrentDustReviewGeometry() is not { } geometry) return;
+            var input = new MainViewModel.PureNegInput(stamp, mask.Width, mask.Height, mask.Bounds);
+            var runs = mask.EnumerateRuns().Select((run, i) => new PureNegComponent.CandidateRun(i, run)).ToArray();
+            var projection = await Task.Run(() => new DustReviewProjection(geometry,
+                mask.Width, mask.Height, mask.Bounds, runs), owner.Token);
+            owner.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(_dustReviewOperation, owner) || vm.CurrentFrame != frame ||
+                vm.CurrentDustReviewGeometry() != geometry) return;
+            stamp.RequireCurrent();
+            var selected = new DustMask(mask.Width, mask.Height, mask.Bounds,
+                runs.Where(run => projection.VisibleIds.Contains(run.RegionId)).Select(run => run.Run));
+            _dustReviewDraft = new(input, geometry, projection, new(selected));
+            _dustView = DustView.After;
+            vm.IsDustReviewActive = true;
+            UpdateDustReviewDisplay();
+            vm.StatusText = Loc.T("红外检测完成，请审核蒙版后应用。");
+        }
+        catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
+        catch (Exception ex) { vm.StatusText = Loc.T("红外除尘失败") + " · " + ex.Message; }
+        finally
+        {
+            if (ReferenceEquals(_dustReviewOperation, owner)) _dustReviewOperation = null;
+            UpdateDustToolbar();
+        }
+    }
+
     private enum DustView { Mask, After }
 
     private sealed record DustReviewDraft(MainViewModel.PureNegInput Input,
@@ -147,6 +188,7 @@ public partial class MainWindow
 
     private void UpdateDustToolbar()
     {
+        InfraredDustButton.IsEnabled = !HasDustReview && Vm is { HasImage: true, IsBusy: false, HasLongTask: false };
         bool reviewing = _dustReviewDraft is not null;
         bool idle = _dustReviewOperation is null;
         bool installed = PureNegComponent.IsInstalled;

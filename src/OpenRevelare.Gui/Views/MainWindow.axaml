@@ -613,6 +613,9 @@
                             </ToggleButton>
                         <StackPanel Name="DustToolbar" IsVisible="False" Orientation="Horizontal"
                                     Spacing="10" Margin="10,0,0,0">
+                            <Button Name="InfraredDustButton" Click="OnInfraredDustClick" Padding="7,4"
+                                    Content="{i18n:T '红外除尘'}"
+                                    ToolTip.Tip="{i18n:T '使用 Epson VueScan RGBI DNG 的红外通道检测灰尘；传统银盐黑白胶片不适用。'}" />
                             <!-- Same overlaid download affordance as SmartCastButton: one visible feature entry. -->
                             <Grid Name="DustDetectEntry">
                                 <Button Name="DustDetectBtn" Click="OnPureNegReviewClick"

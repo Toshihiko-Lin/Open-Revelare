@@ -50,6 +50,10 @@ public sealed class ScannerDngTests
             Assert.False(RawDecode.IsRawExtension(path));
             Assert.True(ImportDialog.IsScan(path));
             Assert.Equal((2,2), TiffIO.ReadTiffSize(path));
+            if (samples == 4)
+                Assert.Equal((2, 2), (InfraredDust.Detect(path).Width, InfraredDust.Detect(path).Height));
+            else
+                Assert.Throws<NotSupportedException>(() => InfraredDust.Detect(path));
             var image = TiffIO.LoadTiff(path, false);
             for (int i=0;i<4;i++)
                 for (int c=0;c<3;c++) Assert.Equal((c+1)*10000/65535f, image.Data[i*3+c], 5);
