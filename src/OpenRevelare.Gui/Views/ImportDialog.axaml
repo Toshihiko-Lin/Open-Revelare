@@ -23,10 +23,9 @@
             <StackPanel Spacing="12">
                 <!-- ── 文件 ─────────────────────────────────────────── -->
                 <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold"
-                               ToolTip.Tip="{i18n:T '支持 RAW（ARW/NEF/CR2/DNG 等）与扫描仪 TIFF。多选 = 整卷。'}" />
-                    <TextBlock Name="ScannerDngHint" IsVisible="False" Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '爱普生 VueScan DNG：支持未压缩的 16 位线性 RGB/RGBI，自动读取完整扫描图。建议关闭 Raw save film；红外通道不参与颜色计算；RGBI 文件可使用红外除尘。其他扫描 DNG 请先输出 48 位 RGB 原始 TIFF。'}" />
+                    <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold" />
+                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                               Text="{i18n:T '支持 RAW、TIFF、FFF 和兼容的 DNG。'}" />
                     <ListBox Name="FileList" Height="112" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
                     <WrapPanel Orientation="Horizontal">
@@ -37,6 +36,24 @@
                         <TextBlock Name="CountLbl" Text="{i18n:T '0 张'}" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextMuteBrush}" Margin="6,0,0,0" />
                     </WrapPanel>
+                    <Expander Header="{i18n:T '格式与要求'}" IsExpanded="False"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="8" Margin="0,4,0,8">
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T 'RAW：支持情况取决于相机型号和编码，部分压缩 RAW 暂不支持。'}" />
+                            <TextBlock Name="RawFormatsHint" Classes="groupHint" TextWrapping="Wrap" />
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T 'TIFF：支持每通道 8 / 16 位无符号整数、32 位浮点，需通道交错存储；推荐 16 位 RGB。'}" />
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T 'FFF：支持 Flextight RGB 扫描；相机后背 FFF 按 RAW 读取。'}" />
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T '扫描 DNG：不限品牌，支持未压缩的 16 位 RGB / RGBI；需通道交错、非分块、默认方向且无额外 DNG 校正。不兼容时请转为 48 位 RGB TIFF。'}" />
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T '红外除尘：目前仅支持 VueScan RGBI DNG；传统银盐黑白胶片不适用。'}" />
+                            <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                       Text="{i18n:T '建议保留未反转的负片数据；VueScan 关闭 Raw save film。JPEG、PNG、HEIC 不支持作为底片导入。'}" />
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
 
                 <StackPanel Name="ImportProcessingOptions" Spacing="12">

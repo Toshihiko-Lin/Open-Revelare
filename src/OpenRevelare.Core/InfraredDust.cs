@@ -10,7 +10,7 @@ public static class InfraredDust
     {
         try
         {
-            if (!ScannerDng.IsScannerDng(path)) return false;
+            if (!ScannerDng.IsScannerDng(path) || !ScannerDng.HasKnownInfrared(path)) return false;
             using var tif = TiffIO.OpenInput(path);
             if (tif is null || tif.GetField(TiffTag.SAMPLESPERPIXEL)?[0].ToInt() != 4) return false;
             int width = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
@@ -24,9 +24,9 @@ public static class InfraredDust
     {
         // Four TIFF samples alone are not evidence of infrared: the fourth may be alpha.
         if (!ScannerDng.IsScannerDng(path))
-            throw new NotSupportedException(CoreText.T("红外除尘需要 Epson VueScan 的 16 位 RGBI DNG 文件。"));
+            throw new NotSupportedException(CoreText.T("红外除尘需要 VueScan 的 16 位 RGBI DNG 文件。"));
         using var tif = TiffIO.OpenInput(path) ?? throw new IOException("Cannot open scanner image.");
-        if (tif.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt() != 4)
+        if (tif.GetField(TiffTag.SAMPLESPERPIXEL)[0].ToInt() != 4 || !ScannerDng.HasKnownInfrared(path))
             throw new NotSupportedException(CoreText.T("此扫描文件没有红外通道。"));
         int width = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
         int height = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();

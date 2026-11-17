@@ -57,6 +57,9 @@ public partial class ImportDialog : Window
     public ImportDialog(IEnumerable<string> initialPaths, bool canAddToCurrent)
     {
         InitializeComponent();
+        RawFormatsHint.Text = string.Join(" · ", RawDecode.RawExtensions
+            .OrderBy(extension => extension, StringComparer.Ordinal)
+            .Select(extension => extension.ToUpperInvariant()));
         FileList.ItemsSource = Files;
         SetUpLensDetection();
         // Opens on whatever the last import chose (OnAcceptClick writes them back).
@@ -65,7 +68,6 @@ public partial class ImportDialog : Window
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
-            ScannerDngHint.IsVisible = Files.Any(path => System.IO.Path.GetExtension(path).Equals(".dng", StringComparison.OrdinalIgnoreCase));
             UpdateReadyUi();
         };
         DestinationRow.IsVisible = canAddToCurrent;

@@ -8,7 +8,8 @@ namespace OpenRevelare.Tests;
 public sealed class ScannerDngTests
 {
     // Independent TIFF writer: a one-pixel RGB preview and a 2x2 linear RGBI SubIFD.
-    private static string Fixture(string software = "VueScan 9.8.16", int bits = 16, bool cfa = false, int samples = 4)
+    private static string Fixture(string software = "VueScan 9.8.16", int bits = 16, bool cfa = false, int samples = 4,
+        string make = "Epson", int photometric = 34892)
     {
         string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".DNG");
         using var stream = File.Create(path);
@@ -22,13 +23,13 @@ public sealed class ScannerDngTests
             w.Write(0);
         }
         Directory(8, [ (254,4,1,1), (256,4,1,1), (257,4,1,1), (258,3,1,8),
-            (259,3,1,1), (262,3,1,2), (271,2,6,800), (277,3,1,3),
+            (259,3,1,1), (262,3,1,2), (271,2,make.Length+1,800), (277,3,1,3),
             (273,4,1,1000), (278,4,1,1), (279,4,1,3), (305,2,software.Length+1,820),
             (330,4,1,512), (50706,1,4,257) ]);
         Directory(512, [ (254,4,1,0), (256,4,1,2), (257,4,1,2), (258,3,samples,900),
-            (259,3,1,1), (262,3,1,cfa ? 32803 : 34892), (277,3,1,samples),
+            (259,3,1,1), (262,3,1,cfa ? 32803 : photometric), (277,3,1,samples),
             (273,4,1,1024), (278,4,1,2), (279,4,1,4*samples*2), (284,3,1,1) ]);
-        stream.Position = 800; w.Write("Epson\0"u8);
+        stream.Position = 800; w.Write(System.Text.Encoding.ASCII.GetBytes(make + "\0"));
         stream.Position = 820; w.Write(System.Text.Encoding.ASCII.GetBytes(software + "\0"));
         stream.Position = 900; for (int i=0;i<samples;i++) w.Write((ushort)bits);
         stream.Position = 1000; w.Write(new byte[] { 255, 0, 255 });
@@ -75,9 +76,77 @@ public sealed class ScannerDngTests
     [Fact]
     public void Camera_dng_with_rgb_preview_stays_on_raw_path()
     {
-        string path = Fixture(software: "Adobe DNG Converter");
+        string path = Fixture(software: "Adobe DNG Converter", cfa: true, samples: 3);
         try { Assert.True(RawDecode.IsRawExtension(path)); Assert.False(ImportDialog.IsScan(path));
             Assert.False(InfraredDust.HasSupportedInfrared(path)); }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("VueScan 9.8.16", "Nikon", 34892, true)]
+    [InlineData("VueScan 9.8.16", "Plustek", 34892, true)]
+    [InlineData("SilverFast 9", "Reflecta", 34892, false)]
+    [InlineData("SilverFast 9", "Reflecta", 2, false)]
+    [InlineData("Film digitizer", "Custom", 34892, false)]
+    public void Compatible_scans_are_not_limited_to_epson_or_vuescan(
+        string software, string make, int photometric, bool infrared)
+    {
+        string path = Fixture(software: software, make: make, photometric: photometric);
+        try
+        {
+            Assert.True(ScannerDng.IsScannerDng(path));
+            Assert.False(RawDecode.IsRawExtension(path));
+            Assert.Equal((2, 2), TiffIO.ReadTiffSize(path));
+            Assert.Equal(10000 / 65535f, TiffIO.LoadTiff(path, false).Data[0], 5);
+            Assert.Equal(infrared, InfraredDust.HasSupportedInfrared(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Full_scan_in_main_ifd_chain_is_selected_instead_of_preview()
+    {
+        string path = Fixture(software: "Film digitizer", make: "Custom", samples: 3);
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            int count = BitConverter.ToUInt16(bytes, 8);
+            int offset = Enumerable.Range(0, count).Select(i => 10 + i * 12)
+                .Single(i => BitConverter.ToUInt16(bytes, i) == 330);
+            BitConverter.GetBytes((ushort)65000).CopyTo(bytes, offset);
+            BitConverter.GetBytes(512).CopyTo(bytes, 10 + count * 12);
+            File.WriteAllBytes(path, bytes);
+            Assert.True(ScannerDng.IsScannerDng(path));
+            Assert.Equal((2, 2), TiffIO.ReadTiffSize(path));
+            Assert.Equal(10000 / 65535f, TiffIO.LoadTiff(path, false).Data[0], 5);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Generic_camera_linear_dng_with_colour_matrix_stays_raw()
+    {
+        string path = Fixture(software: "Adobe DNG Converter", samples: 3);
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            int count = BitConverter.ToUInt16(bytes, 8);
+            int offset = Enumerable.Range(0, count).Select(i => 10 + i * 12)
+                .Single(i => BitConverter.ToUInt16(bytes, i) == 278);
+            BitConverter.GetBytes((ushort)50721).CopyTo(bytes, offset);
+            BitConverter.GetBytes((ushort)10).CopyTo(bytes, offset + 2);
+            BitConverter.GetBytes(9).CopyTo(bytes, offset + 4);
+            BitConverter.GetBytes(1100).CopyTo(bytes, offset + 8);
+            Array.Resize(ref bytes, 1172);
+            for (int i = 0; i < 9; i++)
+            {
+                BitConverter.GetBytes(i % 4 == 0 ? 1 : 0).CopyTo(bytes, 1100 + i * 8);
+                BitConverter.GetBytes(1).CopyTo(bytes, 1104 + i * 8);
+            }
+            File.WriteAllBytes(path, bytes);
+            Assert.False(ScannerDng.IsScannerDng(path));
+            Assert.True(RawDecode.IsRawExtension(path));
+        }
         finally { File.Delete(path); }
     }
 

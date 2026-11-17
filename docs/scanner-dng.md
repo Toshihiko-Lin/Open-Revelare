@@ -1,37 +1,27 @@
-# Epson VueScan scanner DNG
+# Scanner DNG import
 
-爱普生扫描仪使用 VueScan 输出的未压缩 16 位线性 RGB/RGBI DNG，可直接导入。程序自动选择完整扫描图，保留原始 RGB；第四个红外通道不参与颜色计算，RGBI 文件可在除尘工具栏使用「红外除尘」。VueScan 中建议启用 **Raw file** 和 **Raw DNG format**、选择 **48 bit RGB**，关闭 **Raw save film**，将负片反转留给 OpenRevelare。多格扫描图可使用现有分割功能。当前已用 GT-X980 的公开原始文件验证；SilverFast DNG 尚未验证。其他编码请先导出 48 位 RGB 原始 TIFF。
+扫描 DNG 不限扫描仪品牌。VueScan、SilverFast 及其他途径输出的兼容文件可直接导入；按完整图像结构选取图像，跳过缩略预览。真实扫描样本目前验证过 Epson GT-X980；其他来源由生成的结构测试覆盖，仍需设备样本验证。
 
-The initial scanner DNG path supports Epson scans written by VueScan with uncompressed,
-unsigned 16-bit, chunky linear RGB or RGBI samples. It selects the full-resolution image
-from IFD0 or its direct SubIFDs, never the reduced RGB preview. RGBI's fourth channel is
-excluded from visible colour calculations; RGBI files support the Infrared dust removal toolbar action.
-Camera DNGs continue to use LibRaw.
+## 文件要求
 
-## 中文导入指引
+- 支持未压缩、每通道 16 位无符号整数、通道交错存储的完整 RGB / LinearRaw 图像（3 或 4 通道）。
+- 检查根 IFD、直接 SubIFD 和主 IFD 链；每次遍历最多 64 个目录。
+- VueScan / SilverFast 不按设备品牌限制；其他来源需有完整 RGB 图像且不声明相机 ColorMatrix。相机 CFA DNG 和带相机 ColorMatrix 的通用线性 DNG 继续走 RAW 解码器。
+- RGB 图像的嵌入 ICC 按 TIFF 色彩管理处理；LinearRaw 保留扫描仪原始线性 RGB，原色未表征，不套用相机矩阵。
+- 暂不支持分块、平面通道、其他位深、非默认方向、DNG 线性化/黑白电平/裁剪/操作码校正标签。遇到这些情况会明确报错，不读取缩略图代替。
+- 不兼容时请从扫描软件输出 48 位 RGB 原始 TIFF。VueScan 建议关闭 **Raw save film**，保留负片供 OpenRevelare 反转。整条底片可使用多格分割。
 
-1. 在 VueScan 中启用 **Output → Raw file** 和 **Raw DNG format**，使用每通道 16 位的
-   **48 bit RGB**（或 RGBI），关闭 **Raw save film**，保留负片供 OpenRevelare 反转。
-2. 将 DNG 拖入导入窗口；整条底片可勾选「扫描件多格分割」。程序自动选择完整扫描图。
-3. 当前支持未压缩、交错存储的爱普生 VueScan 线性 DNG。RGBI 的第四个红外通道不参与
-   颜色计算，RGBI 文件可在除尘工具栏使用「红外除尘」。输入按扫描仪原始线性 RGB 保留，不宣称完成设备色彩标定。
-4. 遇到暂不支持的编码或校正标签时，按提示从 VueScan 输出 48 位 RGB 原始 TIFF 再导入。
-   SilverFast DNG 尚未验证。
+## 红外除尘
 
-## Scanning and import
+在除尘工具栏点击「红外除尘」，审核、补画或擦除蒙版，确认后应用。蒙版随工程保存并用于预览与导出。局部红外透射衰减检测适合小灰尘和划痕，大面积缺陷可能漏检；传统银盐黑白胶片不适用。
 
-In VueScan, enable **Output → Raw file** and **Raw DNG format**, select **48 bit RGB**
-(or RGBI), and disable **Raw save film** so film inversion is performed in OpenRevelare.
-Import the DNG like a TIFF. Multi-frame scans can use the existing strip splitting option.
-The decoder keeps the original scanner RGB and treats the samples as linear. Scanner
-primaries remain explicitly uncharacterized, following the existing linear scanner TIFF
-admission policy; this path does not apply the DNG camera matrix or a camera white balance.
+目前识别 VueScan 的 RGBI DNG 红外通道，不限扫描仪品牌。其他软件的第四通道可能是透明度，或将红外保存为独立图层，尚不用于红外除尘；没有可用红外数据时按钮置灰。红外数据不参与 RGB 颜色计算。
 
-Compression, tiles, separate planes, other bit depths, non-default orientation and DNG
-linearization/level/crop/opcode corrections are outside this initial path. These scans
-produce an explanatory error rather than decoding their preview. Export a 48-bit RGB raw
-TIFF from VueScan as a fallback. SilverFast DNGs have not been validated and are not routed
-through this scanner path.
+## English
+
+Compatible scanner DNGs from VueScan, SilverFast and other film digitizers are admitted by image structure, without a scanner manufacturer whitelist. The current storage contract is uncompressed, unsigned 16-bit, interleaved RGB or LinearRaw, with three or four channels and default orientation. DNG correction tags and tiled storage are rejected explicitly. Full images in direct SubIFDs or the main IFD chain are selected rather than reduced previews.
+
+Generic DNGs with camera ColorMatrix remain on the RAW path, as do camera CFA DNGs. Embedded ICC in RGB images follows TIFF colour admission. LinearRaw samples retain uncharacterized scanner RGB; camera colour matrices are not applied to scanner RGBI. Infrared dust removal uses only established VueScan RGBI layouts; other writers' fourth samples or separate infrared images are not yet interpreted as IR. Real-device validation beyond the Epson sample remains pending.
 
 ## Evidence and reproduction
 
@@ -52,9 +42,3 @@ check, download the attachment and set `OPENREVELARE_SCANNER_DNG_SAMPLE` to its 
 before running `dotnet test src/OpenRevelare.Tests --filter FullyQualifiedName~ScannerDngTests`.
 Generated fixtures cover preview selection, RGB and RGBI, managed linear admission, ROI reads,
 unsupported layouts and camera-DNG routing without requiring a network download.
-
-## 红外除尘 / Infrared dust removal
-
-在除尘工具栏点击「红外除尘」，检测后审核蒙版，可补画、擦除并对比，点击应用后保存到工程。使用局部红外透射衰减检测并扩展一像素边缘，适合小灰尘和划痕；大面积缺陷可能漏检。传统银盐黑白胶片不适用。当前仅支持上述已验证编码的 Epson VueScan RGBI DNG，不把普通 RGBA TIFF 的透明通道作为红外。
-
-Select Infrared dust removal, review and edit the mask, then apply. The mask is stored in the project and used for previews and exports. Local IR absorption detection targets small defects; broad defects may be missed. Traditional silver-based black-and-white film is unsuitable. Ordinary RGBA TIFF alpha is never interpreted as infrared.
