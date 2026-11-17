@@ -1,4 +1,8 @@
 {
+  "爱普生 VueScan DNG：支持未压缩的 16 位线性 RGB/RGBI，自动读取完整扫描图。建议关闭 Raw save film；红外通道不参与颜色计算，也不用于自动除尘。其他扫描 DNG 请先输出 48 位 RGB 原始 TIFF。": "Epson VueScan DNG: supports uncompressed 16-bit linear RGB/RGBI and selects the full scan automatically. Disable Raw save film. Infrared is excluded from colour calculations and dust removal. For other scanner DNGs, export a 48-bit RGB raw TIFF first.",
+  "此扫描仪 DNG 未找到受支持的完整线性 RGB 图像。请用 VueScan 输出 48 位 RGB 原始 TIFF 后导入。": "No supported full-resolution linear RGB image was found in this scanner DNG. Export a 48-bit RGB raw TIFF from VueScan and import it.",
+  "此扫描仪 DNG 的编码或校正标签暂不支持。请用 VueScan 输出未压缩的 48 位 RGB 原始 TIFF 后导入。": "This scanner DNG encoding or its correction tags are not supported yet. Export an uncompressed 48-bit RGB raw TIFF from VueScan and import it.",
+  "扫描仪线性 DNG：保留原始 RGB，红外通道不参与颜色计算；原色未表征": "Linear scanner DNG: original RGB retained; infrared excluded from colour calculations; primaries uncharacterized",
   "PURENeg 项目": "PURE Neg project",
   "自动除尘致谢：\n感谢 easonzhangbin 与 PURE Neg 贡献者开放检测引擎，感谢 Magnus Holmes 的 film-dust 提供底层算法。\n自动检测集成使用其 MIT 许可引擎代码，完整许可随可选组件提供。": "Automatic dust detection credits:\nThank you to easonzhangbin and the PURE Neg contributors for sharing their detection engine, and to Magnus Holmes for the underlying film-dust algorithms.\nThis integration uses their MIT-licensed engine code; full licences accompany the optional component.",
   "PURENeg 自动除尘": "PURENeg Auto dust",

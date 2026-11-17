@@ -185,6 +185,8 @@ $$T_{pos} = 10^{\left(\frac{R_{out}}{D_{max}[c]}D[c]-R_{out}\right)}$$
 
 ## 文档导航
 
+- [爱普生 VueScan 扫描 DNG](docs/scanner-dng.md)：支持范围、导入设置与验证样本。
+
 - [第一卷](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.md)：从导入、校准、修片到导出与重新打开工程。
 - [操作指南](src/OpenRevelare.Gui/Assets/docs/GUIDE.md)：界面控件与日常工作流。
 - [技术原理](src/OpenRevelare.Gui/Assets/docs/THEORY.md)：色彩与反转模型。

@@ -35,7 +35,7 @@ public partial class ImportDialog : Window
     {
         if (ScanExt.Contains(System.IO.Path.GetExtension(path))) return true;
         // A RAW extension that content-sniffing rejected as RAW is a scanner export (today only
-        // .fff reaches this). Anything the decoder still claims is one frame per file.
+        // .fff and Epson VueScan .dng reach this). Anything the decoder still claims is one frame per file.
         return RawDecode.HasRawExtension(path) && !RawDecode.IsRawExtension(path);
     }
 
@@ -65,6 +65,7 @@ public partial class ImportDialog : Window
         Files.CollectionChanged += (_, _) =>
         {
             CountLbl.Text = Loc.F($"{Files.Count} 张");
+            ScannerDngHint.IsVisible = Files.Any(path => System.IO.Path.GetExtension(path).Equals(".dng", StringComparison.OrdinalIgnoreCase));
             UpdateReadyUi();
         };
         DestinationRow.IsVisible = canAddToCurrent;

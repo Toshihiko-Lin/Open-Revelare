@@ -87,6 +87,7 @@ public static class RawDecode
     {
         string ext = Path.GetExtension(path);
         if (!RawExts.Contains(ext)) return false;
+        if (ScannerDng.IsScannerDng(path)) return false;
         if (!ContentSniffExts.Contains(ext)) return true;
         return !LooksLikeFullColorTiff(path);
     }

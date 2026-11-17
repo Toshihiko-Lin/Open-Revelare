@@ -186,6 +186,8 @@ Cache locations and limits are configurable. Uninstalling does not remove these 
 
 ## Documentation
 
+- [Epson VueScan scanner DNG](docs/scanner-dng.md): supported layouts, import settings and validation sample.
+
 - [Your first roll](src/OpenRevelare.Gui/Assets/docs/FIRST-ROLL.en.md): import, calibration, editing, export and reopening a project.
 - [Operation guide](src/OpenRevelare.Gui/Assets/docs/GUIDE.en.md): controls and everyday workflows.
 - [Technical theory](src/OpenRevelare.Gui/Assets/docs/THEORY.en.md): the colour and inversion model.

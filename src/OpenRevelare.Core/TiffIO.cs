@@ -85,6 +85,16 @@ public static class TiffIO
         });
     }
 
+    /// <summary>Open the actual scan image, including VueScan DNG SubIFDs.</summary>
+    internal static Tiff? OpenInput(string path)
+    {
+        SuppressLibTiffWarnings();
+        Tiff? tif = Tiff.Open(path, "r");
+        if (tif is null) return null;
+        try { ScannerDng.SelectImage(tif); return tif; }
+        catch { tif.Dispose(); throw; }
+    }
+
     /// <summary>Raw ICC profile bytes embedded in the TIFF (tag 34675), or null.</summary>
     public static byte[]? ReadIccBytes(Tiff tif)
     {
@@ -366,7 +376,7 @@ public static class TiffIO
             Parallel.For(0, boundaries.Count - 1, band =>
             {
                 int y0 = boundaries[band], y1 = boundaries[band + 1];
-                using Tiff own = Tiff.Open(path, "r")
+                using Tiff own = OpenInput(path)
                     ?? throw new IOException($"could not open TIFF: {path}");
                 ReadBand(own, path, spp, bps, sampleScale, windows, outputs, stage, SeekBase(y0), y0, y1);
             });
@@ -600,7 +610,7 @@ public static class TiffIO
         WorkingAdmission admission;
         string decodeRecipe;
 
-        using (Tiff tif = Tiff.Open(path, "r")
+        using (Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not open TIFF: {path}"))
         {
             int bps = tif.GetField(TiffTag.BITSPERSAMPLE)[0].ToInt();
@@ -826,7 +836,7 @@ public static class TiffIO
         string? fallbackDiagnostic = null;
         try
         {
-            using (Tiff profileTif = Tiff.Open(path, "r")
+            using (Tiff profileTif = OpenInput(path)
                 ?? throw new IOException($"could not open TIFF: {path}"))
             {
                 _ = TryReadIccPayloadStrict(profileTif, path, out embedded);
@@ -992,7 +1002,7 @@ public static class TiffIO
         string prefix,
         RegionRequest[]? region)
     {
-        using Tiff tif = Tiff.Open(path, "r")
+        using Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not open TIFF for managed linear admission: {path}");
         (SampleWindow[] windows, int bitsPerSample, float[][] encoded, float codeStep, NumericRange range) =
             ReadTiffSamples(tif, path, region, stage: null);
@@ -1113,7 +1123,7 @@ public static class TiffIO
             }
         }
 
-        using Tiff tif = Tiff.Open(path, "r")
+        using Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not reopen TIFF for managed decode: {path}");
         float codeStep = ProbeCodeStep(tif);
 
@@ -1399,7 +1409,7 @@ public static class TiffIO
     private static ImageBuffer[] LoadTiff(string path, bool inputIsSrgb, RegionRequest[]? region)
     {
         SuppressLibTiffWarnings();
-        using Tiff tif = Tiff.Open(path, "r")
+        using Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not open TIFF: {path}");
 
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
@@ -1453,7 +1463,7 @@ public static class TiffIO
     public static (int Width, int Height) ReadTiffSize(string path)
     {
         SuppressLibTiffWarnings();
-        using Tiff tif = Tiff.Open(path, "r")
+        using Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not open TIFF: {path}");
         return (tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt(),
                 tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt());
@@ -1479,7 +1489,7 @@ public static class TiffIO
                                              bool inputIsSrgb, int maxEdge)
     {
         SuppressLibTiffWarnings();
-        using Tiff tif = Tiff.Open(path, "r")
+        using Tiff tif = OpenInput(path)
             ?? throw new IOException($"could not open TIFF: {path}");
 
         int w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();

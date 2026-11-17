@@ -38,6 +38,9 @@ public enum TiffInputEvidence
 
     /// <summary>Nothing in the file said anything. The conventional default was applied.</summary>
     ConventionalDefault,
+
+    /// <summary>Validated scanner DNG with linear RGB samples.</summary>
+    ScannerLinearDng,
 }
 
 /// <summary>
@@ -157,7 +160,7 @@ public static class TiffInputDetector
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         try
         {
-            using Tiff tif = Tiff.Open(path, "r");
+            using Tiff? tif = TiffIO.OpenInput(path);
             return tif is null ? ConventionalDefault : Detect(tif);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -173,7 +176,7 @@ public static class TiffInputDetector
     /// </summary>
     internal static TiffInputDetection DetectWithoutEmbeddedIcc(string path)
     {
-        using Tiff tif = Tiff.Open(path, "r");
+        using Tiff? tif = TiffIO.OpenInput(path);
         return tif is null ? ConventionalDefault : Detect(tif, inspectEmbeddedIcc: false);
     }
 
@@ -197,6 +200,11 @@ public static class TiffInputDetector
                 TiffInputEvidence.EmbeddedIccProfile,
                 "文件含嵌入 ICC，按该 profile 精确转换");
         }
+
+        if ((tif.GetField(TiffTag.PHOTOMETRIC)?[0].ToInt() ?? 0) == 34892)
+            return new TiffInputDetection(TiffInputAssumption.Linear, null,
+                TiffInputEvidence.ScannerLinearDng,
+                "扫描仪线性 DNG：保留原始 RGB，红外通道不参与颜色计算；原色未表征");
 
         if (IsFloatSampleFormat(tif))
         {
