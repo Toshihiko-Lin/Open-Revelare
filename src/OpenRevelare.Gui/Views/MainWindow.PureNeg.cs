@@ -15,10 +15,25 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow
 {
+    private SourceStamp? _infraredSourceStamp;
+    private bool _hasSupportedInfrared;
+
+    private bool CurrentHasSupportedInfrared()
+    {
+        var stamp = Vm?.CurrentFrame is { } frame ? SourceStamp.TryCapture(frame.Path) : null;
+        if (stamp is null) return false;
+        if (stamp != _infraredSourceStamp)
+        {
+            _hasSupportedInfrared = InfraredDust.HasSupportedInfrared(stamp.Path);
+            _infraredSourceStamp = stamp;
+        }
+        return _hasSupportedInfrared;
+    }
+
     private async void OnInfraredDustClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is not { HasImage: true } vm || vm.CurrentFrame is not { } frame ||
-            HasDustReview || vm.IsBusy || vm.HasLongTask) return;
+            HasDustReview || vm.IsBusy || vm.HasLongTask || !CurrentHasSupportedInfrared()) return;
         using var owner = new CancellationTokenSource();
         _dustReviewOperation = owner;
         UpdateDustToolbar();
@@ -188,7 +203,8 @@ public partial class MainWindow
 
     private void UpdateDustToolbar()
     {
-        InfraredDustButton.IsEnabled = !HasDustReview && Vm is { HasImage: true, IsBusy: false, HasLongTask: false };
+        InfraredDustButton.IsEnabled = !HasDustReview &&
+            Vm is { HasImage: true, IsBusy: false, HasLongTask: false } && CurrentHasSupportedInfrared();
         bool reviewing = _dustReviewDraft is not null;
         bool idle = _dustReviewOperation is null;
         bool installed = PureNegComponent.IsInstalled;

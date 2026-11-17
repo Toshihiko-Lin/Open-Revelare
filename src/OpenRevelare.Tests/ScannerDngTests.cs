@@ -50,6 +50,7 @@ public sealed class ScannerDngTests
             Assert.False(RawDecode.IsRawExtension(path));
             Assert.True(ImportDialog.IsScan(path));
             Assert.Equal((2,2), TiffIO.ReadTiffSize(path));
+            Assert.Equal(samples == 4, InfraredDust.HasSupportedInfrared(path));
             if (samples == 4)
                 Assert.Equal((2, 2), (InfraredDust.Detect(path).Width, InfraredDust.Detect(path).Height));
             else
@@ -75,7 +76,8 @@ public sealed class ScannerDngTests
     public void Camera_dng_with_rgb_preview_stays_on_raw_path()
     {
         string path = Fixture(software: "Adobe DNG Converter");
-        try { Assert.True(RawDecode.IsRawExtension(path)); Assert.False(ImportDialog.IsScan(path)); }
+        try { Assert.True(RawDecode.IsRawExtension(path)); Assert.False(ImportDialog.IsScan(path));
+            Assert.False(InfraredDust.HasSupportedInfrared(path)); }
         finally { File.Delete(path); }
     }
 
@@ -85,7 +87,8 @@ public sealed class ScannerDngTests
     public void Unsupported_scan_never_decodes_preview(int bits, bool cfa)
     {
         string path = Fixture(bits: bits, cfa: cfa);
-        try { Assert.Throws<NotSupportedException>(() => TiffIO.LoadTiff(path, false)); }
+        try { Assert.Throws<NotSupportedException>(() => TiffIO.LoadTiff(path, false));
+            Assert.False(InfraredDust.HasSupportedInfrared(path)); }
         finally { File.Delete(path); }
     }
 

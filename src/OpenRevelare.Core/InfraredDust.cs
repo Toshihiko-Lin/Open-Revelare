@@ -5,6 +5,21 @@ namespace OpenRevelare.Core;
 /// <summary>Dust detection from the independently acquired infrared plane of a scanner RGBI file.</summary>
 public static class InfraredDust
 {
+    /// <summary>Inspect metadata only; never treat an arbitrary fourth sample as infrared.</summary>
+    public static bool HasSupportedInfrared(string path)
+    {
+        try
+        {
+            if (!ScannerDng.IsScannerDng(path)) return false;
+            using var tif = TiffIO.OpenInput(path);
+            if (tif is null || tif.GetField(TiffTag.SAMPLESPERPIXEL)?[0].ToInt() != 4) return false;
+            int width = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+            int height = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+            return width > 0 && height > 0 && (long)width * height <= 100_000_000;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return false; }
+    }
+
     public static DustMask Detect(string path, CancellationToken ct = default)
     {
         // Four TIFF samples alone are not evidence of infrared: the fourth may be alpha.
