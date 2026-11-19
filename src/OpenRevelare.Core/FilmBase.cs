@@ -2043,9 +2043,10 @@ public static class FilmBase
     }
 
     /// <summary>
-    /// The black end for a POSITIVE roll, measured as the unexposed film in the perforation band:
-    /// the density distance from the white end down to the darkest 2% of the band's non-hole
-    /// pixels, pooled across the roll.
+    /// The black end for a POSITIVE roll, measured as the unexposed film between the perforations:
+    /// the density distance from the white end down to the middle of that bridge, pooled across
+    /// the roll. The lip outside the holes is not part of the sample — a holder or the gap beside
+    /// the strip is darker than the emulsion and would otherwise set the black end.
     ///
     /// <para>WHY THE EDGE AND NOT THE PICTURE. On a reversal film the unexposed area outside the
     /// camera gate is the film's true D_max: the densest material on the strip. The picture's own

@@ -23,7 +23,8 @@ public class PositivePerforationTests
     /// </summary>
     internal static ImageBuffer Strip(double holeLevel,
                                      (double R, double G, double B)? brightBlock = null,
-                                     double bridgeLevel = 0.004)
+                                     double bridgeLevel = 0.004,
+                                     double? outerLipLevel = null)
     {
         var d = new float[W * H * 3];
         void Put(int x, int y, (double R, double G, double B) t)
@@ -55,6 +56,24 @@ public class PositivePerforationTests
             for (int y = 280; y < 370; y++)
                 for (int x = 750; x < 840; x++)
                     Put(x, y, block);
+        }
+
+        // The lip just outside each hole row: a holder or the gap beside the strip. It sits in
+        // the wide search band and is darker than the emulsion. The black end must ignore it.
+        if (outerLipLevel is double lip)
+        {
+            for (int y = 0; y < H; y++)
+            {
+                double fromCentre = Math.Abs(y - centre);
+                foreach (double rowCentre in new[] { centre - rowOffset, centre + rowOffset })
+                {
+                    double fromRow = Math.Abs(y - rowCentre);
+                    bool outsideFilm = fromCentre > rowOffset;
+                    if (outsideFilm && fromRow >= 1.05 * PxPerMm && fromRow <= 1.7 * PxPerMm)
+                        for (int x = 0; x < W; x++)
+                            Put(x, y, (lip, lip, lip));
+                }
+            }
         }
 
         // Two rows of twelve holes on the 4.75 mm pitch.
@@ -258,6 +277,21 @@ public class PositivePerforationTests
             Assert.True(t > 0 && t <= 1.0, $"black transmittance must be in (0, 1], got {t}");
             Assert.InRange(t, 0.0039, 0.0041);
         }
+    }
+
+    /// <summary>
+    /// A holder or the gap beside the strip is darker than the unexposed bridge and used to set
+    /// the black end, because the sample was the darkest 2% of the wide hole band. The span has
+    /// to stay log10(0.60/0.004) = 2.176, the bridge, not log10(0.60/0.0002) ≈ 3.48.
+    /// </summary>
+    [Fact]
+    public void BlackEnd_IgnoresTheDarkGapBesideTheStrip()
+    {
+        ImageBuffer frame = Strip(0.60, outerLipLevel: 0.0002);
+
+        double[]? span = FilmBase.EstimateBlackSpanFromPerforations(new[] { frame });
+        Assert.NotNull(span);
+        foreach (double v in span!) Assert.InRange(v, 2.15, 2.20);
     }
 
     /// <summary>

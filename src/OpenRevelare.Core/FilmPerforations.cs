@@ -63,8 +63,13 @@ public static class FilmPerforations
     // The hole opening across the strip is ~1.98 mm on a 135 negative, but the light through a
     // hole blooms and the film edge is soft after copy-stand imaging. A 2.8 mm band is a superset
     // of the hole and still clears the 24 mm image area (its inner edge is 12.69 mm from the strip
-    // centre), so the extra is dense unexposed film that the bright tail never selects.
+    // centre). That extra is only for FINDING the holes: the bright tail never selects it.
     public const double HoleHeightMm = 2.8;
+
+    /// <summary>Across-strip window for the black sample, inside the ~1.98 mm hole opening.
+    /// The film between holes along this line is unexposed rebate. The lip outside the opening
+    /// is where a holder or the gap beside the strip sits, and that is darker than the emulsion.</summary>
+    public const double BridgeWindowMm = 1.50;
 
     /// <summary>Detection is done on at most this edge; a full-resolution RAW would only add cost,
     /// not row structure. Returned coordinates are scaled back to the source's pixels.</summary>
@@ -72,11 +77,11 @@ public static class FilmPerforations
 
     private const double TailFraction = 0.02;
 
-    // The black end comes from the COMPLEMENT of the holes: the unexposed film bridges between
-    // them and the margins around each hole. The gate below is what keeps a clear (negative) or
-    // stray-lit edge from being reported as an unexposed black; measured on the real 81-frame
-    // folder, the positive segment reads 2.85/2.80/2.78 D and a clear-edge segment 1.19/1.22/1.30.
-    private const double BlackTailFraction = 0.02;
+    // The black end is the unexposed film BETWEEN the holes, not the darkest pixels in the wider
+    // search band. A holder or the gap beside the strip is darker than that emulsion and used to
+    // win a darkest-2% tail. The gate below still rejects a clear (negative) or stray-lit edge;
+    // measured on the real 81-frame folder, the positive segment reads 2.85/2.80/2.78 D and a
+    // clear-edge segment 1.19/1.22/1.30.
     /// <summary>Pixels darker than this fraction of the hole light count as the non-hole band.</summary>
     private const double HoleLightFraction = 0.5;
     /// <summary>The 90th percentile of the non-hole band must stay below this fraction of the hole
@@ -123,10 +128,13 @@ public static class FilmPerforations
     /// pixels: the triple belongs to one patch of light, and its channel ratios are the light's
     /// colour rather than a per-channel splice.</para>
     ///
-    /// <para>BLACK. The holes are excluded (anything at or above half the hole luma), and the
-    /// darkest 2% of what remains is the unexposed film between and around the holes. Its density
-    /// distance below the white end is returned per channel. This is exposure-invariant — both
-    /// samples are scaled by the same exposure — so it can be pooled across a roll even when the
+    /// <para>BLACK. Only the strip within <see cref="BridgeWindowMm"/> of each row centre — inside
+    /// the hole opening, so a holder or the gap outside the film is not in the sample. The holes
+    /// themselves are excluded (anything at or above half the hole luma). The middle half of what
+    /// remains, by luma, is the unexposed bridge; its density distance below the white end is
+    /// returned per channel. The darkest tail is not used: that is the lip, the holder, or a
+    /// scratch, and it is darker than the emulsion. The span is exposure-invariant — both samples
+    /// are scaled by the same exposure — so it can be pooled across a roll even when the
     /// copy-stand exposure drifts.</para>
     ///
     /// <para>WHEN BLACK IS REFUSED. A clear edge (negative film), a fogged edge, or a band lifted
@@ -147,9 +155,11 @@ public static class FilmPerforations
         double alongMid = (ruler.Horizontal ? w : h) / 2.0;
         double rowOffset = RowSpacingMm / 2 * ruler.AcrossScale;
         double halfBand = HoleHeightMm / 2 * ruler.AcrossScale;
-        if (!(rowOffset > 1) || !(halfBand > 0.5)) return null;
+        double halfBridge = BridgeWindowMm / 2 * ruler.AcrossScale;
+        if (!(rowOffset > 1) || !(halfBand > 0.5) || !(halfBridge > 0.5)) return null;
 
         var luma = new double[w * h];
+        var fromRow = new double[w * h];
         var rgb = new float[w * h * 3];
         int kept = 0;
         for (int y = 0; y < h; y++)
@@ -170,6 +180,7 @@ public static class FilmPerforations
                 int k = kept * 3;
                 rgb[k] = r; rgb[k + 1] = g; rgb[k + 2] = b;
                 luma[kept] = ((double)r + g + b) / 3.0;
+                fromRow[kept] = distance;
                 kept++;
             }
         }
@@ -199,18 +210,21 @@ public static class FilmPerforations
         }
 
         double holeLuma = (white[0] + white[1] + white[2]) / 3.0;
-        var nonHole = new List<int>();
+        var bridge = new List<int>();
         for (int i = 0; i < kept; i++)
-            if (luma[i] < holeLuma * HoleLightFraction) nonHole.Add(i);
+            if (fromRow[i] <= halfBridge && luma[i] < holeLuma * HoleLightFraction) bridge.Add(i);
 
         double[]? black = null;
-        int n = nonHole.Count;
+        int n = bridge.Count;
         if (n >= MinBlackPixels)
         {
-            nonHole.Sort((a, b) => luma[a].CompareTo(luma[b]));
-            int blackTail = Math.Clamp((int)Math.Ceiling(n * BlackTailFraction), 3, n);
-            double[] blackT = MeanOf(nonHole.ToArray(), 0, blackTail);
-            double p90 = luma[nonHole[Math.Min(n - 1, (int)(n * 0.90))]];
+            bridge.Sort((a, b) => luma[a].CompareTo(luma[b]));
+            // Middle half of the bridge. The dark tail is the holder or the gap beside the
+            // strip; the bright tail is the hole rim. Neither is the unexposed emulsion.
+            int bodyStart = n / 4;
+            int bodyCount = Math.Max(3, n - n / 4 - bodyStart);
+            double[] blackT = MeanOf(bridge.ToArray(), bodyStart, bodyCount);
+            double p90 = luma[bridge[Math.Min(n - 1, (int)(n * 0.90))]];
             if (p90 <= holeLuma * MaxNonHoleP90Fraction)
             {
                 var span = new double[3];

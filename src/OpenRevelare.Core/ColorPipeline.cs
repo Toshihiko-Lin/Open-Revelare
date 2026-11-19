@@ -103,10 +103,11 @@ public static class ColorPipeline
     /// precondition Stage 2 needs.
     /// </summary>
     public static void ToOutputSpace(float[] data, ColorSpaceDef output,
-                                     GamutMapping mapping = GamutMapping.Desaturate)
+                                     GamutMapping mapping = GamutMapping.Desaturate,
+                                     bool positiveFilm = false)
     {
         LogEncoding.ToCineon(data);
-        CineonToDisplay(data);
+        CineonToDisplay(data, shoulderAsymptote: 1.0f, positiveFilm);
         OutputRender.Convert(data, Working, output, mapping);
         OutputRender.Encode(data, output);
     }
@@ -175,6 +176,13 @@ public static class ColorPipeline
     /// a print-film cube look like the cube had darkened the highlights, when in fact the cube was
     /// the only one of the two keeping them.
     ///
+    /// A REVERSAL SLIDE DOES NOT HAVE THAT LATITUDE. Its calibrated white end is the clear film,
+    /// and the encoding pins that end to 1032. Feeding those codes to the negative curve treats
+    /// every tone above 685 — most of a slide's highlights — as super-white and rolls them into
+    /// the last few percent under 1. <see cref="PositiveResponseGamma"/> moves picture white to
+    /// 1032 while keeping code 470 at the same 0.183, so the shoulder lands the clear end where a
+    /// negative's diffuse white lands instead of spending the slide's highlight detail as headroom.
+    ///
     /// THE OTHER END IS CORRECTED TOO — see <see cref="Toe"/>. The base normalisation a few lines
     /// below is a subtraction, and a subtraction flattens ratios near the point it subtracts, so
     /// the shadows arrived carrying separation that was the arithmetic's rather than the
@@ -184,6 +192,13 @@ public static class ColorPipeline
     /// </summary>
     public static void CineonToDisplay(float[] data) =>
         CineonToDisplay(data, shoulderAsymptote: 1.0f);
+
+    /// <summary>
+    /// <see cref="CineonToDisplay(float[])"/> for a reversal slide: picture white is the
+    /// calibrated clear end (code 1032), not the negative's diffuse-white code 685.
+    /// </summary>
+    public static void CineonToDisplay(float[] data, bool positiveFilm) =>
+        CineonToDisplay(data, shoulderAsymptote: 1.0f, positiveFilm);
 
     /// <summary>
     /// <see cref="CineonToDisplay"/> aimed at an explicit shoulder asymptote.
@@ -225,18 +240,31 @@ public static class ColorPipeline
     /// </summary>
     public const double ResponseGamma = 0.6;
 
-    internal static void CineonToDisplay(float[] data, float shoulderAsymptote)
+    /// <summary>
+    /// Response gamma for a reversal slide, paired with picture white at
+    /// <see cref="FrameParams.CineonWhiteCode"/> rather than at 685.
+    ///
+    /// Solved so code 470 still normalises to 0.183 — the same 18% grey the negative curve
+    /// produces at <see cref="ResponseGamma"/> — once the exponent's zero moves from 685 to 1032.
+    /// The shoulder is unchanged in the linear domain, so that white end then renders where a
+    /// negative's diffuse white renders (linear 0.75), and the tones just below it stay on the
+    /// body of the curve instead of being packed against the display ceiling.
+    /// </summary>
+    public const double PositiveResponseGamma = 2.04459170208853;
+
+    internal static void CineonToDisplay(float[] data, float shoulderAsymptote, bool positiveFilm = false)
     {
-        const double refWhite = 685.0;
-        const double responseGamma = ResponseGamma;
+        double refWhite = positiveFilm ? FrameParams.CineonWhiteCode : 685.0;
+        double responseGamma = positiveFilm ? PositiveResponseGamma : ResponseGamma;
         const double codeFullScale = 1023.0;
 
         float scale = (float)(codeFullScale * FrameParams.CineonDensityPerCode / responseGamma);
         float white = (float)(refWhite / codeFullScale);
 
-        // The black end, in the linear domain this function outputs. Code 685 is 1 by
-        // construction (it is the exponent's zero); code 95 is where the calibrated film base
-        // lands, and normalising by it is what takes the base to display black.
+        // The black end, in the linear domain this function outputs. The reference white is 1 by
+        // construction (it is the exponent's zero): code 685 on a negative, code 1032 on a slide.
+        // Code 95 is where the calibrated black end lands, and normalising by it takes that end
+        // to display black.
         float blackNorm = (float)(FrameParams.CineonBlackCode / codeFullScale);
         float blackLin = MathF.Pow(10.0f, (blackNorm - white) * scale);
         float span = 1.0f - blackLin;
@@ -329,7 +357,7 @@ public static class ColorPipeline
         if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
             ToOutputSpaceVia(data, lut, output);
         else
-            ToOutputSpace(data, output);
+            ToOutputSpace(data, output, positiveFilm: cal.IsPositiveFilm);
     }
 
     /// <summary>
@@ -356,7 +384,7 @@ public static class ColorPipeline
         if (PrintLutFor(cal, OutputTarget.Sdr(output)) is { } applied)
             ToOutputSpaceVia(data, applied.Lut, applied.Contract, output, colorManagement);
         else
-            ToOutputSpace(data, output);
+            ToOutputSpace(data, output, positiveFilm: cal.IsPositiveFilm);
     }
 
     /// <summary>
@@ -433,10 +461,10 @@ public static class ColorPipeline
             if (applied.Contract.IsExtendedOutput)
                 ToExtendedOutputTargetVia(data, applied.Lut, applied.Contract, target);
             else
-                ToExtendedOutputTargetViaPrint(data, applied.Lut, applied.Contract, target, colorManagement);
+                ToExtendedOutputTargetViaPrint(data, applied.Lut, applied.Contract, target, colorManagement, cal.IsPositiveFilm);
         }
         else
-            ToExtendedOutputTarget(data, target);
+            ToExtendedOutputTarget(data, target, cal.IsPositiveFilm);
     }
 
     /// <summary>
@@ -468,10 +496,10 @@ public static class ColorPipeline
     /// as the clamp into <c>[0,1]</c> at the tail of Stage 2.
     /// </para>
     /// </summary>
-    private static void ToExtendedOutputTarget(float[] data, OutputTarget target)
+    private static void ToExtendedOutputTarget(float[] data, OutputTarget target, bool positiveFilm)
     {
         LogEncoding.ToCineon(data);
-        CineonToDisplay(data, target.HighlightHeadroom);
+        CineonToDisplay(data, target.HighlightHeadroom, positiveFilm);
         OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
     }
 
@@ -546,7 +574,7 @@ public static class ColorPipeline
     /// </summary>
     private static void ToExtendedOutputTargetViaPrint(
         float[] data, CubeLut lut, LutContract contract, OutputTarget target,
-        IColorManagementEngine colorManagement)
+        IColorManagementEngine colorManagement, bool positiveFilm)
     {
         if (contract.IsExtendedOutput)
             throw new ArgumentException("The cube's declared output is an HDR encoding; use the PQ exit.", nameof(contract));
@@ -556,10 +584,10 @@ public static class ColorPipeline
         float[] sdr = (float[])data.Clone();
         float[] hdr = (float[])data.Clone();
         LogEncoding.ToCineon(sdr);
-        CineonToDisplay(sdr, shoulderAsymptote: 1.0f);
+        CineonToDisplay(sdr, shoulderAsymptote: 1.0f, positiveFilm);
         OutputRender.Convert(sdr, Working, target.Space, GamutMapping.PreserveExtended);
         LogEncoding.ToCineon(hdr);
-        CineonToDisplay(hdr, target.HighlightHeadroom);
+        CineonToDisplay(hdr, target.HighlightHeadroom, positiveFilm);
         OutputRender.Convert(hdr, Working, target.Space, GamutMapping.PreserveExtended);
 
         // The print, exactly as the SDR target renders it, decoded into the same linear light.

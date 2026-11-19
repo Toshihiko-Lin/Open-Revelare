@@ -14,6 +14,25 @@ public class PositiveFilmTests
     private static readonly double[] DMax = { 2.20, 2.35, 2.25 };
 
     [Fact]
+    public void Display_PositiveFilm_PlacesClearEndAtPictureWhiteAndHoldsGrey()
+    {
+        float At(double code, bool positive)
+        {
+            var data = new float[] { (float)(code / 1023.0) };
+            ColorPipeline.CineonToDisplay(data, positive);
+            return data[0];
+        }
+
+        // 18% grey stays where the negative curve puts it. The clear end (1032) renders as
+        // picture white — the same place a negative's diffuse white (685) renders — instead of
+        // being rolled into the ceiling with the rest of the highlight latitude.
+        Assert.Equal(At(470, positive: false), At(470, positive: true), 3);
+        Assert.Equal(At(685, positive: false), At(1032, positive: true), 3);
+        Assert.True(At(900, positive: true) < At(685, positive: false));
+        Assert.True(At(1032, positive: false) - At(1032, positive: true) > 0.15f);
+    }
+
+    [Fact]
     public void Endpoints_PositiveFilm_MapsDMinToWhiteAndDMaxToBlack()
     {
         var ep = DensityEndpoints.FromMeasured(DMax, FrameParams.OutputRange, DMin, isPositiveFilm: true);

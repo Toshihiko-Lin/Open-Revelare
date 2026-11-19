@@ -173,6 +173,7 @@ public sealed class FrameParams
     ///
     /// 打开后，反相将 D_min 映射到白端（Cineon 码值 1032，D_adj = 0），
     /// 将 D_max 映射到黑端（Cineon 码值 95，D_adj = -OutputRange）。
+    /// 显示变换把这枚白端当作画面白，不再占用负片在 685 以上的高光余量。
     /// </summary>
     public bool IsPositiveFilm { get; set; }
 
