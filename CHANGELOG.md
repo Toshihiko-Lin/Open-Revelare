@@ -4,13 +4,27 @@
 
 **新增**
 
-- **正片（反转片）支持。** 导入时可选择彩色或黑白正片。右侧提供手动光源校准、片基采样和观片亮度调整。观片映射保留片基偏色，并在接近输出上限时平滑压缩高光。预览和导出都从原始采样重新渲染。
+- **正片（反转片）支持。** 导入彩色或黑白正片后，可手动采样光源和片基、调整观片亮度。
+- **相机与扫描仪采集校准。** 新建卷时可记录设备校准信息，或应用相机暗场／无片场校正、扫描仪输入 ICC。
+- **扫描仪 DNG 导入。** 支持 VueScan、SilverFast 等软件输出的兼容未压缩 16 位 RGB／RGBI DNG，自动读取完整扫描图像。
+- **红外除尘。** 对兼容的 VueScan RGBI DNG，可用红外通道检测灰尘和划痕，并在应用前检查、编辑蒙版。
+
+**修复**
+
+- 修复 Linux/X11 上整卷处理进度浮层的兼容性问题。
 
 ---
 
 **Added**
 
-- **Slide (reversal film) support.** Choose color or black-and-white slides on import. The sidebar offers manual light-source calibration, film-base sampling, and viewing brightness. The viewing tone map preserves the film-base tint and rolls off highlights near the output limit. Preview and export render from the original samples.
+- **Slide (reversal film) support.** Import color or black-and-white slides, sample the light source and film base manually, and adjust viewing brightness. Sync light-source calibration across the roll. Previews and exports retain the film-base tint and roll off highlights smoothly.
+- **Camera and scanner capture calibration.** When creating a roll, record device calibration details or apply camera dark/open-gate correction or a scanner input ICC profile.
+- **Scanner DNG import.** Import compatible uncompressed 16-bit RGB/RGBI DNGs from VueScan, SilverFast, and other software at full resolution.
+- **Infrared dust removal.** Detect dust and scratches in compatible VueScan RGBI DNGs, then review and edit the mask before applying it.
+
+**Fixed**
+
+- Fixed a compatibility issue with the roll processing progress overlay on Linux/X11.
 
 ## v1.10.0（2026-11-13）
 
