@@ -80,10 +80,17 @@ public partial class MainWindow : Window
         // hidden past the fold without any obvious sign.
         // One scroller for the whole panel now, so one thing to watch.
         WireMoreBelowHint(PanelScroll, TabsMoreHint);
-        PanelTabs.SelectionChanged += (_, _) =>
+        PanelTabs.SelectionChanged += (_, e) =>
         {
-            CalibrationSyncFooter.IsVisible = PanelTabs.SelectedIndex == 0;
-            SceneSyncFooter.IsVisible = PanelTabs.SelectedIndex == 1;
+            if (e.Source != PanelTabs) return;
+            bool calibration = PanelTabs.SelectedIndex == 0;
+            bool finishing = PanelTabs.SelectedIndex == 1;
+            CalibrationSyncFooter.IsVisible = calibration;
+            SceneSyncFooter.IsVisible = finishing;
+            InspectorSyncFooter.IsVisible = calibration || finishing;
+            if (calibration || finishing)
+                _clipboardUsesCalibration = calibration;
+            PanelScroll.Offset = default;
             Dispatcher.UIThread.Post(() => TabsMoreHint.IsVisible = HasMoreBelow(PanelScroll));
         };
         // Drag mode for every parameter control in the window. SliderRow's events bubble, so one
@@ -1493,8 +1500,6 @@ public partial class MainWindow : Window
     // what you mean by "copy this" — having one pair of keys for both beats two more chords to
     // remember. The context menus name both explicitly, for when the intent is not the open tab.
 
-    private bool CalibrationTabOpen => PanelTabs.SelectedIndex == 0;
-
     private static bool HasMoreBelow(ScrollViewer sv) =>
         sv.IsEffectivelyVisible && sv.Offset.Y + sv.Viewport.Height < sv.Extent.Height - 0.5;
 
@@ -1509,12 +1514,12 @@ public partial class MainWindow : Window
 
     private void OnCopyActiveClick(object? sender, RoutedEventArgs e)
     {
-        if (CalibrationTabOpen) Vm?.CopyCalibration(); else Vm?.CopyScene();
+        if (_clipboardUsesCalibration) Vm?.CopyCalibration(); else Vm?.CopyScene();
     }
 
     private void OnPasteActiveClick(object? sender, RoutedEventArgs e)
     {
-        if (CalibrationTabOpen) Vm?.PasteCalibrationToCurrent(); else Vm?.PasteSceneToCurrent();
+        if (_clipboardUsesCalibration) Vm?.PasteCalibrationToCurrent(); else Vm?.PasteSceneToCurrent();
     }
 
     private void OnPasteCalToCurrentClick(object? sender, RoutedEventArgs e) =>

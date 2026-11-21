@@ -1298,16 +1298,17 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Margin="16,10,16,12" Padding="3" CornerRadius="6"
-                        Background="{DynamicResource Panel2Brush}">
+                <Border Grid.Row="1" Margin="16,8,16,9" BorderThickness="0,0,0,1"
+                        BorderBrush="{DynamicResource BorderSoftBrush}">
                     <TabStrip Name="InspectorTabs" Classes="inspectorTabs" KeyDown="OnInspectorTabKeyDown"
                               KeyboardNavigation.TabNavigation="Once" SelectedIndex="{Binding #PanelTabs.SelectedIndex, Mode=TwoWay}">
                         <TabStrip.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate></TabStrip.ItemsPanel>
-                        <TabStripItem Content="{Binding CalibrationTabTitle}" />
-                        <TabStripItem Content="{Binding FinishingTabTitle}" />
+                        <TabStripItem><TextBlock Text="{Binding CalibrationTabTitle}" TextWrapping="Wrap" TextAlignment="Center" /></TabStripItem>
+                        <TabStripItem><TextBlock Text="{Binding FinishingTabTitle}" TextWrapping="Wrap" TextAlignment="Center" /></TabStripItem>
+                        <TabStripItem><TextBlock Text="{i18n:T '校正与构图'}" TextWrapping="Wrap" TextAlignment="Center" /></TabStripItem>
                     </TabStrip>
                 </Border>
-                <Border Grid.Row="3" Padding="16,10" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
+                <Border Name="InspectorSyncFooter" Grid.Row="3" Padding="16,10" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                     <StackPanel Spacing="6">
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Grid.Column="0" Text="{Binding BroadcastSourceText}" Classes="readout" TextTrimming="CharacterEllipsis" />
@@ -1325,8 +1326,7 @@
                 <ScrollViewer Name="PanelScroll" HorizontalScrollBarVisibility="Disabled"
                               AllowAutoHide="False">
                 <StackPanel>
-                <!-- Which of these two is open decides what Ctrl+C / Ctrl+V act on: 整卷校准 →
-                     Stage-1 标定, 帧编辑 → Stage-2 场景. -->
+                <!-- The active editing tab determines the settings copied by Ctrl+C / Ctrl+V. -->
                 <Panel>
                 <TabControl Name="PanelTabs" Padding="0">
                     <TabControl.Template>
@@ -1341,7 +1341,6 @@
                             </Grid>
                         </ControlTemplate>
                     </TabControl.Template>
-                    <!-- Two stages, half the strip each — see the Tabs block in App.axaml. -->
                     <TabControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <UniformGrid Rows="1" />
@@ -1417,6 +1416,23 @@
                                     </Grid>
                                 </StackPanel>
 
+                                <Grid Classes="pairedActions" ColumnDefinitions="*,*" Margin="0,0,0,8">
+                                    <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                                  Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
+                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FilmBaseBtnText}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </ToggleButton>
+                                    <ToggleButton Name="DMaxBtn" Grid.Column="1" Classes="sampling" Margin="3,0,0,0"
+                                                  Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
+                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding DMaxBtnText}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </ToggleButton>
+                                </Grid>
+
                                 <!-- 片基去色罩 -->
                                 <!-- ══ 反相：两端各三个绝对密度 ═══════════════════════
                                      渲染消费 scale[3]+offset[3] 六个自由度，这里就给六个数。
@@ -1431,15 +1447,8 @@
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_min" Minimum="-2" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" IsVisible="{Binding IsNegativeFilm}" />
-                                        <Grid Classes="pairedActions" ColumnDefinitions="*,*">
-                                            <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
-                                                          Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
-                                                <Grid ColumnDefinitions="Auto,*">
-                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FilmBaseBtnText}" VerticalAlignment="Center" />
-                                                </Grid>
-                                            </ToggleButton>
-                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                        <Panel>
+                                            <Button HorizontalAlignment="Stretch"
                                                     Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoFilmBaseToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
@@ -1447,10 +1456,10 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoFilmBaseBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
-                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                            <Button HorizontalAlignment="Stretch"
                                                     IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
                                                     Content="{i18n:T '恢复相机白平衡'}" Command="{Binding ResetSlideLightReferenceCommand}" />
-                                        </Grid>
+                                        </Panel>
                                         <!-- 只在测不到裸露片基时出现。成功时不回显 t_base 数值——
                                              那个数已经没有滑块，它的意义由 D_min 承担。-->
                                         <!-- 只有这一组 RGB。片基透射率 T_base 不再给滑块：它与
@@ -1476,15 +1485,8 @@
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
                                                        Value="{Binding DMaxLevel}" IsVisible="{Binding IsNegativeFilm}"
                                                        ToolTip.Tip="{i18n:T 'Cineon 亮端映射：改变高光反差和亮端位置，保持三通道色彩比例。需要整体提亮请使用 Display 曝光。'}" />
-                                        <Grid Classes="pairedActions" ColumnDefinitions="*,*">
-                                            <ToggleButton Name="DMaxBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
-                                                          Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
-                                                <Grid ColumnDefinitions="Auto,*">
-                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding DMaxBtnText}" VerticalAlignment="Center" />
-                                                </Grid>
-                                            </ToggleButton>
-                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                        <Panel>
+                                            <Button HorizontalAlignment="Stretch"
                                                     Click="OnAutoWbHighClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoDMaxToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
@@ -1492,10 +1494,10 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoDMaxBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
-                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                            <Button HorizontalAlignment="Stretch"
                                                     IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
                                                     Content="{i18n:T '清除片基参考'}" Command="{Binding ResetSlideFilmBaseReferenceCommand}" />
-                                        </Grid>
+                                        </Panel>
                                         <TextBlock Classes="groupHint" Text="{Binding SlideFilmBaseStatus}"
                                                    IsVisible="{Binding IsPositiveFilm}" />
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
@@ -1515,7 +1517,7 @@
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
                                 <!-- Header and hint follow the film type: the grey card is an exposure
                                      anchor on a black-and-white roll, not a cast correction. -->
-                                <Expander Header="{Binding CastCardHeader}" IsExpanded="True" Tag="3" IsVisible="{Binding IsNegativeFilm}"
+                                <Expander Header="{Binding CastCardHeader}" Tag="3" IsVisible="{Binding IsNegativeFilm}"
                                           ToolTip.Tip="{Binding CastCardHint}">
                                     <StackPanel Spacing="2">
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
@@ -1570,79 +1572,6 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <Expander Header="{i18n:T '镜头与平场校正'}" Margin="0,0,0,8">
-                                    <StackPanel Spacing="6">
-                                        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
-                                            <Button Content="{i18n:T '自动校正当前帧'}" Click="OnAutoLensCorrectionCurrentClick"
-                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0"
-                                                    ToolTip.Tip="{i18n:T '优先使用内嵌参数，其次 Lensfun；重新自动校正会重置当前帧微调。可撤销。'}" />
-                                            <Button Grid.Column="1" Content="{i18n:T '更多'}"
-                                                    ToolTip.Tip="{i18n:T '整卷自动校正 / 关闭自动校正'}">
-                                                <Button.Flyout>
-                                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                                        <MenuItem Header="{i18n:T '逐帧自动校正整卷'}" Click="OnAutoLensCorrectionRollClick"
-                                                                  ToolTip.Tip="{i18n:T '每帧独立匹配校正来源，并重置整卷微调。可撤销。'}" />
-                                                        <Separator />
-                                                        <MenuItem Header="{i18n:T '关闭当前帧自动校正'}" Click="OnDisableAutoLensCurrentClick" />
-                                                        <MenuItem Header="{i18n:T '关闭整卷自动校正'}" Click="OnDisableAutoLensRollClick" />
-                                                    </MenuFlyout>
-                                                </Button.Flyout>
-                                            </Button>
-                                        </Grid>
-                                        <TextBlock Classes="groupHint" IsVisible="{Binding IsReadingLensCorrection}" Text="{i18n:T '正在读取镜头参数…'}" />
-                                        <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap"
-                                                   IsVisible="{Binding HasLensCorrectionStatus}" />
-
-                                        <Grid ColumnDefinitions="*,Auto" Margin="0,6,0,0">
-                                            <TextBlock Classes="fieldLabel" Text="{i18n:T '手动微调'}" VerticalAlignment="Center" />
-                                            <Button Grid.Column="1" Content="{i18n:T '微调操作'}" IsEnabled="{Binding CanEditLensCorrection}">
-                                                <Button.Flyout>
-                                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                                        <MenuItem Header="{i18n:T '同步滑块到选中帧'}" Click="OnSyncLensSelectedClick" />
-                                                        <MenuItem Header="{i18n:T '同步滑块到整卷'}" Click="OnSyncLensRollClick" />
-                                                        <Separator />
-                                                        <MenuItem Header="{i18n:T '重置当前帧滑块'}" Click="OnResetLensCurrentClick" />
-                                                        <MenuItem Header="{i18n:T '重置整卷滑块'}" Click="OnResetLensRollClick" />
-                                                    </MenuFlyout>
-                                                </Button.Flyout>
-                                            </Button>
-                                        </Grid>
-                                        <StackPanel Spacing="1" IsEnabled="{Binding CanEditLensCorrection}">
-                                            <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
-                                            <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
-                                            <ctl:SliderRow Label="{i18n:T '暗角范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
-                                        </StackPanel>
-
-                                        <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,4,0,0">
-                                            <StackPanel Spacing="6">
-                                                <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
-                                                    <TextBlock Classes="fieldLabel" Text="{i18n:T 'LCC 平场'}" VerticalAlignment="Center" />
-                                                    <CheckBox Grid.Column="1" Content="{i18n:T '启用（整卷）'}" IsChecked="{Binding LccEnabled}"
-                                                              IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
-                                                </Grid>
-                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                           Text="{i18n:T '整卷共用均匀光参考图，用于修正暗角与偏色。'}" />
-                                                <Button Content="{i18n:T '载入 / 更换平场…'}" Click="OnLoadLccClick"
-                                                        HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
-                                                <TextBlock Classes="groupHint" Text="{Binding LccStatus}" TextWrapping="Wrap" />
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Expander Header="{i18n:T '校正详情与高级设置'}">
-                                            <StackPanel Spacing="4">
-                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                                           Text="{i18n:T '自动校正按帧保存；LCC 启用时接管自动暗角校正。滑杆用于额外微调。'}" />
-                                                <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
-                                                <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
-                                                <StackPanel IsEnabled="{Binding CanEditLensCorrection}">
-                                                    <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
-                                                              IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}"
-                                                              ToolTip.Tip="{i18n:T '已有内嵌校正时，请先在「更多」中关闭整卷自动校正。'}" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Expander>
-                                    </StackPanel>
-                                </Expander>
                             </StackPanel>
                         </Border>
                     </TabItem>
@@ -1657,6 +1586,13 @@
                         </TabItem.Header>
                         <Border Classes="finishingStage">
                             <StackPanel Spacing="0" Margin="16,4,16,12">
+                                <StackPanel Spacing="1" Margin="0,0,0,8">
+                                    <ctl:SliderRow Label="{i18n:T '曝光'}" IsVisible="{Binding IsNegativeFilm}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                                   ToolTip.Tip="{i18n:T '成片曝光：改变最终照片亮度，不重新解释底片曝光位置。'}" />
+                                    <ctl:SliderRow Label="{i18n:T '反差'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Contrast}" Bipolar="True" />
+                                    <ctl:SliderRow Label="{i18n:T '饱和度'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Saturation}" Bipolar="True" TrackBrush="{DynamicResource TrackSatBrush}" />
+                                </StackPanel>
+
                                 <!-- 白平衡属于这里，不属于标定。标定阶段解的是【色偏】——胶片、扫描、片基
                                      留在两端上的偏差，写在 D_min / D_max 里，没有"白平衡"的概念；白平衡是
                                      场景的事：这盏灯是暖是冷、要不要留它的暖，是正片域的判断。两层各答各的
@@ -1681,19 +1617,8 @@
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- 基本: the three global dials. They used to sit bare between the
-                                     cards; a slider outside any module has no home to be found in. -->
-                                <Expander Header="{i18n:T '基本'}" IsExpanded="True">
-                                    <StackPanel Spacing="1">
-                                        <ctl:SliderRow Label="{i18n:T '曝光'}" IsVisible="{Binding IsNegativeFilm}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
-                                                       ToolTip.Tip="{i18n:T '成片曝光：改变最终照片亮度，不重新解释底片曝光位置。'}" />
-                                        <ctl:SliderRow Label="{i18n:T '反差'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Contrast}" Bipolar="True" />
-                                        <ctl:SliderRow Label="{i18n:T '饱和度'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Saturation}" Bipolar="True" TrackBrush="{DynamicResource TrackSatBrush}" />
-                                    </StackPanel>
-                                </Expander>
-
                                 <!-- 影调, not 色调: 色调 is already the Tint slider two cards up. -->
-                                <Expander Header="{i18n:T '影调'}" IsExpanded="True">
+                                <Expander Header="{i18n:T '影调'}">
                                     <StackPanel Spacing="1">
                                         <Grid ColumnDefinitions="*,Auto">
                                             <ctl:SliderRow Grid.Column="0" Label="{i18n:T '黑场'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Black}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}" />
@@ -1734,140 +1659,201 @@
                         </Border>
                     </TabItem>
 
-                    <!-- 卷注释 used to be a third tab here. The fields moved into the 印样 dialog
-                         (文件 → 导出印样…) when they stopped feeding EXIF and started feeding the
-                         identification strip burned onto the sheet — you want to be typing them
-                         while looking at the roll they label, not in a side panel. -->
+                    <TabItem Header="{i18n:T '校正与构图'}">
+                        <Border Classes="repairStage">
+                            <StackPanel Spacing="0" Margin="16,4,16,12">
+                                <Expander Header="{i18n:T '设备、镜头与平场'}" Margin="0,0,0,8">
+                                    <StackPanel Spacing="6">
+                                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,4">
+                                            <TextBlock Classes="groupHint" Text="{Binding DeviceCaptureStatus}" TextWrapping="Wrap"
+                                                       VerticalAlignment="Center" Margin="0,0,6,0" />
+                                            <Button Grid.Column="1" Content="{i18n:T '设备校准…'}" Click="OnDeviceCalibrationClick" />
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
+                                            <Button Content="{i18n:T '自动校正当前帧'}" Click="OnAutoLensCorrectionCurrentClick"
+                                                    HorizontalAlignment="Stretch" Margin="0,0,6,0"
+                                                    ToolTip.Tip="{i18n:T '优先使用内嵌参数，其次 Lensfun；重新自动校正会重置当前帧微调。可撤销。'}" />
+                                            <Button Grid.Column="1" Content="{i18n:T '更多'}"
+                                                    ToolTip.Tip="{i18n:T '整卷自动校正 / 关闭自动校正'}">
+                                                <Button.Flyout>
+                                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                        <MenuItem Header="{i18n:T '逐帧自动校正整卷'}" Click="OnAutoLensCorrectionRollClick"
+                                                                  ToolTip.Tip="{i18n:T '每帧独立匹配校正来源，并重置整卷微调。可撤销。'}" />
+                                                        <Separator />
+                                                        <MenuItem Header="{i18n:T '关闭当前帧自动校正'}" Click="OnDisableAutoLensCurrentClick" />
+                                                        <MenuItem Header="{i18n:T '关闭整卷自动校正'}" Click="OnDisableAutoLensRollClick" />
+                                                    </MenuFlyout>
+                                                </Button.Flyout>
+                                            </Button>
+                                        </Grid>
+                                        <TextBlock Classes="groupHint" IsVisible="{Binding IsReadingLensCorrection}" Text="{i18n:T '正在读取镜头参数…'}" />
+                                        <TextBlock Classes="groupHint" Text="{Binding LensCorrectionStatusText}" TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasLensCorrectionStatus}" />
+
+                                        <Expander Header="{i18n:T '手动微调'}" Theme="{StaticResource SubExpander}">
+                                            <StackPanel Spacing="2">
+                                                    <Button HorizontalAlignment="Right" Content="{i18n:T '微调操作'}" IsEnabled="{Binding CanEditLensCorrection}">
+                                                        <Button.Flyout>
+                                                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                                <MenuItem Header="{i18n:T '同步滑块到选中帧'}" Click="OnSyncLensSelectedClick" />
+                                                                <MenuItem Header="{i18n:T '同步滑块到整卷'}" Click="OnSyncLensRollClick" />
+                                                                <Separator />
+                                                                <MenuItem Header="{i18n:T '重置当前帧滑块'}" Click="OnResetLensCurrentClick" />
+                                                                <MenuItem Header="{i18n:T '重置整卷滑块'}" Click="OnResetLensRollClick" />
+                                                            </MenuFlyout>
+                                                        </Button.Flyout>
+                                                    </Button>
+                                                <StackPanel Spacing="1" IsEnabled="{Binding CanEditLensCorrection}">
+                                                    <ctl:SliderRow Label="{i18n:T '畸变'}" Minimum="-0.5" Maximum="0.5" Decimals="3" Increment="0.005" DefaultValue="0" Value="{Binding DistortionK1}" Bipolar="True" />
+                                                    <ctl:SliderRow Label="{i18n:T '暗角'}" Minimum="-1" Maximum="2" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding VignetteAmount}" Bipolar="True" />
+                                                    <ctl:SliderRow Label="{i18n:T '暗角范围'}" Minimum="1" Maximum="6" Decimals="2" Increment="0.05" DefaultValue="2.5" Value="{Binding VignetteFalloff}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Expander>
+
+                                        <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,4,0,0">
+                                            <StackPanel Spacing="6">
+                                                <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding CanEditLensCorrection}">
+                                                    <TextBlock Classes="fieldLabel" Text="{i18n:T 'LCC 平场'}" VerticalAlignment="Center" />
+                                                    <CheckBox Grid.Column="1" Content="{i18n:T '启用（整卷）'}" IsChecked="{Binding LccEnabled}"
+                                                              IsEnabled="{Binding LccAvailable}" VerticalAlignment="Center" />
+                                                </Grid>
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                           Text="{i18n:T '整卷共用均匀光参考图，用于修正暗角与偏色。'}" />
+                                                <Button Content="{i18n:T '载入 / 更换平场…'}" Click="OnLoadLccClick"
+                                                        HorizontalAlignment="Stretch" IsEnabled="{Binding CanEditLensCorrection}" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LccStatus}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Expander Header="{i18n:T '校正详情与高级设置'}">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap"
+                                                           Text="{i18n:T '自动校正按帧保存；LCC 启用时接管自动暗角校正。滑杆用于额外微调。'}" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LensfunProfileText}" TextWrapping="Wrap" />
+                                                <TextBlock Classes="groupHint" Text="{Binding LensfunDetails}" TextWrapping="Wrap" />
+                                                <StackPanel IsEnabled="{Binding CanEditLensCorrection}">
+                                                    <CheckBox Content="{i18n:T '启用 Lensfun 镜头校正（整卷）'}"
+                                                              IsChecked="{Binding LensfunEnabled}" IsEnabled="{Binding LensfunAvailable}"
+                                                              ToolTip.Tip="{i18n:T '已有内嵌校正时，请先在「更多」中关闭整卷自动校正。'}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Expander>
+                                <!-- 齿孔遮罩 -->
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0" IsVisible="{Binding IsNegativeFilm}">
+                                    <CheckBox Grid.Column="0" Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
+                                              IsEnabled="{Binding HasImage}" VerticalAlignment="Center"
+                                              ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
+                                    <Button Grid.Column="1" Classes="icon" Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}"
+                                            Width="26" Height="26" MinHeight="26" Padding="4" Margin="6,0,0,0" VerticalAlignment="Center"
+                                            AutomationProperties.Name="{Binding SprocketSyncLabel}"
+                                            ToolTip.Tip="{Binding SprocketSyncLabel}">
+                                        <ctl:Icon Width="16" Height="16" Data="{StaticResource IcoBroadcast}" />
+                                    </Button>
+                                </Grid>
+                                <Expander Header="{i18n:T '齿孔设置'}" IsVisible="{Binding IsNegativeFilm}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Classes="groupHint"
+                                                   Text="{i18n:T '默认关闭。仅在输入包含齿孔或灯板时启用；先显示遮罩并确认范围，再调整阈值。超过阈值的区域会填白。'}" />
+                                        <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
+                                        <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" IsEnabled="{Binding HasImage}" />
+                                        <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
+                                    </StackPanel>
+                                </Expander>
+
+
+                                <!-- Crop and straightening controls. Orientation sync lives by the preview tools. -->
+                                <Expander Header="{i18n:T '裁切'}" IsExpanded="True">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="fieldLabel" FontWeight="SemiBold" Text="{i18n:T '手动裁切 · 所有片幅'}" />
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <TextBlock Grid.Column="0" Classes="fieldLabel spine" Text="{i18n:T '比例预设'}" />
+                                            <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
+                                                      SelectedIndex="0" SelectionChanged="OnCropPresetChanged" IsEnabled="{Binding CanAutoCrop}"
+                                                      ToolTip.Tip="{i18n:T '选择拖框比例；自由不锁定比例。'}">
+                                                <ComboBoxItem Content="{i18n:T '自由'}" />
+                                                <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
+                                                <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
+                                                <ComboBoxItem Content="{i18n:T '半格 — 内容 (3:4)'}" />
+                                                <ComboBoxItem Content="{i18n:T 'XPan 全幅 (65:24)'}" />
+                                                <ComboBoxItem Content="{i18n:T '645 — 内容 (4:3)'}" />
+                                                <ComboBoxItem Content="{i18n:T '6×6 — 内容 (1:1)'}" />
+                                                <ComboBoxItem Content="{i18n:T '6×7 — 内容 (7:6)'}" />
+                                                <ComboBoxItem Content="{i18n:T '6×9 — 内容 (3:2)'}" />
+                                                <ComboBoxItem Content="{i18n:T '6×12 全景 (2:1)'}" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <ToggleButton Name="CropBtn" Grid.Column="0" Classes="sampling"
+                                                          Click="OnCropClick" IsEnabled="{Binding HasImage}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCrop}" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '拖框裁切'}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </ToggleButton>
+                                            <Button Grid.Column="1" Content="{i18n:T '清除'}" Click="OnClearCropClick"
+                                                    Margin="6,0,0,0" IsEnabled="{Binding HasImage}" />
+                                        </Grid>
+                                        <ctl:SliderRow Label="{i18n:T '拉直'}" Minimum="-15" Maximum="15" Decimals="1" Increment="0.5" DefaultValue="0" Value="{Binding Rotation}" Bipolar="True" />
+                                        <Grid Classes="pairedActions" ColumnDefinitions="*,*">
+                                            <ToggleButton Name="StraightenHBtn" Grid.Column="0" Classes="sampling"
+                                                          Click="OnStraightenHClick" IsEnabled="{Binding HasImage}"
+                                                          ToolTip.Tip="{i18n:T '在预览上拖一条应当水平的参考线，松开即转正'}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoLevelH}" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '取水平'}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </ToggleButton>
+                                            <ToggleButton Name="StraightenVBtn" Grid.Column="1" Classes="sampling"
+                                                          Margin="6,0,0,0"
+                                                          Click="OnStraightenVClick" IsEnabled="{Binding HasImage}"
+                                                          ToolTip.Tip="{i18n:T '在预览上拖一条应当垂直的参考线，松开即转正'}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoLevelV}" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '取垂直'}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </ToggleButton>
+                                        </Grid>
+                                        <Button Name="ApplyReferenceCropButton" Click="OnApplyCropClick" IsEnabled="{Binding CanSyncReferenceCrop}"
+                                                Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
+                                                ToolTip.Tip="{i18n:T '回车应用拖框后，以本帧为参考同步裁切；有勾选只处理勾选帧，否则处理其余帧。同步后逐帧检查，可撤销。'}" />
+                                        <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{i18n:T '先调好本帧，再同步；位置有变化的帧单独微调。'}" />
+                                        <Expander Name="AutoCrop135Expander" Header="{i18n:T '135 辅助识别'}"
+                                                  Theme="{StaticResource SubExpander}" IsExpanded="False" Margin="0,8,0,0">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Classes="groupHint" Text="{i18n:T '仅适用于 135 全幅；其它片幅请使用上方手动裁切。'}" TextWrapping="Wrap" />
+                                                <Grid ColumnDefinitions="*,*">
+                                                    <RadioButton Grid.Column="0" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropContentMode}" IsEnabled="{Binding CanAutoCrop}">
+                                                        <TextBlock TextWrapping="Wrap" Text="{i18n:T '仅画面 3:2'}" />
+                                                    </RadioButton>
+                                                    <RadioButton Grid.Column="1" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropIncludeSprockets}" IsEnabled="{Binding CanAutoCrop}">
+                                                        <TextBlock TextWrapping="Wrap" Text="{i18n:T '含齿孔 35:37'}" />
+                                                    </RadioButton>
+                                                </Grid>
+                                                <Grid ColumnDefinitions="*,*">
+                                                    <Button Grid.Column="0" Name="Find135BoundaryButton" Content="{i18n:T '识别本帧'}" Click="OnAutoCropCurrentClick"
+                                                            IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch" />
+                                                    <Button Grid.Column="1" Content="{Binding CropBatchDetectionLabel}" Click="OnAutoCropRollClick" Margin="6,0,0,0"
+                                                            IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch"
+                                                            ToolTip.Tip="{i18n:T '逐帧定位，可靠帧辅助校验尺寸；有勾选只处理勾选帧，否则处理整卷。'}" />
+                                                </Grid>
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropOutputHint}" />
+                                                <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropFailureText}" IsVisible="{Binding HasAutoCropFailure}" />
+                                                <Button Content="{i18n:T '恢复识别前'}" Click="OnRestoreAutoCropRecoveryClick"
+                                                        IsVisible="{Binding HasAutoCropRecovery}" IsEnabled="{Binding CanAutoCrop}"
+                                                        ToolTip.Tip="{i18n:T '恢复上次识别前的裁切、方向和拉直，不改变镜头与成片设置。'}" />
+                                                <Button Content="{i18n:T '取消识别'}" Click="OnCancelAutoCropClick" IsVisible="{Binding IsAutoCropping}" />
+                                            </StackPanel>
+                                        </Expander>
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </TabItem>
                 </TabControl>
-                <!-- Shown while the open tab still has content below the fold. The fixed
-                     block under the tabs eats height, so it is easy to lose the bottom of a
-                     tab.
-
-                     A FADE, not a chip. The chip was a labelled box floating over the panel
-                     at the bottom right, which is where the panel keeps its widest buttons —
-                     so the notice that there was more to see arrived on top of the thing it
-                     was hiding. A row dissolving into the panel edge says the same thing
-                     without a word on it, and without covering anything: the cut-off row IS
-                     the message. -->
                 </Panel>
-
-                <!-- 齿孔遮罩 / 几何裁切 live below the tabs, not inside Cineon: neither is a
-                     colour parameter, and you want them at hand whichever stage you are on. -->
-                <Grid Classes="repairStage" RowDefinitions="Auto">
-                    <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                        <StackPanel Spacing="0" Margin="16,0,16,16">
-                            <!-- 齿孔遮罩 -->
-                            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0" IsVisible="{Binding IsNegativeFilm}">
-                                <CheckBox Grid.Column="0" Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
-                                          IsEnabled="{Binding HasImage}" VerticalAlignment="Center"
-                                          ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
-                                <Button Grid.Column="1" Classes="icon" Click="OnApplySprocketClick" IsEnabled="{Binding HasImage}"
-                                        Width="26" Height="26" MinHeight="26" Padding="4" Margin="6,0,0,0" VerticalAlignment="Center"
-                                        AutomationProperties.Name="{Binding SprocketSyncLabel}"
-                                        ToolTip.Tip="{Binding SprocketSyncLabel}">
-                                    <ctl:Icon Width="16" Height="16" Data="{StaticResource IcoBroadcast}" />
-                                </Button>
-                            </Grid>
-                            <Expander Header="{i18n:T '齿孔设置'}" IsVisible="{Binding IsNegativeFilm}">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Classes="groupHint"
-                                               Text="{i18n:T '默认关闭。仅在输入包含齿孔或灯板时启用；先显示遮罩并确认范围，再调整阈值。超过阈值的区域会填白。'}" />
-                                    <CheckBox Content="{i18n:T '显示遮罩'}" IsChecked="{Binding ShowSprocketMask}" IsEnabled="{Binding HasImage}" />
-                                    <ctl:SliderRow Label="{i18n:T '阈值'}" Minimum="0.05" Maximum="1.0" Decimals="3" Increment="0.005" DefaultValue="0.9" Value="{Binding SprocketThreshold}" IsEnabled="{Binding HasImage}" />
-                                    <TextBlock Classes="groupHint" Text="{i18n:T '勾选帧优先；未勾选时同步整卷。'}" />
-                                </StackPanel>
-                            </Expander>
-
-
-                            <!-- Crop and straightening controls. Orientation sync lives by the preview tools. -->
-                            <Expander Header="{i18n:T '裁切'}">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="fieldLabel" FontWeight="SemiBold" Text="{i18n:T '手动裁切 · 所有片幅'}" />
-                                    <Grid ColumnDefinitions="Auto,*">
-                                        <TextBlock Grid.Column="0" Classes="fieldLabel spine" Text="{i18n:T '比例预设'}" />
-                                        <ComboBox Grid.Column="1" Name="CropPresetCombo" HorizontalAlignment="Stretch"
-                                                  SelectedIndex="0" SelectionChanged="OnCropPresetChanged" IsEnabled="{Binding CanAutoCrop}"
-                                                  ToolTip.Tip="{i18n:T '选择拖框比例；自由不锁定比例。'}">
-                                            <ComboBoxItem Content="{i18n:T '自由'}" />
-                                            <ComboBoxItem Content="{i18n:T '135 全幅 — 内容 (3:2)'}" />
-                                            <ComboBoxItem Content="{i18n:T '135 全幅 — 含边框 (37:35)'}" />
-                                            <ComboBoxItem Content="{i18n:T '半格 — 内容 (3:4)'}" />
-                                            <ComboBoxItem Content="{i18n:T 'XPan 全幅 (65:24)'}" />
-                                            <ComboBoxItem Content="{i18n:T '645 — 内容 (4:3)'}" />
-                                            <ComboBoxItem Content="{i18n:T '6×6 — 内容 (1:1)'}" />
-                                            <ComboBoxItem Content="{i18n:T '6×7 — 内容 (7:6)'}" />
-                                            <ComboBoxItem Content="{i18n:T '6×9 — 内容 (3:2)'}" />
-                                            <ComboBoxItem Content="{i18n:T '6×12 全景 (2:1)'}" />
-                                        </ComboBox>
-                                    </Grid>
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <ToggleButton Name="CropBtn" Grid.Column="0" Classes="sampling"
-                                                      Click="OnCropClick" IsEnabled="{Binding HasImage}">
-                                            <Grid ColumnDefinitions="Auto,*">
-                                                <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoCrop}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '拖框裁切'}" VerticalAlignment="Center" />
-                                            </Grid>
-                                        </ToggleButton>
-                                        <Button Grid.Column="1" Content="{i18n:T '清除'}" Click="OnClearCropClick"
-                                                Margin="6,0,0,0" IsEnabled="{Binding HasImage}" />
-                                    </Grid>
-                                    <ctl:SliderRow Label="{i18n:T '拉直'}" Minimum="-15" Maximum="15" Decimals="1" Increment="0.5" DefaultValue="0" Value="{Binding Rotation}" Bipolar="True" />
-                                    <Grid Classes="pairedActions" ColumnDefinitions="*,*">
-                                        <ToggleButton Name="StraightenHBtn" Grid.Column="0" Classes="sampling"
-                                                      Click="OnStraightenHClick" IsEnabled="{Binding HasImage}"
-                                                      ToolTip.Tip="{i18n:T '在预览上拖一条应当水平的参考线，松开即转正'}">
-                                            <Grid ColumnDefinitions="Auto,*">
-                                                <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoLevelH}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '取水平'}" VerticalAlignment="Center" />
-                                            </Grid>
-                                        </ToggleButton>
-                                        <ToggleButton Name="StraightenVBtn" Grid.Column="1" Classes="sampling"
-                                                      Margin="6,0,0,0"
-                                                      Click="OnStraightenVClick" IsEnabled="{Binding HasImage}"
-                                                      ToolTip.Tip="{i18n:T '在预览上拖一条应当垂直的参考线，松开即转正'}">
-                                            <Grid ColumnDefinitions="Auto,*">
-                                                <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoLevelV}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '取垂直'}" VerticalAlignment="Center" />
-                                            </Grid>
-                                        </ToggleButton>
-                                    </Grid>
-                                    <Button Name="ApplyReferenceCropButton" Click="OnApplyCropClick" IsEnabled="{Binding CanSyncReferenceCrop}"
-                                            Content="{Binding CropSyncLabel}" HorizontalAlignment="Stretch"
-                                            ToolTip.Tip="{i18n:T '回车应用拖框后，以本帧为参考同步裁切；有勾选只处理勾选帧，否则处理其余帧。同步后逐帧检查，可撤销。'}" />
-                                    <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{i18n:T '先调好本帧，再同步；位置有变化的帧单独微调。'}" />
-                                    <Expander Name="AutoCrop135Expander" Header="{i18n:T '135 辅助识别'}"
-                                              Theme="{StaticResource SubExpander}" IsExpanded="False" Margin="0,8,0,0">
-                                        <StackPanel Spacing="6">
-                                            <TextBlock Classes="groupHint" Text="{i18n:T '仅适用于 135 全幅；其它片幅请使用上方手动裁切。'}" TextWrapping="Wrap" />
-                                            <Grid ColumnDefinitions="*,*">
-                                                <RadioButton Grid.Column="0" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropContentMode}" IsEnabled="{Binding CanAutoCrop}">
-                                                    <TextBlock TextWrapping="Wrap" Text="{i18n:T '仅画面 3:2'}" />
-                                                </RadioButton>
-                                                <RadioButton Grid.Column="1" GroupName="AutoCropOutput" IsChecked="{Binding AutoCropIncludeSprockets}" IsEnabled="{Binding CanAutoCrop}">
-                                                    <TextBlock TextWrapping="Wrap" Text="{i18n:T '含齿孔 35:37'}" />
-                                                </RadioButton>
-                                            </Grid>
-                                            <Grid ColumnDefinitions="*,*">
-                                                <Button Grid.Column="0" Name="Find135BoundaryButton" Content="{i18n:T '识别本帧'}" Click="OnAutoCropCurrentClick"
-                                                        IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch" />
-                                                <Button Grid.Column="1" Content="{Binding CropBatchDetectionLabel}" Click="OnAutoCropRollClick" Margin="6,0,0,0"
-                                                        IsEnabled="{Binding CanAutoCrop}" HorizontalAlignment="Stretch"
-                                                        ToolTip.Tip="{i18n:T '逐帧定位，可靠帧辅助校验尺寸；有勾选只处理勾选帧，否则处理整卷。'}" />
-                                            </Grid>
-                                            <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropOutputHint}" />
-                                            <TextBlock Classes="groupHint" TextWrapping="Wrap" Text="{Binding AutoCropFailureText}" IsVisible="{Binding HasAutoCropFailure}" />
-                                            <Button Content="{i18n:T '恢复识别前'}" Click="OnRestoreAutoCropRecoveryClick"
-                                                    IsVisible="{Binding HasAutoCropRecovery}" IsEnabled="{Binding CanAutoCrop}"
-                                                    ToolTip.Tip="{i18n:T '恢复上次识别前的裁切、方向和拉直，不改变镜头与成片设置。'}" />
-                                            <Button Content="{i18n:T '取消识别'}" Click="OnCancelAutoCropClick" IsVisible="{Binding IsAutoCropping}" />
-                                        </StackPanel>
-                                    </Expander>
-                                </StackPanel>
-                            </Expander>
-                        </StackPanel>
-                    </Border>
-                </Grid>
-
                 </StackPanel>
                 </ScrollViewer>
                 <!-- Shown while the panel has content below the fold. A FADE, not a chip: the

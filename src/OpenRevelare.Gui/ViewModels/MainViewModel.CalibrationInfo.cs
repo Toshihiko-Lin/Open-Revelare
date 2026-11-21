@@ -10,6 +10,10 @@ public sealed partial class MainViewModel
     // Only publish decoder provenance for the frame that supplied the preview.
     private string? _calibrationInfoFramePath;
 
+    public string DeviceCaptureStatus => _captureWorkflow is not null
+        ? CaptureCorrectionText
+        : Loc.T("此卷未应用设备校准");
+
     public string InputCharacterizationText
     {
         get
@@ -85,6 +89,7 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(InputCharacterizationText));
         OnPropertyChanged(nameof(DensityCorrectionText));
         OnPropertyChanged(nameof(CaptureCorrectionText));
+        OnPropertyChanged(nameof(DeviceCaptureStatus));
         OnPropertyChanged(nameof(CaptureCorrectionSourceText));
         OnPropertyChanged(nameof(DensityCorrectionSourceText));
         OnPropertyChanged(nameof(CaptureCorrectionScopeText));

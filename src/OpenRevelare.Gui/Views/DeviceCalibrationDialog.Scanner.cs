@@ -10,6 +10,8 @@ internal sealed partial class DeviceCalibrationDialog
     private async Task ImportScannerStandardAsset()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new() { Title = Loc.T("选择 ICC、IT8/Q60、CGATS 或 Argyll TI3 文件"), AllowMultiple = true });
+        if (files.Count == 0) return;
+        _status.Text = Loc.T("正在读取参考文件…");
         var pending = new List<CalibrationReference>(); var summaries = new List<string>();
         foreach (var file in files)
         {
@@ -25,10 +27,11 @@ internal sealed partial class DeviceCalibrationDialog
                     .Select(kv => kv.Key + ": " + kv.Value)));
         }
         _references.AddRange(pending); RefreshFiles();
-        if (pending.Count == 0) return;
-        _status.Text = Loc.T("标准文件已识别并登记，请保存配置。ICC/XYZ/Lab 不会被当作物理密度或自动应用到胶卷。");
-        await new InfoDialog(Loc.T("扫描校准文件识别结果"), string.Join("\n\n", summaries) + "\n\n"
-            + Loc.T("已检查文件结构及内容类型；这不是本机硬件适用性或测量准确性认证。参考数据仍需匹配实体靶的编号。ICC 若已在扫描输出中使用，不可再次重复应用。")).ShowDialog(this);
+        _status.Text = Loc.F($"已识别并登记 {pending.Count} 个标准文件。请保存配置。");
+        _scannerFileSummary.Text = string.Join("\n\n", summaries) + "\n\n"
+            + Loc.T("请核对参考数据与实体色靶的编号。已使用输入 ICC 转换的扫描无需重复套用。");
+        _scannerFileDetails.IsExpanded = false;
+        _scannerFileDetails.IsVisible = true;
     }
 
     private static readonly JsonSerializerOptions ScannerJson = new() { WriteIndented = true };
@@ -47,17 +50,27 @@ internal sealed partial class DeviceCalibrationDialog
 
     private async Task FitScannerResponse()
     {
-        var p = Snapshot(); p.Validate();
+        var p = ValidatedSnapshot();
         if (p.Kind != CalibrationDeviceKind.Scanner || p.Scanner.Mode != ScannerAcquisitionMode.Transmission
             || p.InputState != CaptureSignalState.LinearDeviceChannels || p.MeasurementTarget != CaptureMeasurementTarget.StandardDensity)
+        {
+            _detailsExpander.IsExpanded = true;
             throw new InvalidOperationException(Loc.T("扫描拟合仅支持透射扫描、线性设备通道和指定参考密度目标。"));
+        }
         if (string.IsNullOrWhiteSpace(p.Scanner.Software) || string.IsNullOrWhiteSpace(p.Scanner.ExportSettings)
             || p.Scanner.BlackCorrection == UpstreamCorrectionState.Unknown || p.Scanner.SpatialCorrection == UpstreamCorrectionState.Unknown)
+        {
+            _detailsExpander.IsExpanded = true;
             throw new InvalidOperationException(Loc.T("请先记录扫描软件、导出设置以及驱动扣黑和白校准状态。"));
+        }
         CalibrationReference One(CalibrationReferenceRole role)
         {
             var matches = p.References.Where(r => r.Role == role).ToArray();
-            if (matches.Length != 1) throw new InvalidOperationException(Loc.T("请分别登记一张色靶图像、一张独立验证扫描和一份色靶参考数据。"));
+            if (matches.Length != 1)
+            {
+                _detailsExpander.IsExpanded = true;
+                throw new InvalidOperationException(Loc.T("请分别登记一张色靶图像、一张独立验证扫描和一份色靶参考数据。"));
+            }
             return matches[0];
         }
         var training = One(CalibrationReferenceRole.TargetImage);

@@ -5,6 +5,8 @@ namespace OpenRevelare.Gui.Views;
 
 public partial class MainWindow
 {
+    private bool _clipboardUsesCalibration = true;
+
     // UniformGrid provides equal-width segments but not WrapPanel's directional navigation.
     // Handle the tab keys here, before the window's image-navigation shortcuts see them.
     private void OnInspectorTabKeyDown(object? sender, KeyEventArgs e)

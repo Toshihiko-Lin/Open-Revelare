@@ -6,23 +6,26 @@
         <ControlTheme x:Key="InspectorTabTheme" TargetType="TabStripItem">
             <Setter Property="Focusable" Value="True" />
             <Setter Property="FocusAdorner" Value="{x:Null}" />
-            <Setter Property="MinHeight" Value="34" />
-            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="MinHeight" Value="38" />
+            <Setter Property="Padding" Value="8,6" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextDimBrush}" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="15" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Name="TabFace" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4">
-                        <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}"
-                                          ContentTemplate="{TemplateBinding ContentTemplate}"
-                                          Padding="{TemplateBinding Padding}"
-                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
+                        <Grid RowDefinitions="*,2">
+                            <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              Padding="{TemplateBinding Padding}"
+                                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                            <Border Name="SelectedUnderline" Grid.Row="1" Background="{DynamicResource AccentBrush}" IsVisible="False" />
+                        </Grid>
                     </Border>
                 </ControlTemplate>
             </Setter>
@@ -31,13 +34,11 @@
                 <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
             </Style>
             <Style Selector="^:selected">
-                <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource BorderSoftBrush}" />
                 <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
                 <Setter Property="FontWeight" Value="SemiBold" />
             </Style>
-            <Style Selector="^:selected:pointerover">
-                <Setter Property="Background" Value="{DynamicResource ElevatedBrush}" />
+            <Style Selector="^:selected /template/ Border#SelectedUnderline">
+                <Setter Property="IsVisible" Value="True" />
             </Style>
             <Style Selector="^:pressed">
                 <Setter Property="Background" Value="{DynamicResource PressSoftBrush}" />
