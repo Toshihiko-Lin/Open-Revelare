@@ -2844,7 +2844,7 @@ public partial class MainWindow : Window
             AllowMultiple = true,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("支持的底片文件")) { Patterns = ImageIo.OpenPatterns },
                 // Always leave a way through: a filter that fails to match is otherwise a dead
                 // end with no in-app remedy (see ImageIo.OpenPatterns on why it can happen).
                 new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },

@@ -115,7 +115,7 @@ public partial class ImportDialog : Window
             if (existing.Add(path)) Files.Add(path);
         if (selection.Rejected.Length + selection.Projects.Length > 0)
             await new InfoDialog(Loc.T("部分文件未加入"),
-                Loc.T("请选择 RAW 或 TIFF；工程请在主窗口打开。") + "\n\n" +
+                Loc.T("支持相机 RAW、TIFF、FFF 和兼容的扫描 DNG。请从主窗口打开工程。") + "\n\n" +
                 string.Join("\n", selection.Rejected.Concat(selection.Projects).Select(System.IO.Path.GetFileName)))
                 .ShowDialog(this);
     }
@@ -128,7 +128,7 @@ public partial class ImportDialog : Window
             AllowMultiple = true,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType(Loc.T("负片 (RAW / TIFF)")) { Patterns = ImageIo.OpenPatterns },
+                new FilePickerFileType(Loc.T("支持的底片文件")) { Patterns = ImageIo.OpenPatterns },
                 new FilePickerFileType(Loc.T("所有文件")) { Patterns = new[] { "*" } },
             },
         });
@@ -137,7 +137,7 @@ public partial class ImportDialog : Window
 
     private async void OnAddFolder(object? sender, RoutedEventArgs e)
     {
-        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("添加文件夹（扫描 RAW/TIFF）") });
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("选择底片文件夹") });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
         await AddPathsAsync(new[] { dir });
     }
@@ -159,7 +159,7 @@ public partial class ImportDialog : Window
     {
         if (OkBtn is null || ReadyHint is null) return;
         string issue = !AddToCurrent && SrcA.IsChecked == true && !_calValid
-            ? _calChecking ? Loc.T("正在识别 R/G/B 校正图…") : Loc.T("请先选择有效的 R/G/B 校正图目录。")
+            ? _calChecking ? Loc.T("正在查找 RGB 校正图…") : Loc.T("请选择包含 RGB 校正图的文件夹。")
             : "";
         OkBtn.IsEnabled = Files.Count > 0 && issue.Length == 0;
         ReadyHint.Text = issue;
@@ -174,7 +174,7 @@ public partial class ImportDialog : Window
 
     private async void OnPickCal(object? sender, RoutedEventArgs e)
     {
-        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("选择 R/G/B 校正图目录") });
+        var dirs = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = Loc.T("选择 RGB 校正图文件夹") });
         if (dirs.FirstOrDefault()?.TryGetLocalPath() is not { } dir) return;
         CalEdit.Text = dir;
         CalDetect.Text = Loc.T("识别中 …");
@@ -214,7 +214,7 @@ public partial class ImportDialog : Window
         if (scans > 0 && scans < Files.Count)
         {
             await new InfoDialog(Loc.T("不能混合扫描件和 RAW"),
-                    Loc.T("这一批里既有扫描 TIFF 又有相机 RAW，两者的处理管线不同（扫描件可能一个文件装着整条底片，需要先分割）。请分成两卷分别导入。"))
+                    Loc.T("请将扫描件和相机 RAW 分卷导入。"))
                 .ShowDialog(this);
             return;
         }

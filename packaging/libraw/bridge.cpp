@@ -11,7 +11,7 @@
 
 API const char* or_raw_version() { return LibRaw::version(); }
 API const char* or_raw_build_info() {
-    return "LibRaw=0.22.2;"
+    return "LibRaw=0.22.3;"
 #ifdef _MSC_VER
         "compiler=MSVC;"
 #elif defined(__clang__)

@@ -5,7 +5,7 @@
         Width="640" SizeToContent="Height" MinWidth="520" MinHeight="400" MaxHeight="760"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource PanelBrush}"
-        Title="{i18n:T '新建项目 / 导入'}">
+        Title="{i18n:T '导入底片'}">
     <DockPanel Margin="20">
         <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,12,0,0">
             <StackPanel Name="DestinationRow" Orientation="Horizontal" Spacing="16" IsVisible="False">
@@ -23,9 +23,7 @@
             <StackPanel Spacing="12">
                 <!-- ── 文件 ─────────────────────────────────────────── -->
                 <StackPanel Spacing="4">
-                    <TextBlock Text="{i18n:T '底片文件 · 可拖入文件或文件夹'}" FontWeight="SemiBold" />
-                    <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                               Text="{i18n:T '支持 RAW、TIFF、FFF 和兼容的 DNG。'}" />
+                    <TextBlock Text="{i18n:T '拖入底片文件或文件夹'}" FontWeight="SemiBold" />
                     <ListBox Name="FileList" Height="112" SelectionMode="Multiple"
                              Background="{DynamicResource Panel2Brush}" />
                     <WrapPanel Orientation="Horizontal">
@@ -40,18 +38,18 @@
                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                         <StackPanel Spacing="8" Margin="0,4,0,8">
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T 'RAW：支持情况取决于相机型号和编码，部分压缩 RAW 暂不支持。'}" />
+                                       Text="{i18n:T '相机 RAW 的支持范围取决于机型和压缩方式。'}" />
                             <TextBlock Name="RawFormatsHint" Classes="groupHint" TextWrapping="Wrap" />
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T 'TIFF：支持每通道 8 / 16 位无符号整数、32 位浮点，需通道交错存储；推荐 16 位 RGB。'}" />
+                                       Text="{i18n:T 'TIFF 支持 8/16 位无符号整数或 32 位浮点，通道需交错存储。推荐 16 位 RGB。'}" />
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T 'FFF：支持 Flextight RGB 扫描；相机后背 FFF 按 RAW 读取。'}" />
+                                       Text="{i18n:T 'FFF 支持 Flextight RGB 扫描。相机后背的 FFF 按 RAW 导入。'}" />
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T '扫描 DNG：不限品牌，支持未压缩的 16 位 RGB / RGBI；需通道交错、非分块、默认方向且无额外 DNG 校正。不兼容时请转为 48 位 RGB TIFF。'}" />
+                                       Text="{i18n:T '扫描 DNG 须为未压缩的 16 位交错 RGB 或 RGBI，默认方向，无分块和额外 DNG 校正。不兼容的文件可转为 48 位 RGB TIFF。'}" />
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T '红外除尘：目前仅支持 VueScan RGBI DNG；传统银盐黑白胶片不适用。'}" />
+                                       Text="{i18n:T '红外除尘仅支持 VueScan RGBI DNG，不适用于传统银盐黑白胶片。'}" />
                             <TextBlock Classes="groupHint" TextWrapping="Wrap"
-                                       Text="{i18n:T '建议保留未反转的负片数据；VueScan 关闭 Raw save film。JPEG、PNG、HEIC 不支持作为底片导入。'}" />
+                                       Text="{i18n:T '扫描时保留未反转的负片，并在 VueScan 中关闭 Raw save film。JPEG、PNG 和 HEIC 无法导入。'}" />
                         </StackPanel>
                     </Expander>
                 </StackPanel>
@@ -75,11 +73,10 @@
                             <Grid ColumnDefinitions="84,*">
                                 <TextBlock Text="{i18n:T '翻拍光源'}" VerticalAlignment="Center" Foreground="{DynamicResource TextMuteBrush}" />
                                 <WrapPanel Grid.Column="1" Orientation="Horizontal">
-                                    <RadioButton Name="SrcB" GroupName="src" Content="{i18n:T '白光'}" IsChecked="True" Margin="0,0,18,0"
-                                                 ToolTip.Tip="{i18n:T '宽谱光源（白光）— Path B'}" />
+                                    <RadioButton Name="SrcB" GroupName="src" Content="{i18n:T '白光'}" IsChecked="True" Margin="0,0,18,0" />
                                     <RadioButton Name="SrcA" GroupName="src" Content="{i18n:T 'RGB 合成光'}"
                                                  Checked="OnSourceChanged" Unchecked="OnSourceChanged"
-                                                 ToolTip.Tip="{i18n:T 'RGB LED 灯板翻拍：分别拍红 / 绿 / 蓝三张，加一张空白灯板 RAW，放在同一文件夹（自动识别）。据此解出通道串扰，还原更准确的原色。'}" />
+                                                 ToolTip.Tip="{i18n:T '分别拍摄红、绿、蓝参考图和空白灯板 RAW，放在同一文件夹。软件会自动识别，用于校正通道串扰。'}" />
                                 </WrapPanel>
                             </Grid>
                             <StackPanel Name="CalRow" IsVisible="False" Spacing="4">
@@ -95,11 +92,11 @@
                     <StackPanel Spacing="6">
                         <TextBlock Text="{i18n:T '导入处理'}" FontWeight="SemiBold" />
                         <Grid ColumnDefinitions="*,*">
-                            <CheckBox Name="SplitChk" Content="{i18n:T '扫描件多格分割'}"
-                                      ToolTip.Tip="{i18n:T '扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。'}" />
+                            <CheckBox Name="SplitChk" Content="{i18n:T '分割底片扫描条'}"
+                                      ToolTip.Tip="{i18n:T '自动识别扫描条中的画格，可手动调整分隔线。'}" />
                             <CheckBox Name="AutoInvertChk" Grid.Column="1" IsChecked="True"
-                                      ToolTip.Tip="{i18n:T '按所选底片类型分析整卷并统一明暗端点；正片不运行负片去色罩。'}">
-                                <TextBlock Text="{i18n:T '导入后自动分析整卷（推荐）'}" TextWrapping="Wrap" />
+                                      ToolTip.Tip="{i18n:T '按底片类型为整卷统一黑白点。'}">
+                                <TextBlock Text="{i18n:T '自动分析整卷'}" TextWrapping="Wrap" />
                             </CheckBox>
                         </Grid>
                     </StackPanel>

@@ -5,7 +5,7 @@ using System.Diagnostics;
 namespace OpenRevelare.Core;
 
 /// <summary>
-/// Camera RAW decoder via the application-owned LibRaw 0.22.2 binding. Port of the core
+/// Camera RAW decoder via the application-owned LibRaw 0.22.3 binding. Port of the core
 /// <c>negative/raw_decode.py::_decode_rawpy</c> path.
 ///
 /// Returns a linear-light float32 (H,W,3) array in CAMERA-NATIVE colour — the
@@ -228,7 +228,7 @@ public static class RawDecode
 
         return ReadNefCompression(path) switch
         {
-            13 or 14 => CoreText.T("此 NEF 用尼康 High Efficiency / High Efficiency★ 压缩，LibRaw 无法解码（强制解码只会得到彩条，不是文件损坏）。请在相机里改用无损压缩 NEF 重拍，或先用 NX Studio、Lightroom 等导出 16-bit TIFF 再导入。"),
+            13 or 14 => CoreText.T("此 NEF 使用 LibRaw 尚不支持的尼康 High Efficiency 压缩（HE / HE★）。请先转为 16 位 TIFF，或改用无损压缩 NEF 拍摄。"),
             _ => null,
         };
     }

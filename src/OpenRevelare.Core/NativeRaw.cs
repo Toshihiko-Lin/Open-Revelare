@@ -82,8 +82,8 @@ internal sealed class RawContext : IDisposable
     private readonly RawHandle _raw;
     private RawContext(byte[]? bytes, string? path = null)
     {
-        if (Native.Version != "0.22.2-Release")
-            throw new NotSupportedException($"Expected LibRaw 0.22.2, loaded {Native.Version}");
+        if (Native.Version != "0.22.3-Release")
+            throw new NotSupportedException($"Expected LibRaw 0.22.3, loaded {Native.Version}");
         _raw = new RawHandle(bytes);
         try
         {

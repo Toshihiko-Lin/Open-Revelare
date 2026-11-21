@@ -104,8 +104,7 @@ single leader frame carries every reference the calibration needs:
 RAF / RW2 / ORF / PEF and others; TIFF covers .tif / .tiff. One roll cannot mix RAW and TIFF.
 Selecting several files puts you in roll mode.
 
-**Copying light source (camera RAW only)**: choose "Broad-spectrum (white light) — Path B" or
-"Narrow-band (RGB) — Path A". The latter also wants a calibration folder.
+**Copying light source (camera RAW only)**: choose “White light” or “RGB composite light.” For RGB composite light, select a calibration folder.
 
 **TIFF colour space is worked out for you**
 

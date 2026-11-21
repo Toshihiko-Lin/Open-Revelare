@@ -60,7 +60,7 @@ public partial class MainWindow
             _dustView = DustView.After;
             vm.IsDustReviewActive = true;
             UpdateDustReviewDisplay();
-            vm.StatusText = Loc.T("红外检测完成，请审核蒙版后应用。");
+            vm.StatusText = Loc.T("红外检测完成。请检查遮罩后应用。");
         }
         catch (OperationCanceledException) when (owner.IsCancellationRequested) { }
         catch (Exception ex) { vm.StatusText = Loc.T("红外除尘失败") + " · " + ex.Message; }

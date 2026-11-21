@@ -38,7 +38,7 @@ fi
 [ -f "$PUB/OpenRevelare" ] || { echo "错误：未找到 $PUB/OpenRevelare"; exit 1; }
 
 # RAW 解码的原生库。缺了照样能打包，但一导入 RAW 就炸，所以这里明说。
-[ -f "$PUB/libOpenRevelare.Raw.Native.so" ] || { echo "错误：缺 LibRaw 0.22.2 原生库"; exit 1; }
+[ -f "$PUB/libOpenRevelare.Raw.Native.so" ] || { echo "错误：缺 LibRaw 0.22.3 原生库"; exit 1; }
 
 # ── 前置检查 ───────────────────────────────────────────────────────────────
 for t in "$TOOL" "$RUNTIME"; do

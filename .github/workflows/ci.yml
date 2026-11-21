@@ -105,7 +105,7 @@ jobs:
   # 发版之后才现形。ad-hoc 签名、bash 3.2 的多字节坑、RID 条件没传给类库导致 dylib
   # 不进产物 —— 这些都是已经栽过的跟头（见 build-app.sh 与 Gui.csproj 里的注释）。
   #
-  # macOS 也编译并运行真实 LibRaw 0.22.2，验证原生 ABI 与解码。
+  # macOS 也编译并运行真实 LibRaw 0.22.3，验证原生 ABI 与解码。
   macos:
     runs-on: macos-latest      # Apple Silicon。Intel 不在 CI 里：托管代码与垫片源码两边一样，
                                # Intel 独有的只是 RID 选择（LittleCmsBundle / ColorManagement.csproj），

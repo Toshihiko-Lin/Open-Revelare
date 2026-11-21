@@ -1,7 +1,7 @@
-# LibRaw 0.22.2
+# LibRaw 0.22.3
 
 All supported platforms build the same application-owned native bridge from
-the official LibRaw **0.22.2** archive. CMake verifies the SHA-256 of LibRaw,
+the source archive for the upstream LibRaw **0.22.3** release tag. CMake verifies the SHA-256 of LibRaw,
 libjpeg-turbo **3.1.2**, and Little CMS **2.19.1** before extracting them.
 Upstream sources are not patched. JPEG and Little CMS are linked statically
 inside the replaceable shared library. OpenMP and IPO are off by default; optional SDKs remain disabled.

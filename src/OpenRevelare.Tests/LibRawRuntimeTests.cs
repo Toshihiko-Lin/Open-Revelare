@@ -102,7 +102,7 @@ public sealed class LibRawRuntimeTests
 
     // Mandatory on every CI platform: a skipped decode must not conceal a missing/wrong DLL.
     [Fact]
-    public void Loads_pinned_native_decoder() => Assert.Equal("0.22.2-Release", RawDecode.LibRawVersion);
+    public void Loads_pinned_native_decoder() => Assert.Equal("0.22.3-Release", RawDecode.LibRawVersion);
 
     [Fact]
     public void Invalid_input_does_not_poison_subsequent_parallel_decodes()

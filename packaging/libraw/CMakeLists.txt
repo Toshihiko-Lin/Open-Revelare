@@ -16,8 +16,8 @@ option(OR_RAW_ENABLE_OPENMP "Enable OpenMP (requires deployment of its runtime)"
 # All native allocations are released inside this same module.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 FetchContent_Declare(libraw
-  URL https://www.libraw.org/data/LibRaw-0.22.2.tar.gz
-  URL_HASH SHA256=de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa)
+  URL https://codeload.github.com/LibRaw/LibRaw/tar.gz/refs/tags/0.22.3
+  URL_HASH SHA256=7edf96c5b70cff88980a02ab0fc8af125cb6a4a377985573c654439d9d02355c)
 FetchContent_GetProperties(libraw)
 if(NOT libraw_POPULATED)
   FetchContent_Populate(libraw)

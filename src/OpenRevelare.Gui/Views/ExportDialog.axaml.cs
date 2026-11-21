@@ -87,7 +87,7 @@ public partial class ExportDialog : Window
         LoadDevices(LensLibraryBox, Settings.Current.FilmLenses ??= [], "选用已保存镜头");
 
         Title = rollMode ? Loc.T("整卷导出选项") : Loc.T("导出选项");
-        OkBtn.Content = rollMode ? Loc.T("选择目录 →") : Loc.T("选择位置 →");
+        OkBtn.Content = rollMode ? Loc.T("选择导出文件夹…") : Loc.T("选择保存位置…");
         ConflictGroup.IsVisible = rollMode;
         // Naming shows in BOTH modes. It used to be roll-only, on the grounds that a single frame
         // types its name in the save dialog anyway — but that dialog opens with the name this

@@ -179,7 +179,7 @@
                                     </Grid>
                                 </StackPanel>
                                 <CheckBox Name="FilmInfoChk" Content="{i18n:T '导出时写入胶片拍摄信息'}" IsCheckedChanged="OnAnyChanged"/>
-                                <TextBlock Classes="groupHint" Text="{i18n:T '未填项目留空，不沿用翻拍参数。曝光、日期等参数按张填写；取消同步可单独修改机身或镜头。'}"/>
+                                <TextBlock Classes="groupHint" Text="{i18n:T '空白字段不会沿用翻拍信息。曝光和日期按帧填写。取消同步可单独设置机身或镜头。'}"/>
                                 <StackPanel Spacing="3">
                                     <TextBlock Classes="formatDetail" Text="{i18n:T '数字化来源（当前帧）'}"/>
                                     <TextBlock Name="SourceExifSummaryLbl" Classes="groupHint" TextWrapping="Wrap"/>
@@ -206,7 +206,7 @@
                 <!-- IsCancel / IsDefault：Esc 退出，Enter 确认，同 InfoDialog 与 PromptDialog。 -->
                 <Button Content="{i18n:T '取消'}" IsCancel="True" Click="OnCancelClick" />
                 <Button Classes="primary" Name="OkBtn" IsDefault="True"
-                        Content="{i18n:T '选择位置 →'}" Click="OnAcceptClick" />
+                        Content="{i18n:T '选择保存位置…'}" Click="OnAcceptClick" />
             </StackPanel>
         </StackPanel>
 
@@ -272,7 +272,7 @@
                                               Content="{i18n:T '场景线性 ACEScg（32-bit float，不含帧编辑）'}"
                                               IsCheckedChanged="OnAnyChanged" />
                                     <TextBlock Classes="groupHint"
-                                               Text="{i18n:T '用于外部调色，不做输出锐化；普通查看器中可能偏暗。'}" />
+                                               Text="{i18n:T '供外部调色使用，无输出锐化。普通查看器中可能偏暗。'}" />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>
@@ -298,7 +298,7 @@
                                     <ComboBoxItem Content="{i18n:T 'Adaptive HDR（标准增益图）'}" />
                                 </ComboBox>
                                 <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                           Text="{i18n:T '单层 HDR 直接以 PQ 编码，不依赖增益图，通常体积较小；需要支持 PQ HDR HEIC 的查看器。Adaptive HDR 包含 SDR 主图与标准增益图，通常体积较大；HDR 支持取决于系统和应用。'}" />
+                                           Text="{i18n:T '单层 HDR 使用 PQ，通常较小，需要兼容的查看器。Adaptive HDR 包含 SDR 主图和增益图，通常较大，兼容的系统和应用可显示 HDR。'}" />
                             </Grid>
                             <Grid Name="HeicQualityRow" ColumnDefinitions="86,*">
                                 <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '品质'}" />
@@ -326,7 +326,7 @@
                                     <TextBlock Classes="fieldLabel" Text="MB" />
                                 </StackPanel>
                                 <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                           Text="{i18n:T '先降品质（下限 40），仍超限再缩尺寸；结果在状态栏报告。'}" />
+                                           Text="{i18n:T '先降低品质（最低 40），再按需缩小尺寸。'}" />
                             </Grid>
                         </StackPanel>
                         <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,6" />
@@ -369,7 +369,7 @@
                         <TextBlock Classes="sectionHead" Text="{i18n:T '尺寸'}" />
                         <Grid ColumnDefinitions="86,*">
                             <CheckBox Grid.Column="1" Name="DownsampleChk"
-                                      Content="{i18n:T '缩放到指定长边'}" IsCheckedChanged="OnDownsampleToggled" />
+                                      Content="{i18n:T '按长边缩放'}" IsCheckedChanged="OnDownsampleToggled" />
                         </Grid>
                         <Grid Name="LongEdgeRow" ColumnDefinitions="86,*" RowDefinitions="Auto,Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '长边'}" />
@@ -380,9 +380,7 @@
                                 <TextBlock Classes="fieldLabel" Text="px" />
                             </StackPanel>
                             <CheckBox Grid.Row="1" Grid.Column="1" Name="UpscaleChk" Margin="0,6,0,0"
-                                      Content="{i18n:T '长边不足时也放大'}" IsCheckedChanged="OnAnyChanged" />
-                            <TextBlock Grid.Row="2" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                       Text="{i18n:T '保持比例；默认只缩小，勾选后允许放大。'}" />
+                                      Content="{i18n:T '允许放大'}" IsCheckedChanged="OnAnyChanged" />
                         </Grid>
 
                         <!-- 锐化归在尺寸里，不在格式里：它的量是按成品像素定的，就在缩放之后做。 -->
@@ -391,7 +389,7 @@
                             <ComboBox Grid.Row="0" Grid.Column="1" Name="SharpenBox"
                                       HorizontalAlignment="Stretch" SelectionChanged="OnAnyChanged" />
                             <TextBlock Grid.Row="1" Grid.Column="1" Classes="groupHint" Margin="0,3,0,0"
-                                       Text="{i18n:T '按导出尺寸锐化；颗粒也会增强。'}" />
+                                       Text="{i18n:T '按导出尺寸锐化，也会增强颗粒。'}" />
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -438,7 +436,7 @@
                              选择看起来像是会直接落盘。 -->
                         <Grid Name="SingleNameHintRow" ColumnDefinitions="86,*">
                             <TextBlock Grid.Column="1" Classes="groupHint"
-                                       Text="{i18n:T '保存对话框会预填这个名字，仍可修改。'}" />
+                                       Text="{i18n:T '保存时可修改文件名。'}" />
                         </Grid>
                         <StackPanel Name="ConflictGroup" Spacing="6" Margin="0,6,0,0">
                             <Border Height="1" Background="{DynamicResource BorderSoftBrush}" Margin="0,0,0,6" />
@@ -454,7 +452,7 @@
                                                      Margin="0,0,0,4" Content="{i18n:T '跳过该帧'}" IsCheckedChanged="OnAnyChanged" />
                                     </WrapPanel>
                                     <TextBlock Classes="groupHint"
-                                               Text="{i18n:T '整卷批量写入，不逐个询问；同批次内重名一律另存。'}" />
+                                               Text="{i18n:T '同一批次内的重名文件会自动另存。'}" />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>

@@ -18,10 +18,10 @@
   </ItemGroup>
   <Target Name="CheckPinnedLibRaw" BeforeTargets="Build" Condition="'$(_NeedsRaw)' == 'true'">
     <Warning Code="ORRAW001" Condition="!Exists('$(_RawPath)')"
-             Text="LibRaw 0.22.2 is missing for $(_RawRid). Run packaging/libraw/build-windows.ps1 or packaging/libraw/build-unix.sh before decoding RAW." />
+             Text="LibRaw 0.22.3 is missing for $(_RawRid). Run packaging/libraw/build-windows.ps1 or packaging/libraw/build-unix.sh before decoding RAW." />
   </Target>
   <Target Name="RequirePinnedLibRawForPublish" BeforeTargets="PrepareForPublish" Condition="'$(_NeedsRaw)' == 'true'">
-    <Error Condition="!Exists('$(_RawPath)')" Text="Cannot publish without LibRaw 0.22.2: $(_RawPath)" />
+    <Error Condition="!Exists('$(_RawPath)')" Text="Cannot publish without LibRaw 0.22.3: $(_RawPath)" />
   </Target>
   <PropertyGroup>
     <_ComputeName Condition="$(_RawRid.StartsWith('win'))">OpenRevelare.Compute.Native.dll</_ComputeName>
