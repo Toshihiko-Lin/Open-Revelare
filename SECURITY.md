@@ -32,6 +32,7 @@
 - [GHSA-wmxv-xphr-5c9g](https://github.com/advisories/GHSA-wmxv-xphr-5c9g)：本项目不使用 ImageSharp 解析输入图像或 BigTIFF；测试中的 JPEG 解码仅处理本项目生成的数据。
 - [GHSA-v76p-62qx-wwq2](https://github.com/advisories/GHSA-v76p-62qx-wwq2)：涉及分块传真压缩 TIFF 的 ImageSharp 解码路径；生产代码不调用 ImageSharp 输入图像／TIFF 解码，TIFF 读取由 `TiffIO` / LibTiff 处理。2026-11-04 复核了全部 ImageSharp 调用；测试中的 `Image.Load` / `Image.Identify` 仅读取本程序生成的 JPEG。
 - [GHSA-gwg2-r3hj-4w44](https://github.com/advisories/GHSA-gwg2-r3hj-4w44)：`JpegIO` 仅将 ICC 字节附加到输出 JPEG，不访问 ImageSharp 的 `IccProfile.Entries` 或 CLUT 解析 / 转换路径。
+- [GHSA-v76p-62qx-wwq2](https://github.com/advisories/GHSA-v76p-62qx-wwq2)（CVE-2026-106118，2026-10-26 公告范围扩至 `3.0.0 ≤ x < 3.2.0`）：影响的是 tile fax 压缩 TIFF 的**解码**路径——tile 缓冲区按 `TileWidth` 分配，fax 解码器却按 `ImageWidth` 写扫描行。本项目不用 ImageSharp 解码任何输入图像：RAW 走 LibRaw，TIFF 由本仓库 `TiffIO` 解析，该路径不可达。官方修复版本为 3.2.0，升级 ImageSharp 时应删除本例外。
 
 生产代码的 ImageSharp 用途为 `JpegIO` 的 JPEG 编码（包括本程序重建的标准 EXIF profile）及 `OnnxDeepWbCorrector.ResizeForInference` 对内存中 `Rgb24` 数据的 Lanczos3 缩放。源文件的 EXIF 由 MetadataExtractor 2.9.3 读取；仅重建可移植字段，不将源缩略图、RAW 存储指针或 MakerNote 交给 ImageSharp，也不增加 ImageSharp 输入图像／TIFF 解码路径。
 新增解码、ICC 解析、TIFF 编码或直方图均衡化调用时，必须重新审查并移除相应例外；获得许可证或替换依赖后应移除这些例外。

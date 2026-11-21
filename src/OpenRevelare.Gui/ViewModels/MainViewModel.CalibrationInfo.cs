@@ -33,9 +33,11 @@ public sealed partial class MainViewModel
 
     public string DensityCorrectionText => Monochrome
         ? Loc.T("密度：黑白共用端点 · 不应用彩色色度补偿")
-        : _decoupleChromaMatrix is not null
-            ? Loc.T("密度：端点校准 + 本卷分光色度补偿")
-            : Loc.T("密度：端点校准 · 未应用分光色度补偿");
+        : IsPositiveFilm
+            ? Loc.T("密度：正片（反转片）端点校准 · D_min 为白端，D_max 为黑端")
+            : _decoupleChromaMatrix is not null
+                ? Loc.T("密度：端点校准 + 本卷分光色度补偿")
+                : Loc.T("密度：端点校准 · 未应用分光色度补偿");
 
     public string CaptureCorrectionText => _captureWorkflow is { } capture
         ? capture.Mode switch
@@ -44,6 +46,8 @@ public sealed partial class MainViewModel
             CaptureWorkflowMode.ScannerInputIcc => Loc.T("采集校正：已应用扫描仪输入 ICC"),
             _ => Loc.T("采集校正：已记录上游流程 · 本软件未再次应用"),
         }
+        : IsPositiveFilm
+            ? Loc.T("采集校正：正片跳过 RGB 分光解耦")
         : _decoupleMatrix is not null
         ? Loc.T("采集校正：已应用 RGB 分光解耦（反相前）")
         : HasCaptureCorrectionReferences
@@ -65,9 +69,11 @@ public sealed partial class MainViewModel
 
     public string DensityCorrectionSourceText => Monochrome
         ? Loc.T("黑白模式共用一组密度端点；已保存的彩色色度补偿不参与当前反相。")
-        : _decoupleChromaMatrix is not null
-        ? Loc.T("色度补偿来源：本卷内容帧解耦前后的色度统计；不是独立标准密度拟合。")
-        : Loc.T("密度来源：当前片基与亮端参数；采样或自动分析记录见下方各项。未建立标准密度映射。");
+        : IsPositiveFilm
+            ? Loc.T("正片模式两端反向映射（D_min → 码值 1032，D_max → 码值 95）；不应用负片染料色度补偿。")
+            : _decoupleChromaMatrix is not null
+                ? Loc.T("色度补偿来源：本卷内容帧解耦前后的色度统计；不是独立标准密度拟合。")
+                : Loc.T("密度来源：当前片基与亮端参数；采样或自动分析记录见下方各项。未建立标准密度映射。");
 
     public string CaptureCorrectionScopeText => _captureWorkflow is not null
         ? Loc.T("已随工程保存配置快照、原始与工作文件摘要。重开工程直接使用工作副本，不再次应用校准。相机相对透射率与扫描 ICC 色度表征的含义不同；实体设置、材料适用性和绝对误差仍需独立验证。")
