@@ -592,8 +592,9 @@ public static class RegionRender
         }
         if (cal.DustEnabled && cal.AutomaticDustMask is not null)
         {
-            sx0 -= DustMask.RepairHalo; sy0 -= DustMask.RepairHalo;
-            sx1 += DustMask.RepairHalo; sy1 += DustMask.RepairHalo;
+            int halo = DustMask.RequiredRepairHalo;
+            sx0 -= halo; sy0 -= halo;
+            sx1 += halo; sy1 += halo;
         }
         int ix0 = Math.Clamp((int)Math.Floor(sx0), 0, srcW - 1);
         int iy0 = Math.Clamp((int)Math.Floor(sy0), 0, srcH - 1);

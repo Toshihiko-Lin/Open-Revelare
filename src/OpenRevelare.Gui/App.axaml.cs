@@ -55,6 +55,7 @@ public partial class App : Application
         // of once per decode, and a cached linear DNG is what makes region decoding possible on
         // that backend at all.
         OpenRevelare.Core.RawDecode.LinearDngCache = Services.DngCache.GetOrConvert;
+        Services.PureNegComponent.RegisterMaskRepair();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

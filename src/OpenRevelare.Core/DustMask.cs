@@ -9,6 +9,12 @@ public sealed class DustMask
 {
     public readonly record struct Run(int Y, int Start, int End);
     public const int RepairHalo = 24;
+    // The desktop host supplies the optional repair engine without a Core runtime dependency.
+    public static (Func<bool> Available, int Halo,
+        Action<ImageBuffer, IReadOnlyCollection<int>, CancellationToken> Apply)? OptionalRepair { get; set; }
+
+    internal static int RequiredRepairHalo =>
+        OptionalRepair is { } engine && engine.Available() ? engine.Halo : RepairHalo;
     private const int MaxRuns = 1_000_000;
     private const int MaxPixels = 4_000_000;
     private readonly Run[] _runs;
@@ -128,6 +134,12 @@ public sealed class DustMask
         foreach (int index in PixelIndices(width, height, fullWidth, fullHeight, ox, oy))
             if (targets.Add(index) && targets.Count > MaxPixels)
                 throw new InvalidOperationException("The scaled automatic dust mask covers too many pixels.");
+        if (targets.Count == 0) return;
+        if (OptionalRepair is { } engine && engine.Available())
+        {
+            engine.Apply(image, targets, cancellationToken);
+            return;
+        }
         float[] data = image.Data;
         foreach (int target in targets)
         {

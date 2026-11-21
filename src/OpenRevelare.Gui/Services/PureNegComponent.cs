@@ -8,7 +8,7 @@ using OpenRevelare.Core;
 
 namespace OpenRevelare.Gui.Services;
 
-internal static class PureNegComponent
+internal static partial class PureNegComponent
 {
     internal const string Revision = "cbcc9fc825ba9aaf12304c7e9524643995faf4dd";
     private const string NodeVersion = "v24.14.1";

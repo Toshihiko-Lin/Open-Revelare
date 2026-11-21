@@ -271,6 +271,7 @@ public partial class MainWindow
                     vm.ReportLongTask(Loc.F($"正在下载 PURENeg 除尘（{value}%）"));
             });
             await PureNegComponent.InstallAsync(progress, owner.Token, preferMirror);
+            vm.RefreshDustRepair();
             vm.StatusText = Loc.T("PURENeg 除尘已安装，可使用自动除尘。");
         }
         catch (OperationCanceledException) when (owner.IsCancellationRequested) { vm.StatusText = Loc.T("PURENeg 除尘下载已取消"); }

@@ -35,8 +35,10 @@
     <AvaloniaResource Remove="Assets\icons\app.ico" />
     <AvaloniaResource Remove="Assets\pureneg-files.json" />
     <AvaloniaResource Remove="Assets\pureneg-analyze.cjs" />
+    <AvaloniaResource Remove="Assets\pureneg-repair.cjs" />
     <EmbeddedResource Include="Assets\pureneg-files.json" LogicalName="PureNegFiles" />
     <EmbeddedResource Include="Assets\pureneg-analyze.cjs" LogicalName="PureNegAnalyze" />
+    <EmbeddedResource Include="Assets\pureneg-repair.cjs" LogicalName="PureNegRepair" />
     <AvaloniaResource Remove="Assets\icons\app.svg" />
   </ItemGroup>
 

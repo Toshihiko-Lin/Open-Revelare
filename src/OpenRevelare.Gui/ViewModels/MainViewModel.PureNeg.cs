@@ -65,6 +65,14 @@ public partial class MainViewModel
         if (refresh) ScheduleRender(markEdit: false);
     }
 
+    internal void RefreshDustRepair()
+    {
+        CancelPreviewWarmup();
+        _preparedPreviews.Clear();
+        _filmPreviews.Clear();
+        if (_automaticDustMask is not null && DustEnabled) ScheduleRender(markEdit: false);
+    }
+
     internal FrameParams WithDustReviewPreview(FrameParams parameters)
     {
         if (!HasDustPreviewOverride) return parameters;
