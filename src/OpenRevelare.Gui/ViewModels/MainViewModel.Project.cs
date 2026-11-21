@@ -1123,6 +1123,7 @@ public partial class MainViewModel
         _positiveCalibrated = p.PositiveCalibrated;
         _positiveWhiteReferenceSet = p.PositiveWhiteReferenceSet;
         _positiveBlackReferenceSet = p.PositiveBlackReferenceSet;
+        OnPropertyChanged(nameof(SlideFilmBaseStatus));
         LoadAutoCropReview(p);
         _suppressRender = true;
         AdoptLensfun(p.Lensfun, p.LensfunEnabled);

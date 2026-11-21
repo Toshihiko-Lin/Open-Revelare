@@ -181,7 +181,7 @@ public static class Pipeline
                     ColorReference.SceneReferred,
                     TransferState.LinearInProfilePrimaries,
                     NumericRange.Extended);
-                gamutPolicy = cal.IsPositiveFilm ? "positive RAW default rendering; no density normalization or film display curve" : applied switch
+                gamutPolicy = cal.IsPositiveFilm ? "positive RAW viewing map with a luminance toe and highlight roll-off" : applied switch
                 {
                     { Contract.IsExtendedOutput: true } hdrLut =>
                         $"print-LUT {hdrLut.Contract} -> PQ decoded at {OutputTarget.ReferenceWhiteNits:0} nits = 1.0, BT.2020 -> carrier unclamped, bounded at {target.HighlightHeadroom:0.###}× diffuse white",

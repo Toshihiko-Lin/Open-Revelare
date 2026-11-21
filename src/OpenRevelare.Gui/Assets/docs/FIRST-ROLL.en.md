@@ -16,9 +16,11 @@ For negatives, leave automatic roll analysis enabled initially. Valid TIFF ICC p
 
 ### Slides / reversal film: manual workflow
 
-Select Color slide or B&W slide before import. Slides do not run automatic base detection, endpoint estimation, levels or roll calibration. Set white and black endpoints manually, using manual sampling if needed. For white, Sample light source selects even panel light or a hole interior. For black, Sample film selects unexposed dense rebate, an inter-frame gap or a bridge between holes. Avoid holders, dust, text, scratches and clipping. Without these references, do not treat picture highlights or shadows as physical references. Share the verified manual calibration across the roll, then crop, grade and remove dust as needed.
+Select Color slide or B&W slide before import. Slides use as-shot white balance by default. To calibrate, use Sample light source on even panel light or a hole interior, avoiding dust and clipping. This replaces as-shot white balance rather than stacking with it. Share calibration across captures made under the same conditions, then crop, grade and remove dust as needed.
 
-Slides do not use brightness-threshold sprocket masking. In HDR output the manually calibrated white endpoint maps to the HDR ceiling. Without a usable reference, the user chooses endpoints; picture content is not analyzed to infer them. Device calibration keeps its separate menu entry. The automatic analysis below applies to negatives.
+Viewing brightness in the right sidebar adjusts linear exposure uniformly. Light sampling establishes a fixed white reference, and Use camera WB restores the default white balance. Highlights roll off smoothly near the SDR or HDR output limit.
+
+If the film edge looks grey, use Viewing map to sample an even unexposed edge or frame gap. Avoid holes, light leaks and the holder. The sample lowers shadow brightness while preserving RGB ratios, and can be cleared separately. Preview and finished output are both rendered from the linear source samples. The automatic analysis below applies only to negatives.
 
 ## 2. Let roll analysis finish, then check calibration
 

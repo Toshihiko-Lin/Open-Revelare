@@ -129,7 +129,8 @@ public static class Stage2
         bool doWb = !AllOne(cal.WbGains);
         float wb0 = (float)cal.WbGains[0], wb1 = (float)cal.WbGains[1], wb2 = (float)cal.WbGains[2];
 
-        bool doExposure = cal.ExposureEv != 0.0;
+        // Slides apply viewing exposure once, in linear light before the output transform.
+        bool doExposure = !cal.IsPositiveFilm && cal.ExposureEv != 0.0;
         float expGain = (float)Math.Pow(2.0, cal.ExposureEv);
 
         // Levels' own degenerate guard (black >= white) folds into the enable flag.
@@ -474,7 +475,8 @@ public static class Stage2
             values.All(value => Math.Abs(value - 1.0) <= 1e-8 + 1e-5);
 
         bool doWhiteBalance = !AllOne(cal.WbGains);
-        bool doExposure = cal.ExposureEv != 0.0;
+        // Slides apply viewing exposure once, in linear light before the output transform.
+        bool doExposure = !cal.IsPositiveFilm && cal.ExposureEv != 0.0;
         if (doWhiteBalance || doExposure)
         {
             float redGain = (float)cal.WbGains[0];
@@ -549,7 +551,8 @@ public static class Stage2
             values.All(value => Math.Abs(value - 1.0) <= 1e-8 + 1e-5);
 
         bool doWhiteBalance = !AllOne(cal.WbGains);
-        bool doExposure = cal.ExposureEv != 0.0;
+        // Slides apply viewing exposure once, in linear light before the output transform.
+        bool doExposure = !cal.IsPositiveFilm && cal.ExposureEv != 0.0;
         if (doWhiteBalance || doExposure)
         {
             OutputRender.Decode(d, output);
@@ -689,7 +692,8 @@ public static class Stage2
         // decode/encode pair; the alternative was running the gain before the render, which is
         // what broke the black normalisation above.
         bool doWb = !AllOne(cal.WbGains);
-        bool doExposure = cal.ExposureEv != 0.0;
+        // Slides apply viewing exposure once, in linear light before the output transform.
+        bool doExposure = !cal.IsPositiveFilm && cal.ExposureEv != 0.0;
         if (doWb || doExposure)
         {
             OutputRender.Decode(d, output);

@@ -198,7 +198,7 @@ public partial class MainViewModel
             _rollBaseCalibration = null;
             _rollHighlightCalibration = null;
             _rollUsedFallbackHighlight = false;
-            FilmBaseText = isPositive ? Loc.T("端点：整卷类型已更改 · 请手动校准白端与黑端")
+            FilmBaseText = isPositive ? Loc.T("片型已更改 · 可重新采样光源")
                 : Loc.T("端点：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
             HighlightConfidenceText = Loc.T("端点：整卷类型已更改 · 原端点诊断已失效");
             NeedsRecalibration = true;
@@ -234,12 +234,23 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(FilmTypeIndex));
         OnPropertyChanged(nameof(MonochromeHint));
         OnPropertyChanged(nameof(FilmTypeHint));
+        OnPropertyChanged(nameof(CalibrationTabTitle));
+        OnPropertyChanged(nameof(FinishingTabTitle));
+        OnPropertyChanged(nameof(CanEditNegativeChannels));
+        OnPropertyChanged(nameof(ColourAdjustmentHint));
+        OnPropertyChanged(nameof(NeutralSampleHint));
+        OnPropertyChanged(nameof(HdrLimitHint));
+        OnPropertyChanged(nameof(RenderSettingsSummary));
+        OnPropertyChanged(nameof(OriginalViewLabel));
+        OnPropertyChanged(nameof(OriginalViewHint));
+        OnPropertyChanged(nameof(CalibrationApplyLabel));
         OnPropertyChanged(nameof(FilmBaseHeader));
         OnPropertyChanged(nameof(FilmBaseToolTip));
         OnPropertyChanged(nameof(FilmBaseBtnText));
         OnPropertyChanged(nameof(AutoFilmBaseBtnText));
         OnPropertyChanged(nameof(AutoFilmBaseToolTip));
         OnPropertyChanged(nameof(DMaxHeader));
+        OnPropertyChanged(nameof(SlideFilmBaseStatus));
         OnPropertyChanged(nameof(DMaxToolTip));
         OnPropertyChanged(nameof(DMaxBtnText));
         OnPropertyChanged(nameof(AutoDMaxBtnText));
@@ -258,21 +269,35 @@ public partial class MainViewModel
     /// <summary>Deep-WB is only valid for C-41 color negatives.</summary>
     public bool CanUseDeepWb => !_monochrome && !_isPositiveFilm;
 
+    public bool CanEditNegativeChannels => IsNegativeFilm && IsColourRoll;
+    public string CalibrationTabTitle => IsPositiveFilm ? Loc.T("翻拍校准") : Loc.T("底片校准");
+    public string FinishingTabTitle => IsPositiveFilm ? Loc.T("调色") : Loc.T("成片调整");
+    public string OriginalViewLabel => IsPositiveFilm ? Loc.T("原图") : Loc.T("负片");
+    public string OriginalViewHint => IsPositiveFilm
+        ? Loc.T("查看校准与调色前的翻拍原图（N）。")
+        : Loc.T("切到负片视图，用于对准片基与齿孔（N）");
+    public string ColourAdjustmentHint => IsPositiveFilm
+        ? Loc.T("可选调色；翻拍光源请在翻拍校准中采样。")
+        : Loc.T("场景白平衡，正片域的线性增益，只管光源的冷暖。片子本身的色偏在 Cineon 标签中标定。");
+    public string NeutralSampleHint => IsPositiveFilm
+        ? Loc.T("采样中性色调整色温与色调，不改变光源校准。")
+        : Loc.T("框选一块本应中性的地方（灰墙、白纸、路面），解出色温 / 色调。只动这两条滑条，不碰 Cineon 两端。");
+
     public string FilmTypeHint => FilmTypeIndex switch
     {
         0 => Loc.T("彩色负片：橙色片基为黑端，画面高光为白端；三层染料各自独立，两端各三个密度共六个自由度。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
-        1 => Loc.T("正片仅手动校准。"),
+        1 => Loc.T("可分别采样光源与片基，调整观片亮度。"),
         2 => Loc.T("黑白负片：三通道折成一路亮度，反相只用一对端点。"),
-        _ => Loc.T("正片仅手动校准。"),
+        _ => Loc.T("可分别采样光源与片基，调整观片亮度。"),
     };
 
     /// <summary>Which end D_min IS, which is the film type's whole point: on a negative the film
     /// base reads as black, on a positive it reads as white. The header names the end rather than
     /// the field, matching the 黑端/白端 wording the rest of the panel already uses.</summary>
-    public string FilmBaseHeader => _isPositiveFilm ? Loc.T("白端 · 光源") : Loc.T("黑端");
+    public string FilmBaseHeader => _isPositiveFilm ? Loc.T("光源校准") : Loc.T("黑端");
 
     /// <summary>The other end. D_max is the highlight on a negative and the shadow on a positive.</summary>
-    public string DMaxHeader => _isPositiveFilm ? Loc.T("黑端 · 未曝光片基") : Loc.T("白端");
+    public string DMaxHeader => _isPositiveFilm ? Loc.T("观片映射") : Loc.T("白端");
 
     public string FilmBaseToolTip => _isPositiveFilm
         ? Loc.T("采均匀光源透光区或齿孔内部。")
@@ -287,7 +312,7 @@ public partial class MainViewModel
         : Loc.T("自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。");
 
     public string DMaxToolTip => _isPositiveFilm
-        ? Loc.T("采未曝光黑片边或画格间隙。")
+        ? Loc.T("框选未曝光片边或画格间隙，为观片映射提供黑位参考，保留片基偏色。")
         : Loc.T("每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。");
 
     public string DMaxBtnText => _isPositiveFilm ? Loc.T("片基采样") : Loc.T("高光采样");
@@ -572,6 +597,9 @@ public partial class MainViewModel
             if (UsesLegacyColorPipeline)
                 return Loc.T("此卷仍是旧版色彩管线（v1），渲染按 D-013 冻结，HDR 不会生效。迁移到 v2 之后可用。");
 
+            if (IsPositiveFilm)
+                return Loc.T("HDR 上限限制输出峰值，不自动提亮光源。画面亮度由观片亮度控制。");
+
             if (!_hdrEnabled)
                 return Loc.T("HDR 关闭：印相渲染，高光收进纸白。");
 
@@ -733,7 +761,8 @@ public partial class MainViewModel
         {
             string space = HdrEnabled ? Loc.T("不裁色域") : CurrentOutputSpace.Name;
             string range = HdrEnabled ? Loc.F($"HDR +{HdrLimitStops:0.0}") : "SDR";
-            string look = PrintLutNames.Count > 0 && PrintLutIndex >= 0 && PrintLutIndex < PrintLutNames.Count
+            string look = IsPositiveFilm ? Loc.T("中性正片")
+                : PrintLutNames.Count > 0 && PrintLutIndex >= 0 && PrintLutIndex < PrintLutNames.Count
                 ? PrintLutNames[PrintLutIndex]
                 : Loc.T("标准显示渲染");
             return Loc.F($"整卷渲染：{space} · {range} · {look}");

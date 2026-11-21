@@ -22,7 +22,9 @@ public partial class MainViewModel
     public string BroadcastTargetText => HasFrameSelection
         ? Loc.F($"目标：勾选 {ContextTargetCount} 帧")
         : Loc.F($"目标：其余 {ContextTargetCount} 帧");
-    public string CalibrationApplyLabel => Loc.F($"应用底片校准到 {ContextTargetCount} 帧");
+    public string CalibrationApplyLabel => IsPositiveFilm
+        ? Loc.F($"应用翻拍校准到 {ContextTargetCount} 帧")
+        : Loc.F($"应用底片校准到 {ContextTargetCount} 帧");
     public string SceneApplyLabel => Loc.F($"应用成片调整到 {ContextTargetCount} 帧");
     public string CompositionTargetLabel => Frames.Any(f => f.IsSelected)
         ? Loc.F($"勾选 {FrameScope.OtherFrames(Frames, CurrentFrame, true).Count} 帧")

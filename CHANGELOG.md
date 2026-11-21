@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## 未发布 / Unreleased
+
+**新增**
+
+- **正片（反转片）支持。** 导入时可选择彩色或黑白正片。右侧提供手动光源校准、片基采样和观片亮度调整。观片映射保留片基偏色，并在接近输出上限时平滑压缩高光。预览和导出都从原始采样重新渲染。
+
+---
+
+**Added**
+
+- **Slide (reversal film) support.** Choose color or black-and-white slides on import. The sidebar offers manual light-source calibration, film-base sampling, and viewing brightness. The viewing tone map preserves the film-base tint and rolls off highlights near the output limit. Preview and export render from the original samples.
+
 ## v1.10.0（2026-11-13）
 
 **新增**

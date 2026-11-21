@@ -361,8 +361,7 @@ public static class ColorPipeline
         ColorSpaceDef output = cal.ResolvedOutputSpace;
         if (cal.IsPositiveFilm)
         {
-            OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
-            OutputRender.Encode(data, output);
+            RenderPositive(data, cal, OutputTarget.Sdr(output));
             return;
         }
         if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
@@ -394,8 +393,7 @@ public static class ColorPipeline
         ColorSpaceDef output = cal.ResolvedOutputSpace;
         if (cal.IsPositiveFilm)
         {
-            OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
-            OutputRender.Encode(data, output);
+            RenderPositive(data, cal, OutputTarget.Sdr(output));
             return;
         }
         if (PrintLutFor(cal, OutputTarget.Sdr(output)) is { } applied)
@@ -476,9 +474,7 @@ public static class ColorPipeline
 
         if (cal.IsPositiveFilm)
         {
-            OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
-            if (cal.PositiveWhiteReferenceSet)
-                for (int i = 0; i < data.Length; i++) data[i] *= target.HighlightHeadroom;
+            RenderPositive(data, cal, target);
             return;
         }
 
@@ -491,6 +487,14 @@ public static class ColorPipeline
         }
         else
             ToExtendedOutputTarget(data, target, cal.IsPositiveFilm);
+    }
+
+    private static void RenderPositive(float[] data, FrameParams cal, OutputTarget target)
+    {
+        PositiveFilmCalibration.ApplyViewingMap(data, cal, target.HighlightHeadroom);
+        OutputRender.Convert(data, Working, target.Space,
+            target.IsExtended ? GamutMapping.PreserveExtended : GamutMapping.Desaturate);
+        if (!target.IsExtended) OutputRender.Encode(data, target.Space);
     }
 
     /// <summary>

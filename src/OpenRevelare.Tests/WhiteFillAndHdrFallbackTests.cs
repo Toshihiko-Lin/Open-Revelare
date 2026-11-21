@@ -8,10 +8,26 @@ namespace OpenRevelare.Tests;
 
 public sealed class WhiteFillAndHdrFallbackTests
 {
+    [Fact]
+    public void Slide_HDR_ceiling_does_not_rescale_calibrated_light_reference()
+    {
+        var source = Working(new ImageBuffer(2, 1, new[] { 0.2f, 0.1f, 0.05f, 1f, 1f, 1f }));
+        var parameters = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveWhiteReferenceSet = true, HdrPeakNits = 400,
+        };
+        using var cmm = new LittleCmsEngine();
+        var lowerCeiling = Pipeline.Render(source, parameters, ColorPipelineVersion.ManagedV2, cmm);
+        parameters.HdrPeakNits = 1600;
+        var upperCeiling = Pipeline.Render(source, parameters, ColorPipelineVersion.ManagedV2, cmm);
+        for (int i = 0; i < lowerCeiling.Pixels.Data.Length; i++)
+            Assert.Equal(lowerCeiling.Pixels.Data[i], upperCeiling.Pixels.Data[i], 4);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Slide_hole_light_reaches_HDR_ceiling_in_whole_prepared_and_regional_outputs(bool mask)
+    public void Slide_light_reference_keeps_fixed_brightness_in_whole_prepared_and_regional_outputs(bool mask)
     {
         var pixels = new ImageBuffer(8, 4);
         for (int i = 0; i < pixels.Data.Length; i += 3)
@@ -38,8 +54,7 @@ public sealed class WhiteFillAndHdrFallbackTests
             ColorPipelineVersion.ManagedV2, cmm);
         foreach (var output in new[] { full.Pixels, prepared.Pixels, region.Frame.Pixels })
             for (int c = 0; c < 3; c++)
-                Assert.InRange(output.Data[c], cal.ResolvedOutputTarget.HighlightHeadroom - 0.001f,
-                    cal.ResolvedOutputTarget.HighlightHeadroom + 0.001f);
+                Assert.InRange(output.Data[c], 1f - 0.001f, 1f + 0.001f);
     }
 
     [Fact]

@@ -1690,10 +1690,15 @@ public static class FilmBase
     /// </summary>
     public static double[] SampleTBase(ImageBuffer image, (double X, double Y, double W, double H) rect,
                                        double blurSigma = 3.0)
+        => SampleTransmission(image, rect, blurSigma, quantise: true);
+
+    /// <summary>Average the linear transmission within the manually selected patch.</summary>
+    public static double[] SampleTransmission(ImageBuffer image, (double X, double Y, double W, double H) rect,
+                                              double blurSigma = 3.0, bool quantise = false)
     {
         double[] patch = BlurredPatch(image, rect, blurSigma, "Sampling", out int pw, out int ph);
         double[] tBase = PatchMean(patch, pw * ph);
-        Quantise(tBase);
+        if (quantise) Quantise(tBase);
         if (tBase.Any(v => v <= 0))
             throw new ArgumentException("Sampled T_base contains non-positive values — check selection area");
         return tBase;

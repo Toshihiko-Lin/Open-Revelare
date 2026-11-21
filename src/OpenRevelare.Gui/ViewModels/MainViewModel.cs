@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using OpenRevelare.ColorManagement;
 using OpenRevelare.Core;
 using OpenRevelare.Gui.Controls;
@@ -1589,7 +1590,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _legacyCalibration;
 
     public string RecalibrationNoticeText => IsPositiveFilm
-        ? Loc.T("正片请手动检查并校准白端与黑端；不会运行自动整卷校准。")
+        ? Loc.T("正片可分别采样光源与未曝光片基。")
         : _legacyCalibration
         ? Loc.T("这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。")
         : Loc.T("光学校正、遮罩或片型已更改，请运行【自动（整卷）】更新标定。");
@@ -2217,12 +2218,44 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _positiveWhiteReferenceSet;
     private bool _positiveBlackReferenceSet;
 
+    [RelayCommand]
+    public void ResetSlideLightReference()
+    {
+        if (!IsPositiveFilm) return;
+        bool wasSuppressed = _suppressRender;
+        _suppressRender = true;
+        try
+        {
+            DMinPerChannel = new[] { 0d, 0d, 0d };
+            _positiveWhiteReferenceSet = false;
+            _positiveCalibrated = _positiveBlackReferenceSet;
+            _filmBaseSampled = false;
+            FilmBaseText = "";
+        }
+        finally { _suppressRender = wasSuppressed; }
+        ScheduleRender();
+    }
+
+    [RelayCommand]
+    public void ResetSlideFilmBaseReference()
+    {
+        if (!IsPositiveFilm || !_positiveBlackReferenceSet) return;
+        _positiveBlackReferenceSet = false;
+        _positiveCalibrated = _positiveWhiteReferenceSet;
+        StatusText = Loc.T("已清除片基参考");
+        OnPropertyChanged(nameof(SlideFilmBaseStatus));
+        ScheduleRender();
+    }
+
+    public string SlideFilmBaseStatus => _positiveBlackReferenceSet
+        ? Loc.T("片基：已采样")
+        : Loc.T("片基：未采样");
     private void MarkSlideCalibration(bool white)
     {
         if (!IsPositiveFilm || !_paramsLoaded || _suppressRender) return;
         _positiveCalibrated = true;
         if (white) _positiveWhiteReferenceSet = true;
-        else _positiveBlackReferenceSet = true;
+        else { _positiveBlackReferenceSet = true; }
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<double[]?>> SlideCameraWb = new();
@@ -2444,7 +2477,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // the highlight sampler's "darkest part of the negative" is judged through a cast too.
         // Null for a scanner TIFF or a camera with no as-shot record, in which case this is a
         // no-op and the view is what it always was.
-        NegativeView.Prepare(disp.Data, CurrentNegativeWb(), parameters.NegativeCameraToWorking);
+        NegativeView.Prepare(disp.Data, CurrentNegativeWb(),
+            parameters.IsPositiveFilm ? parameters.PositiveCameraToWorking : parameters.NegativeCameraToWorking);
         // A VIEWER transform — primaries + encoding curve only. NOT step 4: that carries the
         // Cineon encode and its display rendering, which describe a calibrated positive, while
         // this buffer is raw scene-linear film that nothing has inverted or calibrated. Running it
@@ -2720,7 +2754,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// 里，界面上看不到黑端的任何客观数值，用户无从判断自动标定对不对。两种写法渲染逐位相同
     /// （把片基从除数移到减数是同一个仿射变换），所以改成显示绝对值没有代价。
     /// </summary>
-    public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample(Loc.T("片基采样"), () =>
+    public void SampleFilmBase((double X, double Y, double W, double H) rect) => TrySample(FilmBaseBtnText, () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] tb = FilmBase.SampleTBase(src, rect);
@@ -2729,6 +2763,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _filmBaseSampled = true;
         // 亮端不动：它已经是对 T=1 的绝对密度，与这次采样无关。只有黑端被重新定义。
         DMinPerChannel = TBaseToDensity(tb);
+        if (IsPositiveFilm)
+        {
+            FilmBaseText = Loc.T("光源：已手动采样");
+            StatusText = FilmBaseText;
+            ScheduleRender();
+            return;
+        }
         // Sanity gate: the film base is the most transmissive part of a negative, so a t_base far
         // below the frame's p99.9 almost certainly missed it.
         //
@@ -2811,19 +2852,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// 只是一个把结果normalise成比例、一个保留绝对值。高光白平衡与高光端点本就是一件事，
     /// 所以合并成一个。
     /// </summary>
-    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(IsPositiveFilm ? Loc.T("黑端采样") : Loc.T("高光采样"), () =>
+    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(DMaxBtnText, () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
+        if (IsPositiveFilm)
+        {
+            double[] sample = FilmBase.SampleTransmission(src, rect);
+            double[] density = TBaseToDensity(sample);
+            _positiveCalibrated = true;
+            _positiveBlackReferenceSet = true;
+            DMaxPerChannel = density;
+            StatusText = SlideFilmBaseStatus;
+            OnPropertyChanged(nameof(SlideFilmBaseStatus));
+            ScheduleRender();
+            return;
+        }
         double[] hi = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
-        if (IsPositiveFilm) { _positiveCalibrated = true; _positiveBlackReferenceSet = true; }
         _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
-        HighlightConfidenceText = IsPositiveFilm
-            ? Loc.T("黑端：手动采样端点 · 用户确认区域")
-            : Loc.T("高光：手动采样端点 · 用户确认区域");
-        StatusText = IsPositiveFilm
-            ? Loc.F($"黑端采样 → 黑端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）")
-            : Loc.F($"高光采样 → 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
+        HighlightConfidenceText = Loc.T("高光：手动采样端点 · 用户确认区域");
+        StatusText = Loc.F($"高光采样 → 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
     });
 
     /// <summary>面板上常驻的灰卡读数；没采过时为空，换卷清空。</summary>

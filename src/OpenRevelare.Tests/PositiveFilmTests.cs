@@ -99,13 +99,15 @@ public class PositiveFilmTests
             ColorPipelineVersion.ManagedV2, cmm);
         var prepared = Pipeline.RenderPreparedFilm(Pipeline.PrepareFilm(source, p), p,
             ColorPipelineVersion.ManagedV2, cmm);
-        foreach (var actual in new[] { full.Pixels.Data, region.Frame.Pixels.Data, prepared.Pixels.Data })
+        var originalView = RegionRender.Render(source, p, new RegionRender.Roi(0, 0, 1, 1),
+            ColorPipelineVersion.ManagedV2, cmm, negative: true, negativeWb: p.PositiveCameraWhiteBalance);
+        foreach (var actual in new[] { full.Pixels.Data, region.Frame.Pixels.Data, prepared.Pixels.Data, originalView.Frame.Pixels.Data })
             for (int i = 0; i < expected.Length; i++) Assert.Equal(expected[i], actual[i], 5);
         Assert.Equal(original, raw.Data);
     }
 
     [Fact]
-    public void Slide_CalibrationUsesOneLinearCaptureCorrectionAndKeepsCameraMatrix()
+    public void Slide_CalibrationKeepsCameraMatrixAndMeasuredContrast()
     {
         var raw = new ImageBuffer(3, 1, new[] { 0.08f, 0.06f, 0.04f, 0.24f, 0.3f, 0.2f, 0.8f, 0.6f, 0.4f });
         var p = new FrameParams
@@ -119,7 +121,7 @@ public class PositiveFilmTests
             OutputIntent = OutputIntent.None,
         };
         float[] before = (float[])raw.Data.Clone();
-        float[] expected = { 0, 0, 0, 0.24f / 0.9f, 0.4f / 0.9f, 0.4f / 0.9f, 1, 1, 1 };
+        float[] expected = { 0.1f, 0.1f, 0.1f, 0.34f, 0.5f, 0.5f, 1, 1, 1 };
         using var cmm = new LittleCmsEngine();
         var source = AsWorkingFrame(raw);
         var full = Pipeline.Render(source, p, ColorPipelineVersion.ManagedV2, cmm);
@@ -128,7 +130,8 @@ public class PositiveFilmTests
         foreach (var output in new[] { full.Pixels.Data, region.Frame.Pixels.Data })
             for (int i = 0; i < expected.Length; i++) Assert.Equal(expected[i], output[i], 5);
         Assert.Equal(before, raw.Data);
-        // Recalibration changes only constant gains/offsets: there is no density power or toe.
+        Assert.Equal(0.68, full.Pixels.Data[3] / full.Pixels.Data[4], 5);
+        // Legacy black references remain loadable but do not reshape positive-film contrast.
         var clone = p.Clone();
         Assert.True(clone.PositiveWhiteReferenceSet && clone.PositiveBlackReferenceSet);
     }
@@ -143,6 +146,98 @@ public class PositiveFilmTests
         Assert.False(Read().PositiveBlackReferenceSet);
         vm.DMaxLevel = 2.3;
         Assert.True(Read().PositiveBlackReferenceSet);
+    }
+
+    [Fact]
+    public void Slide_film_base_changes_only_the_displayed_shadows_and_preserves_colour()
+    {
+        var source = new ImageBuffer(3, 1, new[] { 0.1f, 0.4f, 0.001f, 0.2f, 0.1f, 0.003f, 0.02f, 0.02f, 0.02f });
+        var baseline = new FrameParams
+        {
+            IsPositiveFilm = true, OutputIntent = OutputIntent.None,
+            PositiveCameraWhiteBalance = new[] { 2d, 1d, 1.6 },
+        };
+        var calibrated = baseline.Clone();
+        calibrated.PositiveBlackReferenceSet = true;
+        calibrated.DMaxPerChannel = Enumerable.Repeat(-Math.Log10(0.02), 3).ToArray();
+        var before = Pipeline.ProcessFrame(source, baseline).Data;
+        var after = Pipeline.ProcessFrame(source, calibrated).Data;
+        Assert.Equal(before, after);
+        Assert.NotEqual(after[6], after[7]);
+
+        var unadjusted = (float[])before.Clone();
+        var mapped = (float[])after.Clone();
+        PositiveFilmCalibration.ApplyViewingMap(unadjusted, baseline, 1f);
+        PositiveFilmCalibration.ApplyViewingMap(mapped, calibrated, 1f);
+        Assert.Equal(unadjusted[..6], mapped[..6]);
+        Assert.InRange(mapped[6], 0.0001f, unadjusted[6] * 0.2f);
+        Assert.Equal(unadjusted[6] / unadjusted[7], mapped[6] / mapped[7], 5);
+        Assert.Equal(unadjusted[8] / unadjusted[7], mapped[8] / mapped[7], 5);
+    }
+
+    [Fact]
+    public void Slide_single_linear_calibration_preserves_ratios_and_extended_highlights()
+    {
+        float[] levels = { 0f, 0.00001f, 0.001f, 0.01f, 0.02f, 0.08f, 0.18f, 0.5f, 1f, 2f };
+        var data = levels.SelectMany(y => new[] { y * 0.8f, y * 0.6f, y * 0.4f }).ToArray();
+        float[] original = (float[])data.Clone();
+        var p = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveWhiteReferenceSet = true, PositiveBlackReferenceSet = true,
+            DMinPerChannel = new[] { 0.8, 0.6, 0.4 }.Select(t => -Math.Log10(t)).ToArray(),
+            DMaxPerChannel = Enumerable.Repeat(-Math.Log10(0.02), 3).ToArray(),
+        };
+        var result = (float[])data.Clone();
+        PositiveFilmCalibration.Apply(result, p);
+        for (int i = 0; i < levels.Length; i++)
+            for (int c = 0; c < 3; c++) Assert.Equal(levels[i], result[i * 3 + c], 5);
+        Assert.Equal(original, data);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(800)]
+    public void Slide_viewing_exposure_runs_once_before_output_clipping(int peakNits)
+    {
+        var raw = new ImageBuffer(2, 1, new[] { 2f, 2f, 2f, 0.02f, 0.02f, 0.02f });
+        var source = AsWorkingFrame(raw);
+        var p = new FrameParams
+        {
+            IsPositiveFilm = true, HdrPeakNits = peakNits, ExposureEv = -2,
+        };
+        var expectedParameters = p.Clone();
+        expectedParameters.ExposureEv = 0;
+        var expectedSource = AsWorkingFrame(new ImageBuffer(2, 1,
+            raw.Data.Select(v => v * 0.25f).ToArray()));
+        using var cmm = new LittleCmsEngine();
+        var expected = Pipeline.Render(expectedSource, expectedParameters, ColorPipelineVersion.ManagedV2, cmm);
+        var full = Pipeline.Render(source, p, ColorPipelineVersion.ManagedV2, cmm);
+        var prepared = Pipeline.RenderPreparedFilm(Pipeline.PrepareFilm(source, p), p, ColorPipelineVersion.ManagedV2, cmm);
+        var region = RegionRender.Render(source, p, new RegionRender.Roi(0, 0, 1, 1), ColorPipelineVersion.ManagedV2, cmm);
+        foreach (var actual in new[] { full.Pixels.Data, prepared.Pixels.Data, region.Frame.Pixels.Data })
+            for (int i = 0; i < actual.Length; i++) Assert.Equal(expected.Pixels.Data[i], actual[i], 5);
+        Assert.Equal(2f, raw.Data[0]);
+        if (peakNits > 0) Assert.Equal(0.5f, full.Pixels.Data[0], 5);
+    }
+
+    [Fact]
+    public void Slide_can_restore_camera_white_balance_without_resetting_viewing_exposure()
+    {
+        using var vm = RunAutomaticCalibration(null);
+        vm.ExposureEv = 1.5;
+        vm.DMinPerChannel = new[] { 0.1, 0.2, 0.3 };
+        vm.DMaxLevel = 2.3;
+        vm.ResetSlideLightReference();
+        var p = (FrameParams)typeof(MainViewModel).GetMethod("BuildParams", Private)!.Invoke(vm, null)!;
+        Assert.False(p.PositiveWhiteReferenceSet);
+        Assert.True(p.PositiveBlackReferenceSet);
+        Assert.Equal(new[] { 0d, 0d, 0d }, p.DMinPerChannel);
+        Assert.Equal(1.5, p.ExposureEv);
+        vm.ResetSlideFilmBaseReference();
+        Assert.False(((FrameParams)typeof(MainViewModel).GetMethod("BuildParams", Private)!.Invoke(vm, null)!).PositiveBlackReferenceSet);
+        Assert.False(vm.CanEditNegativeChannels);
+        using var negativeVm = new MainViewModel();
+        Assert.NotEqual(vm.CalibrationTabTitle, negativeVm.CalibrationTabTitle);
     }
 
     private static readonly double[] DMin = { 0.10, 0.15, 0.12 };
@@ -328,6 +423,7 @@ public class PositiveFilmTests
                 IsPositiveFilm = true,
                 PositiveCalibrated = true,
                 PositiveWhiteReferenceSet = true,
+                PositiveBlackReferenceSet = true,
                 DMinPerChannel = new[] { 0d, 0d, 0d },
                 DMaxPerChannel = new[] { 2.40, 2.50, 2.45 },
             };
@@ -351,7 +447,7 @@ public class PositiveFilmTests
             Assert.True(loaded.Frames[0].Params.IsPositiveFilm);
             Assert.True(loaded.Frames[0].Params.PositiveCalibrated);
             Assert.True(loaded.Frames[0].Params.PositiveWhiteReferenceSet);
-            Assert.False(loaded.Frames[0].Params.PositiveBlackReferenceSet);
+            Assert.True(loaded.Frames[0].Params.PositiveBlackReferenceSet);
             Assert.Equal(0, loaded.Frames[0].Params.DMinPerChannel[0], 5);
             Assert.Equal(2.40, loaded.Frames[0].Params.DMaxPerChannel[0], 5);
         }

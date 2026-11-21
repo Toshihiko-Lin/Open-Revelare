@@ -596,12 +596,12 @@
                             <ToggleButton Name="CompactFilmRailButton" IsVisible="False" Content="{i18n:T '胶片栏'}"
                                           Click="OnCompactFilmRailClick" Margin="0,0,6,0"
                                           ToolTip.Tip="{i18n:T '显示或收起胶片栏；参数与预览保持并排。'}" />
-                            <ToggleButton Name="ViewNegBtn" Classes="viewMode" AutomationProperties.Name="{i18n:T '负片'}" Click="OnViewNegToggle" IsEnabled="{Binding HasImage}"
+                            <ToggleButton Name="ViewNegBtn" Classes="viewMode" AutomationProperties.Name="{Binding OriginalViewLabel}" Click="OnViewNegToggle" IsEnabled="{Binding HasImage}"
                                           Padding="9,5"
-                                          ToolTip.Tip="{i18n:T '切到负片视图，用于对准片基与齿孔（N）'}">
+                                          ToolTip.Tip="{Binding OriginalViewHint}">
                                 <Grid ColumnDefinitions="Auto,*">
                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoFilm}" />
-                                    <TextBlock Classes="toolCaption" Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '负片'}" VerticalAlignment="Center" />
+                                    <TextBlock Classes="toolCaption" Grid.Column="1" TextWrapping="Wrap" Text="{Binding OriginalViewLabel}" VerticalAlignment="Center" />
                                 </Grid>
                             </ToggleButton>
                             <ToggleButton Name="DustToolBtn" Classes="viewMode" Click="OnDustToolClick"
@@ -1156,8 +1156,8 @@
                                             <TextBlock Grid.Column="1" IsVisible="{Binding HdrEnabled}" Text="{i18n:T '不裁色域'}" />
                                         </Grid>
                                         <Grid ColumnDefinitions="100,*">
-                                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '外观 LUT'}" />
-                                            <ComboBox Grid.Column="1" Name="LookLutPicker" ItemsSource="{Binding PrintLutNames}" IsEnabled="{Binding IsNegativeFilm}"
+                                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '外观 LUT'}" IsVisible="{Binding IsNegativeFilm}" />
+                                            <ComboBox Grid.Column="1" Name="LookLutPicker" ItemsSource="{Binding PrintLutNames}" IsVisible="{Binding IsNegativeFilm}"
                                                       SelectedIndex="{Binding PrintLutIndex}" HorizontalAlignment="Stretch">
                                                 <ComboBox.ContextMenu>
                                                     <ContextMenu>
@@ -1291,6 +1291,10 @@
                         </StackPanel>
                             </StackPanel>
                         </Expander>
+                        <ctl:SliderRow Label="{i18n:T '观片亮度'}" IsVisible="{Binding IsPositiveFilm}"
+                                       Minimum="-5" Maximum="5" Decimals="2" Increment="0.1" DefaultValue="0"
+                                       Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                       ToolTip.Tip="{i18n:T '在观片映射前整体增减曝光。'}" />
                     </StackPanel>
                 </Border>
 
@@ -1299,8 +1303,8 @@
                     <TabStrip Name="InspectorTabs" Classes="inspectorTabs" KeyDown="OnInspectorTabKeyDown"
                               KeyboardNavigation.TabNavigation="Once" SelectedIndex="{Binding #PanelTabs.SelectedIndex, Mode=TwoWay}">
                         <TabStrip.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate></TabStrip.ItemsPanel>
-                        <TabStripItem Content="{i18n:T '底片校准'}" />
-                        <TabStripItem Content="{i18n:T '成片调整'}" />
+                        <TabStripItem Content="{Binding CalibrationTabTitle}" />
+                        <TabStripItem Content="{Binding FinishingTabTitle}" />
                     </TabStrip>
                 </Border>
                 <Border Grid.Row="3" Padding="16,10" BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
@@ -1348,7 +1352,7 @@
                         <TabItem.Header>
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,5,0" VerticalAlignment="Center" Data="{StaticResource IcoFilm}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '底片校准'}" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding CalibrationTabTitle}" />
                             </Grid>
                         </TabItem.Header>
                         <!-- No scroller of its own: the panel scrolls as one column (see PanelScroll). -->
@@ -1426,7 +1430,7 @@
                                     <StackPanel Spacing="2">
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_min" Minimum="-2" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
-                                                       Value="{Binding DMinLevel}" />
+                                                       Value="{Binding DMinLevel}" IsVisible="{Binding IsNegativeFilm}" />
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
                                             <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
@@ -1443,6 +1447,9 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoFilmBaseBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                                    IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
+                                                    Content="{i18n:T '恢复相机白平衡'}" Command="{Binding ResetSlideLightReferenceCommand}" />
                                         </Grid>
                                         <!-- 只在测不到裸露片基时出现。成功时不回显 t_base 数值——
                                              那个数已经没有滑块，它的意义由 D_min 承担。-->
@@ -1451,7 +1458,7 @@
                                              改任一个都在动同一个量）。T_base 由【片基采样】写入，
                                              D_min 才是与 D_max 同量纲、可直接相减的那个。-->
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
-                                                  IsVisible="{Binding IsColourRoll}">
+                                                  IsVisible="{Binding CanEditNegativeChannels}">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" TrackBrush="{DynamicResource TrackRBrush}" />
                                                 <ctl:SliderRow Label="G" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" TrackBrush="{DynamicResource TrackGBrush}" />
@@ -1467,7 +1474,7 @@
                                     <StackPanel Spacing="2">
                                         <TextBlock Classes="groupHint" Text="{Binding DMaxToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
-                                                       Value="{Binding DMaxLevel}"
+                                                       Value="{Binding DMaxLevel}" IsVisible="{Binding IsNegativeFilm}"
                                                        ToolTip.Tip="{i18n:T 'Cineon 亮端映射：改变高光反差和亮端位置，保持三通道色彩比例。需要整体提亮请使用 Display 曝光。'}" />
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
                                             <ToggleButton Name="DMaxBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
@@ -1485,7 +1492,12 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoDMaxBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
+                                                    IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
+                                                    Content="{i18n:T '清除片基参考'}" Command="{Binding ResetSlideFilmBaseReferenceCommand}" />
                                         </Grid>
+                                        <TextBlock Classes="groupHint" Text="{Binding SlideFilmBaseStatus}"
+                                                   IsVisible="{Binding IsPositiveFilm}" />
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
                                                   IsVisible="{Binding CanUseDeepWb}">
                                             <StackPanel Spacing="1">
@@ -1640,7 +1652,7 @@
                         <TabItem.Header>
                             <Grid ColumnDefinitions="Auto,*">
                                 <ctl:Icon Grid.Column="0" Margin="0,0,5,0" VerticalAlignment="Center" Data="{StaticResource IcoLayers}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '成片调整'}" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FinishingTabTitle}" />
                             </Grid>
                         </TabItem.Header>
                         <Border Classes="finishingStage">
@@ -1651,7 +1663,7 @@
                                      问题，不再互相掩盖。曾经因为"同一件事两处调"而撤掉，那时标定组还叫白平衡。-->
                                 <Expander Header="{i18n:T '白平衡'}" IsExpanded="True"
                                           IsVisible="{Binding IsColourRoll}"
-                                          ToolTip.Tip="{i18n:T '场景白平衡，正片域的线性增益，只管光源的冷暖。片子本身的色偏在 Cineon 标签中标定。'}">
+                                          ToolTip.Tip="{Binding ColourAdjustmentHint}">
                                     <StackPanel Spacing="1">
                                         <Grid ColumnDefinitions="*,Auto">
                                             <ctl:SliderRow Grid.Column="0" Label="{i18n:T '色温'}" Minimum="-250" Maximum="250" Decimals="0" Increment="1" DefaultValue="0" Value="{Binding Temp}" Bipolar="True" TrackBrush="{DynamicResource TrackTempBrush}" />
@@ -1661,7 +1673,7 @@
                                                  samplers are anchored to theirs. -->
                                             <ToggleButton Name="NeutralBtn" Grid.Column="1" Classes="sampling icon" Margin="6,0,0,0"
                                                           Click="OnSampleDisplayNeutralClick" IsEnabled="{Binding HasImage}"
-                                                          ToolTip.Tip="{i18n:T '框选一块本应中性的地方（灰墙、白纸、路面），解出色温 / 色调。只动这两条滑条，不碰 Cineon 两端。'}">
+                                                          ToolTip.Tip="{Binding NeutralSampleHint}">
                                                 <ctl:Icon Data="{StaticResource IcoMarquee}" />
                                             </ToggleButton>
                                         </Grid>
@@ -1673,7 +1685,7 @@
                                      cards; a slider outside any module has no home to be found in. -->
                                 <Expander Header="{i18n:T '基本'}" IsExpanded="True">
                                     <StackPanel Spacing="1">
-                                        <ctl:SliderRow Label="{i18n:T '曝光'}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
+                                        <ctl:SliderRow Label="{i18n:T '曝光'}" IsVisible="{Binding IsNegativeFilm}" Minimum="-3" Maximum="3" Decimals="2" Increment="0.1" DefaultValue="0" Value="{Binding ExposureEv}" Bipolar="True" TrackBrush="{DynamicResource TrackLumBrush}"
                                                        ToolTip.Tip="{i18n:T '成片曝光：改变最终照片亮度，不重新解释底片曝光位置。'}" />
                                         <ctl:SliderRow Label="{i18n:T '反差'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Contrast}" Bipolar="True" />
                                         <ctl:SliderRow Label="{i18n:T '饱和度'}" Minimum="-1" Maximum="1" Decimals="2" Increment="0.01" DefaultValue="0" Value="{Binding Saturation}" Bipolar="True" TrackBrush="{DynamicResource TrackSatBrush}" />

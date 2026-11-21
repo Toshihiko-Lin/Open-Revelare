@@ -255,7 +255,8 @@ public static class RegionRender
             // negative reads green and the orange film base this view exists to point at does not
             // look orange. The samplers are unaffected: they read the UniWB preview buffer, never
             // these pixels.
-            NegativeView.Prepare(negOut.Data, negativeWb, cal.NegativeCameraToWorking);
+            NegativeView.Prepare(negOut.Data, negativeWb ?? (cal.IsPositiveFilm ? cal.PositiveCameraWhiteBalance : null),
+                cal.IsPositiveFilm ? cal.PositiveCameraToWorking : cal.NegativeCameraToWorking);
             // A VIEWER transform — primaries + encoding curve, no display rendering. Not step 4:
             // that carries the Cineon encode and CineonToDisplay, both of which describe a
             // CALIBRATED POSITIVE, and this patch is raw un-inverted film that no calibration has
