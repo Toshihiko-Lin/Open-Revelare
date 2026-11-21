@@ -1124,7 +1124,7 @@
   "正片白端的密度（相对完全透光 T=1）。自动优先取齿孔透光；手动请选可信的中性透光参考，避免把有色高光当作白色。": "Slide white-end density relative to full transmission T=1. Auto prefers sprocket-hole light. For manual sampling, use a trustworthy neutral transmission reference; avoid coloured highlights.",
   "白端采样": "Sample White",
   "自动白点": "Auto White",
-  "优先测量齿孔透光作为白端；无可用齿孔时按画面高光估计，可能受场景颜色影响，请检查或手动采样。": "Uses light through sprocket holes for white when available; otherwise estimates from picture highlights. Scene colours can bias the estimate; check it or sample manually.",
+  "优先测量齿孔透光校正采集光源；无齿孔时仅用共用白位调整明暗，不把画面高光校成中性。请检查或手动采样。": "Prefers sprocket-hole light to correct the capture illuminant. Without holes, uses one shared white anchor for brightness, without neutralizing coloured picture highlights. Check it or sample manually.",
   "每个通道读作黑的密度，典型 1.8–2.8。与 D_min 的距离即反差，三通道之差即暗部色偏。": "Density read as black per channel, typically 1.8–2.8. Distance to D_min is contrast; channel differences are shadow cast.",
   "黑端采样": "Sample Black",
   "自动黑点": "Auto Black",

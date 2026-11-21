@@ -1974,7 +1974,12 @@ public static class FilmBase
         double[] tBase = kept.Count > 0 ? MedianOf(kept) : first;
         Quantise(tBase);
         ClampToPhysicalBase(tBase);
-        return tBase.Any(x => x <= 0) ? null : tBase;
+        if (tBase.Any(x => x <= 0)) return null;
+        // Picture highlights are not a neutral colour reference. Use one exposure anchor so
+        // a coloured subject cannot white-balance the whole slide; only measured lamp/reference
+        // light may supply different channel gains. Max keeps the brightest channel in range.
+        double white = tBase.Max();
+        return new[] { white, white, white };
     }
 
     /// <summary>

@@ -20,6 +20,8 @@ Use default Path B for slides. Path A decoupling and smart cast correction are f
 
 Keep holes and rebate in 135 originals: calibration prefers hole light for white and unexposed film between holes for black. A display crop need not remove the original borders. Mounted slides, cropped scans and 120 film without usable holes fall back to picture highlights and shadows; these are estimates, not measured references. Check endpoint sources and representative frames, then use white/black sampling or a grey card if needed. Slides do not use negative mask removal; the orange-base instructions below apply only to colour negatives.
 
+Slide black/white normalization adjusts brightness and contrast, rather than reconstructing colour. Without hole references, auto uses a shared white anchor and density span so coloured highlights are not forced neutral. Hole light is a capture-illuminant reference, not a substitute for device colour characterization.
+
 ## 2. Let roll analysis finish, then check calibration
 
 The first image is a provisional single-frame conversion. Wait for pooled roll analysis before assessing the final calibration. Check film-base and highlight evidence on the Cineon page.

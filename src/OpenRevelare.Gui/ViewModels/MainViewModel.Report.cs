@@ -77,7 +77,7 @@ public sealed partial class MainViewModel
             sb.AppendLine(Loc.T("  LCC　　 关闭"));
         }
 
-        if (_decoupleMatrix is { } decouple)
+        if (!IsPositiveFilm && _decoupleMatrix is { } decouple)
         {
             string source = string.IsNullOrWhiteSpace(_calSourceDir)
                 ? Loc.T("（校正图路径未记录）")

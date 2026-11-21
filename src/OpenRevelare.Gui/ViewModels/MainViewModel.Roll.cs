@@ -277,7 +277,7 @@ public partial class MainViewModel
     public string AutoFilmBaseBtnText => _isPositiveFilm ? Loc.T("自动白点") : Loc.T("自动黑点");
 
     public string AutoFilmBaseToolTip => _isPositiveFilm
-        ? Loc.T("优先测量齿孔透光作为白端；无可用齿孔时按画面高光估计，可能受场景颜色影响，请检查或手动采样。")
+        ? Loc.T("优先测量齿孔透光校正采集光源；无齿孔时仅用共用白位调整明暗，不把画面高光校成中性。请检查或手动采样。")
         : Loc.T("自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。");
 
     public string DMaxToolTip => _isPositiveFilm

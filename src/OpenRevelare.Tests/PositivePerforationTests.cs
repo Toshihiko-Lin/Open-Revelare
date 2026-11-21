@@ -158,7 +158,7 @@ public class PositivePerforationTests
         // The fixture really does contain a brighter coloured candidate: the old estimator, which
         // looks at the picture's bright tail, must see it. Without this half the test would still
         // pass if the block were not bright at all.
-        double[] old = FilmBase.EstimatePositiveWhiteEndFromRoll(new[] { frame })!;
+        double[] old = FilmBase.EstimateTBaseFromRoll(new[] { frame });
         Assert.True(old[0] > 0.90, $"fixture must put a bright block in the picture, got {Fmt(old)}");
         Assert.True(old.Max() / Math.Max(1e-9, old.Min()) > 1.15,
             $"fixture's picture candidate must be coloured, got {Fmt(old)}");

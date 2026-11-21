@@ -35,6 +35,32 @@ public class PositiveFilmTests
     private static readonly double[] DMax = { 2.20, 2.35, 2.25 };
 
     [Fact]
+    public void Slide_PictureWhiteFallbackNormalizesExposureWithoutNeutralizingSubjectColour()
+    {
+        var pixels = new float[64 * 64 * 3];
+        for (int i = 0; i < pixels.Length; i += 3)
+        {
+            pixels[i] = 0.8f; pixels[i + 1] = 0.4f; pixels[i + 2] = 0.2f;
+        }
+        var image = new ImageBuffer(64, 64, pixels);
+        double[] white = FilmBase.EstimatePositiveWhiteEndFromRoll(new[] { image })!;
+        Assert.Equal(white[0], white[1]);
+        Assert.Equal(white[1], white[2]);
+        Assert.InRange(white[0], 0.79, 0.81);
+        var cal = new FrameParams
+        {
+            IsPositiveFilm = true,
+            TBase = new[] { 1.0, 1.0, 1.0 },
+            DMinPerChannel = white.Select(t => -Math.Log10(t)).ToArray(),
+        };
+        cal.DMaxPerChannel = cal.DMinPerChannel.Select(d => d + FrameParams.OutputRange).ToArray();
+        ImageBuffer output = Inversion.Invert(image, cal);
+        // One shared span and anchor keep the original ratios, rather than making this orange grey.
+        Assert.InRange(output.Data[0] / output.Data[1], 1.99, 2.01);
+        Assert.InRange(output.Data[1] / output.Data[2], 1.99, 2.01);
+    }
+
+    [Fact]
     public void Slide_CaptureStatusDoesNotClaimStoredDecouplingWasApplied()
     {
         var vm = new MainViewModel();
