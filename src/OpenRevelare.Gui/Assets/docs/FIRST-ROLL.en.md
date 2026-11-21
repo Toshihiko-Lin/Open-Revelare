@@ -6,21 +6,19 @@ The menu or toolbar's Reset this frame's finishing adjustments keeps film calibr
 
 ## 1. Import one roll
 
-Add the RAW or TIFF files from one roll. The default Path B is for white-light camera copying. Choose Path A only for an RGB narrow-band light source with the three matching reference images. Keep one input family per roll: RAW flat fields for RAW rolls, TIFF flat fields for TIFF rolls.
+Add the RAW or TIFF files from one roll. The default Path B is for white-light camera copying. For negatives captured with RGB light, select that light source and provide matching reference images. Keep one input family per roll: RAW flat fields for RAW rolls, TIFF flat fields for TIFF rolls.
 
-For a typical import, just add originals and import. Splitting, light-source selection and flat fields live under Advanced import settings. If you select Path A or LCC, the dialog shows which reference is needed and waits until it is ready.
+Add originals, choose the film type, then import. Enable splitting for multi-frame scans when needed. Device calibration has its own menu entry; light-source selection is shown directly, without an advanced section.
 
-Leave automatic roll analysis enabled initially. Valid TIFF ICC profiles take priority. If the file has no trustworthy declaration, confirm the suggested sRGB or linear interpretation against the scanner's actual output. Colour adjustments cannot fix an incorrect input interpretation.
+For negatives, leave automatic roll analysis enabled initially. Valid TIFF ICC profiles take priority. If the file has no trustworthy declaration, confirm the suggested sRGB or linear interpretation against the scanner's actual output. Colour adjustments cannot fix an incorrect input interpretation.
 
 **Done when:** frames appear in the filmstrip, the current frame is visible and background analysis reports progress. **Recover by:** checking the filename and error in the status bar; try a single original first, then import the roll again. Exported JPEGs are not negative source inputs.
 
-### Choose the slide / reversal route
+### Slides / reversal film: manual workflow
 
-Use default Path B for slides. Path A decoupling and smart cast correction are for colour negatives. After import analysis finishes, choose Color slide or B&W slide under Film type on the Cineon page, then run automatic roll calibration for slides. Changing type invalidates the previous calibration.
+Select Color slide or B&W slide before import. Slides do not run automatic base detection, endpoint estimation, levels or roll calibration. Set white and black endpoints manually, using manual sampling if needed. For white, Sample light source selects even panel light or a hole interior. For black, Sample film selects unexposed dense rebate, an inter-frame gap or a bridge between holes. Avoid holders, dust, text, scratches and clipping. Without these references, do not treat picture highlights or shadows as physical references. Share the verified manual calibration across the roll, then crop, grade and remove dust as needed.
 
-Keep holes and rebate in 135 originals: calibration prefers hole light for white and unexposed film between holes for black. A display crop need not remove the original borders. Mounted slides, cropped scans and 120 film without usable holes fall back to picture highlights and shadows; these are estimates, not measured references. Check endpoint sources and representative frames, then use white/black sampling or a grey card if needed. Slides do not use negative mask removal; the orange-base instructions below apply only to colour negatives.
-
-Slide black/white normalization adjusts brightness and contrast, rather than reconstructing colour. Without hole references, auto uses a shared white anchor and density span so coloured highlights are not forced neutral. Hole light is a capture-illuminant reference, not a substitute for device colour characterization.
+Slides do not use brightness-threshold sprocket masking. In HDR output the manually calibrated white endpoint maps to the HDR ceiling. Without a usable reference, the user chooses endpoints; picture content is not analyzed to infer them. Device calibration keeps its separate menu entry. The automatic analysis below applies to negatives.
 
 ## 2. Let roll analysis finish, then check calibration
 

@@ -274,8 +274,13 @@ public static class ColorPipeline
             for (int i = from; i < to; i++)
             {
                 float lin = MathF.Pow(10.0f, (data[i] - white) * scale);
-                data[i] = HighlightRolloff.Of(
-                    Toe(MathF.Max((lin - blackLin) / span, 0.0f)), shoulderAsymptote);
+                float normalized = Toe(MathF.Max((lin - blackLin) / span, 0.0f));
+                // A slide's measured hole light is the top of its captured range, not a
+                // negative's diffuse white with more scene latitude above it. Pin that finite
+                // reference to the HDR ceiling instead of approaching it through a shoulder.
+                data[i] = positiveFilm && shoulderAsymptote > 1.0f
+                    ? MathF.Min(normalized, 1.0f) * shoulderAsymptote
+                    : HighlightRolloff.Of(normalized, shoulderAsymptote);
             }
         });
     }
@@ -354,6 +359,12 @@ public static class ColorPipeline
     public static void ToOutputSpaceFor(float[] data, FrameParams cal)
     {
         ColorSpaceDef output = cal.ResolvedOutputSpace;
+        if (cal.IsPositiveFilm)
+        {
+            OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
+            OutputRender.Encode(data, output);
+            return;
+        }
         if (PrintLuts.Resolve(cal.PrintLut) is CubeLut lut)
             ToOutputSpaceVia(data, lut, output);
         else
@@ -381,6 +392,12 @@ public static class ColorPipeline
 
         ArgumentNullException.ThrowIfNull(colorManagement);
         ColorSpaceDef output = cal.ResolvedOutputSpace;
+        if (cal.IsPositiveFilm)
+        {
+            OutputRender.Convert(data, Working, output, GamutMapping.Desaturate);
+            OutputRender.Encode(data, output);
+            return;
+        }
         if (PrintLutFor(cal, OutputTarget.Sdr(output)) is { } applied)
             ToOutputSpaceVia(data, applied.Lut, applied.Contract, output, colorManagement);
         else
@@ -409,6 +426,7 @@ public static class ColorPipeline
     {
         ArgumentNullException.ThrowIfNull(cal);
         ArgumentNullException.ThrowIfNull(target);
+        if (cal.IsPositiveFilm) return null;
         if (string.IsNullOrWhiteSpace(cal.PrintLut)) return null;
 
         CubeLut? lut = PrintLuts.Resolve(cal.PrintLut)
@@ -455,6 +473,14 @@ public static class ColorPipeline
 
         if (pipelineVersion != ColorPipelineVersion.ManagedV2)
             throw new ArgumentOutOfRangeException(nameof(pipelineVersion), pipelineVersion, "Extended targets exist only in ManagedV2.");
+
+        if (cal.IsPositiveFilm)
+        {
+            OutputRender.Convert(data, Working, target.Space, GamutMapping.PreserveExtended);
+            if (cal.PositiveWhiteReferenceSet)
+                for (int i = 0; i < data.Length; i++) data[i] *= target.HighlightHeadroom;
+            return;
+        }
 
         if (PrintLutFor(cal, target) is { } applied)
         {

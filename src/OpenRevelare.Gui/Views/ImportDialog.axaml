@@ -57,17 +57,18 @@
                 </StackPanel>
 
                 <StackPanel Name="ImportProcessingOptions" Spacing="12">
-                    <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="{i18n:T '采集校准'}" FontWeight="SemiBold" />
-                            <Grid ColumnDefinitions="*,Auto">
-                                <ComboBox Name="CaptureProfileChoice" HorizontalAlignment="Stretch" SelectionChanged="OnCaptureProfileChanged" />
-                                <Button Grid.Column="1" Content="{i18n:T '管理与采集引导…'}" Click="OnManageCaptureProfiles" Margin="6,0,0,0" />
-                            </Grid>
-                            <ComboBox Name="CaptureModeChoice" HorizontalAlignment="Stretch" SelectionChanged="OnCaptureModeChanged" />
-                            <TextBlock Name="CaptureWorkflowHint" Classes="groupHint" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,4">
+                        <TextBlock Text="{i18n:T '底片类型'}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <ComboBox Name="FilmTypeChoice" Grid.Column="1" SelectedIndex="0" SelectionChanged="OnFilmTypeChanged"
+                                  HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="{i18n:T '彩色负片'}" />
+                            <ComboBoxItem Content="{i18n:T '彩色正片（反转片）'}" />
+                            <ComboBoxItem Content="{i18n:T '黑白负片'}" />
+                            <ComboBoxItem Content="{i18n:T '黑白正片'}" />
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock Name="PositiveImportHint" Classes="groupHint" TextWrapping="Wrap" IsVisible="False"
+                               Text="{i18n:T '正片仅手动校准。'}" />
                     <Border Background="{DynamicResource Panel2Brush}" CornerRadius="6" Padding="12">
                         <StackPanel Spacing="8">
                             <TextBlock Text="{i18n:T '翻拍校正（相机 RAW）'}" FontWeight="SemiBold" />
@@ -89,13 +90,6 @@
                                 </Grid>
                                 <TextBlock Name="CalDetect" Classes="groupHint" TextWrapping="Wrap" />
                             </StackPanel>
-                            <CheckBox Name="LccChk" Content="{i18n:T 'LCC 平场校正（可选）'}" IsCheckedChanged="OnLccToggled"
-                                      ToolTip.Tip="{i18n:T '拍一张均匀光的平场参考图，逐像素/逐通道修正本翻拍镜头的暗角与角落偏色。'}" />
-                            <Grid Name="LccRow" ColumnDefinitions="*,Auto" IsVisible="False">
-                                <TextBox Name="LccEdit" IsReadOnly="True" Margin="0,0,6,0"
-                                         Watermark="{i18n:T '均匀光的平场参考图（RAW 或 TIFF）'}" />
-                                <Button Grid.Column="1" Content="{i18n:T '选择…'}" Click="OnPickLcc" />
-                            </Grid>
                         </StackPanel>
                     </Border>
                     <StackPanel Spacing="6">
@@ -104,7 +98,7 @@
                             <CheckBox Name="SplitChk" Content="{i18n:T '扫描件多格分割'}"
                                       ToolTip.Tip="{i18n:T '扫描仪常把一整条底片扫成一张图。勾选后导入时先识别每条有几格，并弹窗让你确认分隔线。'}" />
                             <CheckBox Name="AutoInvertChk" Grid.Column="1" IsChecked="True"
-                                      ToolTip.Tip="{i18n:T '分析整卷的片基与高光代理，统一标定端点；完成后刷新预览。'}">
+                                      ToolTip.Tip="{i18n:T '按所选底片类型分析整卷并统一明暗端点；正片不运行负片去色罩。'}">
                                 <TextBlock Text="{i18n:T '导入后自动分析整卷（推荐）'}" TextWrapping="Wrap" />
                             </CheckBox>
                         </Grid>

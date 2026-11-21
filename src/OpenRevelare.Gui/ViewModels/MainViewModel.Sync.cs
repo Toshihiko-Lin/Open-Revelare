@@ -256,6 +256,9 @@ public partial class MainViewModel
             {
                 d.TBase = (double[])s.TBase.Clone();
                 d.DMinPerChannel = (double[])s.DMinPerChannel.Clone();
+                d.PositiveCalibrated = s.PositiveCalibrated;
+                d.PositiveWhiteReferenceSet = s.PositiveWhiteReferenceSet;
+                d.PositiveBlackReferenceSet = s.PositiveBlackReferenceSet;
                 d.DMaxPerChannel = (double[])s.DMaxPerChannel.Clone();
             }
             if (Sync.CalChroma) { d.ChromaChannelScale = (double[])s.ChromaChannelScale.Clone(); }

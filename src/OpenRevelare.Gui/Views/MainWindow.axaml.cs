@@ -1539,14 +1539,14 @@ public partial class MainWindow : Window
     private void OnSampleFilmBaseClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.FilmBase,
             Vm?.IsPositiveFilm == true
-                ? Loc.T("白端采样：预览已切到原始正片。对准【最亮的高光或透明片基】拖框，松开即采样。按 Esc 取消。")
+                ? Loc.T("框选光源透光区；Esc 取消。")
                 : Loc.T("片基采样：预览已切到负片。对准【最亮的橙色片基】（边缘/帧间未曝光处）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 
     private void OnSampleDMaxClick(object? sender, RoutedEventArgs e) =>
         ToggleSampling(sender, SampleMode.DMax,
             Vm?.IsPositiveFilm == true
-                ? Loc.T("黑端采样：预览已切到原始正片。对准【最暗的暗部或黑边】拖框，松开即采样。按 Esc 取消。")
+                ? Loc.T("框选未曝光黑片基；Esc 取消。")
                 : Loc.T("高光采样：预览已切到负片。对准负片【最暗处】（=场景高光）拖框，松开即采样。按 Esc 取消。"),
             useNegative: true);
 

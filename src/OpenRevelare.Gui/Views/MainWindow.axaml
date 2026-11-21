@@ -157,7 +157,7 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <Separator />
-                        <MenuItem Header="{i18n:T '显示齿孔遮罩'}" ToggleType="CheckBox"
+                        <MenuItem Header="{i18n:T '显示齿孔遮罩'}" ToggleType="CheckBox" IsVisible="{Binding IsNegativeFilm}"
                                   IsChecked="{Binding ShowSprocketMask, Mode=TwoWay}"
                                   IsEnabled="{Binding HasImage}" />
                         <Separator />
@@ -1157,7 +1157,7 @@
                                         </Grid>
                                         <Grid ColumnDefinitions="100,*">
                                             <TextBlock Grid.Column="0" Classes="fieldLabel" Text="{i18n:T '外观 LUT'}" />
-                                            <ComboBox Grid.Column="1" Name="LookLutPicker" ItemsSource="{Binding PrintLutNames}"
+                                            <ComboBox Grid.Column="1" Name="LookLutPicker" ItemsSource="{Binding PrintLutNames}" IsEnabled="{Binding IsNegativeFilm}"
                                                       SelectedIndex="{Binding PrintLutIndex}" HorizontalAlignment="Stretch">
                                                 <ComboBox.ContextMenu>
                                                     <ContextMenu>
@@ -1389,7 +1389,7 @@
                                      The whole chain, at the top, before the parameters it
                                      solves. The individual buttons below stay exactly as they
                                      were: these two are the fast path, not a replacement. -->
-                                <StackPanel Spacing="4" Margin="0,0,0,6">
+                                <StackPanel Spacing="4" Margin="0,0,0,6" IsVisible="{Binding IsNegativeFilm}">
                                     <Grid Classes="pairedActions" ColumnDefinitions="*,*">
                                         <Button Grid.Column="0" Classes="primary" Margin="0,0,3,0"
                                                 HorizontalAlignment="Stretch"
@@ -1424,6 +1424,7 @@
                                 <Expander Header="{Binding FilmBaseHeader}" IsExpanded="True" Tag="1"
                                           ToolTip.Tip="{Binding FilmBaseToolTip}">
                                     <StackPanel Spacing="2">
+                                        <TextBlock Classes="groupHint" Text="{Binding FilmBaseToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_min" Minimum="-2" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" />
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
@@ -1435,7 +1436,7 @@
                                                 </Grid>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
-                                                    Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}"
+                                                    Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoFilmBaseToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
@@ -1464,6 +1465,7 @@
                                 <Expander Header="{Binding DMaxHeader}" IsExpanded="True" Tag="2"
                                           ToolTip.Tip="{Binding DMaxToolTip}">
                                     <StackPanel Spacing="2">
+                                        <TextBlock Classes="groupHint" Text="{Binding DMaxToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
                                                        Value="{Binding DMaxLevel}"
                                                        ToolTip.Tip="{i18n:T 'Cineon 亮端映射：改变高光反差和亮端位置，保持三通道色彩比例。需要整体提亮请使用 Display 曝光。'}" />
@@ -1476,7 +1478,7 @@
                                                 </Grid>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
-                                                    Click="OnAutoWbHighClick" IsEnabled="{Binding HasImage}"
+                                                    Click="OnAutoWbHighClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoDMaxToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
@@ -1485,7 +1487,7 @@
                                             </Button>
                                         </Grid>
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
-                                                  IsVisible="{Binding IsColourRoll}">
+                                                  IsVisible="{Binding CanUseDeepWb}">
                                             <StackPanel Spacing="1">
                                                 <ctl:SliderRow Label="R" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxR}" TrackBrush="{DynamicResource TrackRBrush}" ToolTip.Tip="{i18n:T '高级：单独改变红色亮端，会改变高光色偏。'}" />
                                                 <ctl:SliderRow Label="G" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.001" DefaultValue="2" Value="{Binding DMaxG}" TrackBrush="{DynamicResource TrackGBrush}" ToolTip.Tip="{i18n:T '高级：单独改变绿色亮端，会改变高光色偏。'}" />
@@ -1501,7 +1503,7 @@
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
                                 <!-- Header and hint follow the film type: the grey card is an exposure
                                      anchor on a black-and-white roll, not a cast correction. -->
-                                <Expander Header="{Binding CastCardHeader}" IsExpanded="True" Tag="3"
+                                <Expander Header="{Binding CastCardHeader}" IsExpanded="True" Tag="3" IsVisible="{Binding IsNegativeFilm}"
                                           ToolTip.Tip="{Binding CastCardHint}">
                                     <StackPanel Spacing="2">
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
@@ -1702,7 +1704,7 @@
                                             </ToggleButton>
                                         </Grid>
                                         <Button HorizontalAlignment="Stretch" Margin="0,5,0,0"
-                                                Click="OnAutoLevelsClick" IsEnabled="{Binding HasImage}"
+                                                Click="OnAutoLevelsClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                 ToolTip.Tip="{i18n:T '按全图分位自动设定黑场/白场端点'}">
                                             <Grid ColumnDefinitions="Auto,*">
                                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
@@ -1739,21 +1741,11 @@
 
                 <!-- 齿孔遮罩 / 几何裁切 live below the tabs, not inside Cineon: neither is a
                      colour parameter, and you want them at hand whichever stage you are on. -->
-                <Grid Classes="repairStage" RowDefinitions="Auto,Auto">
-                    <!-- Header bar doubles as the divider: a full-width groove plus a rubric,
-                         so it reads as its own region rather than the tail of the open tab. -->
-                    <Border Grid.Row="0" Padding="16,8" Background="{DynamicResource PanelBrush}"
-                            BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Classes="fieldLabel" Text="{i18n:T '构图与修复'}" />
-                            <TextBlock Grid.Column="1" Text="{Binding CompositionTargetLabel}" FontSize="12"
-                                       Foreground="{DynamicResource TextDimBrush}" IsVisible="{Binding HasImage}" />
-                        </Grid>
-                    </Border>
-                    <Border Grid.Row="1">
+                <Grid Classes="repairStage" RowDefinitions="Auto">
+                    <Border BorderBrush="{DynamicResource BorderSoftBrush}" BorderThickness="0,1,0,0">
                         <StackPanel Spacing="0" Margin="16,0,16,16">
                             <!-- 齿孔遮罩 -->
-                            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0" IsVisible="{Binding IsNegativeFilm}">
                                 <CheckBox Grid.Column="0" Content="{i18n:T '启用齿孔遮罩'}" IsChecked="{Binding SprocketEnabled}"
                                           IsEnabled="{Binding HasImage}" VerticalAlignment="Center"
                                           ToolTip.Tip="{i18n:T '默认关闭；包含齿孔或灯板时启用，展开「齿孔设置」预览和调整遮罩。'}" />
@@ -1764,7 +1756,7 @@
                                     <ctl:Icon Width="16" Height="16" Data="{StaticResource IcoBroadcast}" />
                                 </Button>
                             </Grid>
-                            <Expander Header="{i18n:T '齿孔设置'}">
+                            <Expander Header="{i18n:T '齿孔设置'}" IsVisible="{Binding IsNegativeFilm}">
                                 <StackPanel Spacing="4">
                                     <TextBlock Classes="groupHint"
                                                Text="{i18n:T '默认关闭。仅在输入包含齿孔或灯板时启用；先显示遮罩并确认范围，再调整阈值。超过阈值的区域会填白。'}" />

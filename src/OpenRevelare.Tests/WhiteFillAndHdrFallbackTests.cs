@@ -8,6 +8,40 @@ namespace OpenRevelare.Tests;
 
 public sealed class WhiteFillAndHdrFallbackTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Slide_hole_light_reaches_HDR_ceiling_in_whole_prepared_and_regional_outputs(bool mask)
+    {
+        var pixels = new ImageBuffer(8, 4);
+        for (int i = 0; i < pixels.Data.Length; i += 3)
+            for (int c = 0; c < 3; c++)
+                pixels.Data[i + c] = i / 3 % 8 < 2 ? 1f : i / 3 % 8 == 2 ? 0.98f - c * 0.02f : 0.1f;
+        var source = Working(pixels);
+        var cal = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveCalibrated = true, PositiveWhiteReferenceSet = true, HdrPeakNits = 800,
+            SprocketEnabled = mask, SprocketThreshold = 0.9,
+            TBase = new[] { 1d, 1d, 1d }, DMinPerChannel = new[] { 0d, 0d, 0d },
+            DMaxPerChannel = Enumerable.Repeat(FrameParams.OutputRange, 3).ToArray(),
+        };
+
+        using var cmm = new LittleCmsEngine();
+        var full = Pipeline.Render(source, cal, ColorPipelineVersion.ManagedV2, cmm);
+        var withoutMask = cal.Clone();
+        withoutMask.SprocketEnabled = false;
+        Assert.Equal(Pipeline.Render(source, withoutMask, ColorPipelineVersion.ManagedV2, cmm).Pixels.Data,
+            full.Pixels.Data);
+        var prepared = Pipeline.RenderPreparedFilm(Pipeline.PrepareFilm(source, cal), cal,
+            ColorPipelineVersion.ManagedV2, cmm);
+        var region = RegionRender.Render(source, cal, new RegionRender.Roi(0, 0, 1, 1),
+            ColorPipelineVersion.ManagedV2, cmm);
+        foreach (var output in new[] { full.Pixels, prepared.Pixels, region.Frame.Pixels })
+            for (int c = 0; c < 3; c++)
+                Assert.InRange(output.Data[c], cal.ResolvedOutputTarget.HighlightHeadroom - 0.001f,
+                    cal.ResolvedOutputTarget.HighlightHeadroom + 0.001f);
+    }
+
     [Fact]
     public void HDR_only_LUT_colour_survives_the_SDR_companion()
     {

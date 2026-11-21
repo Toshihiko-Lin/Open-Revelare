@@ -171,11 +171,20 @@ public sealed class FrameParams
     /// <summary>
     /// 这卷是正片（反转片）：透明片基/高光处透光最多，乳剂深厚/暗部处透光最少。
     ///
-    /// 打开后，反相将 D_min 映射到白端（Cineon 码值 1032，D_adj = 0），
-    /// 将 D_max 映射到黑端（Cineon 码值 95，D_adj = -OutputRange）。
-    /// 显示变换把这枚白端当作画面白，不再占用负片在 685 以上的高光余量。
+    /// 校准前后共用 RAW 渲染链。手动光源/片基参考只产生线性采集校正，
+    /// 不经过负片密度反转或 Cineon 印片曲线。
     /// </summary>
     public bool IsPositiveFilm { get; set; }
+
+    // Camera rendering stays active after calibration. Reference samples stay camera-native.
+    public bool PositiveCalibrated { get; set; }
+    public bool PositiveWhiteReferenceSet { get; set; }
+    public bool PositiveBlackReferenceSet { get; set; }
+    public double[]? PositiveCameraWhiteBalance { get; set; }
+    public double[,]? PositiveCameraToWorking { get; set; }
+    public bool UsePositiveCameraWhiteBalance => IsPositiveFilm && !Monochrome && !PositiveWhiteReferenceSet
+        && PositiveCameraWhiteBalance is { Length: 3 };
+
 
     /// <summary>Per-channel chroma compression for the RGB-decouple path (× before chroma_grade).</summary>
     public double[] ChromaChannelScale { get; set; } = { 1.0, 1.0, 1.0 };
@@ -563,6 +572,11 @@ public sealed class FrameParams
         ChromaChannelScale = (double[])ChromaChannelScale.Clone(),
         Monochrome = Monochrome,
         IsPositiveFilm = IsPositiveFilm,
+        PositiveCalibrated = PositiveCalibrated,
+        PositiveWhiteReferenceSet = PositiveWhiteReferenceSet,
+        PositiveBlackReferenceSet = PositiveBlackReferenceSet,
+        PositiveCameraToWorking = PositiveCameraToWorking is null ? null : (double[,])PositiveCameraToWorking.Clone(),
+        PositiveCameraWhiteBalance = PositiveCameraWhiteBalance is null ? null : (double[])PositiveCameraWhiteBalance.Clone(),
         OutputIntent = OutputIntent,
         DisplayReferredStage2 = DisplayReferredStage2,
         OutputSpace = OutputSpace,

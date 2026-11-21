@@ -536,6 +536,9 @@ public static class Project
             ["lcc_enabled"] = e.LccEnabled ?? p.LccFlatField != null,
             ["monochrome"] = p.Monochrome,
             ["is_positive_film"] = p.IsPositiveFilm,
+            ["positive_calibrated"] = p.PositiveCalibrated,
+            ["positive_white_reference"] = p.PositiveWhiteReferenceSet,
+            ["positive_black_reference"] = p.PositiveBlackReferenceSet,
             // SceneBase adjustments
             ["wb_gains"] = Arr(p.WbGains),
             ["exposure_ev"] = p.ExposureEv,
@@ -611,6 +614,13 @@ public static class Project
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             Monochrome = Bool(d, "monochrome", false),
             IsPositiveFilm = Bool(d, "is_positive_film", false),
+            PositiveWhiteReferenceSet = Bool(d, "positive_white_reference",
+                Bool(d, "positive_calibrated", false) || (Bool(d, "is_positive_film", false) && MigrateShadowEndpoint(d).Any(v => v != 0))),
+            PositiveBlackReferenceSet = Bool(d, "positive_black_reference",
+                Bool(d, "is_positive_film", false) && d["d_max_per_channel"] is JsonArray oldBlack
+                    && oldBlack.Any(v => v is not null && v.GetValue<double>() != 2.0)),
+            PositiveCalibrated = Bool(d, "positive_calibrated", false)
+                || (Bool(d, "is_positive_film", false) && MigrateShadowEndpoint(d).Any(v => v != 0)),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             DustEnabled = Bool(d, "dust_enabled", false),
             DustSpots = DesDustSpots(d["dust_spots"]),

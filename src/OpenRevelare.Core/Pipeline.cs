@@ -181,7 +181,7 @@ public static class Pipeline
                     ColorReference.SceneReferred,
                     TransferState.LinearInProfilePrimaries,
                     NumericRange.Extended);
-                gamutPolicy = applied switch
+                gamutPolicy = cal.IsPositiveFilm ? "positive RAW default rendering; no density normalization or film display curve" : applied switch
                 {
                     { Contract.IsExtendedOutput: true } hdrLut =>
                         $"print-LUT {hdrLut.Contract} -> PQ decoded at {OutputTarget.ReferenceWhiteNits:0} nits = 1.0, BT.2020 -> carrier unclamped, bounded at {target.HighlightHeadroom:0.###}× diffuse white",
@@ -329,8 +329,7 @@ public static class Pipeline
         {
             Stage2.ApplyManagedAfterTargetEncoding(pixels.Data, cal, target.Space);
         }
-        // Layout fill is reference white in either encoding, independent of exposure,
-        // channel curves, print look or the HDR ceiling. Nothing was photographed there.
+        // Geometry and negative-mask fill are layout white; slides never create a brightness mask.
         if (fill is not null) Sprocket.ApplyMask(pixels.Data, fill);
     }
 
@@ -405,7 +404,8 @@ public static class Pipeline
         double[,]? inputMatrix = InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint);
         bool inPlaceOps = cal.LccFlatField != null || cal.VignetteAmount != 0.0
                           || (cal.DustEnabled && cal.DustSpots.Count > 0)
-                          || cal.DecoupleMatrix != null || inputMatrix != null || cal.Monochrome;
+                          || cal.DecoupleMatrix != null || inputMatrix != null || cal.Monochrome || cal.IsPositiveFilm
+                          || (cal.IsPositiveFilm && cal.PositiveCameraToWorking is not null);
         if (inPlaceOps && ReferenceEquals(src, img))
             src = new ImageBuffer(img.Width, img.Height, (float[])img.Data.Clone())
                       .InheritSourceFrom(img);
@@ -424,7 +424,7 @@ public static class Pipeline
         // Sprocket/light-board mask — detected on the raw negative BEFORE decouple
         // (the neutral over-bright board would otherwise skew the chroma statistic).
         bool[]? sprocketMask = null;
-        if (cal.SprocketEnabled && cal.SprocketThreshold is double thr)
+        if (!cal.IsPositiveFilm && cal.SprocketEnabled && cal.SprocketThreshold is double thr)
             sprocketMask = Sprocket.MakeMask(src.Data, src.PixelCount, (float)thr);
 
         // ── Input colour space: declared primaries → WORKING (ACEScg), on the NEGATIVE ──
@@ -436,6 +436,8 @@ public static class Pipeline
         // IccRead.ReadMatrix at load; RAW and unprofiled TIFF are not, and are treated as
         // working-space data without being converted. That gap does not affect the density
         // inversion (which is self-referential through t_base) but it does affect step 4.
+        if (cal.IsPositiveFilm) PositiveFilmCalibration.Apply(src.Data, cal);
+
         if (inputMatrix != null)
             InputTransform.Apply(src.Data, inputMatrix);
 
@@ -464,7 +466,9 @@ public static class Pipeline
 
         double[]? chromaAmp = cal.IsPositiveFilm ? null : cal.DecoupleChromaAmp;
         double[,]? chromaMatrix = cal.IsPositiveFilm ? null : ResolveChromaMatrix(cal);
-        ImageBuffer result = Inversion.Invert(src, cal, chromaAmp, chromaMatrix);
+        ImageBuffer result = cal.IsPositiveFilm
+            ? new ImageBuffer(src.Width, src.Height, (float[])src.Data.Clone()).InheritSourceFrom(src)
+            : Inversion.Invert(src, cal, chromaAmp, chromaMatrix);
 
         // Apply sprocket mask after inversion + black floor: fill masked pixels white.
         if (sprocketMask != null)

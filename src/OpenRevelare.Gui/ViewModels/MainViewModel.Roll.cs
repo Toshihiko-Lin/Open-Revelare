@@ -180,6 +180,7 @@ public partial class MainViewModel
     private void SetFilmType(bool isPositive, bool monochrome)
     {
         if (_isPositiveFilm == isPositive && _monochrome == monochrome) return;
+        CancelRollAnalysis();
         _isPositiveFilm = isPositive;
         _monochrome = monochrome;
         NotifyFilmTypeProperties();
@@ -197,7 +198,8 @@ public partial class MainViewModel
             _rollBaseCalibration = null;
             _rollHighlightCalibration = null;
             _rollUsedFallbackHighlight = false;
-            FilmBaseText = Loc.T("端点：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
+            FilmBaseText = isPositive ? Loc.T("端点：整卷类型已更改 · 请手动校准白端与黑端")
+                : Loc.T("端点：整卷类型已更改 · 原自动置信度已失效，请重新运行自动标定");
             HighlightConfidenceText = Loc.T("端点：整卷类型已更改 · 原端点诊断已失效");
             NeedsRecalibration = true;
         }
@@ -220,7 +222,11 @@ public partial class MainViewModel
 
     private void NotifyFilmTypeProperties()
     {
+        if (_isPositiveFilm) ShowSprocketMask = false;
+        UpdateSprocketOverlay();
         OnPropertyChanged(nameof(IsPositiveFilm));
+        OnPropertyChanged(nameof(PrintLutHint));
+        OnPropertyChanged(nameof(RecalibrationNoticeText));
         OnPropertyChanged(nameof(IsNegativeFilm));
         OnPropertyChanged(nameof(Monochrome));
         OnPropertyChanged(nameof(IsColourRoll));
@@ -255,24 +261,24 @@ public partial class MainViewModel
     public string FilmTypeHint => FilmTypeIndex switch
     {
         0 => Loc.T("彩色负片：橙色片基为黑端，画面高光为白端；三层染料各自独立，两端各三个密度共六个自由度。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
-        1 => Loc.T("彩色正片（反转片）：选定类型后运行自动整卷校准。135 原片请保留齿孔和片边供测量；无齿孔时按画面估计，请检查白端与黑端。正片跳过 Path A 解耦和智能色偏修正。"),
+        1 => Loc.T("正片仅手动校准。"),
         2 => Loc.T("黑白负片：三通道折成一路亮度，反相只用一对端点。"),
-        _ => Loc.T("黑白正片：黑白反转片，三通道折成一路亮度，透光处为白端。"),
+        _ => Loc.T("正片仅手动校准。"),
     };
 
     /// <summary>Which end D_min IS, which is the film type's whole point: on a negative the film
     /// base reads as black, on a positive it reads as white. The header names the end rather than
     /// the field, matching the 黑端/白端 wording the rest of the panel already uses.</summary>
-    public string FilmBaseHeader => _isPositiveFilm ? Loc.T("白端") : Loc.T("黑端");
+    public string FilmBaseHeader => _isPositiveFilm ? Loc.T("白端 · 光源") : Loc.T("黑端");
 
     /// <summary>The other end. D_max is the highlight on a negative and the shadow on a positive.</summary>
-    public string DMaxHeader => _isPositiveFilm ? Loc.T("黑端") : Loc.T("白端");
+    public string DMaxHeader => _isPositiveFilm ? Loc.T("黑端 · 未曝光片基") : Loc.T("白端");
 
     public string FilmBaseToolTip => _isPositiveFilm
-        ? Loc.T("正片白端的密度（相对完全透光 T=1）。自动优先取齿孔透光；手动请选可信的中性透光参考，避免把有色高光当作白色。")
+        ? Loc.T("采均匀光源透光区或齿孔内部。")
         : Loc.T("每个通道读作黑的密度（相对完全透光 T=1）。负片的橙色片基必然 R<G<B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。");
 
-    public string FilmBaseBtnText => _isPositiveFilm ? Loc.T("白端采样") : Loc.T("片基采样");
+    public string FilmBaseBtnText => _isPositiveFilm ? Loc.T("光源采样") : Loc.T("片基采样");
 
     public string AutoFilmBaseBtnText => _isPositiveFilm ? Loc.T("自动白点") : Loc.T("自动黑点");
 
@@ -281,10 +287,10 @@ public partial class MainViewModel
         : Loc.T("自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。");
 
     public string DMaxToolTip => _isPositiveFilm
-        ? Loc.T("每个通道读作黑的密度，典型 1.8–2.8。正片里最厚、最不透光的地方——深黑乳剂、画面暗部——就是黑端。与 D_min 的距离即反差，三通道之差即暗部色偏。")
+        ? Loc.T("采未曝光黑片边或画格间隙。")
         : Loc.T("每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。");
 
-    public string DMaxBtnText => _isPositiveFilm ? Loc.T("黑端采样") : Loc.T("高光采样");
+    public string DMaxBtnText => _isPositiveFilm ? Loc.T("片基采样") : Loc.T("高光采样");
 
     public string AutoDMaxBtnText => _isPositiveFilm ? Loc.T("自动黑点") : Loc.T("自动白点");
 
@@ -747,7 +753,9 @@ public partial class MainViewModel
     ///
     /// Row 1 was the pure CST and is now the first cube; the switch below therefore has no
     /// special case left between the standard rendering and the stocks.
-    public string PrintLutHint => _printLutIndex switch
+    public string PrintLutHint => IsPositiveFilm
+        ? Loc.T("中性 RAW：恢复白平衡，不叠加风格曲线。")
+        : _printLutIndex switch
     {
         0 => Loc.T("标准显示渲染：解 Cineon 编码并套用显示渲染（响应 gamma 0.6，片基归零）。想直接看片子就用它。"),
         _ => Loc.F($"印片模拟：{PrintLutNames[_printLutIndex]}。反差与色彩由该胶片决定，帧编辑在它之后。"),
@@ -1536,6 +1544,7 @@ public partial class MainViewModel
         TiffInputAssumption tiffInputAssumption,
         bool sharedSlot)
     {
+        SetSlideCameraWhiteBalance(ep, sourcePath);
         using var decodeTrace = RenderTrace.Scope("export.decode");
         SourceStamp stamp = SourceStamp.Capture(sourcePath);
         if (sharedSlot)

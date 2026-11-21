@@ -31,6 +31,120 @@ public class PositiveFilmTests
         Assert.Equal(before, vm.DMaxPerChannel);
     }
 
+    [Fact]
+    public async Task Slide_automatic_calibration_commands_preserve_manual_endpoints_and_levels()
+    {
+        using var vm = RunAutomaticCalibration(decoupleMatrix: null);
+        vm.DMinPerChannel = new[] { 0.12, 0.15, 0.18 };
+        vm.DMaxPerChannel = new[] { 2.1, 2.2, 2.3 };
+        vm.Black = 0.1; vm.White = -0.1;
+        double[] white = vm.DMinPerChannel, black = vm.DMaxPerChannel;
+        vm.AutoFilmBase(); vm.AutoDetectDMax(); vm.AutoWbHigh();
+        vm.AutoInvertCurrentFrame(); vm.AutoLevels();
+        await vm.AutoInvertRollCommandAsync();
+        Assert.Equal(white, vm.DMinPerChannel);
+        Assert.Equal(black, vm.DMaxPerChannel);
+        Assert.Equal(0.1, vm.Black);
+        Assert.Equal(-0.1, vm.White);
+        Assert.True(string.IsNullOrEmpty(vm.RollAnalysisProgress));
+    }
+
+    [Fact]
+    public void Slide_AsShotFallbackIsRenderOnlyAndStopsAfterManualWhiteCalibration()
+    {
+        var raw = new ImageBuffer(2, 1, new[] { 0.2f, 0.4f, 0.25f, 0.1f, 0.2f, 0.125f });
+        float[] original = (float[])raw.Data.Clone();
+        var p = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveCameraWhiteBalance = new[] { 2d, 1d, 1.6 },
+            OutputIntent = OutputIntent.None,
+            DMaxPerChannel = Enumerable.Repeat(FrameParams.OutputRange, 3).ToArray(),
+        };
+        var balanced = Pipeline.ProcessFrame(raw, p);
+        Assert.Equal(balanced.Data[0], balanced.Data[1], 4);
+        Assert.Equal(balanced.Data[1], balanced.Data[2], 4);
+        Assert.Equal(original, raw.Data);
+        using var cmm = new LittleCmsEngine();
+        var region = RegionRender.Render(AsWorkingFrame(raw), p,
+            new RegionRender.Roi(0, 0, 1, 1), ColorPipelineVersion.ManagedV2, cmm);
+        for (int i = 0; i < balanced.Data.Length; i++)
+            Assert.Equal(balanced.Data[i], region.Frame.Pixels.Data[i], 5);
+
+        p.PositiveCalibrated = true;
+        p.PositiveWhiteReferenceSet = true; // even unit transmission is an explicit reference
+        var withoutAsShot = p.Clone();
+        withoutAsShot.PositiveCameraWhiteBalance = null;
+        Assert.Equal(Pipeline.ProcessFrame(raw, withoutAsShot).Data, Pipeline.ProcessFrame(raw, p).Data);
+        Assert.True(p.Clone().PositiveCalibrated);
+    }
+
+    [Fact]
+    public void UncalibratedSlideMatchesDefaultRawViewingWithoutDensityOrDisplayCurve()
+    {
+        var raw = new ImageBuffer(3, 1, new[] { 0.04f, 0.12f, 0.06f, 0.2f, 0.4f, 0.25f, 0.4f, 0.7f, 0.3f });
+        var p = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveCameraWhiteBalance = new[] { 2d, 1d, 1.6 },
+            PositiveCameraToWorking = CameraCharacterization.ToWorking(new double[,] { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }),
+        };
+        float[] original = (float[])raw.Data.Clone();
+        float[] expected = (float[])raw.Data.Clone();
+        NegativeView.Prepare(expected, p.PositiveCameraWhiteBalance, p.PositiveCameraToWorking);
+        OutputRender.Convert(expected, ColorPipeline.Working, p.ResolvedOutputSpace, GamutMapping.Desaturate);
+        OutputRender.Encode(expected, p.ResolvedOutputSpace);
+        using var cmm = new LittleCmsEngine();
+        var source = AsWorkingFrame(raw);
+        var full = Pipeline.Render(source, p, ColorPipelineVersion.ManagedV2, cmm);
+        var region = RegionRender.Render(source, p, new RegionRender.Roi(0, 0, 1, 1),
+            ColorPipelineVersion.ManagedV2, cmm);
+        var prepared = Pipeline.RenderPreparedFilm(Pipeline.PrepareFilm(source, p), p,
+            ColorPipelineVersion.ManagedV2, cmm);
+        foreach (var actual in new[] { full.Pixels.Data, region.Frame.Pixels.Data, prepared.Pixels.Data })
+            for (int i = 0; i < expected.Length; i++) Assert.Equal(expected[i], actual[i], 5);
+        Assert.Equal(original, raw.Data);
+    }
+
+    [Fact]
+    public void Slide_CalibrationUsesOneLinearCaptureCorrectionAndKeepsCameraMatrix()
+    {
+        var raw = new ImageBuffer(3, 1, new[] { 0.08f, 0.06f, 0.04f, 0.24f, 0.3f, 0.2f, 0.8f, 0.6f, 0.4f });
+        var p = new FrameParams
+        {
+            IsPositiveFilm = true, PositiveCalibrated = true,
+            PositiveWhiteReferenceSet = true, PositiveBlackReferenceSet = true,
+            PositiveCameraWhiteBalance = new[] { 2d, 1d, 1.6 },
+            PositiveCameraToWorking = new double[,] { { 0.8, 0.2, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
+            DMinPerChannel = new[] { 0.8, 0.6, 0.4 }.Select(t => -Math.Log10(t)).ToArray(),
+            DMaxPerChannel = new[] { 0.08, 0.06, 0.04 }.Select(t => -Math.Log10(t)).ToArray(),
+            OutputIntent = OutputIntent.None,
+        };
+        float[] before = (float[])raw.Data.Clone();
+        float[] expected = { 0, 0, 0, 0.24f / 0.9f, 0.4f / 0.9f, 0.4f / 0.9f, 1, 1, 1 };
+        using var cmm = new LittleCmsEngine();
+        var source = AsWorkingFrame(raw);
+        var full = Pipeline.Render(source, p, ColorPipelineVersion.ManagedV2, cmm);
+        var region = RegionRender.Render(source, p, new RegionRender.Roi(0, 0, 1, 1),
+            ColorPipelineVersion.ManagedV2, cmm);
+        foreach (var output in new[] { full.Pixels.Data, region.Frame.Pixels.Data })
+            for (int i = 0; i < expected.Length; i++) Assert.Equal(expected[i], output[i], 5);
+        Assert.Equal(before, raw.Data);
+        // Recalibration changes only constant gains/offsets: there is no density power or toe.
+        var clone = p.Clone();
+        Assert.True(clone.PositiveWhiteReferenceSet && clone.PositiveBlackReferenceSet);
+    }
+
+    [Fact]
+    public void Slide_scalar_adjustments_enable_only_the_reference_being_edited()
+    {
+        using var vm = RunAutomaticCalibration(null);
+        vm.DMinLevel = 0.2;
+        FrameParams Read() => (FrameParams)typeof(MainViewModel).GetMethod("BuildParams", Private)!.Invoke(vm, null)!;
+        Assert.True(Read().PositiveWhiteReferenceSet);
+        Assert.False(Read().PositiveBlackReferenceSet);
+        vm.DMaxLevel = 2.3;
+        Assert.True(Read().PositiveBlackReferenceSet);
+    }
+
     private static readonly double[] DMin = { 0.10, 0.15, 0.12 };
     private static readonly double[] DMax = { 2.20, 2.35, 2.25 };
 
@@ -212,7 +326,9 @@ public class PositiveFilmTests
             var p = new FrameParams
             {
                 IsPositiveFilm = true,
-                DMinPerChannel = new[] { 0.15, 0.18, 0.16 },
+                PositiveCalibrated = true,
+                PositiveWhiteReferenceSet = true,
+                DMinPerChannel = new[] { 0d, 0d, 0d },
                 DMaxPerChannel = new[] { 2.40, 2.50, 2.45 },
             };
 
@@ -233,7 +349,10 @@ public class PositiveFilmTests
             var loaded = Project.Load(path);
             Assert.Single(loaded.Frames);
             Assert.True(loaded.Frames[0].Params.IsPositiveFilm);
-            Assert.Equal(0.15, loaded.Frames[0].Params.DMinPerChannel[0], 5);
+            Assert.True(loaded.Frames[0].Params.PositiveCalibrated);
+            Assert.True(loaded.Frames[0].Params.PositiveWhiteReferenceSet);
+            Assert.False(loaded.Frames[0].Params.PositiveBlackReferenceSet);
+            Assert.Equal(0, loaded.Frames[0].Params.DMinPerChannel[0], 5);
             Assert.Equal(2.40, loaded.Frames[0].Params.DMaxPerChannel[0], 5);
         }
         finally
@@ -366,158 +485,6 @@ public class PositiveFilmTests
         return ep.CodeOf(channel, -Math.Log10(Math.Max(transmittance, 1e-10)));
     }
 
-    /// <summary>
-    /// THE REGRESSION THIS FILE EXISTS FOR: 自动（单张）on a slide roll must put the picture's
-    /// HIGHLIGHT on Cineon white and its deepest SHADOW on Cineon black.
-    ///
-    /// It guards the polarity of the whole automatic chain, not one formula. A negative's auto
-    /// chain measures "the film base" (brightest) into D_min and "the densest content" into D_max;
-    /// on a slide those two measurements are still the brightest and the densest, but D_min is now
-    /// the WHITE end, so the pair has to come out as (highlight, shadow) and land 1032/95. If the
-    /// chain were left on negative semantics — or if the measured pair were written to the wrong
-    /// fields — the picture comes back inverted or flat, which is exactly what "自动校准在正片上
-    /// 不工作" looks like.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_PutsHighlightOnWhiteAndShadowOnBlack()
-    {
-        MainViewModel vm = RunAutomaticCalibration(decoupleMatrix: null);
-        double[] dMin = vm.DMinPerChannel, dMax = vm.DMaxPerChannel;
-
-        // The white end is the film's highlight, the black end its deepest shadow — and the pair is
-        // ordered the same way round as any density pair (D_max is deeper even though it now reads
-        // as black), so FrameParams.Validate's invariant still holds.
-        Assert.True(dMax[0] > dMin[0] && dMax[1] > dMin[1] && dMax[2] > dMin[2],
-            $"black end must be denser than white end, got D_min={Fmt(dMin)} D_max={Fmt(dMax)}");
-
-        for (int c = 0; c < 3; c++)
-        {
-            // White belongs to the brightest material in the frame — on a scan that still shows the
-            // light table, that is the table. (The picture's own highlight then sits just under
-            // white; cropping the frame is what puts the film's clear base on 1032 instead, which
-            // is why the UI recommends cropping before auto calibration.)
-            double brightest = c switch { 0 => 1.000, 1 => 0.990, _ => 0.985 };
-            double shadow = c switch { 0 => 0.020, 1 => 0.021, _ => 0.023 };
-            // White is pinned to Cineon white within a code or two. Not bit-exact: when a channel's
-            // base sits at the clipping ceiling it carries no colour information and its colour is
-            // taken from the reliable channels (FilmBase.ClampToPhysicalBase), which moves that
-            // channel's white end by a fraction of a code. One or two codes of white is the honest
-            // tolerance; the cast that mattered was tenths of a density.
-            Assert.InRange(CodeAt(dMin, dMax, c, brightest), FrameParams.CineonWhiteCode - 4, FrameParams.CineonWhiteCode + 4);
-            // Black is pinned to within a band, not exactly: a positive's three channels share ONE
-            // span (see Endpoints_PositiveFilm_ShareOneSpanSoTheBlackEndCarriesNoColour), so the
-            // channel whose measured span was longest lands a little above 95 and the shortest a
-            // little below. Bands of tens of codes around black are the normal, intended spread —
-            // what must not happen is the shadow drifting up into the midtones.
-            Assert.InRange(CodeAt(dMin, dMax, c, shadow), 40, 160);
-        }
-
-        // The endpoints must be the ones that actually reach the picture, not just the live
-        // controls: this is what a thumbnail, an export and the next frame switch all read.
-        Assert.True(vm.CurrentFrame!.Params.IsPositiveFilm,
-            "auto calibration must not clear the roll's film type");
-        Assert.Equal(dMin, vm.CurrentFrame.Params.DMinPerChannel);
-        Assert.Equal(dMax, vm.CurrentFrame.Params.DMaxPerChannel);
-    }
-
-    /// <summary>
-    /// The view-model half of the perforation rule: 自动（单张）on a slide with visible perforations
-    /// must place the white end on the light through the HOLES, not on the brighter coloured
-    /// picture patch the old sampled-highlight path would take. The fixture's block is brighter
-    /// than the holes, so an unwired or reverted chain reads a lower D_min and fails the band.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_TakesTheWhiteEndFromThePerforations()
-    {
-        ImageBuffer strip = PositivePerforationTests.Strip(0.60, (1.00, 0.90, 0.70));
-
-        MainViewModel vm = RunAutomaticCalibration(decoupleMatrix: null, scan: strip);
-
-        double expected = -Math.Log10(0.60);   // holes are 0.60 in every channel
-        for (int c = 0; c < 3; c++)
-            Assert.InRange(vm.DMinPerChannel[c], expected - 0.01, expected + 0.01);
-        Assert.True(vm.StatusText.Contains("齿孔"), $"status should say the route, got '{vm.StatusText}'");
-    }
-
-    /// <summary>
-    /// The black-end half of the same rule: 自动（单张）on a slide with an unexposed perforation band
-    /// must put the black end on the film's known black (0.004 here), not on the picture's 0.15
-    /// midtone. A scene solve alone would land near 0.82 D; the physical edge is ~2.40 D.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_TakesTheBlackEndFromThePerforations()
-    {
-        ImageBuffer strip = PositivePerforationTests.Strip(0.60, (1.00, 0.90, 0.70));
-
-        MainViewModel vm = RunAutomaticCalibration(decoupleMatrix: null, scan: strip);
-
-        // D_min = -log10(0.60) = 0.2218 plus the unexposed span log10(0.60/0.004) = 2.176.
-        foreach (double d in vm.DMaxPerChannel)
-            Assert.InRange(d, 2.37, 2.43);
-        Assert.True(vm.StatusText.Contains("黑端取自片边未曝光黑"),
-            $"status should say the black route, got '{vm.StatusText}'");
-    }
-
-    /// <summary>
-    /// A band lifted to 0.20 (light-table spill) is not an unexposed black. The perforation path
-    /// declines, the scene estimate keeps the black end, and the status says so — reporting 2.4 D
-    /// from a lifted band would crush every shadow on the frame.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_ContaminatedBandFallsBackToSceneBlack()
-    {
-        ImageBuffer strip = PositivePerforationTests.Strip(0.60, bridgeLevel: 0.20);
-
-        MainViewModel vm = RunAutomaticCalibration(decoupleMatrix: null, scan: strip);
-
-        Assert.True(vm.StatusText.Contains("黑端取自画面暗部"),
-            $"status should say the fallback route, got '{vm.StatusText}'");
-        for (int c = 0; c < 3; c++)
-            Assert.True(vm.DMaxPerChannel[c] > vm.DMinPerChannel[c],
-                "black end must stay deeper than the white end");
-    }
-
-    /// <summary>
-    /// THE BUG THAT MADE THE BUTTON LOOK BROKEN ON SLIDES ONLY: the automatic chain measured in a
-    /// different colour domain than the render uses.
-    ///
-    /// A Path-A capture calibration (the RGB decoupling a copy-stand workflow produces) is applied
-    /// by the negative pipeline and — deliberately — NOT by the positive one: a slide has no orange
-    /// mask to undo, so Pipeline.ProcessFrame skips the matrix. The measurement helper that feeds
-    /// every automatic and sampled endpoint (MainViewModel.Stage1Source) kept applying it, so on a
-    /// slide roll each endpoint was solved from matrixed pixels and then used to invert raw ones.
-    /// The numbers still looked plausible, which is what hid it: the white end sat a few codes and a
-    /// visible cast off Cineon 1032 instead of on it, and the channel differences that are supposed
-    /// to be the highlight balance were the matrix's. Negatives were unaffected because there both
-    /// paths apply the matrix — which is why the same button worked until the roll was switched to
-    /// positive.
-    ///
-    /// So: with the capture matrix present, a slide's automatic result must be bit-for-bit the
-    /// result without it. That is the invariant, and it is what this test pins.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_MeasuresInTheDomainTheRenderUses()
-    {
-        // A real decoupling matrix: dye-layer separation, not a row-normalised grey-preserving one,
-        // so a coloured subject genuinely moves if the matrix is applied.
-        double[,] matrix =
-        {
-            { 1.35, -0.25, -0.10 },
-            { -0.20, 1.30, -0.10 },
-            { -0.05, -0.20, 1.25 },
-        };
-
-        MainViewModel plain = RunAutomaticCalibration(decoupleMatrix: null);
-        MainViewModel matrixed = RunAutomaticCalibration(matrix);
-
-        Assert.Equal(plain.DMinPerChannel, matrixed.DMinPerChannel);
-        Assert.Equal(plain.DMaxPerChannel, matrixed.DMaxPerChannel);
-
-        // And the answer is still the correct one, so "equal" is not equal-and-wrong.
-        double[] dMin = matrixed.DMinPerChannel, dMax = matrixed.DMaxPerChannel;
-        Assert.Equal(FrameParams.CineonWhiteCode, CodeAt(dMin, dMax, 0, 1.000), 0);
-        Assert.InRange(CodeAt(dMin, dMax, 0, 0.020), 40, 160);   // shared span: see above
-    }
 
     /// <summary>
     /// The render half of the same invariant, at the level where it is stated: a positive frame
@@ -898,22 +865,6 @@ public class PositiveFilmTests
         Assert.NotEqual(dMax[0] - dMin[0], dMax[2] - dMin[2], 3);
     }
 
-    /// <summary>
-    /// End to end through the real 自动（单张）command: after an automatic solve on a positive, the
-    /// committed endpoints must have one shared span. This is the shape the user sees — equal spans
-    /// means the picture has one colour balance (the base's) instead of three competing ones.
-    /// </summary>
-    [Fact]
-    public void AutoCalibration_PositiveFilm_CommitsSharedSpanEndpoints()
-    {
-        MainViewModel vm = RunAutomaticCalibration(decoupleMatrix: null);
-        double[] dMin = vm.DMinPerChannel, dMax = vm.DMaxPerChannel;
-
-        double s0 = dMax[0] - dMin[0], s1 = dMax[1] - dMin[1], s2 = dMax[2] - dMin[2];
-        Assert.Equal(s0, s1, 3);
-        Assert.Equal(s1, s2, 3);
-        Assert.True(s0 > 0.2, $"span should be a real contrast, got {s0:F3}");
-    }
 
     // ══ The density reference is neutral on a positive ══════════════════════════
     //
@@ -983,14 +934,7 @@ public class PositiveFilmTests
         vm.SampleDMax((0.20, 0.88, 0.50, 0.08));            // the deep shadow band
         Assert.Equal(new[] { 1.699, 1.699, 1.699 }, vm.DMaxPerChannel.Select(v => Math.Round(v, 3)).ToArray());
 
-        vm.SampleNeutralGrey((0.40, 0.40, 0.20, 0.20));     // the neutral card
-        // It must have measured, not thrown: the three channels of a neutral patch stay equal, and
-        // none of them may come back negative (which is what the stale base used to produce).
-        double[] after = vm.DMaxPerChannel;
-        Assert.Equal(after[0], after[1], 6);
-        Assert.Equal(after[1], after[2], 6);
-        Assert.True(after.All(v => v > 0.1),
-            $"grey card produced {Fmt(after)} — status was '{Status(vm)}'");
+
     }
 
     /// <summary>

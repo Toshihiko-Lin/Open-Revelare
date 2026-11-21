@@ -9,6 +9,50 @@ namespace OpenRevelare.Tests;
 public sealed class LensfunRollTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Import_film_type_is_installed_before_first_selection_and_survives_reopen(bool positive, bool mono)
+    {
+        string folder = Path.Combine(TestDataIsolation.Root, "film-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var config = new ImportConfig
+        {
+            IsPositiveFilm = positive, Monochrome = mono, AutoInvert = true,
+            PathA = positive, CalDir = Path.Combine(folder, "missing-negative-reference"),
+        };
+        config.Paths.AddRange(new[] { WriteTiff(folder, "a.tif"), WriteTiff(folder, "b.tif") });
+        using var vm = new MainViewModel();
+        bool firstSelected = false;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(vm.CurrentFrame) || vm.CurrentFrame is null) return;
+            firstSelected = true;
+            Assert.All(vm.Frames, frame =>
+            {
+                Assert.Equal(positive, frame.Params.IsPositiveFilm);
+                Assert.Equal(mono, frame.Params.Monochrome);
+            });
+            Assert.Equal(positive, vm.IsPositiveFilm);
+            Assert.Equal(mono, vm.Monochrome);
+        };
+        await vm.LoadRollWithConfigAsync(config);
+        await Settle(vm);
+        Assert.True(firstSelected);
+        bool effectiveAuto = (bool)typeof(MainViewModel).GetField("_cfgAutoInvert",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(vm)!;
+        Assert.Equal(!positive, effectiveAuto);
+        if (positive) Assert.True(string.IsNullOrEmpty(vm.RollAnalysisProgress));
+        string project = Path.Combine(folder, "film.ncproj");
+        Assert.True(await vm.SaveProjectAsync(project));
+        await vm.OpenProjectAsync(project);
+        await Settle(vm);
+        Assert.Equal(positive, vm.IsPositiveFilm);
+        Assert.Equal(mono, vm.Monochrome);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task Import_choice_applies_to_all_frames_and_survives_toggle_save_and_reopen(bool enabled)

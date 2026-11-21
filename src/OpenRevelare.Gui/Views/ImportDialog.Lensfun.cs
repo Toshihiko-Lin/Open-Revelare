@@ -11,7 +11,7 @@ public partial class ImportDialog
 
     private void SetUpLensDetection()
     {
-        // Conditional RGB/LCC controls can grow the dialog after its initial screen clamp.
+        // File and destination changes can resize the dialog after its initial screen clamp.
         SizeChanged += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             if (!_lensClosed && IsVisible) WindowLayout.FitToScreen(this);

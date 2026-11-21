@@ -291,14 +291,16 @@ public static class RegionRender
             DustRemoval.Apply(slice, cal.DustSpots, frameW, frameH, b.X0, b.Y0);
 
         bool[]? mask = null;
-        if (cal.SprocketEnabled && cal.SprocketThreshold is double thr)
+        if (!cal.IsPositiveFilm && cal.SprocketEnabled && cal.SprocketThreshold is double thr)
             mask = Sprocket.MakeMask(slice.Data, slice.PixelCount, (float)thr);
+
+        if (cal.IsPositiveFilm) PositiveFilmCalibration.Apply(slice.Data, cal);
 
         // Mirrors Pipeline.ProcessFrame — the preview must predict the export.
         if (InputTransform.ToWorking(cal.InputPrimaries, cal.InputWhitePoint) is double[,] inputM)
             InputTransform.Apply(slice.Data, inputM);
 
-        if (cal.DecoupleMatrix != null)
+        if (cal.DecoupleMatrix != null && !cal.IsPositiveFilm)
             Decouple.Apply(slice.Data, cal.DecoupleMatrix, cal.DecoupleMode);
 
         // Mirrors Pipeline.ProcessFrame again: the patch is the same picture at full resolution,
@@ -306,8 +308,9 @@ public static class RegionRender
         // differently balanced rectangle over the preview.
         if (cal.Monochrome) Monochrome.FoldInPlace(slice.Data);
 
-        ImageBuffer inverted = Inversion.Invert(slice, cal, cal.DecoupleChromaAmp,
-                                                Pipeline.ResolveChromaMatrix(cal));
+        ImageBuffer inverted = cal.IsPositiveFilm ? slice
+            : Inversion.Invert(slice, cal, cal.IsPositiveFilm ? null : cal.DecoupleChromaAmp,
+                                                cal.IsPositiveFilm ? null : Pipeline.ResolveChromaMatrix(cal));
         if (mask != null) Sprocket.ApplyMask(inverted.Data, mask);
 
         // ── Geometry: one composed inverse map, output rect → source coordinate ──

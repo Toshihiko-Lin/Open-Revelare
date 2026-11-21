@@ -556,7 +556,7 @@ public partial class MainViewModel
                         RawDecode.IsRawExtension(cfg.Paths[0]));
                     lccName = Path.GetFileName(cfg.LccPath);
                 }
-                if (cfg.PathA && !string.IsNullOrWhiteSpace(cfg.CalDir))
+                if (cfg.PathA && !cfg.IsPositiveFilm && !string.IsNullOrWhiteSpace(cfg.CalDir))
                 {
                     ReportBackground(Loc.T("识别 R/G/B 校正图 …"));
                     string[] candidates = Directory.EnumerateFiles(cfg.CalDir)
@@ -603,9 +603,9 @@ public partial class MainViewModel
         lock (_decoding) _decoding.Clear();
 
         // Retain calibration SOURCE paths so a saved .ncproj can recompute matrices on load.
-        _calSourceDir = cfg.PathA ? cfg.CalDir : null;
+        _calSourceDir = cfg.PathA && !cfg.IsPositiveFilm ? cfg.CalDir : null;
         _captureWorkflow = cfg.CaptureWorkflow;
-        _declaredPathA = cfg.PathA;
+        _declaredPathA = cfg.PathA && !cfg.IsPositiveFilm;
         _calRgbPaths = calRgb;
         _lccSourcePath = (cfg.LccEnabled && !string.IsNullOrWhiteSpace(cfg.LccPath)) ? cfg.LccPath : null;
 
@@ -613,7 +613,7 @@ public partial class MainViewModel
         // during LoadRollAsync) sample t_base in the DECOUPLED domain and the first render decouples.
         // The auto-inversion choice rides along for the same reason: PrepareImportedRollAsync acts on it
         // partway through the load.
-        _cfgAutoInvert = cfg.AutoInvert;
+        _cfgAutoInvert = cfg.AutoInvert && !cfg.IsPositiveFilm;
         _decoupleMatrix = dm; _decoupleChromaMatrix = cm;
         NotifyCalibrationInfo();
         _lccFlatField = lccField;
@@ -650,7 +650,7 @@ public partial class MainViewModel
         IsBusy = false;
 
         _configLoad = true;
-        try { await LoadRollAsync(cfg.Paths); }
+        try { await LoadRollAsync(cfg.Paths, cfg.IsPositiveFilm, cfg.Monochrome); }
         finally { _configLoad = false; }
 
         // Detection is not repeated here: LoadRollAsync above owns it for every entry point, and
@@ -875,7 +875,7 @@ public partial class MainViewModel
     }
 
     /// <summary>Open a roll: build a frame per file, show the first, decode thumbnails in the background.</summary>
-    public async Task LoadRollAsync(IReadOnlyList<string> paths)
+    public async Task LoadRollAsync(IReadOnlyList<string> paths, bool isPositiveFilm = false, bool monochrome = false)
     {
         if (paths.Count == 0) return;
         // Config imports flush before their potentially-failing preparation, while the outgoing
@@ -941,6 +941,13 @@ public partial class MainViewModel
         // rather than the finished frames keeps each split scan's virtual copies next to their
         // parent, since they are all contributed by one path.
         foreach (string p in SortedByName(paths)) AddFramesForPath(p);
+        // Film type must precede frame selection: selection starts the first render and analysis.
+        foreach (RollFrame frame in Frames)
+        {
+            frame.Params.IsPositiveFilm = isPositiveFilm;
+            frame.Params.Monochrome = monochrome;
+        }
+        SyncFilmType(isPositiveFilm, monochrome);
         // Select per source before the first decode, inversion, thumbnail, or project registration.
         var incomingFrames = Frames.ToArray();
         long lensGeneration = _previews.Generation;
@@ -1113,6 +1120,9 @@ public partial class MainViewModel
     /// <summary>Push a frame's stored FrameParams into all the UI controls (suppressing renders).</summary>
     private void LoadParams(FrameParams p)
     {
+        _positiveCalibrated = p.PositiveCalibrated;
+        _positiveWhiteReferenceSet = p.PositiveWhiteReferenceSet;
+        _positiveBlackReferenceSet = p.PositiveBlackReferenceSet;
         LoadAutoCropReview(p);
         _suppressRender = true;
         AdoptLensfun(p.Lensfun, p.LensfunEnabled);

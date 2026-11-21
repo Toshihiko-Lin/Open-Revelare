@@ -194,6 +194,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private FrameParams ForPreview(FrameParams p)
     {
+        SetSlideCameraWhiteBalance(p, CurrentFrame?.Path);
         if (_previewMargin is null) return p;                  // plain whole-file preview
         p = p.Clone();
         p.DustSpots = DustSpotsRelativeTo(p.DustSpots, _previewMargin.Value);
@@ -234,6 +235,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private static FrameParams ForRegion(FrameParams p, RollFrame f,
                                          (double X, double Y, double W, double H)? margin)
     {
+        SetSlideCameraWhiteBalance(p, f.Path);
         if (margin is not { } box) return p;
         p = p.Clone();
         p.DustSpots = DustSpotsRelativeTo(p.DustSpots, box);
@@ -1308,7 +1310,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void UpdateSprocketOverlay()
     {
-        if (!ShowSprocketMask || _previewLinear is null)
+        if (IsPositiveFilm || !ShowSprocketMask || _previewLinear is null)
         {
             SprocketMaskOverlay = null;
             SprocketMaskScene = null;
@@ -1434,17 +1436,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _dMinR;
     [ObservableProperty] private double _dMinG;
     [ObservableProperty] private double _dMinB;
-    partial void OnDMinRChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMinGChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMinBChanged(double value) { InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinRChanged(double value) { MarkSlideCalibration(true); InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinGChanged(double value) { MarkSlideCalibration(true); InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMinBChanged(double value) { MarkSlideCalibration(true); InvalidateBaseEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
 
     /// <summary>亮端：逐通道白点密度（典型 1.8–2.4）。高光白平衡就是这三个数。</summary>
     [ObservableProperty] private double _dMaxR = 2.0;
     [ObservableProperty] private double _dMaxG = 2.0;
     [ObservableProperty] private double _dMaxB = 2.0;
-    partial void OnDMaxRChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMaxGChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
-    partial void OnDMaxBChanged(double value) { InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxRChanged(double value) { MarkSlideCalibration(false); InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxGChanged(double value) { MarkSlideCalibration(false); InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
+    partial void OnDMaxBChanged(double value) { MarkSlideCalibration(false); InvalidateHighlightEndpointDiagnostics(); SyncScalarsFromEndpoints(); ScheduleRender(); }
 
     /// <summary>暗端三个分量的数组视图。同一份数据，不是第二个字段。</summary>
     public double[] DMinPerChannel
@@ -1516,6 +1518,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private void PushLevel(bool shadow)
     {
         if (_syncingEndpointView) return;
+        MarkSlideCalibration(shadow);
         _syncingEndpointView = true;
         // 三个分量的 setter 各自会 ScheduleRender，而拖动中的渲染是同步的：不压住的话，
         // 拖一下 D_max 会先画"只有 R 动了"、再画"R G 动了"两帧中间态才画到位——预览
@@ -1585,7 +1588,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _needsRecalibration;
     private bool _legacyCalibration;
 
-    public string RecalibrationNoticeText => _legacyCalibration
+    public string RecalibrationNoticeText => IsPositiveFilm
+        ? Loc.T("正片请手动检查并校准白端与黑端；不会运行自动整卷校准。")
+        : _legacyCalibration
         ? Loc.T("这一卷的标定来自旧版模型，画面与保存时不同。请点下面的【自动（整卷）】重跑一次。")
         : Loc.T("光学校正、遮罩或片型已更改，请运行【自动（整卷）】更新标定。");
 
@@ -2208,6 +2213,32 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>片基是否已经采过样。语言切换时用来决定是否重译告警文案。</summary>
     private bool _filmBaseSampled;
+    private bool _positiveCalibrated;
+    private bool _positiveWhiteReferenceSet;
+    private bool _positiveBlackReferenceSet;
+
+    private void MarkSlideCalibration(bool white)
+    {
+        if (!IsPositiveFilm || !_paramsLoaded || _suppressRender) return;
+        _positiveCalibrated = true;
+        if (white) _positiveWhiteReferenceSet = true;
+        else _positiveBlackReferenceSet = true;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<double[]?>> SlideCameraWb = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<double[,]?>> SlideCameraMatrix = new();
+    private static void SetSlideCameraWhiteBalance(FrameParams p, string? path)
+    {
+        if (!p.IsPositiveFilm || path is null || !File.Exists(path)) return;
+        if (!RawDecode.IsRawExtension(path)) return;
+        SourceStamp stamp = SourceStamp.Capture(path);
+        p.PositiveCameraWhiteBalance = SlideCameraWb.GetOrAdd(stamp.Key,
+            _ => new Lazy<double[]?>(() => RawDecode.CameraWhiteBalance(path))).Value;
+        p.PositiveCameraToWorking = SlideCameraMatrix.GetOrAdd(stamp.Key,
+            _ => new Lazy<double[,]?>(() => CameraCharacterization.ToWorking(RawDecode.CameraToSrgbMatrix(path)))).Value;
+        stamp.RequireCurrent();
+    }
+
 
     /// <summary>Whether the last single-frame auto calibration took the positive white end from
     /// the perforations rather than from the picture's bright end. Only used to say which route
@@ -2313,6 +2344,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         AutomaticDustMask = _automaticDustMask,
         Monochrome = Monochrome,
         IsPositiveFilm = IsPositiveFilm,
+        PositiveCalibrated = _positiveCalibrated,
+        PositiveWhiteReferenceSet = _positiveWhiteReferenceSet,
+        PositiveBlackReferenceSet = _positiveBlackReferenceSet,
         // Stage 1 — 反相的全部自由度：片基 + 两端各三个绝对密度
         TBase = TBaseArr(),
         DMinPerChannel = DMinPerChannel,
@@ -2690,6 +2724,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] tb = FilmBase.SampleTBase(src, rect);
+        if (IsPositiveFilm) { _positiveCalibrated = true; _positiveWhiteReferenceSet = true; }
         _calibrationDiagnosticsRollWide = false;
         _filmBaseSampled = true;
         // 亮端不动：它已经是对 T=1 的绝对密度，与这次采样无关。只有黑端被重新定义。
@@ -2780,6 +2815,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] hi = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
+        if (IsPositiveFilm) { _positiveCalibrated = true; _positiveBlackReferenceSet = true; }
         _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
         HighlightConfidenceText = IsPositiveFilm
@@ -2808,11 +2844,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SampleNeutralGrey((double X, double Y, double W, double H) rect) => TrySample(Loc.T("中性灰采样"), () =>
     {
+        if (IsPositiveFilm) return;
         if (Stage1Source(_previewLinear) is not { } src) return;
         // 同一个 RectMeanDensity、同一个 T=1 参考：与高光采样、片基采样写出同一量纲的绝对密度。
         double[] grey = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
         double[] dMin = DMinPerChannel, before = DMaxPerChannel;
         double[] hi = DensityEndpoints.HighlightFromNeutralAtCode(grey, dMin, FrameParams.CineonGreyCode, isPositiveFilm: IsPositiveFilm);
+        if (IsPositiveFilm) _positiveCalibrated = true;
         _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
         HighlightConfidenceText = IsPositiveFilm
@@ -2845,7 +2883,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (Frames.Count == 0) return;
         // Manual import promises no automatic measurements, including this full-resolution pass.
         SprocketEnabled = false;
-        if (!_cfgAutoInvert) { StartRollWarmUp(); return; }
+        if (!_cfgAutoInvert || IsPositiveFilm) { StartRollWarmUp(); return; }
 
         RollFrame[] importedFrames = Frames.ToArray();
         var progressOwner = new object();
@@ -2932,7 +2970,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void AutoInvertOnImportRun(BoardCutResult measuredBoardCut)
     {
-        if (_cfgAutoInvert) _ = AutoInvertRollAsync(measuredBoardCut);
+        if (_cfgAutoInvert && !IsPositiveFilm) _ = AutoInvertRollAsync(measuredBoardCut);
     }
 
     /// <summary>
@@ -3103,6 +3141,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private double? AutoBoardCut()
     {
+        if (IsPositiveFilm) return null;
         if (SprocketEnabled) return SprocketThreshold;
         return MeasureBoardCut();
     }
@@ -3397,6 +3436,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null)
     {
+        if (IsPositiveFilm) return;
         var progressOwner = new object();
         _rollProgressOwner = progressOwner;
         RollAnalysisNoticeDismissed = false;
@@ -3455,7 +3495,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // lands. That is why <see cref="RollAnalysisPending"/> exists: the provisional state is
         // announced rather than left to look like the finished result.
         double? cut = measuredBoardCut is { } measured ? measured.Threshold
-            : SprocketEnabled ? SprocketThreshold : await MeasureBoardCutAsync(ct);
+            : IsPositiveFilm ? null : SprocketEnabled ? SprocketThreshold : await MeasureBoardCutAsync(ct);
         if (ct.IsCancellationRequested)
         {
             if (ReferenceEquals(_autoInvertCts, cts)) _autoInvertCts = null;
@@ -4088,6 +4128,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// automatic single-frame and roll chains reuse their full-resolution board pass.</summary>
     private void AutoDetectDMax(double? cut)
     {
+        if (IsPositiveFilm) return;
         _blackEndFromPerforations = false;
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
@@ -4199,6 +4240,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void AutoInvertCurrentFrame()
     {
+        if (IsPositiveFilm) return;
         if (_previewLinear is null) return;
 
         // The base step mutates the live controls before the highlight step can know whether the
@@ -4331,6 +4373,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void AutoFilmBase()
     {
+        if (IsPositiveFilm) return;
         if (_previewLinear is null) return;
         if (!AutoFilmBaseFromRoll(AutoBoardCut(), useMode: true, broadcastToRoll: false)) return;
         CommitLiveParams(CurrentFrame);
@@ -4351,6 +4394,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void AutoWbHigh()
     {
+        if (IsPositiveFilm) return;
         // Two-buffer contract (same as AutoFilmBaseFromRoll): the luma masks — sprocket/light-board
         // cut and dark valley — key off the RAW region, which is where those thresholds are
         // calibrated and where the pipeline builds its own mask; the sampled VALUES come from the
@@ -4880,6 +4924,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void AutoLevels()
     {
+        if (IsPositiveFilm) return;
         if (_previewWorking is null) return;
         FrameParams p = BuildParams();
         p.BlackPoint = 0.0; p.WhitePoint = 1.0;   // measure the positive WITHOUT the current levels
