@@ -10,8 +10,42 @@ namespace OpenRevelare.Tests;
 
 public class PositiveFilmTests
 {
+    // A hidden button alone does not protect command callers from the negative-only solver.
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task SmartCast_UnsupportedFilmDoesNotRequestModelOrChangeEndpoints(bool positive, bool mono)
+    {
+        var vm = new MainViewModel();
+        SetField(vm, "_isPositiveFilm", positive);
+        SetField(vm, "_monochrome", mono);
+        bool requested = false;
+        vm.ConfirmDeepWbDownload = () => { requested = true; return Task.FromResult(false); };
+        double[] before = (double[])vm.DMaxPerChannel.Clone();
+
+        await vm.AutoWbAiAsync();
+
+        Assert.False(vm.CanUseDeepWb);
+        Assert.False(requested);
+        Assert.Equal(before, vm.DMaxPerChannel);
+    }
+
     private static readonly double[] DMin = { 0.10, 0.15, 0.12 };
     private static readonly double[] DMax = { 2.20, 2.35, 2.25 };
+
+    [Fact]
+    public void Slide_CaptureStatusDoesNotClaimStoredDecouplingWasApplied()
+    {
+        var vm = new MainViewModel();
+        SetField(vm, "_isPositiveFilm", true);
+        string withoutReference = vm.CaptureCorrectionText;
+        SetField(vm, "_decoupleMatrix", new double[,] { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } });
+        // Switching a Path A roll to slides keeps references for switching back, but skips them.
+        Assert.Equal(withoutReference, vm.CaptureCorrectionText);
+        SetField(vm, "_isPositiveFilm", false);
+        Assert.NotEqual(withoutReference, vm.CaptureCorrectionText);
+    }
 
     [Fact]
     public void Display_PositiveFilm_PlacesClearEndAtPictureWhiteAndHoldsGrey()

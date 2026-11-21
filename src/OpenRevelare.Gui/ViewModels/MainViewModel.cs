@@ -4519,6 +4519,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task AutoWbAiAsync()
     {
+        // This solver assumes the negative print response; a slide must use measured references.
+        if (!CanUseDeepWb) return;
         RefreshDeepWbAvailability();
         if (!IsDeepWbInstalled && !await InstallDeepWbAsync()) return;
         if (_previewWorking is null) return;

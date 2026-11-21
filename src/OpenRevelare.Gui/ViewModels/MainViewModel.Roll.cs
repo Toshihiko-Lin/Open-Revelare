@@ -255,7 +255,7 @@ public partial class MainViewModel
     public string FilmTypeHint => FilmTypeIndex switch
     {
         0 => Loc.T("彩色负片：橙色片基为黑端，画面高光为白端；三层染料各自独立，两端各三个密度共六个自由度。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
-        1 => Loc.T("彩色正片（反转片）：画面透光处（高光）为白端，深黑乳剂为黑端——两端与负片正好相反。带片边或多画格的扫描件，先裁切/拆分再自动校准更准。"),
+        1 => Loc.T("彩色正片（反转片）：选定类型后运行自动整卷校准。135 原片请保留齿孔和片边供测量；无齿孔时按画面估计，请检查白端与黑端。正片跳过 Path A 解耦和智能色偏修正。"),
         2 => Loc.T("黑白负片：三通道折成一路亮度，反相只用一对端点。"),
         _ => Loc.T("黑白正片：黑白反转片，三通道折成一路亮度，透光处为白端。"),
     };
@@ -269,7 +269,7 @@ public partial class MainViewModel
     public string DMaxHeader => _isPositiveFilm ? Loc.T("黑端") : Loc.T("白端");
 
     public string FilmBaseToolTip => _isPositiveFilm
-        ? Loc.T("每个通道读作白的密度（相对完全透光 T=1）。正片里透光最多的地方——画面高光、未被乳剂覆盖的透明片基——就是白端。展开三个分量可调高光色偏。")
+        ? Loc.T("正片白端的密度（相对完全透光 T=1）。自动优先取齿孔透光；手动请选可信的中性透光参考，避免把有色高光当作白色。")
         : Loc.T("每个通道读作黑的密度（相对完全透光 T=1）。负片的橙色片基必然 R<G<B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。");
 
     public string FilmBaseBtnText => _isPositiveFilm ? Loc.T("白端采样") : Loc.T("片基采样");
@@ -277,7 +277,7 @@ public partial class MainViewModel
     public string AutoFilmBaseBtnText => _isPositiveFilm ? Loc.T("自动白点") : Loc.T("自动黑点");
 
     public string AutoFilmBaseToolTip => _isPositiveFilm
-        ? Loc.T("自动找出正片里透光最多的地方（画面高光、透明片基）并写入白端。")
+        ? Loc.T("优先测量齿孔透光作为白端；无可用齿孔时按画面高光估计，可能受场景颜色影响，请检查或手动采样。")
         : Loc.T("自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。");
 
     public string DMaxToolTip => _isPositiveFilm
@@ -289,7 +289,7 @@ public partial class MainViewModel
     public string AutoDMaxBtnText => _isPositiveFilm ? Loc.T("自动黑点") : Loc.T("自动白点");
 
     public string AutoDMaxToolTip => _isPositiveFilm
-        ? Loc.T("自动找到画面最暗处，把它当作纯黑来解出暗端三个密度")
+        ? Loc.T("优先测量齿孔之间的未曝光片桥作为黑端；无可信片边时按画面暗部估计，请检查或手动采样。")
         : Loc.T("自动找到画面最亮点，把它当作纯白来解出亮端三个密度");
 
     public string AutoRollBtnText => _isPositiveFilm ? Loc.T("自动整卷（正片）") : Loc.T("自动（整卷）");

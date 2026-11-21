@@ -34,7 +34,9 @@ public sealed partial class MainViewModel
                 ? Loc.T("密度：端点校准 + 本卷分光色度补偿")
                 : Loc.T("密度：端点校准 · 未应用分光色度补偿");
 
-    public string CaptureCorrectionText => _decoupleMatrix is not null
+    public string CaptureCorrectionText => IsPositiveFilm
+        ? Loc.T("采集校正：正片跳过 RGB 分光解耦")
+        : _decoupleMatrix is not null
         ? Loc.T("采集校正：已应用 RGB 分光解耦（反相前）")
         : HasCaptureCorrectionReferences
             ? Loc.T("采集校正：未应用 · 校正参考未成功载入")

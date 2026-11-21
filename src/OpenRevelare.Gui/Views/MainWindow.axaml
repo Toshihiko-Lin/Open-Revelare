@@ -1378,6 +1378,9 @@
                                     </ComboBox>
                                 </Grid>
 
+                                <TextBlock Classes="groupHint" Text="{Binding FilmTypeHint}"
+                                           IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" Margin="0,0,0,8" />
+
                                 <!-- ── 一键去色罩 / 正片校准 ─────────────────────────────
                                      The whole chain, at the top, before the parameters it
                                      solves. The individual buttons below stay exactly as they
@@ -1508,7 +1511,7 @@
                                                 </Grid>
                                             </ToggleButton>
                                             <Grid Grid.Column="1" Margin="3,0,0,0" RowDefinitions="Auto,Auto"
-                                                  IsVisible="{Binding IsColourRoll}" IsEnabled="{Binding !HasLongTask}">
+                                                  IsVisible="{Binding CanUseDeepWb}" IsEnabled="{Binding !HasLongTask}">
                                                 <Button Name="SmartCastButton" HorizontalAlignment="Stretch"
                                                         Click="OnAutoWbAiClick"
                                                         ToolTip.Tip="{i18n:T '不需要灰卡。建议先裁掉齿孔和片边；结果可以撤销。'}">
