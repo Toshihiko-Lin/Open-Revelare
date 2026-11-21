@@ -211,6 +211,18 @@ internal static class PureNegComponent
         if (!File.Exists(license)) throw new IOException("Node.js license is missing.");
     }
 
+    /// <summary>
+    /// Polarity sent to PURE Neg. Auto on a negative lets the engine vote. A rendered
+    /// slide keeps dust dark, and bright picture highlights otherwise win that vote,
+    /// so auto on positive film searches dark dust only. An explicit choice is kept.
+    /// </summary>
+    internal static string PolarityForFilm(int selectedIndex, bool positiveFilm) => selectedIndex switch
+    {
+        1 => "bright",
+        2 => "dark",
+        _ => positiveFilm ? "dark" : "auto",
+    };
+
     public static async Task<ReviewImage> PrepareAsync(string workspace, string input,
         string polarity, string sensitivity, string categories, IProgress<DetectionProgress> progress, CancellationToken ct)
     {

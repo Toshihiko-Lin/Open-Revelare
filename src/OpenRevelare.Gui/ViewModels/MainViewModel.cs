@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -1413,10 +1413,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 所以界面上没有「亮度」「反差」「色温」这些字段——它们是 D_min / D_max 两个标量与其
     // 展开分量的派生读数，任何为它们单独立字段的做法都是在重新制造上面那个局面。
 
-    /// <summary>片基透射率 T_base——把裸片基放到密度 0 的除数。暗端密度相对它陈述。</summary>
-    [ObservableProperty] private double _tBaseR = 0.82;
-    [ObservableProperty] private double _tBaseG = 0.51;
-    [ObservableProperty] private double _tBaseB = 0.29;
+    /// <summary>
+    /// 密度参考透射率。**中性 1,1,1**，与 <see cref="FrameParams.TBase"/> 的约定一致：密度的参考点
+    /// 是「完全透光」，片基由黑端（D_min）承载，两个端点是同量纲的绝对密度。
+    ///
+    /// 这里曾经硬编码成 0.82 / 0.51 / 0.29 —— 一个 C-41 橙色片基的典型值。任何在
+    /// <see cref="LoadParams"/> 之前走到的测量（手动采样就是最典型的一条）都会拿这个幻影片基
+    /// 当参考，于是三个通道各被减去约 0.09 / 0.29 / 0.54 的密度：黑端悄悄带上色偏，灰卡采样
+    /// 甚至直接失败（有一条通道的密度被减成负数，"采样区不比黑端浓"）。正片尤其致命——
+    /// 它根本没有色罩，任何非中性的参考都是错的。
+    /// </summary>
+    [ObservableProperty] private double _tBaseR = 1.0;
+    [ObservableProperty] private double _tBaseG = 1.0;
+    [ObservableProperty] private double _tBaseB = 1.0;
     partial void OnTBaseRChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
     partial void OnTBaseGChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
     partial void OnTBaseBChanged(double value) { InvalidateBaseEndpointDiagnostics(); ScheduleRender(); }
@@ -2200,6 +2209,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>片基是否已经采过样。语言切换时用来决定是否重译告警文案。</summary>
     private bool _filmBaseSampled;
 
+    /// <summary>Whether the last single-frame auto calibration took the positive white end from
+    /// the perforations rather than from the picture's bright end. Only used to say which route
+    /// the completion status took.</summary>
+    private bool _whiteEndFromPerforations;
+
+    /// <summary>Whether the last single-frame auto calibration took the positive black end from
+    /// the unexposed perforation band rather than from the picture's dark end.</summary>
+    private bool _blackEndFromPerforations;
+
     // ── Tone curves (gamma-2.2 domain; set by the CurveEditor via SetCurves) ─────
     private List<(double X, double Y)> _curveM = new(), _curveR = new(), _curveG = new(), _curveB = new();
     private bool _curvePreserveHue = true;
@@ -2229,7 +2247,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ScheduleRender();
     }
 
-    private double[] TBaseArr() => new[] { TBaseR, TBaseG, TBaseB };
+    /// <summary>
+    /// The density reference the samplers and the render use.
+    ///
+    /// NEUTRAL FOR A POSITIVE, always. T_base is a legacy field: it used to BE the film base, and
+    /// a project written by an older build restores whatever it stored (Project.Load reads it
+    /// back, and the code has always said so). On a negative that stale value is at least a
+    /// meaningful quantity — a mask colour — but on a positive there is no mask at all, so any
+    /// non-neutral reference only subtracts a per-channel constant from every measurement:
+    /// measured on a synthetic slide with a stored (0.82, 0.51, 0.29), the black end came back
+    /// 1.613 / 1.407 / 1.161 for a patch whose true density is 1.699 in all three channels, and
+    /// the grey card failed outright with one channel reading -0.015 D.
+    /// </summary>
+    private double[] TBaseArr() => IsPositiveFilm
+        ? new[] { 1.0, 1.0, 1.0 }
+        : new[] { TBaseR, TBaseG, TBaseB };
 
     /// <summary>The render snapshot, for tests that check what the pickers feed the pipeline.</summary>
     internal FrameParams RenderParamsForTest() => BuildParams();
@@ -2280,6 +2312,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DustSpots = new List<DustSpot>(_dustSpots),
         AutomaticDustMask = _automaticDustMask,
         Monochrome = Monochrome,
+        IsPositiveFilm = IsPositiveFilm,
         // Stage 1 — 反相的全部自由度：片基 + 两端各三个绝对密度
         TBase = TBaseArr(),
         DMinPerChannel = DMinPerChannel,
@@ -2594,7 +2627,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         CalibrationSources.RequireCurrent(BuildParams());
         ImageBuffer? lcc = LccEnabled && LccAvailable ? _lccFlatField : null;
         bool lensfunVignette = LensfunEnabled && _lensfunCalibration is { IsUsable: true, Vignetting: not null } && lcc is null;
-        if (lcc is null && _embeddedLens is not { HasVignette: true } && !lensfunVignette && VignetteAmount == 0.0 && _decoupleMatrix is null && !Monochrome) return neg;
+        // Path-A decoupling is C-41 correction: it undoes the orange mask's cross-channel
+        // contamination of three dye layers. A positive has no such mask, and Pipeline.ProcessFrame
+        // therefore SKIPS the matrix on a slide roll. This method's contract is "the buffer the
+        // density inversion is handed", so it has to skip it too — otherwise every automatic and
+        // sampled endpoint on a slide roll is measured in a domain the render never uses. The
+        // numbers still come back plausible, which is what made it silent: the white end lands a
+        // few codes and a visible cast away from Cineon 1032 instead of on it, and the per-channel
+        // differences that are supposed to be the highlight balance are the matrix's instead.
+        // On a negative the two paths agree (both apply it), which is why this only showed up
+        // after switching a roll to positive.
+        bool decouple = _decoupleMatrix is not null && !IsPositiveFilm;
+        if (lcc is null && _embeddedLens is not { HasVignette: true } && !lensfunVignette && VignetteAmount == 0.0 && !decouple && !Monochrome) return neg;
 
         var src = new ImageBuffer(neg.Width, neg.Height, (float[])neg.Data.Clone())
             .InheritSourceFrom(neg);
@@ -2606,8 +2650,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             LensfunCorrections.ApplyVignetting(src, _lensfunCalibration!);
         if (VignetteAmount != 0.0)
             LensCorrections.ApplyVignette(src.Data, src.Width, src.Height, VignetteAmount, VignetteFalloff);
-        if (_decoupleMatrix is not null)
-            Decouple.Apply(src.Data, _decoupleMatrix, DecoupleMode.Linear);
+        if (decouple)
+            Decouple.Apply(src.Data, _decoupleMatrix!, DecoupleMode.Linear);
         // The fold belongs here for the same reason decouple does: this method's contract is "the
         // buffer the density inversion is handed", and on a black-and-white roll that buffer is
         // folded. Measuring the unfolded channels and then rendering the folded one would put every
@@ -2679,13 +2723,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         double brSum = br[0] + br[1] + br[2];
         if (tbSum < brSum * 0.08)
         {
-            FilmBaseText = Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采");
+            FilmBaseText = IsPositiveFilm
+                ? Loc.T("⚠ 采样区偏暗，可能不是高光/透光片基——请对准最亮的高光或透明片基重采")
+                : Loc.T("⚠ 采样区偏暗，可能不是片基——请在负片视图中对准最亮的橙色片基重采");
             StatusText = FilmBaseText;
         }
         else
         {
-            FilmBaseText = Loc.T("片基：手动物理采样 · 用户确认区域");
-            StatusText = Loc.F($"片基采样 → 黑端 {DMinR:F3} / {DMinG:F3} / {DMinB:F3}");
+            FilmBaseText = IsPositiveFilm
+                ? Loc.T("白端：手动物理采样 · 用户确认区域")
+                : Loc.T("片基：手动物理采样 · 用户确认区域");
+            StatusText = IsPositiveFilm
+                ? Loc.F($"白端采样 → 白端 {DMinR:F3} / {DMinG:F3} / {DMinB:F3}")
+                : Loc.F($"片基采样 → 黑端 {DMinR:F3} / {DMinG:F3} / {DMinB:F3}");
         }
     });
 
@@ -2726,14 +2776,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// 只是一个把结果normalise成比例、一个保留绝对值。高光白平衡与高光端点本就是一件事，
     /// 所以合并成一个。
     /// </summary>
-    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(Loc.T("高光采样"), () =>
+    public void SampleDMax((double X, double Y, double W, double H) rect) => TrySample(IsPositiveFilm ? Loc.T("黑端采样") : Loc.T("高光采样"), () =>
     {
         if (Stage1Source(_previewLinear) is not { } src) return;
         double[] hi = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
         _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
-        HighlightConfidenceText = Loc.T("高光：手动采样端点 · 用户确认区域");
-        StatusText = Loc.F($"高光采样 → 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
+        HighlightConfidenceText = IsPositiveFilm
+            ? Loc.T("黑端：手动采样端点 · 用户确认区域")
+            : Loc.T("高光：手动采样端点 · 用户确认区域");
+        StatusText = IsPositiveFilm
+            ? Loc.F($"黑端采样 → 黑端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）")
+            : Loc.F($"高光采样 → 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
     });
 
     /// <summary>面板上常驻的灰卡读数；没采过时为空，换卷清空。</summary>
@@ -2758,20 +2812,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // 同一个 RectMeanDensity、同一个 T=1 参考：与高光采样、片基采样写出同一量纲的绝对密度。
         double[] grey = FilmBase.SampleDMaxPerChannelFromRect(src, rect, TBaseArr());
         double[] dMin = DMinPerChannel, before = DMaxPerChannel;
-        double[] hi = DensityEndpoints.HighlightFromNeutralAtCode(grey, dMin, FrameParams.CineonGreyCode);
+        double[] hi = DensityEndpoints.HighlightFromNeutralAtCode(grey, dMin, FrameParams.CineonGreyCode, isPositiveFilm: IsPositiveFilm);
         _calibrationDiagnosticsRollWide = false;
         DMaxPerChannel = hi;
-        HighlightConfidenceText = Loc.T("高光：灰卡物理锚点 · Cineon 470 · 用户确认区域");
+        HighlightConfidenceText = IsPositiveFilm
+            ? Loc.T("暗端：灰卡物理锚点 · Cineon 470 · 用户确认区域")
+            : Loc.T("高光：灰卡物理锚点 · Cineon 470 · 用户确认区域");
 
         double CardCode(double[] dMax)
         {
-            var ep = DensityEndpoints.FromMeasured(dMax, FrameParams.OutputRange, dMin);
+            var ep = DensityEndpoints.FromMeasured(dMax, FrameParams.OutputRange, dMin, isPositiveFilm: IsPositiveFilm);
             return (ep.CodeOf(0, grey[0]) + ep.CodeOf(1, grey[1]) + ep.CodeOf(2, grey[2])) / 3.0;
         }
         double stops = (FrameParams.CineonGreyCode - CardCode(before)) * FrameParams.CineonDensityPerCode
                        / ColorPipeline.ResponseGamma / Math.Log10(2.0);
         GreyCardText = Loc.F($"灰卡 D {grey[0]:F3} / {grey[1]:F3} / {grey[2]:F3} → Cineon 标准灰 {FrameParams.CineonGreyCode:F0}");
-        StatusText = Loc.F($"中性灰采样 → 灰卡为 Cineon 标准灰 {FrameParams.CineonGreyCode:F0} · 亮度较标定 {stops:+0.00;-0.00} 档 · 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
+        StatusText = IsPositiveFilm
+            ? Loc.F($"中性灰采样 → 灰卡为 Cineon 标准灰 {FrameParams.CineonGreyCode:F0} · 亮度较标定 {stops:+0.00;-0.00} 档 · 黑端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）")
+            : Loc.F($"中性灰采样 → 灰卡为 Cineon 标准灰 {FrameParams.CineonGreyCode:F0} · 亮度较标定 {stops:+0.00;-0.00} 档 · 亮端 {DMaxLevel:F3}（逐通道 {hi[0]:F3} / {hi[1]:F3} / {hi[2]:F3}）");
     });
 
     /// <summary>换卷时清掉上一卷的灰卡读数：它是那一卷那个光源下的测量。</summary>
@@ -2901,6 +2959,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_previewLinear is null) return false;
         bool ok = false;
+        bool whiteFromPerforations = false;
+        _whiteEndFromPerforations = false;
         try
         {
             // Path A: t_base must live in the DECOUPLED domain (the pipeline decouples BEFORE
@@ -2920,7 +2980,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             if (tb is null)
             {
                 tb = FilmBase.EstimateTBaseFromEdgeSliver(
-                    _previewLinear, values, allowNeutralCarrier: Monochrome,
+                    _previewLinear, values, allowNeutralCarrier: Monochrome || IsPositiveFilm,
                     upperLumaCut: sprocketThreshold);
                 physicalCandidate = tb is not null;
             }
@@ -2929,10 +2989,40 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     ? FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold)
                     : FilmBase.EstimateTBaseFromRoll(new[] { _previewLinear }, sprocketThreshold,
                                                      valueImages: new[] { values });
-            // 片基的绝对密度进黑端；TBase 保持中性 1,1,1（参考点是完全透光）。
+            // A POSITIVE's white end is the brightest material in the frame — the picture's own
+            // highlight or the light table. The base estimators above were written for a negative,
+            // where the brightest material is the bare orange base, so on a slide they can place
+            // the cut below the film's clear areas and report a dense interior as "the base".
+            // That puts the white end INSIDE the picture: everything above it clips, i.e. the
+            // overexposure this clamp exists to prevent. See FilmBase.KeepWhiteEndAtBrightEnd.
+            if (IsPositiveFilm)
+            {
+                // The white end is the light through the PERFORATIONS, not the picture's own
+                // highlight: the holes are clear film, so the light there saw no dye, and every
+                // frame of a roll saw the same lamp through them. This has to be measured on the
+                // UNCROPPED preview — a 3:2 crop cuts the holes off entirely — which is why it
+                // reads `values` (the whole frame after Stage 1) rather than AutoRegionStage1().
+                ImageBuffer whiteSource = values ?? _previewLinear;
+                if (FilmBase.EstimateWhiteEndFromPerforations(new[] { whiteSource }) is { } holeWhite)
+                {
+                    tb = holeWhite;
+                    whiteFromPerforations = true;
+                }
+                else
+                {
+                    // No perforations in view (a cropped scan, or a holder that hid the edges):
+                    // fall back to the picture's own bright end, which is what this path used
+                    // before. Without a crop the whole preview is all we have, and the bright-end
+                    // clamp below still bounds it.
+                    ImageBuffer picture = AutoRegionStage1() ?? whiteSource;
+                    tb = FilmBase.EstimatePositiveWhiteEndFromRoll(new[] { picture })
+                         ?? FilmBase.KeepWhiteEndAtBrightEnd(tb, picture);
+                }
+            }
+            // 片基/透光端的绝对密度进 D_min；TBase 保持中性 1,1,1（参考点是完全透光）。
             DMinPerChannel = TBaseToDensity(tb);
             // Only broadcast to the whole roll when invoked from the roll-wide chain. Per-frame
-            // buttons (自动黑点, 自动单张) pass broadcastToRoll: false so the other frames keep
+            // buttons (自动黑点/自动白点, 自动单张) pass broadcastToRoll: false so the other frames keep
             // whatever they already hold — overwriting their d_min is the bug those callers fix.
             if (broadcastToRoll)
             {
@@ -2940,6 +3030,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 foreach (RollFrame f in Frames) f.Params.DMinPerChannel = (double[])dmin.Clone();
             }
             _filmBaseSampled = true;
+            _whiteEndFromPerforations = whiteFromPerforations;
             ok = true;
 
             // Provenance, not channel order, decides whether this was a physical carrier pick.
@@ -2947,26 +3038,43 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // through an orange mask (measured on the ORF sample roll), so R>G>B is not a valid
             // gate before the light/sensor has been characterised. Mode and edge topology are
             // actual evidence; the bright-tail fallback is explicitly content inference.
-            if (physicalCandidate)
+            if (physicalCandidate || whiteFromPerforations)
             {
                 // A successful single-frame pick needs no persistent diagnostic line: the status
                 // already reports the action, and one frame cannot support the roll-style
                 // confidence wording. Keep the provisional message only while the roll pass is
                 // actually going to replace this first-frame answer with pooled evidence.
-                FilmBaseText = broadcastToRoll
-                    ? Monochrome
-                        ? Loc.T("片基：当前帧无色载体候选 · 整卷分析完成后给出置信度")
-                        : Loc.T("片基：当前帧物理片基候选 · 整卷分析完成后给出置信度")
-                    : "";
-                StatusText = Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
+                FilmBaseText = whiteFromPerforations
+                    ? (broadcastToRoll
+                        ? Loc.T("白端：齿孔透光 · 整卷分析完成后给出置信度")
+                        : "")
+                    : broadcastToRoll
+                        ? IsPositiveFilm
+                            ? Loc.T("白端：当前帧透光高光候选 · 整卷分析完成后给出置信度")
+                            : Monochrome
+                                ? Loc.T("片基：当前帧无色载体候选 · 整卷分析完成后给出置信度")
+                                : Loc.T("片基：当前帧物理片基候选 · 整卷分析完成后给出置信度")
+                        : "";
+                StatusText = whiteFromPerforations
+                    ? Loc.T("已自动检测正片白端（齿孔透光）")
+                    : IsPositiveFilm
+                        ? Loc.T("已自动检测正片白端（画面高光）") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"))
+                        : Loc.T("已自动检测片基") + (sprocketThreshold is null ? Loc.T("（无齿孔模式）") : Loc.T("与齿孔阈值"));
             }
             else
             {
-                FilmBaseText = Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
-                StatusText = Loc.T("⚠ 未测到裸露片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定");
+                FilmBaseText = IsPositiveFilm
+                    ? Loc.T("⚠ 未测到高光边缘——自动结果只是画面最亮处，建议手动【白端采样】")
+                    : Loc.T("⚠ 未测到裸露片基——自动结果只是画面最亮处，请手动【片基采样】");
+                StatusText = IsPositiveFilm
+                    ? Loc.T("⚠ 未测到边缘透光区：这一卷可能已裁掉边缘，自动结果仅供参考——请用【白端采样】手动标定")
+                    : Loc.T("⚠ 未测到裸露片基：这一卷可能已裁掉片基区域，自动结果仅供参考——请用【片基采样】手动标定");
             }
         }
-        catch (Exception ex) { StatusText = Loc.T("自动片基检测失败：") + ex.Message; }
+        catch (Exception ex)
+        {
+            StatusText = (IsPositiveFilm ? Loc.T("自动正片白端检测失败：") : Loc.T("自动片基检测失败：")) + ex.Message;
+        }
         // When broadcasting, every frame just took new d_min so all thumbnails are stale — drop
         // them before restarting. Otherwise DecodeThumbnailsAsync skips frames that still show
         // stale thumbnails. For per-frame calls only the current frame's thumbnail needs refresh;
@@ -3396,7 +3504,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // parameters — so drop them now rather than only at the end of stage 2. Otherwise the
         // strip shows raw negatives for the whole length of the roll analysis.
         foreach (RollFrame f in Frames) SetThumbnail(f, null);
-        StatusText = Loc.T("去色罩（当前帧）完成，正在分析整卷 …");
+        StatusText = IsPositiveFilm
+            ? Loc.T("正片校准（当前帧）完成，正在分析整卷 …")
+            : Loc.T("去色罩（当前帧）完成，正在分析整卷 …");
 
         // ── Stage 2: pool the whole roll ───────────────────────────────────────────────────
         List<RollFrame> frames = Frames.ToList();
@@ -3572,6 +3682,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+
             bool sameDomain = masks.Count == values.Count
                               && !masks.Where((m, i) => !ReferenceEquals(m, values[i])).Any();
             IReadOnlyList<ImageBuffer>? valueList = sameDomain ? null : values;
@@ -3590,7 +3701,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             FilmBaseEstimate baseEstimate = await Task.Run(
                 () => FilmBase.EstimateTBaseFromRollDetailed(
-                    baseMaskList, cut, baseValueList, allowNeutralCarrier: Monochrome), ct);
+                    baseMaskList, cut, baseValueList, allowNeutralCarrier: Monochrome || IsPositiveFilm), ct);
             // A detector can only judge frames it received. If decoding dropped part of the roll,
             // its internal agreement remains real but is less representative of the requested
             // roll. Report the attempted denominator and apply a smooth missingness penalty;
@@ -3605,6 +3716,32 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     TotalFrames = order.Count,
                 };
             double[] rollBase = baseEstimate.TBase;
+            bool whiteFromPerforations = false;
+            // A POSITIVE's white reference is the light through the clear PERFORATIONS, which is
+            // the lamp itself: no dye sits in the hole, so every frame of the roll saw the same
+            // white through the same holes. That is why it is measured on the UNCROPPED buffers
+            // (baseValueBuffers) — a 3:2 crop removes the holes, exactly as it removes the margin
+            // a negative's base lives in. It also stops the answer depending on picture content:
+            // a white wall or a specular highlight is not a colour reference, and it changes from
+            // frame to frame.
+            //
+            // When no frame shows a perforation pair (a cropped scan, or a holder that hid the
+            // edges) this falls back to the picture's own bright end — the previous behaviour —
+            // pooled across the CROPPED buffers the scene endpoints use.
+            if (IsPositiveFilm)
+            {
+                if (FilmBase.EstimateWhiteEndFromPerforations(baseValueBuffers) is { } holeWhite)
+                {
+                    rollBase = holeWhite;
+                    whiteFromPerforations = true;
+                }
+                else
+                {
+                    var pictures = values.Count > 0 ? (IReadOnlyList<ImageBuffer>)values : masks;
+                    if (FilmBase.EstimatePositiveWhiteEndFromRoll(pictures) is { } rollWhite)
+                        rollBase = rollWhite;
+                }
+            }
 
             // 估计器传**片基**做参考，让它们在「相对片基」的密度上工作——那正是反相消费的量：
             // 跨度 = D_max − D_min，颜色平衡是三通道跨度之比（DensityEndpoints.FromMeasured）。
@@ -3614,13 +3751,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // 写回 DMaxPerChannel 时再加回 D_min，两端仍然是同一基准的绝对密度——
             // 早先「传 rollBase 会让两端基准不一致」的问题，出在没加回，不在传什么。
             double[] dMin = TBaseToDensity(rollBase);
+            // The physical black reference: the unexposed film inside the perforation band. Same
+            // uncropped Stage-1 buffers as the white end, so both live in the domain the inversion
+            // uses. Null when no frame had a trustworthy edge (a cropped scan, a clear/negative
+            // edge, or an edge lifted by stray light); the scene detector decides then.
+            double[]? edgeBlackSpan = IsPositiveFilm
+                ? FilmBase.EstimateBlackSpanFromPerforations(baseValueBuffers)
+                : null;
+            bool blackFromPerforations = edgeBlackSpan is not null;
             double[] AbsoluteFrom(double[] span) => AddDMin(span, dMin);
 
             double[]? rollWbHigh = null;
             try
             {
                 rollWbHigh = AbsoluteFrom(await Task.Run(
-                    () => FilmBase.AutoWbHighFromRoll(masks, rollBase, cut, valueList), ct));
+                    () => FilmBase.AutoWbHighFromRoll(
+                        masks, rollBase, cut, valueList,
+                        edgeInset: IsPositiveFilm && AutoCrop is null
+                            ? FilmBase.WideBorderInsetForMeasurement : FilmBase.TightBorderInsetForMeasurement), ct));
             }
             catch (OperationCanceledException) { throw; }
             catch { /* no usable highlight across the roll — keep the current-frame solve */ }
@@ -3629,12 +3777,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // uses: an opaque film-edge line would inflate the channels unequally and show up as
             // a colour cast.
             HighlightEndpointEstimate? highlightEstimate = await Task.Run(
-                () => FilmBase.DetectDMaxPerChannelFromRollDetailed(
+                () => FilmBase.DetectDMaxPerChannelResolvingBorderInset(
                     values, rollBase, 90.0, masks, cut,
                     // Path A still needs the bounded no-clip lift: independent extrema are
                     // collected only from the same high-density endpoint candidates, then one
                     // uniform factor preserves the co-sited colour ratios.
-                    protectIndependentChannelExtrema: true), ct);
+                    protectIndependentChannelExtrema: true,
+                    positiveFilm: IsPositiveFilm && AutoCrop is null), ct);
             if (highlightEstimate is { } indexedHighlight
                 && indexedHighlight.RepresentativeFrame >= 0
                 && indexedHighlight.RepresentativeFrame < sourceRollIndices.Count)
@@ -3669,7 +3818,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // them. The per-channel D-max detector is preferred: it picks the frame the roll
                 // agrees on, where AutoWbHighFromRoll takes the single densest frame's highlight.
                 double[]? rollHighlight = rollDMaxPerCh ?? rollWbHigh;
-                if (rollHighlight is not null) DMaxPerChannel = rollHighlight;
+                // The physical black reference wins when the perforation band provided one: the
+                // unexposed edge IS D_max, while the scene detector can be dragged by frame gaps
+                // and the black surround. edgeBlackSpan is relative to the white end, the same
+                // unit rollDMaxPerCh already is.
+                if (IsPositiveFilm && edgeBlackSpan is not null)
+                    rollHighlight = AddDMin(edgeBlackSpan, dMin);
+                if (rollHighlight is not null)
+                    // 正片没有色罩：颜色只由白端（透明片基）承担，黑端只定深度。见
+                    // DensityEndpoints.SharedSpanEndpoints —— 逐个通道的反差会把片边/染料
+                    // 的差异当成色偏，实测能整张偏蓝。
+                    DMaxPerChannel = DensityEndpoints.SharedSpanEndpoints(rollHighlight, dMin, IsPositiveFilm);
                 // The detector's endpoints ARE the placement — both the channels' relative spans
                 // (the colour balance) and where the picture sits.
                 // Levels stay neutral — the display rendering has already placed both ends; see
@@ -3682,6 +3841,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // more guaranteed to be a real film base than a single frame's, and reporting it as a
             // plain measurement here would silently overwrite the warning stage 1 just raised.
             UpdateCalibrationConfidence(baseEstimate, highlightEstimate, rollDMaxPerCh is null && rollWbHigh is not null);
+            // Say which reference the white end actually came from. UpdateCalibrationConfidence
+            // describes the negative-base estimator's evidence, which is not what measured this
+            // roll once the perforation path answered; replacing the line (rather than appending)
+            // keeps it from claiming "lamp board" for a hole measurement.
+            if (IsPositiveFilm)
+                FilmBaseText = whiteFromPerforations
+                    ? Loc.T("白端：齿孔透光（整卷）")
+                    : FilmBaseText + Loc.T(" · 齿孔未检出（画面高光）");
+            if (IsPositiveFilm)
+                HighlightConfidenceText = blackFromPerforations
+                    ? Loc.T("黑端：片边未曝光黑（整卷）")
+                    : HighlightConfidenceText + Loc.T(" · 片边黑未检出（画面暗部）");
             ApplyAutoChainToRoll();
             FinishAutoInvert(cts, masks.Count, failed, failReason);
         }
@@ -3781,13 +3952,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         FilmBaseText = baseEstimate.Evidence switch
         {
             FilmBaseEvidence.PhysicalMode =>
-                isMonochrome
-                    ? Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板片基")
-                    : Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板色罩"),
+                IsPositiveFilm
+                    ? Loc.F($"白端：{Confidence(baseEstimate.Confidence)} · 灯板透光")
+                    : isMonochrome
+                        ? Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板片基")
+                        : Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 灯板色罩"),
             FilmBaseEvidence.PhysicalEdgeSliver =>
-                Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 边缘片基"),
+                IsPositiveFilm
+                    ? Loc.F($"白端：{Confidence(baseEstimate.Confidence)} · 边缘透光")
+                    : Loc.F($"片基：{Confidence(baseEstimate.Confidence)} · 边缘片基"),
             _ =>
-                Loc.T("⚠ 片基：需确认 · 内容推断，建议片基采样"),
+                IsPositiveFilm
+                    ? Loc.T("⚠ 白端：需确认 · 内容推断，建议白端采样")
+                    : Loc.T("⚠ 片基：需确认 · 内容推断，建议片基采样"),
         };
 
         UpdateHighlightConfidence(highlightEstimate, usedFallbackHighlight);
@@ -3811,7 +3988,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // highlight", which the completion status already says. Surface only conditions
                 // the user can act on instead of leaving permanent method/provenance chatter.
                 HighlightConfidenceText = high.ClippingRisk || high.QuantizationRisk
-                    ? Loc.T("⚠ 高光接近裁切或量化边界，建议人工检查")
+                    ? (IsPositiveFilm ? Loc.T("⚠ 黑端接近裁切或量化边界，建议人工检查") : Loc.T("⚠ 高光接近裁切或量化边界，建议人工检查"))
                     : "";
             }
             else
@@ -3819,18 +3996,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 string warning = high.ClippingRisk || high.QuantizationRisk
                     ? Loc.T(" · 建议人工检查")
                     : "";
-                HighlightConfidenceText = Loc.F($"高光：{Confidence(high.Confidence)} · 多帧场景高光{warning}");
+                HighlightConfidenceText = IsPositiveFilm
+                    ? Loc.F($"黑端：{Confidence(high.Confidence)} · 多帧场景暗部{warning}")
+                    : Loc.F($"高光：{Confidence(high.Confidence)} · 多帧场景高光{warning}");
             }
         }
         else if (usedFallback)
         {
             HighlightConfidenceText = rollWide
-                ? Loc.T("⚠ 高光：需确认 · 使用了备用估计，建议高光采样")
-                : Loc.T("⚠ 高光依据较弱，建议人工检查或手动采样");
+                ? (IsPositiveFilm ? Loc.T("⚠ 黑端：需确认 · 使用了备用估计，建议黑端采样") : Loc.T("⚠ 高光：需确认 · 使用了备用估计，建议高光采样"))
+                : Loc.T("⚠ 依据较弱，建议人工检查或手动采样");
         }
         else
         {
-            HighlightConfidenceText = Loc.T("⚠ 高光：未获得可靠估计，建议高光采样");
+            HighlightConfidenceText = IsPositiveFilm
+                ? Loc.T("⚠ 黑端：未获得可靠估计，建议黑端采样")
+                : Loc.T("⚠ 高光：未获得可靠估计，建议高光采样");
         }
     }
 
@@ -3847,7 +4028,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         string voteText = failed > 0
             ? Loc.F($"{voted} 帧参与，{failed} 帧解码失败：{failReason}")
             : Loc.F($"{voted} 帧参与");
-        StatusText = Loc.F($"整卷去色罩完成（{voteText}）· 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
+        StatusText = (IsPositiveFilm
+            ? Loc.F($"正片整卷校准完成（{voteText}）· 白端 {DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 黑端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
+            : Loc.F($"整卷去色罩完成（{voteText}）· 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}"))
                    + (string.IsNullOrEmpty(FilmBaseText) ? "" : " · " + FilmBaseText)
                    + (string.IsNullOrEmpty(HighlightConfidenceText) ? "" : " · " + HighlightConfidenceText);
         ScheduleRender();
@@ -3905,6 +4088,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// automatic single-frame and roll chains reuse their full-resolution board pass.</summary>
     private void AutoDetectDMax(double? cut)
     {
+        _blackEndFromPerforations = false;
         ImageBuffer? src = AutoRegionStage1();
         if (src is null) return;
         // 估计器按当前黑端归一化（参考 = 10^−D_min），在跨度上测量，结果加回 D_min——见下。
@@ -3937,14 +4121,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // chain's stage 2 for the cast that measuring absolute densities produced.
         double[] dMin = DMinPerChannel;
         double[] tBase = TBaseFromDensity(dMin);
+        // The physical black reference, measured on the UNCROPPED preview: a 3:2 crop removes the
+        // perforation band. Failure is allowed and means the scene estimator below decides.
+        ImageBuffer full = Stage1Source(_previewLinear) ?? _previewLinear!;
+        double[]? edgeBlackSpan = IsPositiveFilm
+            ? FilmBase.EstimateBlackSpanFromPerforations(new[] { full })
+            : null;
+        bool blackFromPerforations = edgeBlackSpan is not null;
+        _blackEndFromPerforations = blackFromPerforations;
         _calibrationDiagnosticsRollWide = false;
         HighlightEndpointEstimate? highlightEstimate = null;
         double[]? highlight = null;
         if (mask is not null)
         {
-            highlightEstimate = FilmBase.DetectDMaxPerChannelFromRollDetailed(
+            // The border inset is RESOLVED from the frame rather than assumed: a positive's
+            // unexposed margin is the densest thing in the frame, so a scan that still shows it
+            // needs a wider inset than a negative's bright base ever did. See
+            // FilmBase.DetectDMaxPerChannelResolvingBorderInset.
+            highlightEstimate = FilmBase.DetectDMaxPerChannelResolvingBorderInset(
                 new[] { src }, tBase, 90.0, new[] { mask }, cut,
-                protectIndependentChannelExtrema: true);
+                protectIndependentChannelExtrema: true,
+                positiveFilm: IsPositiveFilm && AutoCrop is null);
             highlight = highlightEstimate?.Density;
 
             // Fallback: the densest-highlight solve. It answers from the same masked pixels but
@@ -3957,13 +4154,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     highlight = FilmBase.AutoWbHighFromRoll(
                         new[] { mask }, tBase, cut,
-                        valueImages: ReferenceEquals(mask, src) ? null : new[] { src });
+                        valueImages: ReferenceEquals(mask, src) ? null : new[] { src },
+                        edgeInset: IsPositiveFilm && AutoCrop is null
+                            ? FilmBase.WideBorderInsetForMeasurement : FilmBase.TightBorderInsetForMeasurement);
                 }
                 catch { /* no usable highlight in this frame — say so below */ }
             }
         }
 
-        if (highlight is not null) DMaxPerChannel = AddDMin(highlight, dMin);
+        // The unexposed edge wins when it is valid: it is the film's true D_max, while the scene
+        // solve can be dragged by frame gaps and the black surround. Same relative-density unit
+        // as the scene answer, so SharedSpanEndpoints below handles both unchanged.
+        if (edgeBlackSpan is not null) highlight = edgeBlackSpan;
+
+        if (highlight is not null)
+            DMaxPerChannel = DensityEndpoints.SharedSpanEndpoints(AddDMin(highlight, dMin), dMin, IsPositiveFilm);
         _lastHighlightMeasured = highlight is not null;
         UpdateHighlightConfidence(
             highlightEstimate,
@@ -3971,8 +4176,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             rollWide: false);
 
         StatusText = highlight is not null
-            ? Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
-            : Loc.T("⚠ 这一帧测不到高光——亮端保持原值，请用【高光采样】手动标定或改用【自动（整卷）】");
+            ? (IsPositiveFilm
+                ? Loc.F($"自动暗部 → 黑端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）")
+                  + (blackFromPerforations ? Loc.T(" · 片边未曝光黑") : Loc.T(" · 画面暗部"))
+                : Loc.F($"自动高光 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）"))
+            : (IsPositiveFilm
+                ? Loc.T("⚠ 这一帧测不到暗部——黑端保持原值，请用【黑端采样】手动标定或改用【自动整卷（正片）】")
+                : Loc.T("⚠ 这一帧测不到高光——亮端保持原值，请用【高光采样】手动标定或改用【自动（整卷）】"));
     }
 
     /// <summary>
@@ -4033,7 +4243,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (!committed)
         {
             if (baseMeasured && !highlightMeasured)
-                StatusText = Loc.T("⚠ 单张去色罩未应用：这一帧测不到高光，已恢复原参数。请用【高光采样】手动标定或改用【自动（整卷）】");
+                StatusText = IsPositiveFilm
+                    ? Loc.T("⚠ 单张正片校准未应用：这一帧测不到暗部，已恢复原参数。请用【黑端采样】手动标定或改用【自动整卷（正片）】")
+                    : Loc.T("⚠ 单张去色罩未应用：这一帧测不到高光，已恢复原参数。请用【高光采样】手动标定或改用【自动（整卷）】");
             return;
         }
 
@@ -4043,7 +4255,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ScheduleRender();
         // Only this frame's thumbnail changed — the other frames were untouched.
         if (CurrentFrame is not null) { SetThumbnail(CurrentFrame, null); RestartThumbnails(); }
-        StatusText = Loc.F($"单张去色罩完成 · 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
+        StatusText = IsPositiveFilm
+            ? Loc.F($"单张正片校准完成 · 白端 {DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 黑端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}")
+              + (_whiteEndFromPerforations ? Loc.T(" · 白端取自齿孔透光") : Loc.T(" · 白端取自画面高光"))
+              + (_blackEndFromPerforations ? Loc.T(" · 黑端取自片边未曝光黑") : Loc.T(" · 黑端取自画面暗部"))
+            : Loc.F($"单张去色罩完成 · 黑端（片基密度）{DMinR:F3}, {DMinG:F3}, {DMinB:F3} · 亮端 {DMaxR:F3}, {DMaxG:F3}, {DMaxB:F3}");
     }
 
     private sealed record SingleFrameAutoSnapshot(
@@ -4163,9 +4379,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         double[]? highlight = null;
         try
         {
-            highlight = FilmBase.DetectDMaxPerChannelFromRoll(
+            highlight = FilmBase.DetectDMaxPerChannelResolvingBorderInset(
                 new[] { val }, tBase, 90.0, new[] { raw }, cut,
-                protectIndependentChannelExtrema: true);
+                protectIndependentChannelExtrema: true,
+                positiveFilm: IsPositiveFilm && AutoCrop is null)?.Density;
         }
         catch { /* 逐通道端点弃权——下面的回退还有机会 */ }
 
@@ -4173,7 +4390,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                highlight = FilmBase.AutoWbHighFromRoll(new[] { raw }, tBase, cut, values);
+                highlight = FilmBase.AutoWbHighFromRoll(
+                    new[] { raw }, tBase, cut, values,
+                    edgeInset: IsPositiveFilm && AutoCrop is null
+                        ? FilmBase.WideBorderInsetForMeasurement : FilmBase.TightBorderInsetForMeasurement);
             }
             catch (Exception ex)
             {
@@ -4188,7 +4408,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        DMaxPerChannel = AddDMin(highlight, dMin);
+        DMaxPerChannel = DensityEndpoints.SharedSpanEndpoints(AddDMin(highlight, dMin), dMin, IsPositiveFilm);
         StatusText = Loc.F($"自动白点 → 亮端 {DMaxLevel:F3}（逐通道 {DMaxR:F3} / {DMaxG:F3} / {DMaxB:F3}）");
     }
 
@@ -4299,6 +4519,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task AutoWbAiAsync()
     {
+        // This solver assumes the negative print response; a slide must use measured references.
+        if (!CanUseDeepWb) return;
         RefreshDeepWbAvailability();
         if (!IsDeepWbInstalled && !await InstallDeepWbAsync()) return;
         if (_previewWorking is null) return;

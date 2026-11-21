@@ -240,7 +240,7 @@ public partial class MainWindow
             UpdateDustToolbar();
             return;
         }
-        string polarity = DustPolarity.SelectedIndex switch { 1 => "bright", 2 => "dark", _ => "auto" };
+        string polarity = PureNegComponent.PolarityForFilm(DustPolarity.SelectedIndex, vm.IsPositiveFilm);
         string sensitivity = DustSensitivity.Value.ToString(CultureInfo.InvariantCulture);
         DustOptionsBtn.Flyout?.Hide();
         EndDustComparison(refresh: false);

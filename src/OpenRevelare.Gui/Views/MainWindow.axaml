@@ -1364,14 +1364,24 @@
 
                                 <!-- ── 片型 ──────────────────────────────────────────
                                      卷级判断，放在最前面：它决定下面这些控件里哪些还有意义。
-                                     打开后三通道在进密度域前折成一路亮度，反相只用一对端点。 -->
-                                <CheckBox Margin="0,0,0,6" IsChecked="{Binding Monochrome, Mode=TwoWay}"
-                                          IsEnabled="{Binding HasImage}"
-                                          ToolTip.Tip="{Binding MonochromeHint}">
-                                    <TextBlock Text="{i18n:T '黑白负片（整卷）'}" VerticalAlignment="Center" />
-                                </CheckBox>
+                                     打开后三通道在进密度域前折成一路亮度，反相只用一对端点；
+                                     正片模式反向映射两端端点。 -->
+                                <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,8">
+                                    <TextBlock Grid.Column="0" Text="{i18n:T '底片类型'}" VerticalAlignment="Center" Margin="0,0,8,0" Classes="fieldLabel" />
+                                    <ComboBox Grid.Column="1" SelectedIndex="{Binding FilmTypeIndex, Mode=TwoWay}"
+                                              IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"
+                                              ToolTip.Tip="{Binding FilmTypeHint}">
+                                        <ComboBoxItem Content="{i18n:T '彩色负片'}" />
+                                        <ComboBoxItem Content="{i18n:T '彩色正片（反转片）'}" />
+                                        <ComboBoxItem Content="{i18n:T '黑白负片'}" />
+                                        <ComboBoxItem Content="{i18n:T '黑白正片'}" />
+                                    </ComboBox>
+                                </Grid>
 
-                                <!-- ── 一键去色罩 ────────────────────────────────────
+                                <TextBlock Classes="groupHint" Text="{Binding FilmTypeHint}"
+                                           IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" Margin="0,0,0,8" />
+
+                                <!-- ── 一键去色罩 / 正片校准 ─────────────────────────────
                                      The whole chain, at the top, before the parameters it
                                      solves. The individual buttons below stay exactly as they
                                      were: these two are the fast path, not a replacement. -->
@@ -1380,10 +1390,10 @@
                                         <Button Grid.Column="0" Classes="primary" Margin="0,0,3,0"
                                                 HorizontalAlignment="Stretch"
                                                 Click="OnAutoInvertRollClick" IsEnabled="{Binding HasImage}"
-                                                ToolTip.Tip="{i18n:T '遍历整卷解出片基、白平衡、D-max 与黑白场，一套参数应用到所有帧。覆盖已有的白平衡与色阶，不改动裁切。'}">
+                                                ToolTip.Tip="{i18n:T '遍历整卷解出片基/端点、白平衡、D-max 与黑白场，一套参数应用到所有帧。覆盖已有的白平衡与色阶，不改动裁切。'}">
                                             <Grid ColumnDefinitions="Auto,*">
                                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '自动（整卷）'}" VerticalAlignment="Center"
+                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoRollBtnText}" VerticalAlignment="Center"
                                                            Foreground="{DynamicResource AccentFgBrush}" />
                                             </Grid>
                                         </Button>
@@ -1393,7 +1403,7 @@
                                                 ToolTip.Tip="{i18n:T '只对当前帧做同样的自动流程，不动其他帧、也不改动裁切——用于整卷参数对这一张不合适时。'}">
                                             <Grid ColumnDefinitions="Auto,*">
                                                 <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
-                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '自动（单张）'}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoFrameBtnText}" VerticalAlignment="Center" />
                                             </Grid>
                                         </Button>
                                     </Grid>
@@ -1406,26 +1416,26 @@
                                      分量同步平移（色偏不变），改分量则只动色偏（标量不变）。
                                      「亮度」「反差」「色温」都是这六个数的派生读数，不另立字段。-->
 
-                                <!-- D_min：暗端 -->
-                                <Expander Header="{i18n:T '黑端'}" IsExpanded="True" Tag="1"
-                                          ToolTip.Tip="{i18n:T '每个通道读作黑的密度（相对完全透光 T=1）。C-41 橙色片基必然 R&lt;G&lt;B，典型 0.09 / 0.29 / 0.54。展开三个分量可调暗部色偏。'}">
+                                <!-- D_min：端点 -->
+                                <Expander Header="{Binding FilmBaseHeader}" IsExpanded="True" Tag="1"
+                                          ToolTip.Tip="{Binding FilmBaseToolTip}">
                                     <StackPanel Spacing="2">
-                                        <ctl:SliderRow Label="D_min" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
+                                        <ctl:SliderRow Label="D_min" Minimum="-2" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" />
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
                                             <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
                                                           Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '片基采样'}" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FilmBaseBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}"
-                                                    ToolTip.Tip="{i18n:T '自动找出画面中裸露的片基并写入黑端。依次尝试：灯板下的片基峰、边缘裸片基窄带、亮端分位。'}">
+                                                    ToolTip.Tip="{Binding AutoFilmBaseToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '自动黑点'}" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoFilmBaseBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
                                         </Grid>
@@ -1438,17 +1448,17 @@
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
                                                   IsVisible="{Binding IsColourRoll}">
                                             <StackPanel Spacing="1">
-                                                <ctl:SliderRow Label="R" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" TrackBrush="{DynamicResource TrackRBrush}" />
-                                                <ctl:SliderRow Label="G" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" TrackBrush="{DynamicResource TrackGBrush}" />
-                                                <ctl:SliderRow Label="B" Minimum="-0.5" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinB}" TrackBrush="{DynamicResource TrackBBrush}" />
+                                                <ctl:SliderRow Label="R" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinR}" TrackBrush="{DynamicResource TrackRBrush}" />
+                                                <ctl:SliderRow Label="G" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinG}" TrackBrush="{DynamicResource TrackGBrush}" />
+                                                <ctl:SliderRow Label="B" Minimum="-2" Maximum="2" Decimals="3" Increment="0.001" DefaultValue="0" Value="{Binding DMinB}" TrackBrush="{DynamicResource TrackBBrush}" />
                                             </StackPanel>
                                         </Expander>
                                     </StackPanel>
                                 </Expander>
 
-                                <!-- D_max：亮端 -->
-                                <Expander Header="{i18n:T '白端'}" IsExpanded="True" Tag="2"
-                                          ToolTip.Tip="{i18n:T '每个通道读作白的密度，典型 1.8–2.4。与 D_min 的距离即反差，三通道之差即高光色偏。'}">
+                                <!-- D_max：端点 -->
+                                <Expander Header="{Binding DMaxHeader}" IsExpanded="True" Tag="2"
+                                          ToolTip.Tip="{Binding DMaxToolTip}">
                                     <StackPanel Spacing="2">
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
                                                        Value="{Binding DMaxLevel}"
@@ -1458,15 +1468,15 @@
                                                           Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '高光采样'}" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding DMaxBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </ToggleButton>
                                             <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     Click="OnAutoWbHighClick" IsEnabled="{Binding HasImage}"
-                                                    ToolTip.Tip="{i18n:T '自动找到画面最亮点，把它当作纯白来解出亮端三个密度'}">
+                                                    ToolTip.Tip="{Binding AutoDMaxToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoWand}" />
-                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{i18n:T '自动白点'}" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoDMaxBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
                                         </Grid>
@@ -1501,7 +1511,7 @@
                                                 </Grid>
                                             </ToggleButton>
                                             <Grid Grid.Column="1" Margin="3,0,0,0" RowDefinitions="Auto,Auto"
-                                                  IsVisible="{Binding IsColourRoll}" IsEnabled="{Binding !HasLongTask}">
+                                                  IsVisible="{Binding CanUseDeepWb}" IsEnabled="{Binding !HasLongTask}">
                                                 <Button Name="SmartCastButton" HorizontalAlignment="Stretch"
                                                         Click="OnAutoWbAiClick"
                                                         ToolTip.Tip="{i18n:T '不需要灰卡。建议先裁掉齿孔和片边；结果可以撤销。'}">

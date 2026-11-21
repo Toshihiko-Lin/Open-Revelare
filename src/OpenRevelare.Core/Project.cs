@@ -529,6 +529,7 @@ public static class Project
             ["distortion_k1"] = p.DistortionK1,
             ["lcc_enabled"] = e.LccEnabled ?? p.LccFlatField != null,
             ["monochrome"] = p.Monochrome,
+            ["is_positive_film"] = p.IsPositiveFilm,
             // SceneBase adjustments
             ["wb_gains"] = Arr(p.WbGains),
             ["exposure_ev"] = p.ExposureEv,
@@ -603,6 +604,7 @@ public static class Project
             PrintLutOutput = Str(d, "print_lut_output", ""),
             SprocketEnabled = Bool(d, "sprocket_enabled", false),
             Monochrome = Bool(d, "monochrome", false),
+            IsPositiveFilm = Bool(d, "is_positive_film", false),
             SprocketThreshold = d["sprocket_threshold"] is { } st ? st.GetValue<double>() : 0.9,
             DustEnabled = Bool(d, "dust_enabled", false),
             DustSpots = DesDustSpots(d["dust_spots"]),
