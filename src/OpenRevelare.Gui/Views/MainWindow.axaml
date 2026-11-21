@@ -1416,23 +1416,6 @@
                                     </Grid>
                                 </StackPanel>
 
-                                <Grid Classes="pairedActions" ColumnDefinitions="*,*" Margin="0,0,0,8">
-                                    <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
-                                                  Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
-                                        <Grid ColumnDefinitions="Auto,*">
-                                            <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FilmBaseBtnText}" VerticalAlignment="Center" />
-                                        </Grid>
-                                    </ToggleButton>
-                                    <ToggleButton Name="DMaxBtn" Grid.Column="1" Classes="sampling" Margin="3,0,0,0"
-                                                  Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
-                                        <Grid ColumnDefinitions="Auto,*">
-                                            <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
-                                            <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding DMaxBtnText}" VerticalAlignment="Center" />
-                                        </Grid>
-                                    </ToggleButton>
-                                </Grid>
-
                                 <!-- 片基去色罩 -->
                                 <!-- ══ 反相：两端各三个绝对密度 ═══════════════════════
                                      渲染消费 scale[3]+offset[3] 六个自由度，这里就给六个数。
@@ -1447,8 +1430,15 @@
                                         <TextBlock Classes="groupHint" Text="{Binding FilmBaseToolTip}" IsVisible="{Binding IsPositiveFilm}" TextWrapping="Wrap" />
                                         <ctl:SliderRow Label="D_min" Minimum="-2" Maximum="2" Decimals="3" Increment="0.005" DefaultValue="0"
                                                        Value="{Binding DMinLevel}" IsVisible="{Binding IsNegativeFilm}" />
-                                        <Panel>
-                                            <Button HorizontalAlignment="Stretch"
+                                        <Grid Classes="pairedActions" ColumnDefinitions="*,*">
+                                            <ToggleButton Name="FilmBaseBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                                          Click="OnSampleFilmBaseClick" IsEnabled="{Binding HasImage}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding FilmBaseBtnText}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </ToggleButton>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     Click="OnAutoFilmBaseClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoFilmBaseToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
@@ -1456,10 +1446,12 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoFilmBaseBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
-                                            <Button HorizontalAlignment="Stretch"
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
-                                                    Content="{i18n:T '恢复相机白平衡'}" Command="{Binding ResetSlideLightReferenceCommand}" />
-                                        </Panel>
+                                                    Command="{Binding ResetSlideLightReferenceCommand}">
+                                                <TextBlock Text="{i18n:T '恢复相机白平衡'}" TextWrapping="Wrap" />
+                                            </Button>
+                                        </Grid>
                                         <!-- 只在测不到裸露片基时出现。成功时不回显 t_base 数值——
                                              那个数已经没有滑块，它的意义由 D_min 承担。-->
                                         <!-- 只有这一组 RGB。片基透射率 T_base 不再给滑块：它与
@@ -1485,8 +1477,15 @@
                                         <ctl:SliderRow Label="D_max" Minimum="0.3" Maximum="4" Decimals="3" Increment="0.005" DefaultValue="2"
                                                        Value="{Binding DMaxLevel}" IsVisible="{Binding IsNegativeFilm}"
                                                        ToolTip.Tip="{i18n:T 'Cineon 亮端映射：改变高光反差和亮端位置，保持三通道色彩比例。需要整体提亮请使用 Display 曝光。'}" />
-                                        <Panel>
-                                            <Button HorizontalAlignment="Stretch"
+                                        <Grid Classes="pairedActions" ColumnDefinitions="*,*">
+                                            <ToggleButton Name="DMaxBtn" Grid.Column="0" Classes="sampling" Margin="0,0,3,0"
+                                                          Click="OnSampleDMaxClick" IsEnabled="{Binding HasImage}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <ctl:Icon Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Data="{StaticResource IcoMarquee}" />
+                                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding DMaxBtnText}" VerticalAlignment="Center" />
+                                                </Grid>
+                                            </ToggleButton>
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     Click="OnAutoWbHighClick" IsEnabled="{Binding HasImage}" IsVisible="{Binding IsNegativeFilm}"
                                                     ToolTip.Tip="{Binding AutoDMaxToolTip}">
                                                 <Grid ColumnDefinitions="Auto,*">
@@ -1494,10 +1493,12 @@
                                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding AutoDMaxBtnText}" VerticalAlignment="Center" />
                                                 </Grid>
                                             </Button>
-                                            <Button HorizontalAlignment="Stretch"
+                                            <Button Grid.Column="1" Margin="3,0,0,0" HorizontalAlignment="Stretch"
                                                     IsVisible="{Binding IsPositiveFilm}" IsEnabled="{Binding HasImage}"
-                                                    Content="{i18n:T '清除片基参考'}" Command="{Binding ResetSlideFilmBaseReferenceCommand}" />
-                                        </Panel>
+                                                    Command="{Binding ResetSlideFilmBaseReferenceCommand}">
+                                                <TextBlock Text="{i18n:T '清除片基参考'}" TextWrapping="Wrap" />
+                                            </Button>
+                                        </Grid>
                                         <TextBlock Classes="groupHint" Text="{Binding SlideFilmBaseStatus}"
                                                    IsVisible="{Binding IsPositiveFilm}" />
                                         <Expander Header="{i18n:T '逐通道'}" Theme="{StaticResource SubExpander}" Margin="0,4,0,0"
@@ -1517,7 +1518,7 @@
                                      与高光采样互为替代，后按的生效。白平衡不在这里——那是场景光源的事，在 Display。-->
                                 <!-- Header and hint follow the film type: the grey card is an exposure
                                      anchor on a black-and-white roll, not a cast correction. -->
-                                <Expander Header="{Binding CastCardHeader}" Tag="3" IsVisible="{Binding IsNegativeFilm}"
+                                <Expander Header="{Binding CastCardHeader}" IsExpanded="True" Tag="3" IsVisible="{Binding IsNegativeFilm}"
                                           ToolTip.Tip="{Binding CastCardHint}">
                                     <StackPanel Spacing="2">
                                         <Grid Classes="pairedActions" ColumnDefinitions="*,*">
