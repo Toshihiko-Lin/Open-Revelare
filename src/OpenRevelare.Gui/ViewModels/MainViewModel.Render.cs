@@ -44,6 +44,7 @@ public partial class MainViewModel
     private ImageBuffer? _dragSmall;
     private WorkingFrame? _dragSource;
     internal Task InteractiveRenderTask { get; private set; } = Task.CompletedTask;
+    internal Task ScheduledRenderTask { get; private set; } = Task.CompletedTask;
     private const int DragMaxEdge = PreviewMaxEdge / 2;
 
     /// <summary>A slider thumb or curve point was grabbed — enter low-latency drag mode.</summary>
@@ -73,10 +74,8 @@ public partial class MainViewModel
     // Backstop for the whole render path, and the reason all three entry points below are
     // wrapped rather than just the async ones.
     //
-    // ScheduleRender and RenderNow are `async void`: they are driven straight off property
-    // setters, so there is no Task for anyone to observe and an escaping exception unwinds
-    // past the message loop and TERMINATES the process, taking every unsaved edit in the roll
-    // with it. The interactive pump needs the same exception backstop.
+    // Property setters request renders without awaiting them. Handle failures here so they
+    // reach the status bar and exceptions from RenderNow cannot escape the message loop.
     //
     // The sampling path already learned this (MainWindow's pointer-released backstop and
     // TrySample); a render is exactly as user-triggered and exactly as fatal. Cancellation
@@ -112,10 +111,16 @@ public partial class MainViewModel
         _renderCts?.Cancel();
         var cts = new CancellationTokenSource();
         _renderCts = cts;
+        ScheduledRenderTask = RunScheduledRenderAsync(cts.Token);
+        await ScheduledRenderTask;
+    }
+
+    private async Task RunScheduledRenderAsync(CancellationToken ct)
+    {
         try
         {
-            await Task.Delay(50, cts.Token);
-            await RenderPreviewAsync(BuildParams(), cts.Token);
+            await Task.Delay(50, ct);
+            await RenderPreviewAsync(BuildParams(), ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { ReportRenderFailure(ex); }

@@ -559,6 +559,9 @@ public sealed class ProjectReliabilityTests
         await vm.OpenProjectAsync(project);
         await Settle(vm);
         Assert.True(vm.HasImage);
+        // Headless preview failures also write to StatusText. Wait for the initial render
+        // before asserting the export message.
+        await vm.ScheduledRenderTask.WaitAsync(TimeSpan.FromSeconds(10));
         var options = new ExportOptions { KeepSourceExif = false };
         string existing = Path.Combine(dir, "existing.tif");
         File.WriteAllText(existing, "previous export");
