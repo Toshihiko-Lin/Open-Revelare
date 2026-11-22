@@ -30,10 +30,9 @@
 
 ## 一、发版前
 
-- [ ] `src/OpenRevelare.Gui/OpenRevelare.Gui.csproj` 的 `<Version>` 是要发的号。
-      这是**唯一**的版本来源：关于框、更新检测、`open-revelare.iss` 都读它，
-      release.yml 的 guard job 会拿它和 tag 比，对不上直接失败。
-- [ ] `CHANGELOG.md` 顶部那节改成正式版本号（别留「待发布」）。
+- [ ] `src/OpenRevelare.Gui/OpenRevelare.Gui.csproj` 的 `<Version>` 用于关于框和更新检测。
+      同步更新 `open-revelare.iss` 的 `MyAppVersion`，并确保 tag 一致，`release.yml` 的 guard 会检查三者。
+- [ ] `CHANGELOG.md` 顶部那节使用正式版本号，打 tag 前补上实际发布日期。
 - [ ] **仓库已经是 public。** 私有仓库对匿名客户端来说不存在：
       `api.github.com/repos/…/releases/latest` 返回 404，更新检测拿不到东西，
       README 的三个下载徽章全是死链。
