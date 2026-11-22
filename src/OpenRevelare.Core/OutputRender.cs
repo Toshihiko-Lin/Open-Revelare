@@ -238,6 +238,20 @@ public static class OutputRender
         }
     }
 
+    // Fused export kernels use the same inverse TRC without retaining a decoded frame.
+    internal readonly struct SampleDecoder(ColorSpaceDef space)
+    {
+        private readonly float[]? _lut = space.Transfer == TransferFunction.SrgbPiecewise ? Srgb.InverseLut : null;
+        private readonly bool _power = space.Transfer == TransferFunction.Power;
+        private readonly float _gamma = (float)space.Gamma;
+
+        public float Decode(float value)
+        {
+            if (_lut is not null) return _lut[Srgb.LutIndex(value)];
+            return _power ? MathF.Pow(Math.Clamp(value, 0f, 1f), _gamma) : value;
+        }
+    }
+
     /// <summary>
     /// The power-curve exponent for a space whose TRC is <see cref="TransferFunction.Power"/>,
     /// for consumers that must describe the curve rather than apply it —

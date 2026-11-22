@@ -21,11 +21,33 @@ public static class Pipeline
     public static RenderedFrame RenderSdrRendition(WorkingFrame source, FrameParams parameters,
         ColorPipelineVersion version, IColorManagementEngine colorManagement, ColorSpaceDef? baseSpace = null)
     {
+        ColorSpaceDef space = baseSpace ?? ColorSpaces.Srgb;
+        if (version == ColorPipelineVersion.ManagedV2 && parameters.OutputIntent != OutputIntent.None
+            && parameters.ResolvedOutputTarget.IsExtended)
+            return RenderHdrWithSdrBase(source, parameters, colorManagement, space).SdrBase;
         RenderedFrame master = Render(source, parameters, version, colorManagement);
         if (master.Encoding.Range != NumericRange.Extended) return master;
-        ColorSpaceDef space = baseSpace ?? ColorSpaces.Srgb;
         RenderedFrame template = Render(source, parameters.SdrRendition(space), version, colorManagement);
         return HdrGainMap.ColourMatchedSdrBase(template, master, space);
+    }
+
+    /// <summary>Managed HDR master and its matched SDR base with one physical render and geometry pass.</summary>
+    public static (RenderedFrame Master, RenderedFrame SdrBase) RenderHdrWithSdrBase(
+        WorkingFrame source, FrameParams parameters, IColorManagementEngine colorManagement,
+        ColorSpaceDef baseSpace, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        FrameParams sdr = parameters.SdrRendition(baseSpace);
+        PreparedFilmFrame physical = PrepareFilm(source, parameters);
+        ct.ThrowIfCancellationRequested();
+        RenderedFrame master = RenderPreparedFilm(physical, parameters, ColorPipelineVersion.ManagedV2, colorManagement);
+        ct.ThrowIfCancellationRequested();
+        // The preparation is local to this call. Once the master owns its copy, finish
+        // the preparation's buffer in place for the SDR template.
+        FinishManaged(physical.Pixels, physical.Fill, sdr, colorManagement);
+        var template = DescribeRenderedPixels(physical.Pixels, sdr, ColorPipelineVersion.ManagedV2);
+        ct.ThrowIfCancellationRequested();
+        return (master, HdrGainMap.ColourMatchedSdrBase(template, master, baseSpace));
     }
     /// <summary>
     /// Typed render boundary for new callers. M1 deliberately delegates the pixel math to the
@@ -466,9 +488,11 @@ public static class Pipeline
 
         double[]? chromaAmp = cal.IsPositiveFilm ? null : cal.DecoupleChromaAmp;
         double[,]? chromaMatrix = cal.IsPositiveFilm ? null : ResolveChromaMatrix(cal);
-        ImageBuffer result = cal.IsPositiveFilm
-            ? new ImageBuffer(src.Width, src.Height, (float[])src.Data.Clone()).InheritSourceFrom(src)
-            : Inversion.Invert(src, cal, chromaAmp, chromaMatrix);
+        // Pre-inversion corrections already own this buffer when they copied or resampled
+        // the source. Density inversion reads and writes only the current RGB triplet.
+        ImageBuffer result = cal.IsPositiveFilm ? src
+            : ReferenceEquals(src, img) ? Inversion.Invert(src, cal, chromaAmp, chromaMatrix)
+            : Inversion.InvertInPlace(src, cal, chromaAmp, chromaMatrix);
 
         // Apply sprocket mask after inversion + black floor: fill masked pixels white.
         if (sprocketMask != null)

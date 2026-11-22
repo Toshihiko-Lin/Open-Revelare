@@ -15,13 +15,15 @@ internal static class PreviewParametersKey
         .Where(p => p.CanRead && p.CanWrite).OrderBy(p => p.Name, StringComparer.Ordinal).ToArray();
     // Exclude only known downstream controls. New parameters conservatively invalidate film
     // preparation until their stage is reviewed; never infer scope from UI grouping.
-    private static readonly HashSet<string> CreativeProperties = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> DownstreamProperties = new(StringComparer.Ordinal)
     {
         nameof(FrameParams.WbGains), nameof(FrameParams.ExposureEv), nameof(FrameParams.BlackPoint),
         nameof(FrameParams.WhitePoint), nameof(FrameParams.Contrast), nameof(FrameParams.Highlights),
         nameof(FrameParams.Shadows), nameof(FrameParams.Saturation), nameof(FrameParams.CurvePointsM),
         nameof(FrameParams.CurvePointsR), nameof(FrameParams.CurvePointsG), nameof(FrameParams.CurvePointsB),
         nameof(FrameParams.CurvePreserveHue), nameof(FrameParams.CurveHasEndpoints),
+        nameof(FrameParams.OutputIntent), nameof(FrameParams.OutputSpace), nameof(FrameParams.HdrPeakNits),
+        nameof(FrameParams.PrintLut), nameof(FrameParams.PrintLutOutput), nameof(FrameParams.DisplayReferredStage2),
     };
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -41,7 +43,7 @@ internal static class PreviewParametersKey
         var key = new StringBuilder();
         foreach (var property in Properties)
         {
-            if (filmOnly && CreativeProperties.Contains(property.Name)) continue;
+            if (filmOnly && DownstreamProperties.Contains(property.Name)) continue;
             key.Append(property.Name).Append(':');
             key.Append(JsonSerializer.Serialize(property.GetValue(parameters), property.PropertyType, Options));
             key.Append(';');

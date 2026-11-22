@@ -26,7 +26,7 @@ public static class LensfunCorrections
         var output = new ImageBuffer(w, h).InheritSourceFrom(source);
         var (cx, cy, norm) = Coordinates(calibration, region.FrameWidth, region.FrameHeight);
         var distortion = calibration.Distortion;
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             for (int x = 0; x < w; x++)
             {
@@ -105,7 +105,7 @@ public static class LensfunCorrections
         double cy = (fh - 1) * 0.5 + Math.Min(fw - 1, fh - 1) * 0.5 * calibration.CenterY;
         // PA uses half the calibration sensor's diagonal, unlike the distortion models.
         double norm = Math.Sqrt(fw * fw + fh * fh) * calibration.CameraCropFactor / (2 * v.CropFactor);
-        Parallel.For(0, image.Height, y =>
+        ParallelSweep.For(0, image.Height, y =>
         {
             for (int x = 0; x < image.Width; x++)
             {

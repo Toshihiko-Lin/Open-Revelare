@@ -29,6 +29,41 @@ public static class RawDecode
 
     public static (long ResidentBytes, int Entries, long Hits, long Misses, long Joins) SourceCacheStatistics()
         => SourceBytes.Snapshot();
+
+    private static readonly Dictionary<RawSourceCache.Revision, long> DecodePixelEstimates = new();
+    private const int DecodePixelEstimateLimit = 512;
+
+    /// <summary>Sensor size from the header, without unpacking or demosaicing the RAW.</summary>
+    public static long EstimateDecodePixels(string path)
+    {
+        var revision = RawSourceCache.Revision.Capture(path);
+        lock (DecodePixelEstimates)
+            if (DecodePixelEstimates.TryGetValue(revision, out long cached)) return cached;
+
+        long pixels;
+        try
+        {
+            using var raw = RawContext.OpenFile(path);
+            pixels = Math.Max((long)raw.RawWidth * raw.RawHeight, (long)raw.Width * raw.Height);
+        }
+        catch (Exception ex) when (ex is LibRawException or DllNotFoundException or EntryPointNotFoundException
+            or BadImageFormatException or NotSupportedException)
+        {
+            // The selected decoder may still be able to read the file (e.g. DNG Converter).
+            return 0;
+        }
+
+        if (pixels <= 0 || RawSourceCache.Revision.Capture(path) != revision) return 0;
+        // The same original may be queued for preflight, preview, calibration and crop
+        // thumbnails. Keep only its dimensions so repeated estimates need no file handle.
+        lock (DecodePixelEstimates)
+        {
+            if (DecodePixelEstimates.Count >= DecodePixelEstimateLimit)
+                DecodePixelEstimates.Remove(DecodePixelEstimates.Keys.First());
+            DecodePixelEstimates[revision] = pixels;
+        }
+        return pixels;
+    }
     // Camera RAW extensions, as a ROUTING HINT ONLY — this decides whether a file is handed to
     // LibRaw or to TiffIO, nothing more. LibRaw itself dispatches on file CONTENT, not on the
     // name: a file with a RAW extension that is not actually RAW is rejected by the decoder

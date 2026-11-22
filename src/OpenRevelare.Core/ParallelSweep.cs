@@ -59,13 +59,13 @@ internal static class ParallelSweep
     {
         if (length <= 0) return;
 
-        if (length < SerialThreshold)
+        if (length < SerialThreshold || ExportExecution.IsSequential)
         {
             body(0, length);
             return;
         }
 
-        Parallel.ForEach(Partitioner.Create(0, length),
+        Parallel.ForEach(Partitioner.Create(0, length), ExportExecution.Options,
                          range => body(range.Item1, range.Item2));
     }
 
@@ -80,4 +80,14 @@ internal static class ParallelSweep
     /// </summary>
     public static void OverPixels(int pixelCount, Action<int, int> body)
         => Over(pixelCount, (p0, p1) => body(p0 * 3, p1 * 3));
+
+    public static void For(int start, int end, Action<int> body)
+    {
+        if (!ExportExecution.IsSequential)
+        {
+            Parallel.For(start, end, ExportExecution.Options, body);
+            return;
+        }
+        for (int i = start; i < end; i++) body(i);
+    }
 }

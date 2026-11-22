@@ -106,9 +106,8 @@ public static class OutputSharpen
             return new ImageBuffer(width, height, accelerated).InheritSourceFrom(source);
         // A combined working set may not fit even when each individual operation does.
         var resized = Resample.ToLongEdge(source, longEdge, allowUpscale);
-        var result = new ImageBuffer(width, height, (float[])resized.Data.Clone()).InheritSourceFrom(source);
-        Apply(result, level);
-        return result;
+        Apply(resized, level);
+        return resized;
     }
 
     /// <summary>
@@ -141,85 +140,87 @@ public static class OutputSharpen
     }
 
     private static void ApplyCpu(float[] data, int w, int h, float sigma, float amount)
+        => ApplyByRows(data, w, h, Kernel(sigma), amount);
+
+    private static void ApplyByRows(float[] data, int width, int height, float[] kernel, float amount)
     {
-        float[] luma = Luma(data, w, h);
-        float[] blurred = GaussianBlur(luma, w, h, sigma);
-
-        ParallelSweep.Over(w * h, (from, to) =>
-        {
-            for (int i = from; i < to; i++)
-            {
-                float delta = luma[i] - blurred[i];
-                if (delta > -Threshold && delta < Threshold) continue;
-                // The threshold is subtracted rather than switched on, so an edge at the boundary
-                // does not step from "untouched" to "fully sharpened" and leave a visible contour
-                // where the threshold happens to fall.
-                delta -= delta > 0f ? Threshold : -Threshold;
-
-                float add = Math.Clamp(delta * amount, -OvershootLimit, OvershootLimit);
-                int p = i * 3;
-                data[p] = Math.Clamp(data[p] + add, 0f, 1f);
-                data[p + 1] = Math.Clamp(data[p + 1] + add, 0f, 1f);
-                data[p + 2] = Math.Clamp(data[p + 2] + add, 0f, 1f);
-            }
-        });
-    }
-
-    private static float[] Luma(float[] data, int w, int h)
-    {
-        var luma = new float[w * h];
-        ParallelSweep.Over(luma.Length, (from, to) =>
-        {
-            for (int i = from; i < to; i++)
-            {
-                int p = i * 3;
-                luma[i] = 0.2126f * data[p] + 0.7152f * data[p + 1] + 0.0722f * data[p + 2];
-            }
-        });
-        return luma;
-    }
-
-    /// <summary>
-    /// Separable Gaussian with the tails clamped at the border. Separable because a 2-D Gaussian is
-    /// the product of two 1-D ones, so an r-wide kernel costs 2r samples per pixel rather than r².
-    /// </summary>
-    private static float[] GaussianBlur(float[] src, int w, int h, float sigma)
-    {
-        float[] kernel = Kernel(sigma);
         int radius = kernel.Length / 2;
+        const int scratchBytes = 8 << 20;
+        int maxRows = (int)(scratchBytes / ((long)width * sizeof(float) * 2));
+        bool small = (long)width * height < 262_144;
+        int blockRows = ExportExecution.IsSequential || small ? 1 : Math.Clamp(maxRows - 2 * radius, 1, 256);
+        int retainedRows = Math.Min(height, blockRows + 2 * radius);
+        var luma = new float[checked(width * retainedRows)];
+        var horizontal = new float[luma.Length];
 
-        var horizontal = new float[src.Length];
-        ParallelSweep.Over(h, (fromRow, toRow) =>
+        void PrepareRow(int y)
         {
-            for (int y = fromRow; y < toRow; y++)
+            int input = y * width;
+            int row = y % retainedRows * width;
+            for (int x = 0; x < width; x++)
+                luma[row + x] = LumaAt(data, input + x);
+            for (int x = 0; x < width; x++)
             {
-                int row = y * w;
-                for (int x = 0; x < w; x++)
-                {
-                    float sum = 0f;
-                    for (int k = -radius; k <= radius; k++)
-                        sum += src[row + Math.Clamp(x + k, 0, w - 1)] * kernel[k + radius];
-                    horizontal[row + x] = sum;
-                }
+                float sum = 0f;
+                for (int k = -radius; k <= radius; k++)
+                    sum += luma[row + Math.Clamp(x + k, 0, width - 1)] * kernel[k + radius];
+                horizontal[row + x] = sum;
             }
-        });
+        }
 
-        var blurred = new float[src.Length];
-        ParallelSweep.Over(h, (fromRow, toRow) =>
+        void SharpenRow(int y)
         {
-            for (int y = fromRow; y < toRow; y++)
+            Span<int> offsets = stackalloc int[kernel.Length];
+            int current = y % retainedRows * width;
+            for (int k = -radius; k <= radius; k++)
+                offsets[k + radius] = Math.Clamp(y + k, 0, height - 1) % retainedRows * width;
+            for (int x = 0; x < width; x++)
             {
-                int row = y * w;
-                for (int x = 0; x < w; x++)
-                {
-                    float sum = 0f;
-                    for (int k = -radius; k <= radius; k++)
-                        sum += horizontal[Math.Clamp(y + k, 0, h - 1) * w + x] * kernel[k + radius];
-                    blurred[row + x] = sum;
-                }
+                float sum = 0f;
+                for (int k = 0; k < kernel.Length; k++)
+                    sum += horizontal[offsets[k] + x] * kernel[k];
+                ApplyCorrection(data, y * width + x, luma[current + x] - sum, amount);
             }
-        });
-        return blurred;
+        }
+
+        int prepared = 0;
+        for (int start = 0; start < height;)
+        {
+            int end = Math.Min(height, start + blockRows);
+            int bottom = Math.Min(height, end + radius);
+            // Finish the input rows and their halo before touching any output RGB. Preserve
+            // the trailing halo in the ring for the next block, with original luma intact.
+            if (blockRows == 1)
+            {
+                for (int y = prepared; y < bottom; y++) PrepareRow(y);
+                SharpenRow(start);
+            }
+            else
+            {
+                ParallelSweep.For(prepared, bottom, PrepareRow);
+                ParallelSweep.For(start, end, SharpenRow);
+            }
+            prepared = bottom;
+            start = end;
+        }
+    }
+
+    private static void ApplyCorrection(float[] data, int i, float delta, float amount)
+    {
+        if (delta > -Threshold && delta < Threshold) return;
+        // Subtract the threshold so the correction grows continuously across the boundary.
+        delta -= delta > 0f ? Threshold : -Threshold;
+        float add = Math.Clamp(delta * amount, -OvershootLimit, OvershootLimit);
+        int p = i * 3;
+        data[p] = Math.Clamp(data[p] + add, 0f, 1f);
+        data[p + 1] = Math.Clamp(data[p + 1] + add, 0f, 1f);
+        data[p + 2] = Math.Clamp(data[p + 2] + add, 0f, 1f);
+    }
+
+    private static float LumaAt(float[] data, int i)
+    {
+        int p = i * 3;
+        return 0.2126f * data[p] + 0.7152f * data[p + 1] + 0.0722f * data[p + 2];
     }
 
     /// <summary>A normalised 1-D Gaussian reaching three sigma, which is where it is worth 1%.</summary>

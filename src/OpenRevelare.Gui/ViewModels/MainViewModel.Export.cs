@@ -35,13 +35,9 @@ public partial class MainViewModel
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var exportBox = SplitCropOf(frame);
+            await PreparePhotoExportAsync();
             JpegIO.JpegFit? fit = await Task.Run(() =>
-            {
-                ct.ThrowIfCancellationRequested();
-                var (working, boxed) = LoadForExport(
-                    srcPath, exportBox, ep, pipelineVersion, tiffInputAssumption, sharedSlot: true);
-                return RenderAndWriteExport(working, boxed, srcPath, path, opt, pipelineVersion, ct);
-            });
+                ExportPhoto(srcPath, exportBox, ep, path, opt, pipelineVersion, tiffInputAssumption, ct), ct);
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}") + DescribeFit(fit);
         }
         catch (OperationCanceledException) { StatusText = Loc.T("导出已取消"); }
@@ -49,7 +45,35 @@ public partial class MainViewModel
         {
             StatusText = Loc.T("导出失败：") + ex.Message;
         }
-        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
+        finally { EndPhotoExport(owner); }
+    }
+
+    private bool _photoExportActive;
+    private TaskCompletionSource? _patchExportWait;
+
+    private async Task PreparePhotoExportAsync()
+    {
+        _photoExportActive = true;
+        _patchIdleCts?.Cancel();
+        _patchCts?.Cancel();
+        _patchQueued = null;
+        if (_patchRunning)
+        {
+            _patchExportWait = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            await _patchExportWait.Task;
+            _patchExportWait = null;
+        }
+        _regionSlot = null;
+        _patchDirty = false;
+        // The slot gate can be held across a decode. Keep any wait off the UI thread.
+        await Task.Run(() => { lock (_fullSlotGate) _fullSlot = null; });
+    }
+
+    private void EndPhotoExport(CancellationTokenSource owner)
+    {
+        _photoExportActive = false;
+        EndLongTask(owner);
+        ReleaseBulkBuffers();
     }
 
     // ══ Sharp patch (local full-resolution zoom) ════════════════════════════════
@@ -223,10 +247,8 @@ public partial class MainViewModel
             && s.X0 <= need.X0 && s.Y0 <= need.Y0 && s.X1 >= need.X1 && s.Y1 >= need.Y1)
             return s.Working;
 
-        // A full-resolution decode of this very file may already be resident — the export path
-        // leaves one behind, and the fallback below puts one there whenever a source cannot be
-        // region-decoded. It covers every possible request, so taking it costs nothing where the
-        // alternative is a second whole-file decode of the same pixels.
+        // A full-resolution decode may already be resident from dust analysis or a source that
+        // cannot be region-decoded. Reuse it for requests covered by the same source grid.
         FullSlot? full;
         lock (_fullSlotGate) full = _fullSlot;
         if (full is { Box: null }
@@ -300,7 +322,7 @@ public partial class MainViewModel
     /// </summary>
     private async void SchedulePatchCleanup()
     {
-        if (!_patchDirty) return;
+        if (_photoExportActive || !_patchDirty) return;
         _patchIdleCts?.Cancel();
         var cts = new CancellationTokenSource();
         _patchIdleCts = cts;
@@ -311,8 +333,6 @@ public partial class MainViewModel
         if (Patch is null)
         {
             _regionSlot = null;
-            // Safe to drop even mid-export: ExportAsync holds its own reference to the buffer,
-            // so clearing the slot only means the NEXT caller decodes again.
             lock (_fullSlotGate) _fullSlot = null;
         }
         ReleaseBulkBuffers();
@@ -338,7 +358,7 @@ public partial class MainViewModel
     public async Task RequestSharpPatchAsync(RegionRender.Roi roi)
     {
         using var patchTrace = RenderTrace.Scope("zoom.patch.total");
-        if (CurrentFrame is not { } frame || !HasImage) return;
+        if (_photoExportActive || CurrentFrame is not { } frame || !HasImage) return;
         // The before-edits view strips Stage 2 from a chain the region renderer applies whole, so
         // there is no matching patch to render and the (soft) preview stands in. The NEGATIVE view
         // does have one — see the negative flag threaded below.
@@ -481,6 +501,7 @@ public partial class MainViewModel
         finally
         {
             _patchRunning = false;
+            _patchExportWait?.TrySetResult();
             if (needsDecode) ReportBackground("");
 
             if (_patchQueued is { } next)

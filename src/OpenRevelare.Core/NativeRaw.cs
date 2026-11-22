@@ -45,6 +45,8 @@ internal static class Native
     }
     internal static void Check(int error)
     {
+        const int insufficientMemory = -100007; // LIBRAW_UNSUFFICIENT_MEMORY
+        if (error == insufficientMemory) throw new OutOfMemoryException("LibRaw could not allocate enough memory to decode the image.");
         if (error != 0) throw new LibRawException(error);
     }
 }

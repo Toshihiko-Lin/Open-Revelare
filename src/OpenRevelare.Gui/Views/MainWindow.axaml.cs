@@ -172,6 +172,8 @@ public partial class MainWindow : Window
                         UpdateDustToolbar();
                     if (args.PropertyName is nameof(MainViewModel.HasLongTask) or nameof(MainViewModel.IsBusy))
                         UpdateDustToolbar();
+                    if (args.PropertyName == nameof(MainViewModel.HasLongTask) && !vm.HasLongTask && vm.Patch is null)
+                        SyncSharpPatch();
                     OnWindowsPresentationViewModelPropertyChanged(vm, args.PropertyName);
                 };
                 vm.FrameParamsLoaded += p =>

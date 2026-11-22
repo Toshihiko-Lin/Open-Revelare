@@ -58,9 +58,6 @@ public static class LinearDng
     public static void Write(ImageBuffer displayReferred, ColorSpaceDef space, string path,
                              string? cameraModel = null, SourceExif? sourceExif = null)
     {
-        // Decode and quantize together. A full-resolution float copy plus a separate
-        // linearization sweep used to precede this same 16-bit result.
-        ushort[] raw = Quantise16(displayReferred, space);
         ImageBuffer thumbSource = Resample.ToLongEdge(displayReferred, ThumbnailLongEdge, allowUpscale: false);
         byte[] thumb = Quantise8(thumbSource);
 
@@ -103,7 +100,7 @@ public static class LinearDng
             Entry.Placeholder(273, EntryType.Long, 1),             // StripOffsets — patched below
             Entry.Short(277, 3),
             Entry.Long(278, (uint)displayReferred.Height),
-            Entry.Long(279, (uint)raw.Length * 2),
+            Entry.Long(279, (uint)displayReferred.Data.Length * sizeof(ushort)),
             Entry.Short(284, 1),
             Entry.Shorts(339, 1, 1, 1),                            // SampleFormat: unsigned integer
             Entry.Shorts(50713, 1, 1),                             // BlackLevelRepeatDim
@@ -116,7 +113,7 @@ public static class LinearDng
 
         ExportFile.Write(path, staging =>
         {
-            WriteFile(staging, ifd0, subIfd, thumb, raw);
+            WriteFile(staging, ifd0, subIfd, thumb, displayReferred.Data, space);
             sourceExif?.ApplyToTiff(staging, displayReferred.Width, displayReferred.Height, exactSrgb: false);
         });
     }
@@ -132,28 +129,29 @@ public static class LinearDng
         return [m[0, 0], m[0, 1], m[0, 2], m[1, 0], m[1, 1], m[1, 2], m[2, 0], m[2, 1], m[2, 2]];
     }
 
-    private static ushort[] Quantise16(ImageBuffer encoded, ColorSpaceDef space)
+    private static void WriteRawSamples(BinaryWriter writer, float[] source, ColorSpaceDef space)
     {
-        float[] source = encoded.Data;
-        var raw = new ushort[source.Length];
-        float[]? lut = space.Transfer == TransferFunction.SrgbPiecewise ? Srgb.InverseLut : null;
-        bool power = space.Transfer == TransferFunction.Power;
-        float gamma = (float)space.Gamma;
-        ParallelSweep.Over(raw.Length, (from, to) =>
+        // The TIFF strip is contiguous on disk. Quantizing and writing it in blocks
+        // keeps the DNG layout identical with a fixed-size conversion buffer.
+        var block = new ushort[Math.Min(source.Length, 512 * 1024)];
+        var decode = new OutputRender.SampleDecoder(space);
+        for (int offset = 0; offset < source.Length;)
         {
-            for (int i = from; i < to; i++)
+            int count = Math.Min(block.Length, source.Length - offset);
+            int start = offset;
+            ParallelSweep.Over(count, (from, to) =>
             {
-                // Exactly OutputRender.Decode's LUT/index/power arithmetic and the
-                // original ties-to-even quantization, including extended/nonfinite inputs.
-                float v = source[i];
-                if (lut is not null) v = lut[Srgb.LutIndex(v)];
-                else if (power) v = MathF.Pow(Math.Clamp(v, 0f, 1f), gamma);
-                raw[i] = v <= 0f ? (ushort)0
-                       : v >= 1f ? (ushort)65535
-                       : (ushort)MathF.Round(v * 65535f);
-            }
-        });
-        return raw;
+                for (int i = from; i < to; i++)
+                {
+                    float v = decode.Decode(source[start + i]);
+                    ushort sample = v <= 0f ? (ushort)0 : v >= 1f ? (ushort)65535 : (ushort)MathF.Round(v * 65535f);
+                    block[i] = BitConverter.IsLittleEndian ? sample
+                        : System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(sample);
+                }
+            });
+            writer.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(block.AsSpan(0, count)));
+            offset += count;
+        }
     }
 
     /// <summary>The preview stays DISPLAY-REFERRED: it is looked at, not computed with.</summary>
@@ -235,7 +233,7 @@ public static class LinearDng
     }
 
     private static void WriteFile(string path, List<Entry> ifd0, List<Entry> subIfd,
-                                  byte[] thumb, ushort[] raw)
+                                  byte[] thumb, float[] raw, ColorSpaceDef space)
     {
         // ── Layout. Everything is a function of the entry counts, so no seeking back is needed
         // except to fill the placeholders, which happens before a byte is written.
@@ -278,23 +276,7 @@ public static class LinearDng
 
         w.Write(thumb);
         if (fs.Position % 2 != 0) w.Write((byte)0);
-        if (BitConverter.IsLittleEndian)
-        {
-            w.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(raw.AsSpan()));
-        }
-        else
-        {
-            // DNG's II header always promises little endian, regardless of the host.
-            byte[] block = new byte[64 * 1024];
-            for (int offset = 0; offset < raw.Length;)
-            {
-                int count = Math.Min(block.Length / 2, raw.Length - offset);
-                for (int i = 0; i < count; i++)
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(block.AsSpan(i * 2), raw[offset + i]);
-                w.Write(block.AsSpan(0, count * 2));
-                offset += count;
-            }
-        }
+        WriteRawSamples(w, raw, space);
     }
 
     /// <summary>Pads a value to an even length: TIFF requires every value offset to be

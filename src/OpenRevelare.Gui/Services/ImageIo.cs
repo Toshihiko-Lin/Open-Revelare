@@ -52,9 +52,8 @@ public static class ImageIo
     // start three 1 GB decodes into it. Re-checking also means a long import backs off when
     // something else on the machine grows, and opens back up when it exits.
     //
-    // The two slot sizes are CAMERA numbers. A TIFF is weighed from its own header instead
-    // (<see cref="TiffFullBytes"/>): scanner files range from a few MP to a whole 190 MP strip,
-    // and no fixed slot describes both.
+    // The defaults below are for unknown RAW dimensions. Recognized files are charged for the
+    // source bytes, sensor grid and outputs. Full-size TIFFs use their own header as well.
     private const long FullSlotBytes = 1_200L << 20;     // ~1.2 GB per in-flight full-quality RAW decode
     private const long PreviewSlotBytes = 512L << 20;    // ~0.5 GB per in-flight half-size preview
     private const long ReserveBytes = 2L << 30;          // leave the OS and the rest of the app room
@@ -64,6 +63,9 @@ public static class ImageIo
     private static readonly object GateLock = new();
     private static int _inFlight;
     private static long _inFlightBytes;
+    private static int _waitingExports;
+    private static bool _exportActive;
+    [ThreadStatic] private static bool _ownsExport;
     private static long _cachedBudget;   // bytes available to decodes; see the guard below
     private static bool _budgetKnown;
     private static long _budgetStamp;
@@ -101,7 +103,11 @@ public static class ImageIo
     {
         long now = Environment.TickCount64;
         if (_budgetKnown && now - _budgetStamp < LimitRefreshMs) return _cachedBudget;
-        _cachedBudget = AutoBudget();
+        long budget = AutoBudget(_inFlightBytes);
+        // Start each wave with a sample taken before its first allocation. In-flight estimates
+        // approximate memory already consumed on later samples, so they can lower this ceiling
+        // but cannot expand it while decodes may still be allocating.
+        _cachedBudget = _budgetKnown ? Math.Min(_cachedBudget, budget) : budget;
         _budgetKnown = true;
         _budgetStamp = now;
         return _cachedBudget;
@@ -110,10 +116,10 @@ public static class ImageIo
     /// <summary>Free memory less a reserve, with the decodes already in flight added back — they
     /// have themselves consumed free memory, so the probe is self-correcting and the figure
     /// describes total concurrency rather than "how much MORE fits".</summary>
-    private static long AutoBudget()
+    private static long AutoBudget(long runningBytes = 0)
     {
         if (SystemMemory.TryGetAvailableBytes(out long free))
-            return free + Volatile.Read(ref _inFlightBytes) - ReserveBytes;
+            return free + runningBytes - ReserveBytes;
 
         // No free-memory API (macOS): fall back to the old total-based rule, expressed in
         // full-quality slots so it stays as conservative as it was.
@@ -135,16 +141,15 @@ public static class ImageIo
     }
 
     /// <summary>Run <paramref name="decode"/> once the gate admits a decode of
-    /// <paramref name="slotBytes"/>. A manual limit counts decodes; the automatic one weighs
-    /// them against free memory, always admitting at least one so a small machine still gets
-    /// its picture, and never more than one per core.</summary>
+    /// <paramref name="slotBytes"/>. Free memory limits concurrency even with a manual count.
+    /// A single decode can proceed so an oversized estimate cannot strand a small machine.</summary>
     private static T Gated<T>(long slotBytes, Func<T> decode)
     {
+        // The synchronous export worker already reserved the gate for its entire frame.
+        if (_ownsExport) return decode();
         lock (GateLock)
         {
-            // Timed wait, so a budget that GREW while we were blocked is noticed even if no
-            // decode finished to pulse us. A budget that shrank simply stops admitting until
-            // the excess drains — never cancels work already running.
+            // Pressure can stop admissions without cancelling work already running.
             while (!Admits(slotBytes)) Monitor.Wait(GateLock, 250);
             _inFlight++;
             _inFlightBytes += slotBytes;
@@ -158,15 +163,58 @@ public static class ImageIo
 
     private static bool Admits(long slotBytes)
     {
-        int manual = ManualLimit();
-        if (manual > 0) return _inFlight < manual;
-        if (_inFlight == 0) return true;
-        if (_inFlight >= Math.Min(Environment.ProcessorCount, HardCap)) return false;
-        return _inFlightBytes + slotBytes <= CurrentBudget();
+        if (_exportActive || _waitingExports > 0) return false;
+        if (_inFlight == 0)
+        {
+            _budgetKnown = false;
+            _ = CurrentBudget();
+            return true;
+        }
+        int limit = ManualLimit();
+        if (limit == 0) limit = Math.Min(Environment.ProcessorCount, HardCap);
+        return CanShareDecodeSlot(_inFlight, limit, _inFlightBytes, slotBytes, CurrentBudget());
     }
 
-    /// <summary>A full-quality RAW decode's weight.</summary>
-    private static T Gated<T>(Func<T> decode) => Gated(FullSlotBytes, decode);
+    internal static bool CanShareDecodeSlot(int running, int limit, long runningBytes, long required, long budget) =>
+        running < limit && required <= budget - runningBytes;
+
+    /// <summary>Drain active decodes and reserve their memory headroom through rendering and
+    /// encoding. New background decodes wait even when manual concurrency is configured.</summary>
+    internal static T RunPhotoExport<T>(CancellationToken ct, Func<T> export)
+    {
+        lock (GateLock)
+        {
+            _waitingExports++;
+            try
+            {
+                while (_exportActive || _inFlight != 0)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Monitor.Wait(GateLock, 100);
+                }
+                ct.ThrowIfCancellationRequested();
+                _exportActive = true;
+            }
+            finally
+            {
+                _waitingExports--;
+                Monitor.PulseAll(GateLock);
+            }
+        }
+
+        _ownsExport = true;
+        try { return export(); }
+        finally
+        {
+            _ownsExport = false;
+            lock (GateLock)
+            {
+                _exportActive = false;
+                _budgetKnown = false;
+                Monitor.PulseAll(GateLock);
+            }
+        }
+    }
 
     /// <summary>
     /// A full-quality decode of <paramref name="path"/>: the RAW slot for RAW, the file's own
@@ -174,18 +222,48 @@ public static class ImageIo
     /// in for it.
     /// </summary>
     private static T GatedFull<T>(string path, Func<T> decode)
-        => Gated(RawDecode.IsRawExtension(path) ? FullSlotBytes : TiffFullBytes(path),
-            () => SourceStamp.ReadStable(path, decode));
+        => SourceStamp.ReadStable(path, () => _ownsExport ? decode() :
+            Gated(RawDecode.IsRawExtension(path) ? RawDecodeBytes(path, full: true) : TiffFullBytes(path), decode));
 
     /// <summary>A preview decode's weight — light when it is a half-size LibRaw decode or a
     /// TIFF window (which streams: the output plus one scanline, whatever the file's size — see
     /// <see cref="TiffIO.LoadWorkingRegion"/>); full when the DNG backend's linear sources come
     /// back full size whatever was asked.</summary>
-    private static T GatedPreview<T>(string path, Func<T> decode)
-        => Gated(RawDecode.IsRawExtension(path) && Settings.Current.DecodeBackend == RawDecode.RawBackend.Dng
-                     ? FullSlotBytes
-                     : PreviewSlotBytes,
-                 () => SourceStamp.ReadStable(path, decode));
+    private static T GatedPreview<T>(string path, int[] maxEdges, Func<T> decode)
+        => SourceStamp.ReadStable(path, () =>
+        {
+            long outputBytes = maxEdges.Sum(edge => (long)Math.Max(0, edge) * Math.Max(0, edge) * 12);
+            long bytes = RawDecode.IsRawExtension(path)
+                ? RawDecodeBytes(path, Settings.Current.DecodeBackend == RawDecode.RawBackend.Dng, outputBytes)
+                : Math.Max(PreviewSlotBytes, (64L << 20) + outputBytes);
+            return Gated(bytes, decode);
+        });
+
+    private static long RawDecodeBytes(string path, bool full, long outputBytes = 0)
+    {
+        try
+        {
+            long pixels = RawDecode.EstimateDecodePixels(path);
+            // Auto may rescue an unrecognized file with the full-size DNG backend.
+            bool fullSize = full || pixels == 0 && Settings.Current.DecodeBackend == RawDecode.RawBackend.Auto;
+            return EstimateRawDecodeBytes(pixels, new FileInfo(path).Length, fullSize, outputBytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Leave source failures to the decoder, which owns the error message.
+            return EstimateRawDecodeBytes(0, 0, full, outputBytes);
+        }
+    }
+
+    internal static long EstimateRawDecodeBytes(long pixels, long sourceBytes, bool full, long outputBytes)
+    {
+        // Estimated from the existing 60 MP full and 80 MP half-size decode baselines.
+        // A native context owns one sensor grid even when multiple crop outputs are requested.
+        long native = pixels > 0
+            ? checked(pixels * (full ? 20 : 6))
+            : full ? FullSlotBytes : PreviewSlotBytes;
+        return Math.Max(64L << 20, checked(native + sourceBytes + outputBytes));
+    }
 
     /// <summary>
     /// A full-resolution decode of one rectangle of <paramref name="path"/>: its share of the
@@ -409,7 +487,7 @@ public static class ImageIo
     /// case that ran an 8 GB machine out of memory.
     /// </summary>
     public static (ImageBuffer[] Previews, int SourceWidth, int SourceHeight) LoadPreviews(
-        string path, params int[] maxEdges) => GatedPreview(path, () =>
+        string path, params int[] maxEdges) => GatedPreview(path, maxEdges, () =>
     {
         if (!RawDecode.IsRawExtension(path))
         {
@@ -434,7 +512,7 @@ public static class ImageIo
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
         TiffInputAssumption tiffInputAssumption,
-        params int[] maxEdges) => GatedPreview(path, () =>
+        params int[] maxEdges) => GatedPreview(path, maxEdges, () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -591,7 +669,7 @@ public static class ImageIo
     /// it that way.
     /// </summary>
     public static (ImageBuffer Preview, int SourceWidth, int SourceHeight) LoadPreviewRegion(
-        string path, (double X, double Y, double W, double H) rect, int maxEdge) => GatedPreview(path, () =>
+        string path, (double X, double Y, double W, double H) rect, int maxEdge) => GatedPreview(path, [maxEdge], () =>
     {
         if (RawDecode.IsRawExtension(path))
         {
@@ -626,7 +704,7 @@ public static class ImageIo
         int maxEdge,
         ColorPipelineVersion pipelineVersion,
         IColorManagementEngine colorManagement,
-        TiffInputAssumption tiffInputAssumption) => GatedPreview(path, () =>
+        TiffInputAssumption tiffInputAssumption) => GatedPreview(path, [maxEdge], () =>
     {
         RequirePipelineVersion(pipelineVersion);
         ArgumentNullException.ThrowIfNull(colorManagement);
@@ -685,9 +763,9 @@ public static class ImageIo
         var settings = Settings.Current;
         var backend = settings.DecodeBackend;
         var fbdd = settings.FbddMode;
-        // Retain the independent jobs' conservative budget for all retained output buffers.
-        long slot = backend == RawDecode.RawBackend.Dng ? FullSlotBytes : PreviewSlotBytes;
-        return Gated(checked(slot * rects.Length), () => SourceStamp.ReadStable(path, () =>
+        long outputBytes = checked((long)maxEdge * maxEdge * 12 * rects.Length);
+        return SourceStamp.ReadStable(path, () => Gated(
+            RawDecodeBytes(path, backend == RawDecode.RawBackend.Dng, outputBytes), () =>
         {
             var decoded = RawDecode.DecodeRawPreviewBatch(path, backend, fbdd, rects, maxEdge);
             var results = new (WorkingFrame, int, int)[decoded.Length];

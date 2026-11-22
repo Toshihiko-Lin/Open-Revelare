@@ -550,6 +550,42 @@ public sealed class ProjectReliabilityTests
     }
 
     [Fact]
+    public async Task Photo_export_reports_memory_pressure_and_batch_retries_pending_frames()
+    {
+        string dir = Folder(), first = Image(dir, "first.tif"), second = Image(dir, "second.tif");
+        string project = ProjectFile(dir, new() { SourcePath = first }, new() { SourcePath = second });
+        long available = long.MaxValue;
+        using var vm = new MainViewModel(() => Interlocked.Read(ref available));
+        await vm.OpenProjectAsync(project);
+        await Settle(vm);
+        Assert.True(vm.HasImage);
+        var options = new ExportOptions { KeepSourceExif = false };
+        string existing = Path.Combine(dir, "existing.tif");
+        File.WriteAllText(existing, "previous export");
+
+        Interlocked.Exchange(ref available, 0);
+        await vm.ExportAsync(existing, options);
+        Assert.Contains("可用内存不足", vm.StatusText);
+        Assert.Equal("previous export", File.ReadAllText(existing));
+
+        await vm.ExportRollAsync(Path.Combine(dir, "deliver"), options);
+        var job = vm.LastBatchExportJob!;
+        Assert.False(vm.HasLongTask);
+        Assert.Contains("可用内存不足", job.SystemError);
+        Assert.Equal(OpenRevelare.Gui.Services.BatchExportState.Failed, job.Items[0].State);
+        Assert.Equal(OpenRevelare.Gui.Services.BatchExportState.Pending, job.Items[1].State);
+        Assert.All(job.Items, item => Assert.False(File.Exists(item.OutputPath)));
+
+        Interlocked.Exchange(ref available, long.MaxValue);
+        await vm.RetryBatchExportAsync();
+        Assert.All(job.Items, item =>
+        {
+            Assert.Equal(OpenRevelare.Gui.Services.BatchExportState.Completed, item.State);
+            Assert.True(File.Exists(item.OutputPath));
+        });
+    }
+
+    [Fact]
     public async Task Failed_batch_resumes_after_a_new_view_model_opens_the_same_project()
     {
         string dir = Folder(), first = Image(dir, "first.tif"), bad = Path.Combine(dir, "bad.tif");

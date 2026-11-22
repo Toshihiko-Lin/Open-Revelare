@@ -1560,29 +1560,19 @@ public partial class MainViewModel
     /// The export therefore frames the picture the way the preview showed it, and holds one
     /// cell of the strip rather than all of it: a whole Flextight strip is 1.5–2.3 GB as float,
     /// and decoding it to export a third of it is what an 8 GB machine could not do. Anything
-    /// else — a whole-file frame, a RAW — still takes the full decode, through the single
-    /// full-resolution slot when <paramref name="sharedSlot"/> asks for it (the editor's
-    /// export → tweak → re-export loop) and transiently otherwise (the roll export, which visits
-    /// every frame once).
+    /// else — a whole-file frame, a RAW — takes a full decode. Both paths keep the
+    /// source pixels only for the duration of the frame's export.
     /// </summary>
     private (WorkingFrame Working, FrameParams Params) LoadForExport(
         string sourcePath,
         (double X, double Y, double W, double H)? box,
         FrameParams ep,
         ColorPipelineVersion pipelineVersion,
-        TiffInputAssumption tiffInputAssumption,
-        bool sharedSlot)
+        TiffInputAssumption tiffInputAssumption)
     {
         SetSlideCameraWhiteBalance(ep, sourcePath);
         using var decodeTrace = RenderTrace.Scope("export.decode");
         SourceStamp stamp = SourceStamp.Capture(sourcePath);
-        if (sharedSlot)
-        {
-            var cachedBox = box is not null && !RawDecode.IsRawExtension(sourcePath) ? box : null;
-            WorkingFrame working = LoadFullWorking(sourcePath, pipelineVersion, tiffInputAssumption, cachedBox);
-            stamp.RequireCurrent();
-            return (working, cachedBox is { } split ? ForBox(ep, split) : ep);
-        }
         if (box is { } bx
             && ImageIo.LoadWorkingTiffRegionFull(
                 sourcePath, bx, pipelineVersion, ColorManagement, tiffInputAssumption) is { } window)
@@ -1595,6 +1585,119 @@ public partial class MainViewModel
         stamp.RequireCurrent();
         return (DecodedSources.Track(full, stamp), ep);
     }
+
+    private JpegIO.JpegFit? ExportPhoto(string sourcePath,
+        (double X, double Y, double W, double H)? box, FrameParams ep, string path, ExportOptions opt,
+        ColorPipelineVersion version, TiffInputAssumption assumption, CancellationToken ct,
+        SourceStamp? expectedSource = null, SourceStamp? lutSource = null)
+    {
+        try
+        {
+            return ImageIo.RunPhotoExport(ct, () =>
+            {
+                SourceStamp source = expectedSource ?? SourceStamp.Capture(sourcePath);
+                source.RequireCurrent();
+                if (lutSource is { IsCurrent: false })
+                    throw new IOException(Loc.T("任务的 LUT 参考已更改，请重新创建批量导出任务。"));
+                bool raw = RawDecode.IsRawExtension(sourcePath);
+                long decodePixels;
+                if (raw)
+                {
+                    decodePixels = RawDecode.EstimateDecodePixels(sourcePath);
+                }
+                else
+                {
+                    var (width, height) = TiffIO.ReadTiffSize(sourcePath);
+                    // Include rounding at both edges of a TIFF window.
+                    decodePixels = box is { } region
+                        ? (long)Math.Min(width, Math.Ceiling(width * region.W) + 1)
+                            * (long)Math.Min(height, Math.Ceiling(height * region.H) + 1)
+                        : (long)width * height;
+                }
+                source.RequireCurrent();
+                RequireExportMemory(decodePixels * (raw ? 40 : 24), ct);
+                bool sequential = Settings.Current.SequentialPhotoExport;
+                bool bounded = sequential || PreferLowMemoryExport(decodePixels, _previewAvailableBytes());
+                T Execute<T>(Func<T> action) => sequential ? ExportExecution.RunSequential(action)
+                    : bounded ? ExportExecution.RunLowMemory(action) : action();
+                var (working, boxed) = Execute(() => LoadForExport(sourcePath, box, ep, version, assumption));
+                source.RequireCurrent();
+                ct.ThrowIfCancellationRequested();
+                bounded |= PreferLowMemoryExport(working.Pixels.PixelCount, _previewAvailableBytes());
+                long workspace = EstimateExportWorkspace(working.Pixels.Width, working.Pixels.Height,
+                    boxed, opt, version, bounded);
+                RequireExportMemory(workspace, ct);
+                return Execute(() => RenderAndWriteExport(working, boxed, sourcePath, path, opt, version, ct));
+            });
+        }
+        catch (Exception ex) when (ex is OutOfMemoryException and not InsufficientMemoryException
+            || ex is AggregateException errors && errors.Flatten().InnerExceptions.Any(e => e is OutOfMemoryException))
+        {
+            throw new InsufficientMemoryException(ExportMemoryMessage(), ex);
+        }
+    }
+
+    // Large GPU dispatches may have several concurrent image-sized buffers, especially
+    // while calibrating a workload. Switch sooner than the minimum for the CPU path.
+    private static bool PreferLowMemoryExport(long pixels, long? availableBytes) =>
+        pixels >= 16_000_000 && availableBytes is long free && free < pixels * 96 + (512L << 20);
+
+    private static long EstimateExportWorkspace(int width, int height, FrameParams p, ExportOptions opt,
+        ColorPipelineVersion version, bool bounded)
+    {
+        long sourcePixels = (long)width * height;
+        bool dual = version == ColorPipelineVersion.ManagedV2 && p.OutputIntent != OutputIntent.None
+            && p.ResolvedOutputTarget.IsExtended && (opt.Format is ExportFormat.Dng or ExportFormat.Jpeg
+                || opt.Format == ExportFormat.Heic && opt.HeicAdaptiveHdr);
+        long renderBytes = sourcePixels * (dual ? 48 : 36);
+        if (p.QuarterTurns % 2 != 0) (width, height) = (height, width);
+        if (p.CropRect is { } crop)
+        {
+            width = (int)Math.Clamp(Math.Ceiling(width * crop.W) + 1, 1, width);
+            height = (int)Math.Clamp(Math.Ceiling(height * crop.H) + 1, 1, height);
+        }
+        long renderedPixels = (long)width * height;
+        long outputPixels = renderedPixels;
+        if (opt.Downsample && opt.MaxLongEdge > 0)
+        {
+            var (w, h) = Resample.LongEdgeSize(width, height, opt.MaxLongEdge, opt.AllowUpscale);
+            outputPixels = (long)w * h;
+        }
+        // Budget beyond the decoded source already in memory. Count the live rendition(s)
+        // and give the encoder headroom for resize, quantization and native codec workspace.
+        int encodeBytesPerPixel = opt.Format switch
+        {
+            ExportFormat.Heic => dual ? 88 : 64,
+            ExportFormat.Jpeg => dual ? 42 : 20,
+            ExportFormat.Dng => 12,
+            _ => 12,
+        };
+        if (!bounded && opt.SharpenApplies && opt.Sharpen != OutputSharpen.Level.None)
+            encodeBytesPerPixel += 24;
+        return Math.Max(renderBytes, renderedPixels * (dual ? 24 : 12) + outputPixels * encodeBytesPerPixel);
+    }
+
+    private void RequireExportMemory(long bytes, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (bytes <= 0) return;
+        long required = bytes + Math.Min(bytes / 4, 512L << 20);
+        if (_previewAvailableBytes() is not long free || free >= required) return;
+        // Between frames there can be a large unreachable heap from the previous export.
+        // Recheck after reclaiming it, on the export worker before allocating another frame.
+        _previews.TrimToProtected();
+        _tiles.TrimResident();
+        _preparedPreviews.Clear();
+        _filmPreviews.Clear();
+        RawDecode.ClearSourceCache();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+        ct.ThrowIfCancellationRequested();
+        if (_previewAvailableBytes() is long remaining && remaining < required)
+            throw new InsufficientMemoryException(ExportMemoryMessage());
+    }
+
+    private static string ExportMemoryMessage() =>
+        Loc.T("可用内存不足，无法导出这张照片。请释放内存后重试。");
 
     /// <summary>
     /// <see cref="ForRegion"/> for params that already carry the frame's LIVE crop and orientation
@@ -1664,19 +1767,25 @@ public partial class MainViewModel
             return null;
         }
 
-        RenderedFrame rendered = Pipeline.Render(working, ep, pipelineVersion, ColorManagement);
-        ct.ThrowIfCancellationRequested();
-        // Decided off the frame the render actually produced rather than the params: a LegacyV1
-        // roll ignores its peak and comes back normalized, and then this is an ordinary JPEG.
-        bool gainMap = (opt.Format == ExportFormat.Jpeg || (opt.Format == ExportFormat.Heic && opt.HeicAdaptiveHdr)) && !opt.ExportLinear
-            && rendered.Encoding.Range == NumericRange.Extended;
-        sourceStamp.RequireCurrent();
-        if (!gainMap) return WriteExport(rendered, path, opt, sourceExif);
-
+        bool gainMapRequested = (opt.Format == ExportFormat.Jpeg || (opt.Format == ExportFormat.Heic && opt.HeicAdaptiveHdr))
+            && !opt.ExportLinear;
         ColorSpaceDef baseSpace = opt.ResolvedHdrBaseSpace;
-        RenderedFrame sdrBase = Pipeline.Render(
-            working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
-        sdrBase = HdrGainMap.ColourMatchedSdrBase(sdrBase, rendered, baseSpace);
+        RenderedFrame rendered, sdrBase;
+        if (gainMapRequested && pipelineVersion == ColorPipelineVersion.ManagedV2
+            && ep.OutputIntent != OutputIntent.None && ep.ResolvedOutputTarget.IsExtended)
+        {
+            (rendered, sdrBase) = Pipeline.RenderHdrWithSdrBase(working, ep, ColorManagement, baseSpace, ct);
+        }
+        else
+        {
+            rendered = Pipeline.Render(working, ep, pipelineVersion, ColorManagement);
+            ct.ThrowIfCancellationRequested();
+            sourceStamp.RequireCurrent();
+            if (!gainMapRequested || rendered.Encoding.Range != NumericRange.Extended)
+                return WriteExport(rendered, path, opt, sourceExif);
+            var template = Pipeline.Render(working, GainMapBaseParams(ep, baseSpace), pipelineVersion, ColorManagement);
+            sdrBase = HdrGainMap.ColourMatchedSdrBase(template, rendered, baseSpace);
+        }
         ct.ThrowIfCancellationRequested();
         if (opt.Downsample)
         {
@@ -1719,25 +1828,6 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Output sharpening, on a COPY of the render's pixels — the caller's frame may be the retained
-    /// preview, and a sharpened preview would be a different picture from the one that was graded.
-    ///
-    /// Applied here, after the resize and before the encode, because that is what output sharpening
-    /// means: the correction is sized to the delivered pixels. Anything the option does not apply to
-    /// (see <see cref="ExportOptions.SharpenApplies"/>) passes through untouched.
-    /// </summary>
-    private static RenderedFrame Sharpened(RenderedFrame output, ExportOptions opt)
-    {
-        if (!opt.SharpenApplies || opt.Sharpen == OutputSharpen.Level.None) return output;
-
-        ImageBuffer pixels = output.Pixels;
-        var copy = new ImageBuffer(pixels.Width, pixels.Height, (float[])pixels.Data.Clone())
-            .InheritSourceFrom(pixels);
-        OutputSharpen.Apply(copy, opt.Sharpen);
-        return output.WithPixels(copy);
-    }
-
-    /// <summary>
     /// Scene-linear/extended output is only portable with its exact profile. The old dialog
     /// setting may contain a stale "omit ICC" value from an sRGB export; it must not turn a later
     /// linear or HDR export into an error or an uncharacterized file.
@@ -1761,7 +1851,8 @@ public partial class MainViewModel
             output = opt.Downsample
                 ? rendered.WithPixels(Resample.ToLongEdge(rendered.Pixels, opt.MaxLongEdge, opt.AllowUpscale))
                 : rendered;
-            output = Sharpened(output, opt);
+            // This render is owned by the export. Sharpen at delivery size in the same buffer.
+            if (opt.SharpenApplies) OutputSharpen.Apply(output.Pixels, opt.Sharpen);
         }
         ExportProfilePolicy profilePolicy = ProfilePolicyFor(opt);
 
@@ -1906,7 +1997,7 @@ public partial class MainViewModel
             await RunBatchExportAsync(job, owner.Token);
         }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
-        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
+        finally { EndPhotoExport(owner); }
     }
 
     private BatchExportItem CreateBatchItem(string sourcePath, string? output,
@@ -1919,15 +2010,10 @@ public partial class MainViewModel
         var source = SourceStamp.Capture(sourcePath);
         if (output is not null && File.Exists(output) && opt.Conflict != ExportFile.ConflictPolicy.Overwrite)
             throw new IOException(Loc.T("目标文件已被其他操作创建，请移走文件后重试：") + output);
-        if (lutSource is { IsCurrent: false })
-            throw new IOException(Loc.T("任务的 LUT 参考已更改，请重新创建批量导出任务。"));
-        var (working, boxed) = LoadForExport(sourcePath, box, ep,
-            pipelineVersion, tiffInputAssumption, sharedSlot: false);
-        source.RequireCurrent();
-        JpegIO.JpegFit? fit = RenderAndWriteExport(working, boxed, sourcePath,
-            output!, opt, pipelineVersion, ct);
+        JpegIO.JpegFit? fit = ExportPhoto(sourcePath, box, ep, output!, opt,
+            pipelineVersion, tiffInputAssumption, ct, source, lutSource);
         return DescribeFit(fit);
-    }));
+    }, ct));
 
     private bool RestoreBatchJob(string projectPath)
     {
@@ -1982,11 +2068,12 @@ public partial class MainViewModel
         if (!TryBeginLongTask(Loc.T("重试未完成的导出 …"), out var owner)) return;
         try { await RunBatchExportAsync(job, owner.Token); }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
-        finally { EndLongTask(owner); ReleaseBulkBuffers(); }
+        finally { EndPhotoExport(owner); }
     }
 
     private async Task RunBatchExportAsync(BatchExportJob job, CancellationToken ct)
     {
+        await PreparePhotoExportAsync();
         await job.RunAsync(ct, (i, item) => ReportLongTask(
             Loc.F($"导出 {i + 1}/{job.Items.Count}：{Path.GetFileName(item.SourcePath)} …")));
         int completed = job.Items.Count(i => i.State == BatchExportState.Completed);
@@ -2262,12 +2349,8 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Serialises the check-then-decode above. It used to be a bare read/write, which was fine
-    /// while only the export path called it — one export at a time, on one worker. The sharp
-    /// patch made it reachable from several workers at once, and two threads that both miss the
-    /// slot both decode: at ~690 MB for a 60 MP frame, a handful of overlapping requests is
-    /// gigabytes. The lock holds across the decode on purpose — the second caller is meant to
-    /// WAIT for the first one's buffer, not start a second decode of the same file.
+    /// Hold through the decode so two callers that miss the slot together can share one
+    /// full-size copy. A 60 MP float RGB buffer is about 690 MiB.
     /// </summary>
     private readonly object _fullSlotGate = new();
 

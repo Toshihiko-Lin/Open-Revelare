@@ -56,11 +56,12 @@ public static class Settings
         /// <summary>Ceiling in GB; least-recently-used entries are dropped past it.</summary>
         public int CacheBudgetGb { get; set; } = 5;
 
-        /// <summary>How many RAW decodes may run at once. 0 = 自动 (sized from the machine's
-        /// FREE physical memory, re-checked as work arrives). A manual value overrides that
-        /// entirely — useful both ways: cap it to keep a shared machine responsive, or raise it
-        /// on a workstation with plenty of headroom to spare.</summary>
+        /// <summary>Maximum concurrent decodes. Zero selects the automatic worker count.
+        /// Available memory and the cost of each decode limit both modes.</summary>
         public int DecodeConcurrency { get; set; }
+
+        /// <summary>Force one application-managed worker per exported photo. Otherwise use available memory.</summary>
+        public bool SequentialPhotoExport { get; set; }
 
         /// <summary>Backdrop the photo is judged against (预览区右键 → 背景色). Deliberately
         /// independent of <see cref="Theme"/>: it is a viewing condition, not UI chrome, and a

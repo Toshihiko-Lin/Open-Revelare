@@ -171,8 +171,8 @@ public sealed class HdrGainMap
 
         // Both into the base's linear space: the base undoes its own TRC, the HDR rendition is
         // rotated into the base's primaries and fitted into its gamut.
-        float[] s = (float[])sdrBase.Pixels.Data.Clone();
-        OutputRender.Decode(s, baseSpace);
+        float[] s = sdrBase.Pixels.Data;
+        var decode = new OutputRender.SampleDecoder(baseSpace);
         float[] d = HdrInBaseGamut(hdr, baseSpace);
 
         const float offset = DefaultOffset;
@@ -185,7 +185,7 @@ public sealed class HdrGainMap
             {
                 for (int i = from; i < to; i++)
                 {
-                    float hv = d[i], sv = s[i];
+                    float hv = d[i], sv = decode.Decode(s[i]);
                     if (!(sv > 0f)) sv = 0f;      // NaN lands on black; negatives cannot occur
                     gain[i] = MathF.Log2((hv + offset) / (sv + offset));
                 }
@@ -200,7 +200,7 @@ public sealed class HdrGainMap
                 for (int p = from; p < to; p += 3)
                 {
                     float yh = ly * d[p] + lg * d[p + 1] + lb * d[p + 2];
-                    float ys = ly * s[p] + lg * s[p + 1] + lb * s[p + 2];
+                    float ys = ly * decode.Decode(s[p]) + lg * decode.Decode(s[p + 1]) + lb * decode.Decode(s[p + 2]);
                     if (!(ys > 0f)) ys = 0f;
                     // Never below zero: the HDR rendition is at least as luminous as its SDR
                     // sibling everywhere by construction, so a negative here is float noise or
@@ -338,15 +338,15 @@ public sealed class HdrGainMap
         RequireHdr(hdr);
         if (template.Pixels.Width != hdr.Pixels.Width || template.Pixels.Height != hdr.Pixels.Height)
             throw new ArgumentException("SDR template and HDR master must share one geometry.");
-        float[] sdr = (float[])template.Pixels.Data.Clone();
-        OutputRender.Decode(sdr, baseSpace);
+        float[] sdr = template.Pixels.Data;
+        var decode = new OutputRender.SampleDecoder(baseSpace);
         float[] pixels = HdrInBaseGamut(hdr, baseSpace);
         (float wr, float wg, float wb) = LuminanceWeights(baseSpace);
         ParallelSweep.OverPixels(template.Pixels.PixelCount, (from, to) =>
         {
             for (int i = from; i < to; i += 3)
             {
-                float ys = wr * sdr[i] + wg * sdr[i + 1] + wb * sdr[i + 2];
+                float ys = wr * decode.Decode(sdr[i]) + wg * decode.Decode(sdr[i + 1]) + wb * decode.Decode(sdr[i + 2]);
                 float yh = wr * pixels[i] + wg * pixels[i + 1] + wb * pixels[i + 2];
                 float scale = yh > 1e-10f && float.IsFinite(ys) ? Math.Max(0, ys) / yh : 0;
                 pixels[i] *= scale; pixels[i + 1] *= scale; pixels[i + 2] *= scale;

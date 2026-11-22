@@ -391,7 +391,7 @@ public static class TiffIO
         }
         else
         {
-            Parallel.For(0, boundaries.Count - 1, band =>
+            ParallelSweep.For(0, boundaries.Count - 1, band =>
             {
                 int y0 = boundaries[band], y1 = boundaries[band + 1];
                 using Tiff own = OpenInput(path)
@@ -1925,7 +1925,8 @@ public static class TiffIO
     {
         int rowSamples = checked(image.Width * 3);
         int strips = (image.Height + rowsPerStrip - 1) / rowsPerStrip;
-        int workers = Math.Min(strips, Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+        int limit = ExportExecution.IsSequential ? 1 : ExportExecution.UsesBoundedBuffers ? 2 : 4;
+        int workers = Math.Min(strips, Math.Clamp(Environment.ProcessorCount / 2, 1, limit));
         int stripBytes = checked(Math.Min(rowsPerStrip, image.Height) * rowSamples * bytesPerSample);
         var buffers = new DeflateStripBuffer[workers];
         var options = new ParallelOptions { MaxDegreeOfParallelism = workers };

@@ -7,7 +7,7 @@ public static class EmbeddedLensCorrections
         if (!c.HasVignette) return;
         var region = sourceRegion ?? FrameRegion.Whole(image.Width,image.Height);
         var (cx,cy,radius) = EmbeddedLensCalibration.Coordinates(region.FrameWidth,region.FrameHeight,c.VignetteCenterX,c.VignetteCenterY);
-        Parallel.For(0,image.Height,y => {
+        ParallelSweep.For(0,image.Height,y => {
             for (int x=0; x<image.Width; x++) {
                 double dx=x+region.OffsetX-cx,dy=y+region.OffsetY-cy;
                 float gain=(float)c.Gain(Math.Sqrt(dx*dx+dy*dy)/radius);
@@ -63,7 +63,7 @@ public static class EmbeddedLensCorrections
         else ApplyVignetting(src,c,region);
         if(!c.HasDistortion) return src;
         var output=new ImageBuffer(src.Width,src.Height).InheritSourceFrom(image);
-        Parallel.For(0,src.Height,y=>{
+        ParallelSweep.For(0,src.Height,y=>{
             for(int x=0;x<src.Width;x++) for(int ch=0;ch<3;ch++) {
                 var mapped=c.Map(x+region.OffsetX,y+region.OffsetY,ch,region.FrameWidth,region.FrameHeight);
                 double sx=Math.Clamp(mapped.X-region.OffsetX,0,src.Width-1),sy=Math.Clamp(mapped.Y-region.OffsetY,0,src.Height-1);

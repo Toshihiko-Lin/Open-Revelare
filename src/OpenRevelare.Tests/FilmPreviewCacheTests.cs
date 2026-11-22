@@ -71,14 +71,21 @@ public sealed class FilmPreviewCacheTests
     [Theory]
     [InlineData(ColorPipelineVersion.LegacyV1)]
     [InlineData(ColorPipelineVersion.ManagedV2)]
-    public void Creative_edits_reuse_film_but_match_full_recomputation(ColorPipelineVersion version)
+    public void Creative_and_output_edits_reuse_film_and_match_full_recomputation(ColorPipelineVersion version)
     {
         var source = Source();
         var cache = new FilmPreviewCache(() => 2L << 30);
         var p = Parameters();
         using var cmm = new LittleCmsEngine();
         EqualRender(Pipeline.Render(source, p, version, cmm), cache.Render(source, p, version, cmm, default));
-        foreach (var change in CreativeChanges())
+        Action<FrameParams>[] changes =
+        [
+            .. CreativeChanges(),
+            p => p.OutputSpace = "DisplayP3", p => p.HdrPeakNits = 1000,
+            p => p.PrintLut = ":kodak-2383", p => p.DisplayReferredStage2 = !p.DisplayReferredStage2,
+            p => p.OutputIntent = OutputIntent.None
+        ];
+        foreach (var change in changes)
         {
             var edited = p.Clone();
             change(edited);
@@ -86,11 +93,11 @@ public sealed class FilmPreviewCacheTests
             EqualRender(Pipeline.Render(source, edited, version, cmm), cache.Render(source, edited, version, cmm, default));
         }
         Assert.Equal(1, cache.Preparations);
-        Assert.Equal(CreativeChanges().Length, cache.Hits);
+        Assert.Equal(changes.Length, cache.Hits);
     }
 
     [Fact]
-    public void Physical_geometry_dust_and_output_changes_invalidate_and_match_fresh_pixels()
+    public void Physical_geometry_and_dust_changes_invalidate_and_match_fresh_pixels()
     {
         Action<FrameParams>[] changes =
         [
@@ -108,8 +115,6 @@ public sealed class FilmPreviewCacheTests
             p => p.DustSpots.Add(new DustSpot(0.4, 0.4, 0.02)),
             p => p.AutomaticDustMask = new DustMask(64, 48, (0, 0, 1, 1), [new(12, 10, 13)]),
             p => p.EmbeddedLens = new EmbeddedLensCalibration("test", VignettePolynomial: [0.1]),
-            p => p.OutputSpace = "DisplayP3", p => p.HdrPeakNits = 1000,
-            p => p.PrintLut = ":kodak-2383", p => p.DisplayReferredStage2 = false,
         ];
         var source = Source();
         using var cmm = new LittleCmsEngine();

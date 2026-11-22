@@ -412,7 +412,7 @@ public static class JpegIO
     private static void FillRows(int width, int height, Action<int> fill)
     {
         // The image's storage is fixed before workers start; each owns disjoint rows.
-        if ((long)width * height >= 262144) Parallel.For(0, height, fill);
+        if ((long)width * height >= 262144) ParallelSweep.For(0, height, fill);
         else for (int y = 0; y < height; y++) fill(y);
     }
 

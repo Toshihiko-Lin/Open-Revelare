@@ -78,7 +78,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>Decoded previews for the whole roll, keyed by source path — a frame switch is a
     /// dictionary lookup, not a decode. See <see cref="PreviewCache"/> for the memory model.</summary>
-    private readonly PreviewCache _previews = new();
+    private readonly PreviewCache _previews;
 
     /// <summary>In-flight decodes, keyed by path. A frame switch and the roll warm-up routinely
     /// want the same file at the same instant (the roll warms from the current frame outward, and
@@ -603,39 +603,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // aspect the double crop produced. Virtual copies of a whole frame have no rect in their key
     // and still share one tile, which is correct.
     private const int TileMaxEdge = 320;   // ≈ the cell width of a 2048 px sheet at 6 columns
-    private readonly Dictionary<string, WorkingFrame> _tiles = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SourceStamp> _tileSources = new(StringComparer.Ordinal);
+    private readonly RollTileCache _tiles;
 
     private void CaptureTile(string key, WorkingFrame preview, long generation, SourceStamp stamp)
     {
         // File attributes and resampling can take much longer than a dictionary lookup.
-        // TileFor/ClearPreviewCaches run on the UI thread and share this gate.
-        if (_previews.Generation != generation || !stamp.IsCurrent) return;
-        lock (_tiles)
-            if (_tiles.ContainsKey(key)) return;
+        // ClearPreviewCaches can invalidate the generation while this tile is prepared.
+        long tileGeneration = _tiles.Generation;
+        if (_previews.Generation != generation || !stamp.IsCurrent || _tiles.Contains(key)) return;
         WorkingFrame tile = DecodedSources.Track(
             preview.WithPixels(Resample.Box(preview.Pixels, TileMaxEdge)), stamp);
-        if (!stamp.IsCurrent) return;
         lock (_tiles)
         {
             if (_previews.Generation != generation) return;
-            if (_tileSources.TryGetValue(stamp.Path, out var old) && old != stamp)
-                foreach (string stale in _tiles.Keys.Where(k => k.StartsWith(old.Key + "|", StringComparison.Ordinal)).ToArray())
-                    _tiles.Remove(stale);
-            _tileSources[stamp.Path] = stamp;
-            if (_tiles.ContainsKey(key)) return;
-            _tiles[key] = tile;
+            _tiles.Put(key, tile, stamp, tileGeneration);
         }
     }
 
-    /// <summary>The tile for a frame, which is the tile of the region that frame owns.</summary>
-    private WorkingFrame? TileFor(RollFrame f)
-    {
-        string key = PreviewKey(f.Path, SplitCropOf(f));
-        lock (_tiles) return _tiles.TryGetValue(key, out WorkingFrame? t) ? t : null;
-    }
-
-    private void ClearTiles() { lock (_tiles) { _tiles.Clear(); _tileSources.Clear(); } }
+    private void ClearTiles() { lock (_tiles) _tiles.Clear(); }
 
     private void ClearPreviewCaches()
     {
@@ -650,7 +635,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             _previews.Clear();
             _tiles.Clear();
-            _tileSources.Clear();
         }
     }
 
@@ -667,12 +651,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             keys.Add(PreviewKey(candidate.Path, SplitCropOf(candidate)));
         }
         _previews.Protect(keys);
+        _tiles.Protect(keys);
     }
 
-    /// <summary>Single-slot full-resolution buffer, kept ONLY between the decode and the export
-    /// that asked for it. Full-res is ~288 MB for 24 MP, so it is decoded lazily (export path
-    /// only) and never held for the roll — the same rule the Python GUI states for _hires_current.</summary>
-    /// <remarks>A record CLASS, not a tuple: it is written from the export worker thread and read
+    /// <summary>One full-resolution buffer for sharp patches and dust analysis. Photo export
+    /// releases this slot so it does not retain a second full-size source.</summary>
+    /// <remarks>A record CLASS, not a tuple: it is written from a decode worker and read
     /// on the UI thread, and only a reference assignment is atomic.</remarks>
     private sealed record FullSlot(
         string Path,
@@ -2982,9 +2966,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 f.Params.SprocketEnabled = false;
                 f.Params.SprocketThreshold = SprocketThreshold;
             }
-            // Admit the expensive board samples before the rest of the roll's preview decodes.
-            if (!warmupStarted) StartRollWarmUp();
-            AutoInvertOnImportRun(new BoardCutResult(threshold));
+            // On the staged path, let each analysis decode also produce its thumbnails.
+            // Two whole-roll walks can outrun one another and evict still-needed previews.
+            if (!warmupStarted)
+            {
+                _warmCts?.Cancel();
+                WarmupProgress = "";
+                _rollWarm = false;
+            }
+            AutoInvertOnImportRun(new BoardCutResult(threshold), warmPreviews: !warmupStarted);
             UpdateSprocketOverlay();
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
@@ -3016,9 +3006,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// this roll by hand, and silently seeding t_base both overwrites the starting point they
     /// wanted and hides that anything happened.
     /// </summary>
-    private void AutoInvertOnImportRun(BoardCutResult measuredBoardCut)
+    private void AutoInvertOnImportRun(BoardCutResult measuredBoardCut, bool warmPreviews)
     {
-        if (_cfgAutoInvert && !IsPositiveFilm) _ = AutoInvertRollAsync(measuredBoardCut);
+        if (_cfgAutoInvert && !IsPositiveFilm) _ = AutoInvertRollAsync(measuredBoardCut, warmPreviews);
     }
 
     /// <summary>
@@ -3482,7 +3472,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// the user gets a usable picture immediately, and the roll-wide refinement lands after. The
     /// two-stage shape is why this is async and why the status line reports twice.
     /// </summary>
-    private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null)
+    private async Task AutoInvertRollAsync(BoardCutResult? measuredBoardCut = null, bool warmPreviews = false)
     {
         if (IsPositiveFilm) return;
         var progressOwner = new object();
@@ -3491,7 +3481,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         RollAnalysisProgress = Loc.T("正在测量片基与高光 …");
         try
         {
-            await AutoInvertRollCoreAsync(measuredBoardCut);
+            await AutoInvertRollCoreAsync(measuredBoardCut, warmPreviews);
         }
         catch (OperationCanceledException)
         {
@@ -3509,12 +3499,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             {
                 _rollProgressOwner = null;
                 RollAnalysisProgress = "";
+                if (warmPreviews && !_rollWarm && !_disposed) StartRollWarmUp();
             }
             ReleaseBulkBuffers();
         }
     }
 
-    private async Task AutoInvertRollCoreAsync(BoardCutResult? measuredBoardCut)
+    private async Task AutoInvertRollCoreAsync(BoardCutResult? measuredBoardCut, bool warmPreviews)
     {
         if (_previewLinear is null) return;
         _previewStamp?.RequireCurrent();
@@ -3598,7 +3589,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         // ── Stage 2: pool the whole roll ───────────────────────────────────────────────────
         List<RollFrame> frames = Frames.ToList();
-        if (frames.Count <= 1) { FinishAutoInvert(cts); return; }
+        if (frames.Count <= 1)
+        {
+            if (warmPreviews) _rollWarm = true;
+            FinishAutoInvert(cts);
+            return;
+        }
 
         // Everything on screen is now one frame's answer standing in for the roll. Say so, and
         // let the notice be dismissed — a user who already knows should not have to keep reading
@@ -3608,16 +3604,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            // Walk outward from the current frame, and dedupe by preview key — the SAME order and
-            // the same work unit WarmRollAsync uses. Both matter for speed: this pass shares the
-            // warm-up's decodes through PreviewAsync's cache and in-flight table (no frame is ever
-            // decoded twice), but only if the two ask for frames in the same order. Walking the
-            // roll in index order while the warm-up walks outward means constantly asking for the
-            // one frame it has not reached yet, which serialises this behind it.
+            // Vote once per source crop. Copies share its decoded pixels, while each
+            // thumbnail uses the copy's own framing and grade.
             int start = Math.Max(0, CurrentFrame is { } cur ? frames.IndexOf(cur) : 0);
             var order = new List<(int RollIndex, string Path,
-                (double X, double Y, double W, double H)? Pre, RollFrame Frame)>();
+                (double X, double Y, double W, double H)? Pre, RollFrame Frame, string Key)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var thumbnailTargets = warmPreviews ? new Dictionary<string, List<RollFrame>>(StringComparer.OrdinalIgnoreCase) : null;
             var analysisSources = new SourceSnapshot(frames.Select(f => f.Path)
                 .Concat(_calRgbPaths ?? Array.Empty<string>())
                 .Concat(_lccSourcePath is { } lccPath ? new[] { lccPath } : Array.Empty<string>()));
@@ -3626,7 +3619,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 int rollIndex = (start + i) % frames.Count;
                 RollFrame f = frames[rollIndex];
                 var pre = SplitCropOf(f);
-                if (seen.Add(PreviewKey(f.Path, pre))) order.Add((rollIndex, f.Path, pre, f));
+                string key = PreviewKey(f.Path, pre);
+                if (seen.Add(key)) order.Add((rollIndex, f.Path, pre, f, key));
+                if (thumbnailTargets is not null)
+                {
+                    if (!thumbnailTargets.TryGetValue(key, out var targets)) thumbnailTargets[key] = targets = [];
+                    targets.Add(f);
+                }
             }
 
             // Decode completion order is deliberately NOT analysis order. The old concurrent
@@ -3648,11 +3647,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await Parallel.ForEachAsync(batches, new ParallelOptions
             {
                 CancellationToken = ct,
-                // PreviewAsync still shares the warm-up's cache and in-flight decodes.  The
-                // work after each decode is different, though: it allocates Stage-1 and crop
-                // buffers outside the decode memory gate, so keep that fan-out deliberately
-                // narrower than the warm-up.
-                MaxDegreeOfParallelism = Math.Min(ImageIo.PreviewWorkers, AnalysisWorkers),
+                // The shared pass replaces two sets of in-flight preview requests. Keep
+                // its analysis and thumbnail buffers bounded while the decode gate weighs RAWs.
+                MaxDegreeOfParallelism = Math.Min(ImageIo.PreviewWorkers, warmPreviews ? 2 * AnalysisWorkers : AnalysisWorkers),
             }, async (batch, token) =>
             {
                 PreviewCache.Entry[]? batchEntries = null;
@@ -3666,9 +3663,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 for (int j = 0; j < batch.Length; j++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var (rollIndex, path, pre, frame) = batch[j];
-                    ImageBuffer raw;
-                    try { raw = (batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token)).Preview; }
+                    var (rollIndex, path, pre, frame, key) = batch[j];
+                    WorkingFrame working;
+                    try { working = (batchEntries is not null ? batchEntries[j] : await PreviewAsync(path, pre, pipelineVersion, inputAssumption).WaitAsync(token)).Working; }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
                     {
@@ -3687,7 +3684,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         continue;
                     }
 
-                    raw = Resample.Box(raw, AnalysisMaxEdge);
+                    if (thumbnailTargets is not null)
+                    {
+                        await PublishWarmThumbnailsAsync(working, thumbnailTargets[key], pre, token);
+                        token.ThrowIfCancellationRequested();
+                        RenderTrace.Count("import.analysis.preview-reused");
+                    }
+                    ImageBuffer raw = Resample.Box(working.Pixels, AnalysisMaxEdge);
 
                     // Restrict to the KEPT PICTURE before measuring anything — the same rule
                     // AutoRegion states for the single-frame path. What PreviewAsync returns is the
@@ -3743,6 +3746,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             });
             ReportRollAnalysisProgress(cts, "");
             ct.ThrowIfCancellationRequested();
+            if (warmPreviews)
+            {
+                _rollWarm = true;
+                MarkSheetDirty();
+            }
             completed.Sort((a, b) => a.RollIndex.CompareTo(b.RollIndex));
             var masks = new List<ImageBuffer>(completed.Count);
             var values = new List<ImageBuffer>(completed.Count);
@@ -5136,6 +5144,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         _previewAvailableBytes = previewAvailableBytes ?? (() =>
             SystemMemory.TryGetAvailableBytes(out long free) ? free : null);
+        _previews = new PreviewCache(_previewAvailableBytes);
+        long tileBudget = Math.Clamp(SystemMemory.TotalBytes() / 256, 16L << 20, 64L << 20);
+        _tiles = new RollTileCache(tileBudget, _previewAvailableBytes);
         _preparedPreviews = new PreparedPreviewCache(availableBytes: _previewAvailableBytes);
         _filmPreviews = new FilmPreviewCache(_previewAvailableBytes);
         Frames.CollectionChanged += (_, _) => { RefreshScopeSubscriptions(); NotifyRollBroadcastHints(); };
@@ -5169,6 +5180,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _renderCts?.Cancel();
         _thumbCts?.Cancel();
         _warmCts?.Cancel();
+        _tiles.Dispose();
         _autoSave.Discard();
         Loc.Changed -= RetranslateText;
         if (_colorManagement.IsValueCreated)
@@ -5412,7 +5424,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Redraw the roll's cover contact sheet from the resident tiles and store it.
+    /// Redraw the roll's cover contact sheet from the cached tiles and store it.
     ///
     /// Every frame is re-rendered, not just the edited one: a tile is ~320 px, so the whole roll
     /// costs a few milliseconds per frame on a worker, and tracking which cell went stale would
@@ -5429,7 +5441,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private async Task<bool> UpdateRollSheetAsync()
     {
         var sources = new SourceSnapshot(Frames.Select(f => f.Path));
-        if (BuildSheetCells() is not { } cells) return false;
+        if (BuildSheetCells() is not { } snapshot) return false;
         string rollId = _roll!.Id;
         if (!MayWriteCover(rollId)) return false;
         var opt = new SheetComposer.Options
@@ -5439,8 +5451,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         };
 
         ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
-        List<ImageBuffer> thumbs = await Task.Run(() => RenderSheetCells(cells, pipelineVersion));
+        List<ImageBuffer>? thumbs = await Task.Run(() => RenderSheetCells(snapshot.Cells, snapshot.Generation, pipelineVersion));
+        if (thumbs is null) return false;
         SheetComposer.Grid grid = await Task.Run(() => SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt));
+        if (snapshot.Generation != _tiles.Generation) return false;
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);   // UI thread
         ImageBuffer sheet = SheetComposer.ToBuffer(composed);
 
@@ -5454,14 +5468,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// of not leaving yesterday's cover on the wall after an edit.</summary>
     private bool UpdateRollSheetNow()
     {
-        if (BuildSheetCells() is not { } cells) return false;
+        if (BuildSheetCells() is not { } snapshot) return false;
         if (!MayWriteCover(_roll!.Id)) return false;
         var opt = new SheetComposer.Options
         {
             Style = Settings.Current.SheetStyle, Aspect = Settings.Current.SheetAspect,
             Orientation = Settings.Current.SheetOrientation,
         };
-        List<ImageBuffer> thumbs = RenderSheetCells(cells, _colorPipelineVersion);
+        List<ImageBuffer>? thumbs = RenderSheetCells(snapshot.Cells, snapshot.Generation, _colorPipelineVersion);
+        if (thumbs is null) return false;
         SheetComposer.Grid grid = SheetComposer.BuildGrid(thumbs, SheetLong(thumbs, opt), opt);
         using RenderTargetBitmap composed = SheetComposer.Compose(grid, Notes, opt);
         SheetStore.Save(_roll!.Id, SheetComposer.ToBuffer(composed));
@@ -5472,7 +5487,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// A cover drawn while the roll is still decoding is full of placeholder cells. That is fine
     /// for a roll that has no cover yet — a fresh import fills its card in progressively — but it
     /// must never REPLACE a finished cover: reopening an untouched old project re-decodes the whole
-    /// roll (tiles are RAM-only), and stepping back into 图库 during those seconds used to flush a
+    /// roll (tiles are session-local), and stepping back into 图库 during those seconds used to flush a
     /// half-empty sheet over the good one, blanking the bottom of the card.
     ///
     /// Refusing here costs nothing: the warm-up marks the sheet dirty when it finishes, so an edit
@@ -5480,40 +5495,51 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private bool MayWriteCover(string rollId) => _rollWarm || !SheetStore.Exists(rollId);
 
-    /// <summary>Snapshot every cell's tile and params on the UI thread — both move under a
-    /// background pass. Null when there is nothing worth drawing yet.</summary>
-    private List<(WorkingFrame? Tile, FrameParams Params)>? BuildSheetCells()
+    /// <summary>Snapshot tile keys and params on the UI thread. The render loads one tile at a time.</summary>
+    private (List<(string? Key, FrameParams Params)> Cells, long Generation)? BuildSheetCells()
     {
         if (_roll is null || Frames.Count == 0) return null;
-        var cells = new List<(WorkingFrame? Tile, FrameParams Params)>(Frames.Count);
+        long generation = _tiles.Generation;
+        var cells = new List<(string? Key, FrameParams Params)>(Frames.Count);
         foreach (RollFrame f in Frames)
         {
             // A split frame's tile was cut from the source as that frame's region PLUS its margin,
             // so the stored whole-scan rect does not describe it — re-expressed against the box, or
             // the cover gets a crop of a crop. Same rule as RenderPreviewAsync / RenderThumbnailAsync.
-            cells.Add((TileFor(f), ForRegion(f.Params.Clone(), f, SplitCropOf(f))));
+            var margin = SplitCropOf(f);
+            string key = PreviewKey(f.Path, margin);
+            cells.Add((_tiles.Contains(key) ? key : null, ForRegion(f.Params.Clone(), f, margin)));
         }
-        return cells.Any(c => c.Tile is not null) ? cells : null;   // nothing decoded yet
+        return cells.Any(c => c.Key is not null) ? (cells, generation) : null;
     }
 
-    private List<ImageBuffer> RenderSheetCells(
-        List<(WorkingFrame? Tile, FrameParams Params)> cells,
+    private List<ImageBuffer>? RenderSheetCells(
+        List<(string? Key, FrameParams Params)> cells, long generation,
         ColorPipelineVersion pipelineVersion)
     {
         // Placeholder cells borrow a real tile's dimensions so the grid geometry (median aspect)
         // is the one the finished sheet will have.
-        ImageBuffer sample = cells.First(c => c.Tile is not null).Tile!.Pixels;
+        string sampleKey = cells.First(c => c.Key is not null).Key!;
+        if (_tiles.Get(sampleKey, generation, promote: false) is not { } sampleTile) return null;
+        ImageBuffer sample = sampleTile.Pixels;
+        ImageBuffer? placeholder = null;
         var list = new List<ImageBuffer>(cells.Count);
         // The cover is an sRGB JPEG on an SDR card, so an HDR roll's cells are its SDR rendition
         // (D-031) — the extended render's numbers are linear and unbounded, and read as pixels
         // they would print a dark, clipped sheet.
-        foreach (var (tile, p) in cells)
-            list.Add(tile is null ? Placeholder(sample.Width, sample.Height)
-                                  : Pipeline.RenderSdrRendition(
-                                      tile,
-                                      p,
-                                      pipelineVersion,
-                                      ColorManagement).Pixels);
+        foreach (var (key, p) in cells)
+        {
+            if (key is null)
+            {
+                list.Add(placeholder ??= Placeholder(sample.Width, sample.Height));
+                continue;
+            }
+            // A tile present in the snapshot must still be readable. Retain the old cover if
+            // this generation was invalidated or if reading the temporary file failed.
+            var tile = key == sampleKey ? sampleTile : _tiles.Get(key, generation, promote: false);
+            if (tile is null) return null;
+            list.Add(Pipeline.RenderSdrRendition(tile, p, pipelineVersion, ColorManagement).Pixels);
+        }
         return list;
     }
 

@@ -44,7 +44,7 @@ public static class Resample
         var dst = new ImageBuffer(ow, oh);
         float[] s = src.Data, d = dst.Data;
         float inv = 1.0f / (factor * factor);
-        Parallel.For(0, oh, oy =>
+        ParallelSweep.For(0, oh, oy =>
         {
             for (int ox = 0; ox < ow; ox++)
             {
@@ -151,7 +151,7 @@ public static class Resample
         (int Start, float[] Weights)[] taps = AxisTaps(srcLength, length);
 
         int lines = horizontally ? height : width;
-        Parallel.For(0, lines, line =>
+        ParallelSweep.For(0, lines, line =>
         {
             for (int i = 0; i < length; i++)
             {

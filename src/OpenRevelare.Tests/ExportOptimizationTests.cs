@@ -66,7 +66,8 @@ public sealed class ExportOptimizationTests
         WithFile("dng", path =>
         {
             var space = ColorSpaces.ByName(name, ColorSpaces.Srgb);
-            var image = Frame(false, 263, 131).Pixels;
+            // sRGB crosses a streaming DNG block boundary and ends in a partial block.
+            var image = name == "sRGB" ? Frame(false, 521, 337).Pixels : Frame(false, 263, 131).Pixels;
             float[] special = [-0.2f, 0f, 0.5f, 1f, 1.2f, float.NaN, float.PositiveInfinity, float.NegativeInfinity,
                 0.5f / 65535f, 1.5f / 65535f];
             special.CopyTo(image.Data, 0);
@@ -129,6 +130,54 @@ public sealed class ExportOptimizationTests
             }
             Assert.Equal(original, frame.Pixels.Data);
         });
+    }
+
+    [Fact]
+    public void Sequential_processing_preserves_render_and_deflate_export()
+    {
+        WithFile("tif", path =>
+        {
+            var source = Frame(false, 521, 513).Pixels;
+            var parameters = new FrameParams { VignetteAmount = 0.5, DistortionK1 = 0.08, QuarterTurns = 1 };
+            var parallel = Pipeline.ProcessFrame(source, parameters);
+            TiffIO.ExportTiff16(parallel, path, TiffIO.CompressionMode.Deflate);
+            byte[] expected = File.ReadAllBytes(path);
+
+            var sequential = ExportExecution.RunSequential(() =>
+            {
+                var rendered = Pipeline.ProcessFrame(source, parameters);
+                TiffIO.ExportTiff16(rendered, path, TiffIO.CompressionMode.Deflate);
+                return rendered;
+            });
+
+            Assert.Equal(parallel.Data, sequential.Data);
+            Assert.Equal(expected, File.ReadAllBytes(path));
+            Assert.False(ExportExecution.IsSequential);
+        });
+    }
+
+    [Fact]
+    public void Sequential_sharpening_preserves_pixels_across_halo_and_border_rows()
+    {
+        foreach (var (width, height) in new[] { (31, 3), (31, 29), (521, 513) })
+        {
+            var parallel = Frame(false, width, height).Pixels;
+            var sequential = new ImageBuffer(parallel.Width, height, (float[])parallel.Data.Clone());
+            var bounded = new ImageBuffer(parallel.Width, height, (float[])parallel.Data.Clone());
+            OutputSharpen.Apply(parallel, OutputSharpen.Level.High);
+            ExportExecution.RunSequential(() =>
+            {
+                OutputSharpen.Apply(sequential, OutputSharpen.Level.High);
+                return sequential;
+            });
+            ExportExecution.RunLowMemory(() =>
+            {
+                OutputSharpen.Apply(bounded, OutputSharpen.Level.High);
+                return bounded;
+            });
+            Assert.Equal(parallel.Data, sequential.Data);
+            Assert.Equal(sequential.Data, bounded.Data);
+        }
     }
 
     [Fact]

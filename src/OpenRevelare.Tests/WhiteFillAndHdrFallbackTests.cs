@@ -74,6 +74,11 @@ public sealed class WhiteFillAndHdrFallbackTests
             Assert.Equal("", p.SdrRendition().PrintLut); // the old independently rendered base drops the look
             var master = Pipeline.Render(source, p, ColorPipelineVersion.ManagedV2, cmm);
             var fallback = Pipeline.RenderSdrRendition(source, p, ColorPipelineVersion.ManagedV2, cmm);
+            var template = Pipeline.Render(source, p.SdrRendition(), ColorPipelineVersion.ManagedV2, cmm);
+            var separatelyMatched = HdrGainMap.ColourMatchedSdrBase(template, master, ColorSpaces.Srgb);
+            var pair = Pipeline.RenderHdrWithSdrBase(source, p, cmm, ColorSpaces.Srgb);
+            Assert.Equal(master.Pixels.Data, pair.Master.Pixels.Data);
+            Assert.Equal(separatelyMatched.Pixels.Data, pair.SdrBase.Pixels.Data);
             float[] hdrColour = HdrGainMap.HdrInBaseGamut(master, ColorSpaces.Srgb);
             float[] sdrColour = (float[])fallback.Pixels.Data.Clone();
             OutputRender.Decode(sdrColour, ColorSpaces.Srgb);

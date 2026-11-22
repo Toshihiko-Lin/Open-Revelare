@@ -63,6 +63,8 @@ public sealed class PreviewCache
     public PreviewCache() : this(BudgetBytes, () =>
         SystemMemory.TryGetAvailableBytes(out long bytes) ? bytes : null, probeIntervalMs: 2_000) { }
 
+    internal PreviewCache(Func<long?> availableBytes) : this(BudgetBytes, availableBytes, probeIntervalMs: 2_000) { }
+
     internal PreviewCache(long budgetBytes, Func<long?> availableBytes, int probeIntervalMs = 0)
     {
         if (budgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(budgetBytes));
@@ -84,7 +86,9 @@ public sealed class PreviewCache
     private static long SizeOf(ImageBuffer b) => (long)b.Data.Length * sizeof(float);
 
     /// <summary>The cached entry for <paramref name="path"/>, or null. Marks it most-recently-used.</summary>
-    public Entry? Get(string path)
+    public Entry? Get(string path) => Get(path, promote: true);
+
+    internal Entry? Get(string path, bool promote)
     {
         lock (_gate)
         {
@@ -96,8 +100,11 @@ public sealed class PreviewCache
                 if (_nodes.Remove(path, out var node)) _lru.Remove(node);
                 return null;
             }
-            Touch(path);
-            Trim(path);
+            if (promote)
+            {
+                Touch(path);
+                Trim(path);
+            }
             return e;
         }
     }
@@ -141,6 +148,16 @@ public sealed class PreviewCache
             budget = Math.Min(budget / 3, 128L << 20);
         else if (_sampledFreeBytes is >= 0 and < ModeratePressureBytes)
             budget = Math.Min(budget / 2, 384L << 20);
+        EvictTo(budget, protectedPath);
+    }
+
+    internal void TrimToProtected()
+    {
+        lock (_gate) EvictTo(0, protectedPath: null);
+    }
+
+    private void EvictTo(long budget, string? protectedPath)
+    {
         for (LinkedListNode<string>? victim = _lru.Last; _bytes > budget && victim is not null;)
         {
             LinkedListNode<string>? previous = victim.Previous;

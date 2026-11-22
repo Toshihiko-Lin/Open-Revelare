@@ -166,7 +166,7 @@ public static class Lcc
 
         if (region.IsWhole(w, h))
         {
-            Parallel.For(0, h, y =>
+            ParallelSweep.For(0, h, y =>
             {
                 int b = y * w * 3;
                 for (int x = 0; x < w * 3; x++)
@@ -176,7 +176,7 @@ public static class Lcc
         }
 
         int ox = (int)region.OffsetX, oy = (int)region.OffsetY;
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             int b = y * w * 3;
             int fb = ((oy + y) * fw + ox) * 3;
@@ -216,7 +216,7 @@ public static class Lcc
             wx[x] = fx - ix;
         }
 
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             double fy = Math.Clamp(oy + y, 0, fh - 1) * sy;
             int iy = (int)Math.Floor(fy);
@@ -300,7 +300,7 @@ public static class Lcc
             // image, so only they pay Reflect() (a modulo plus branches, per tap); the interior —
             // all but 2r of each row/column — indexes straight into the buffer. Same arithmetic,
             // same order, same results; it just stops multiplying the tap count by a modulo.
-            Parallel.For(0, h, y =>
+            ParallelSweep.For(0, h, y =>
             {
                 int row = y * w;
                 int lo = Math.Min(r, w), hi = Math.Max(lo, w - r);
@@ -327,7 +327,7 @@ public static class Lcc
                     tmp[row + x] = (float)acc;
                 }
             });
-            Parallel.For(0, w, x =>
+            ParallelSweep.For(0, w, x =>
             {
                 int lo = Math.Min(r, h), hi = Math.Max(lo, h - r);
                 for (int y = 0; y < lo; y++)
@@ -394,7 +394,7 @@ public static class Lcc
         double sy = h > 1 ? (double)(h - 1) / (H - 1) : 0.0;
         double sx = w > 1 ? (double)(w - 1) / (W - 1) : 0.0;
 
-        Parallel.For(0, H, oy =>
+        ParallelSweep.For(0, H, oy =>
         {
             double fy = oy * sy;
             int y0 = (int)Math.Floor(fy);

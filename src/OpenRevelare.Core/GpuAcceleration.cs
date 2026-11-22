@@ -121,7 +121,7 @@ public static class GpuAcceleration
     {
         result = null!;
         var mode = Mode;
-        if (mode == GpuAccelerationMode.Off || _unavailable
+        if (ExportExecution.UsesBoundedBuffers || mode == GpuAccelerationMode.Off || _unavailable
             || (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
             || (mode == GpuAccelerationMode.Auto && pixels < minimumPixels)) return false;
         // Bound peak device allocations; very large scans retain the existing CPU route.

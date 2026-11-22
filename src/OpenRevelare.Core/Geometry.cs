@@ -30,7 +30,7 @@ public static class Geometry
         // so no two workers touch the same output element and the result is identical to the
         // serial walk. Worth doing — a quarter turn on a 24 MP frame is 72 M scattered writes,
         // and this was the one geometry op still running on a single core.
-        Parallel.For(0, h, r =>
+        ParallelSweep.For(0, h, r =>
         {
             for (int c = 0; c < w; c++)
             {
@@ -48,7 +48,7 @@ public static class Geometry
         int w = img.Width, h = img.Height;
         var outImg = new ImageBuffer(w, h);
         float[] src = img.Data, dst = outImg.Data;
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             for (int x = 0; x < w; x++)
             {
@@ -108,7 +108,7 @@ public static class Geometry
         // (x, y). Combined with crop.py's -degrees that flips the sign of both sin
         // terms relative to the textbook (x, y) form. Getting this wrong rotates the
         // image the WRONG WAY and still looks plausible in isolation.
-        Parallel.For(0, h, yo =>
+        ParallelSweep.For(0, h, yo =>
         {
             for (int xo = 0; xo < w; xo++)
             {

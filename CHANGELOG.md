@@ -1,5 +1,22 @@
 # OpenRevelare — 更新日志
 
+## v1.11.1（2026-11-22）
+
+**性能优化**
+
+- **整卷导入更快。** 缩短 RAW 分析和缩略图生成的等待时间，内存紧张时自动降低并发。
+- **预览响应更快。** 调整 LUT、输出色域或 HDR 上限后，更快看到效果。
+- **大图导出更省内存。** 可在「偏好设置 → 图像与性能 → 照片导出」选择「串行（低内存）」。若导出提示内存不足，可释放内存后重试。
+
+---
+
+**Performance improvements**
+
+- **Faster roll imports.** RAW analysis and thumbnail generation take less time. Fewer files are processed at once when memory is low.
+- **More responsive previews.** See changes to LUTs, output color space, and HDR peak brightness sooner.
+- **Lower memory use when exporting large photos.** Choose Sequential (low memory) under Preferences → Imaging & Performance → Photo export. If an export runs out of available memory, free up memory and retry.
+
+
 ## v1.11.0（2026-11-22）
 
 **新增**

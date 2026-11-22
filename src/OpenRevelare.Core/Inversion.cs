@@ -43,6 +43,19 @@ public static class Inversion
         double[]? chromaAmp = null,
         double[,]? chromaMatrix = null,
         double? blackFloor = null)
+        => InvertInto(image, new ImageBuffer(image.Width, image.Height), cal, chromaAmp, chromaMatrix, blackFloor);
+
+    internal static ImageBuffer InvertInPlace(
+        ImageBuffer image, FrameParams cal, double[]? chromaAmp, double[,]? chromaMatrix)
+    {
+        InvertInto(image, image, cal, chromaAmp, chromaMatrix, blackFloor: null);
+        image.SourceQuantisationStep = 0;
+        return image;
+    }
+
+    private static ImageBuffer InvertInto(
+        ImageBuffer image, ImageBuffer outImg, FrameParams cal,
+        double[]? chromaAmp, double[,]? chromaMatrix, double? blackFloor)
     {
         double[] amp = chromaAmp ?? new[] { 1.0, 1.0, 1.0 };
         bool ampIdentity = ApproxAll(amp, 1.0);
@@ -109,12 +122,11 @@ public static class Inversion
         float bf = bfActive ? (float)blackFloor!.Value : 0.0f;
         float bfScale = bfActive ? (float)(1.0 / (1.0 - blackFloor!.Value)) : 1.0f;
 
-        var outImg = new ImageBuffer(image.Width, image.Height);
         float[] src = image.Data;
         float[] dst = outImg.Data;
         int width = image.Width;
 
-        Parallel.For(0, image.Height, y =>
+        ParallelSweep.For(0, image.Height, y =>
         {
             int rowStart = y * width * 3;
             int rowEnd = rowStart + width * 3;

@@ -75,8 +75,15 @@ public sealed class SourceRevisionTests : IDisposable
             new[] { typeof(string), typeof((double X, double Y, double W, double H)?) })!;
         Task<PreviewCache.Entry> Preview((double, double, double, double)? region = null) =>
             (Task<PreviewCache.Entry>)previewMethod.Invoke(vm, new object?[] { path, region })!;
-        var tileMethod = typeof(MainViewModel).GetMethod("TileFor", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        WorkingFrame? Tile() => (WorkingFrame?)tileMethod.Invoke(vm, new object[] { new RollFrame(path) });
+        var tiles = (RollTileCache)typeof(MainViewModel).GetField("_tiles", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(vm)!;
+        var previewKey = typeof(MainViewModel).GetMethod("PreviewKey", BindingFlags.NonPublic | BindingFlags.Instance,
+            new[] { typeof(string), typeof((double, double, double, double)?) })!;
+        WorkingFrame? Tile()
+        {
+            string key = (string)previewKey.Invoke(vm, new object?[] { path, null })!;
+            return tiles.Get(key, tiles.Generation);
+        }
         var fullMethod = typeof(MainViewModel).GetMethod("LoadFullWorking", BindingFlags.NonPublic | BindingFlags.Instance)!;
         WorkingFrame Full((double, double, double, double)? box = null) => (WorkingFrame)fullMethod.Invoke(vm,
             new object?[] { path, ColorPipelineVersion.ManagedV2, TiffInputAssumption.Linear, box })!;

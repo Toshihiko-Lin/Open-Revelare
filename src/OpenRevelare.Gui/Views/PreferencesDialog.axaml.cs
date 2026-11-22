@@ -29,6 +29,7 @@ public sealed class PreferencesDialog : Window
     private ComboBox _theme = new();
     private ComboBox _language = new();
     private ComboBox _concurrency = new();
+    private ComboBox _exportConcurrency = new();
     private ComboBox _gpu = new();
     private ListBox _category = new();
     private TextBlock _dngNote = new();
@@ -51,7 +52,7 @@ public sealed class PreferencesDialog : Window
     private sealed record State(int Backend, int Fbdd, int Theme, int Language, int Concurrency,
                                 bool CacheOn, bool CachePersist, string CacheDir, int CacheBudget,
                                 string SheetDir, int SheetBudget, bool AutoInvert, int Gpu, bool CameraColor,
-                                int Category);
+                                int Category, bool SequentialExport);
 
     public PreferencesDialog()
     {
@@ -80,7 +81,8 @@ public sealed class PreferencesDialog : Window
             AutoInvert: s.AutoInvertOnImport,
             Gpu: s.GpuMode == GpuAccelerationMode.Off ? 1 : 0,
             CameraColor: s.CharacterizeRawNegativeView,
-            Category: 0));
+            Category: 0,
+            SequentialExport: s.SequentialPhotoExport));
     }
 
     private State Snapshot() => new(
@@ -98,7 +100,8 @@ public sealed class PreferencesDialog : Window
         AutoInvert: _autoInvert.IsChecked ?? true,
         Gpu: Math.Max(0, _gpu.SelectedIndex),
         CameraColor: _cameraColor.IsChecked ?? false,
-        Category: Math.Max(0, _category.SelectedIndex));
+        Category: Math.Max(0, _category.SelectedIndex),
+        SequentialExport: _exportConcurrency.SelectedIndex == 1);
 
     private void Build(State v)
     {
@@ -118,6 +121,8 @@ public sealed class PreferencesDialog : Window
         concurrencyItems[0] = Loc.T("自动（按可用内存）");
         for (int i = 1; i <= MaxConcurrency; i++) concurrencyItems[i] = Loc.F($"{i} 张同时解码");
         _concurrency = Combo(concurrencyItems, v.Concurrency);
+        _exportConcurrency = Combo(new[] { Loc.T("自动（按可用内存）"), Loc.T("串行（低内存）") },
+            v.SequentialExport ? 1 : 0);
 
         _cacheBudget = Combo(CacheBudgets.Select(g => Loc.F($"{g} GB（约 {g * 1024 / 349} 帧 60MP）")).ToArray(), v.CacheBudget);
         _sheetBudget = Combo(SheetBudgets.Select(g => Loc.F($"{g} GB（约 {g * 1024 * 1024 / 300} 卷）")).ToArray(), v.SheetBudget);
@@ -199,7 +204,10 @@ public sealed class PreferencesDialog : Window
                 Row(Loc.T("GPU 加速"), _gpu),
                 Description(Loc.T("加速大图缩放与输出锐化；设备不可用或没有提速时自动使用 CPU。Windows 和 macOS 均支持。")),
                 Row(Loc.T("RAW 并发解码数"), _concurrency),
-                Details(Loc.T("解码资源详情"), _concurrencyNote)));
+                Details(Loc.T("解码资源详情"), _concurrencyNote)),
+            PreferenceCard(Loc.T("照片导出"),
+                Row(Loc.T("导出处理方式"), _exportConcurrency),
+                Description(Loc.T("照片始终逐张导出。串行模式用一个线程处理像素和 TIFF 压缩，可能较慢。"))));
 
         Control storage = CategoryPage(
             Loc.T("存储"),
@@ -331,8 +339,8 @@ public sealed class PreferencesDialog : Window
         // One interpolated literal apiece, not a concatenation: `$"…" + "…"` collapses to a plain
         // string before Loc.F could see the composite format, and the overload would not bind.
         _concurrencyNote.Text = _concurrency.SelectedIndex <= 0
-            ? Loc.F($"{freeText} → 自动：导入预览 {autoPreview} 张并发、全尺寸解码 {autoFull} 张。预览解码约占 0.5 GB/张，全尺寸约 1.2 GB/张，导入过程中会随可用内存变化自动升降。")
-            : Loc.F($"手动固定 {_concurrency.SelectedIndex} 张（当前自动会选：预览 {autoPreview} 张、全尺寸 {autoFull} 张）。{freeText}；预览解码约占 0.5 GB/张，全尺寸约 1.2 GB/张，设高了会让机器换页变慢。");
+            ? Loc.F($"{freeText}。按典型 RAW 估计，预览可同时解码 {autoPreview} 张，全尺寸 {autoFull} 张。实际并发随文件尺寸和可用内存调整。")
+            : Loc.F($"并发上限为 {_concurrency.SelectedIndex} 张。{freeText}。实际并发仍随文件尺寸和可用内存调整。");
     }
 
     private static readonly int[] CacheBudgets = { 2, 5, 10, 20, 50 };
@@ -412,6 +420,7 @@ public sealed class PreferencesDialog : Window
         s.Theme = _theme.SelectedIndex == 1 ? "light" : "dark";
         s.Language = _language.SelectedIndex switch { 1 => "zh", 2 => "en", _ => "auto" };
         s.DecodeConcurrency = Math.Max(0, _concurrency.SelectedIndex);
+        s.SequentialPhotoExport = _exportConcurrency.SelectedIndex == 1;
         s.GpuMode = _gpu.SelectedIndex == 1 ? GpuAccelerationMode.Off : GpuAccelerationMode.Auto;
         GpuAcceleration.Mode = s.GpuMode;
         s.AutoInvertOnImport = _autoInvert.IsChecked ?? true;

@@ -24,9 +24,8 @@ public partial class MainViewModel
     /// broadcast re-renders the strip instead of re-decoding the whole roll (it used to pay a RAW
     /// decode per frame, every single time anything was applied to the roll).
     ///
-    /// The tile is tried FIRST because it is the only one of the two that cannot be evicted: on a
-    /// long roll the preview cache drops earlier frames, and 「应用标定到整卷」 would then decode
-    /// them again just to redraw a 256 px thumbnail.
+    /// The small tile is tried first. The roll's temporary cache keeps it available after the
+    /// larger editing preview has been evicted.
     /// </summary>
     private async Task DecodeThumbnailsAsync(CancellationToken ct)
     {
@@ -51,8 +50,11 @@ public partial class MainViewModel
                     // split scan the file holds several negatives, and the path-keyed lookups used to
                     // hand each frame the strip's first slice.
                     var pre = SplitCropOf(f);
-                    WorkingFrame source = TileFor(f)
-                                          ?? _previews.Get(PreviewKey(f.Path, pre))?.Working
+                    string key = PreviewKey(f.Path, pre);
+                    long generation = _tiles.Generation;
+                    WorkingFrame source = (_tiles.Contains(key)
+                                              ? await Task.Run(() => _tiles.Get(key, generation, promote: false), ct) : null)
+                                          ?? _previews.Get(key, promote: false)?.Working
                                           ?? (await PreviewAsync(f.Path, pre).WaitAsync(ct)).Working;
                     await RenderThumbnailAsync(f, source, pre, ct);
                 }
@@ -122,6 +124,22 @@ public partial class MainViewModel
         ThumbnailProgress = "";
         _thumbCts = new CancellationTokenSource();
         _ = DecodeThumbnailsAsync(_thumbCts.Token);
+    }
+
+    private async Task PublishWarmThumbnailsAsync(WorkingFrame source, List<RollFrame> candidates,
+        (double X, double Y, double W, double H)? margin, CancellationToken ct)
+    {
+        // Use the planned group rather than rebuilding file identities on the UI thread.
+        var targets = await Dispatcher.UIThread.InvokeAsync(() =>
+            candidates.Where(f => !ct.IsCancellationRequested && Frames.Contains(f)
+                && f.Thumbnail is null && SplitCropOf(f) == margin).ToList());
+        foreach (RollFrame frame in targets)
+        {
+            if (ct.IsCancellationRequested) return;
+            try { await RenderThumbnailAsync(frame, source, margin, ct); }
+            catch (OperationCanceledException) { return; }
+            catch { /* one bad thumbnail must not stop the roll */ }
+        }
     }
 
     /// <summary>
@@ -201,23 +219,8 @@ public partial class MainViewModel
                     catch (OperationCanceledException) { throw; }
                     catch { Interlocked.Increment(ref done); continue; }   // undecodable → skip, keep going
 
-                    // Publish each frame's thumbnail the moment its decode lands, rather than at the
-                    // end of the roll — the strip fills in progressively instead of all at once.
-                    // Matched on the preview key, so a split frame only takes the decode of its OWN
-                    // slice and not a sibling's.
-                    // Reuse the snapshot's region/revision identity. Rebuilding every frame's
-                    // key here did N² synchronous FileInfo.Refresh calls on the UI thread.
-                    List<RollFrame> targets = await Dispatcher.UIThread.InvokeAsync(() =>
-                        targetsByKey[key].Where(f => !token.IsCancellationRequested &&
-                                          Frames.Contains(f) && f.Thumbnail is null && SplitCropOf(f) == pre)
-                              .ToList());
-                    foreach (RollFrame f in targets)
-                    {
-                        if (token.IsCancellationRequested) return;
-                        try { await RenderThumbnailAsync(f, entry.Working, pre, token); }
-                        catch (OperationCanceledException) { return; }
-                        catch { /* one bad thumbnail must not stop the roll */ }
-                    }
+                    await PublishWarmThumbnailsAsync(entry.Working, targetsByKey[key], pre, token);
+                    token.ThrowIfCancellationRequested();
 
                     int n = Interlocked.Increment(ref done);
                     ReportBackground(n >= total ? "" : Loc.F($"后台解码 {n}/{total} …"));

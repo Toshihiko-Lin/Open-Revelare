@@ -99,7 +99,7 @@ public static class LensCorrections
         float ofsX = (float)region.OffsetX, ofsY = (float)region.OffsetY;
         int lastFx = (int)fw - 1, lastFy = (int)fh - 1;
         int iOfsX = (int)region.OffsetX, iOfsY = (int)region.OffsetY;
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             float fy0 = ofsY + y;
             for (int x = 0; x < w; x++)
@@ -159,7 +159,7 @@ public static class LensCorrections
         // size this reduces term-for-term to what the whole-frame path always computed, which
         // is what keeps the parity baseline bit-identical.
         double fw = region.FrameWidth, fh = region.FrameHeight;
-        Parallel.For(0, h, y =>
+        ParallelSweep.For(0, h, y =>
         {
             // yy in [-1,1] across the FRAME height, xx in [-1,1] across the FRAME width.
             float gy = fh > 1 ? (float)(-1.0 + 2.0 * (region.OffsetY + y) / (fh - 1)) : 0.0f;
