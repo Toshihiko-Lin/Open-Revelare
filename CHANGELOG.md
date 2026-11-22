@@ -4,7 +4,7 @@
 
 **新增**
 
-- **正片（反转片）支持。** 导入彩色或黑白正片后，可手动采样光源和片基、调整观片亮度，并将光源校准同步到整卷。预览和导出保留片基色调，高光平滑过渡。
+- **正片（反转片）支持。** 导入彩色或黑白正片后，可手动采样光源和片基、调整观片亮度，并将光源校准同步到整卷。
 - **相机与扫描仪采集校准（试验）。** 可记录设备校准信息，或应用相机暗场／无片场校正、扫描仪输入 ICC。
 - **扫描仪 DNG 导入。** 支持 VueScan、SilverFast 等软件输出的兼容未压缩 16 位 RGB／RGBI DNG，自动读取完整扫描图像。
 - **红外除尘。** 对兼容的 VueScan RGBI DNG，可用红外通道检测灰尘和划痕，并在应用前检查、编辑蒙版。
@@ -13,7 +13,6 @@
 
 - 装好 PURENeg 后，自动检测、红外检测和手绘得到的除尘蒙版统一使用 PURENeg 填充。
 - LibRaw 更新至 0.22.3。
-- 右侧校准面板的片基、高光和光源采样按钮回到各自的校准分组，负片的灰卡采样分组默认展开。
 
 **修复**
 
@@ -24,7 +23,7 @@
 
 **Added**
 
-- **Slide (reversal film) support.** Import color or black-and-white slides, sample the light source and film base manually, and adjust viewing brightness. Sync light-source calibration across the roll. Previews and exports retain the film-base tint and roll off highlights smoothly.
+- **Slide (reversal film) support.** Import color or black-and-white slides, sample the light source and film base manually, and adjust viewing brightness. Sync light-source calibration across the roll.
 - **Camera and scanner capture calibration (experimental).** Record device calibration details or apply camera dark/open-gate correction or a scanner input ICC profile.
 - **Scanner DNG import.** Import compatible uncompressed 16-bit RGB/RGBI DNGs from VueScan, SilverFast, and other software at full resolution.
 - **Infrared dust removal.** Detect dust and scratches in compatible VueScan RGBI DNGs, then review and edit the mask before applying it.
@@ -33,7 +32,6 @@
 
 - When PURENeg is installed, it fills dust masks from automatic detection, infrared detection and manual painting.
 - Updated LibRaw to 0.22.3.
-- Moved film-base, highlight, and light-source sampling back into their respective sections in the right-hand calibration panel. The gray-card sampling section now opens by default for negatives.
 
 **Fixed**
 
