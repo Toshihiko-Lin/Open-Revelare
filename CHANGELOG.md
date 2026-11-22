@@ -1,6 +1,6 @@
 # OpenRevelare — 更新日志
 
-## v1.11.0（待发布）
+## v1.11.0（2026-11-22）
 
 **新增**
 
@@ -18,6 +18,7 @@
 **修复**
 
 - 修复 Linux/X11 上整卷处理进度浮层的兼容性问题。
+- 修复可用内存较低时，小型扫描仪校准 TIFF 被误判为内存不足的问题。
 
 ---
 
@@ -37,6 +38,7 @@
 **Fixed**
 
 - Fixed a compatibility issue with the roll processing progress overlay on Linux/X11.
+- Fixed an incorrect low-memory error when opening small scanner calibration TIFFs.
 
 ## v1.10.0（2026-11-13）
 
