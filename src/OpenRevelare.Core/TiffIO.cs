@@ -1414,9 +1414,16 @@ public static class TiffIO
             || tif.GetField(TiffTag.ICCPROFILE) is not null || tif.GetField(TiffTag.TRANSFERFUNCTION) is not null)
             throw new NotSupportedException("Measurement requires untiled, top-left, 16-bit or float RGB device TIFF without ICC/TRC. Export device data; do not just strip a processed image's profile.");
         bool floating = ValidateSampleStorage(tif, bps);
-        long bytes = checked((long)w * h * 12);
-        if (w <= 0 || h <= 0 || bytes > int.MaxValue * 4L
-            || (PhysicalMemory.TryGetAvailableBytes(out long free) && bytes + (128L << 20) > free))
+        long pixels = (long)w * h;
+        if (w <= 0 || h <= 0 || pixels > Array.MaxLength / 3)
+            throw new InvalidOperationException("Scanner measurement image exceeds available memory.");
+        long bytes = pixels * 3 * sizeof(float);
+        // Available memory can dip briefly on macOS. Reserve headroom for large scans
+        // without rejecting small measurement targets that allocate at most 1 MiB.
+        const long memoryProbeThreshold = 1L << 20;
+        const long decodeHeadroom = 128L << 20;
+        if (bytes > memoryProbeThreshold && PhysicalMemory.TryGetAvailableBytes(out long free)
+            && bytes + decodeHeadroom > free)
             throw new InvalidOperationException("Scanner measurement image exceeds available memory.");
         float step = floating ? 1f : 1f / 65535f;
         SampleWindow[] windows = SampleWindow.Resolve(w, h, null);

@@ -215,8 +215,8 @@ jobs:
       # 显示/导出色彩管理继续使用独立的固定 Little CMS 共享库。
       - name: Restore or build native dependencies
         uses: ./.github/actions/build-native
-      - name: LibRaw runtime and decode smoke tests
-        run: dotnet test src/OpenRevelare.Tests -c Release --nologo --filter "FullyQualifiedName~LibRawRuntimeTests|FullyQualifiedName~LinearDngTests"
+      - name: Regression tests on macOS ${{ matrix.arch }}
+        run: dotnet test -c Release --nologo
       - name: publish + 装配 Little CMS manifest
         run: |
           RID=${{ matrix.rid }}
