@@ -348,6 +348,8 @@ public sealed class ProjectReliabilityTests
         });
         using var vm = new MainViewModel();
         await vm.OpenProjectAsync(path); await Settle(vm);
+        // The initial headless preview can report a failure through the same status text.
+        await vm.ScheduledRenderTask.WaitAsync(TimeSpan.FromSeconds(10));
         File.WriteAllText(Path.Combine(dir, "flat.tif"), "invalid reference");
         await vm.RestoreProjectReferencesAsync(dir);
         Assert.Equal(missing, Project.Load(path).Meta.LccPath);
