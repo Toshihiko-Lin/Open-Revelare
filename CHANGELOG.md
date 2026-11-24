@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.11.2（待发布）
+
+**修复**
+
+- 修复 macOS 导出 JPEG 或 HEIC 时可能误报内存不足的问题。可用内存估算现在会计入部分可回收的文件缓存。[#13](https://github.com/Toshihiko-Lin/Open-Revelare/issues/13)
+
+---
+
+**Fixed**
+
+- Fixed an incorrect low-memory error that could block JPEG or HEIC exports on macOS. The available memory estimate now includes a portion of the reclaimable file cache. [#13](https://github.com/Toshihiko-Lin/Open-Revelare/issues/13)
+
 ## v1.11.1（2026-11-22）
 
 **性能优化**
