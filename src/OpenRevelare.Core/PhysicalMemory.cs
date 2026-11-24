@@ -26,7 +26,7 @@ public static class PhysicalMemory
         {
             bool found = OperatingSystem.IsWindows() ? TryWindows(out bytes)
                 : OperatingSystem.IsLinux() ? TryLinux(out bytes)
-                : OperatingSystem.IsMacOS() && TryMacOS(out bytes);
+                : OperatingSystem.IsMacOS() && TryMacOS(Sysctl, out bytes);
             if (!found) return false;
             // The host's MemAvailable can exceed a container/process memory allowance.
             long limit = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
@@ -122,10 +122,12 @@ public static class PhysicalMemory
             && len is sizeof(uint) or sizeof(ulong);
     }
 
+    internal delegate bool TryReadSysctl(string name, out ulong value);
+
     /// <summary>
     /// macOS has no single "available" counter, so this reconstructs one from the VM page
-    /// statistics that <c>sysctlbyname</c> exposes — the same numbers mach's
-    /// <c>host_statistics64</c> returns, without paying for the mach port.
+    /// statistics that <c>sysctlbyname</c> exposes. Here the free and speculative
+    /// counts are separate, unlike the free count from <c>host_statistics64</c>.
     ///
     /// Deliberately NOT <c>vm.page_free_count</c> alone. That is the exact analogue of Linux's
     /// MemFree, which the branch above rejects for good reason, and macOS is the worst case for
@@ -136,7 +138,7 @@ public static class PhysicalMemory
     ///
     /// What the kernel can hand a new allocation without swapping is free + speculative
     /// (read-ahead pages nobody has claimed) + purgeable (volatile caches, dropped on demand)
-    /// + external (clean file-backed pages, reclaimable by dropping them). Inactive pages that
+    /// + pageable external (file-backed pages, including reclaimable file cache). Inactive pages that
     /// are NOT external are dirty anonymous memory: reclaiming those means a swap write, which
     /// is the stall we are sizing concurrency to avoid, so they are left out.
     ///
@@ -147,21 +149,21 @@ public static class PhysicalMemory
     /// whole gate exists to avoid. Free and speculative pages are counted whole; they are
     /// genuinely unclaimed.
     /// </summary>
-    private static bool TryMacOS(out long bytes)
+    internal static bool TryMacOS(TryReadSysctl read, out long bytes)
     {
         bytes = 0;
-        if (!Sysctl("hw.pagesize", out ulong pageSize) || pageSize == 0) return false;
-        if (!Sysctl("vm.page_free_count", out ulong free)) return false;
+        if (!read("hw.pagesize", out ulong pageSize) || pageSize == 0) return false;
+        if (!read("vm.page_free_count", out ulong free)) return false;
 
         // Only the free count is required. The rest are refinements: each has been present for
         // many releases, but a probe that hard-fails on one missing key would silently drop the
         // whole platform back to the total-based estimate, which is what P5 was about.
         ulong outright = free;
-        if (Sysctl("vm.page_speculative_count", out ulong spec)) outright += spec;
+        if (read("vm.page_speculative_count", out ulong spec)) outright += spec;
 
         ulong reclaimable = 0;
-        if (Sysctl("vm.page_purgeable_count", out ulong purge)) reclaimable += purge;
-        if (Sysctl("vm.page_external_count", out ulong ext)) reclaimable += ext;
+        if (read("vm.page_purgeable_count", out ulong purge)) reclaimable += purge;
+        if (read("vm.page_pageable_external_count", out ulong external)) reclaimable += external;
 
         ulong pages = outright + (ulong)(reclaimable * ReclaimableShare);
 
