@@ -4,15 +4,12 @@ namespace OpenRevelare.Core;
 /// Writes the finished positive as a LINEAR DNG — a 16-bit LinearRaw image plus the colour tags
 /// that say what its numbers mean.
 ///
-/// WHAT IT IS FOR. Handing the result to Lightroom, Camera Raw or Capture One for the grade. A
-/// 16-bit TIFF can do that too, but it arrives as a finished picture: the raw controls are off, the
-/// tone curve has already been applied, and highlight recovery has nothing to recover from. A DNG
-/// arrives as MATERIAL — the raw panel is live, the white balance slider works, and the host
-/// applies its own rendering. What this file carries is the inversion and the grade; what it
-/// deliberately does not carry is the display curve.
+/// The main image carries the finished SDR grade in linear light. The embedded profile requests
+/// an identity tone curve and no automatic black subtraction so readers that honor it start
+/// from the finished look. Readers may apply their own RAW defaults.
 ///
 /// WHAT IS IN IT. The pixels are the ordinary SDR render in the roll's output space with that
-/// space's encoding curve UNDONE, so they are linear light in those primaries, bounded to [0,1] and
+/// space's transfer function undone, so they are linear light in those primaries, bounded to [0,1] and
 /// quantised to 16 bits. <c>ColorMatrix1</c> states those primaries the way DNG wants them (XYZ D50
 /// → this space), and <c>AsShotNeutral</c> is 1,1,1 because the white balance is already in the
 /// pixels — the film base was neutralised in the density domain, which is the whole point of the
@@ -83,6 +80,9 @@ public static class LinearDng
             Entry.Rationals(50728, 1d, 1d, 1d),                    // AsShotNeutral: already balanced
             Entry.SignedRationals(50721, ColorMatrixD50(space)),   // ColorMatrix1
             Entry.Short(50778, 23),                                // CalibrationIlluminant1: D50
+            Entry.Short(50879, 1),                                 // ColorimetricReference: output-referred
+            Entry.Floats(50940, 0f, 0f, 1f, 1f),                   // ProfileToneCurve: identity
+            Entry.Long(51110, 1),                                  // DefaultBlackRender: none
             // The PREVIEW's profile, not the raw's: IFD0 holds display-referred pixels encoded in
             // the output space, and a file browser that assumed sRGB would show an Adobe RGB or P3
             // roll's thumbnail undersaturated. The raw itself is described by ColorMatrix1 above.
@@ -176,7 +176,7 @@ public static class LinearDng
 
     private enum EntryType : ushort
     {
-        Byte = 1, Ascii = 2, Short = 3, Long = 4, Rational = 5, Undefined = 7, SignedRational = 10,
+        Byte = 1, Ascii = 2, Short = 3, Long = 4, Rational = 5, Undefined = 7, SignedRational = 10, Float = 11,
     }
 
     /// <summary>One IFD entry. <see cref="Payload"/> is the value as bytes; anything over four of
@@ -195,6 +195,8 @@ public static class LinearDng
         public static Entry Long(ushort tag, uint value) => new(tag, EntryType.Long, 1, BitConverter.GetBytes(value));
         public static Entry Longs(ushort tag, params uint[] values)
             => new(tag, EntryType.Long, (uint)values.Length, values.SelectMany(BitConverter.GetBytes).ToArray());
+        public static Entry Floats(ushort tag, params float[] values)
+            => new(tag, EntryType.Float, (uint)values.Length, values.SelectMany(BitConverter.GetBytes).ToArray());
         public static Entry Bytes(ushort tag, params byte[] values) => new(tag, EntryType.Byte, (uint)values.Length, values);
         public static Entry Undefined(ushort tag, byte[] values) => new(tag, EntryType.Undefined, (uint)values.Length, values);
 

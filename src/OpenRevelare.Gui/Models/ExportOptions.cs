@@ -14,9 +14,7 @@ public enum ExportFormat
     /// <summary>8-bit JPEG, 4:4:4.</summary>
     Jpeg,
     /// <summary>
-    /// 16-bit LinearRaw DNG: the finished positive with the display curve undone, for grading in
-    /// Lightroom / Camera Raw / Capture One. See <see cref="LinearDng"/> for what that does and does
-    /// not include.
+    /// 16-bit LinearRaw DNG with the finished SDR grade and neutral rendering defaults.
     /// </summary>
     Dng,
     /// <summary>HEVC Main10: SDR with exact ICC, or direct PQ / Adaptive HDR.</summary>
@@ -357,7 +355,7 @@ public sealed class ExportOptions
             _ => "LZW",
         };
         if (IsDng)
-            return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色 · 不含显示曲线");
+            return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色");
         if (Format == ExportFormat.Heic)
         {
             if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");

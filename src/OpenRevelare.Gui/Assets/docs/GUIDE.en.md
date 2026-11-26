@@ -554,13 +554,10 @@ base or gain map; it requires an HDR HEIC viewer. Adaptive HDR is also available
 HEIC and JPEG remember separate quality settings and both support file-size limits, reducing
 quality first and resolution second.
 
-> **A linear DNG** carries the finished positive with the display curve removed: the inversion, the
-> lens corrections and the frame edits are all baked in, but the output space's encoding curve is
-> not applied, so the pixels are linear light in that space's primaries, at 16 bits. In Lightroom or
-> Camera Raw it arrives as MATERIAL rather than as a finished picture — the raw panel is live, the
-> white balance slider works, and the highlights have something to recover. The output space's
-> primaries are written into the DNG's `ColorMatrix1`, and `AsShotNeutral` is 1/1/1 because the
-> balance was already solved in the density domain (declaring it again would have the host undo it).
+> **A linear DNG** stores the inversion, lens corrections and frame edits in a 16-bit linear image.
+> Its `ColorMatrix1` describes the output colour space. The file marks the pixels as a finished SDR
+> render and requests an identity tone curve and no automatic black subtraction. The appearance
+> depends on whether the RAW editor honors these settings and which import preset it uses.
 >
 > It is **not** a repackaged camera RAW — the mosaic is gone long before this point — and not the
 > scene-linear ACEScg master either; that is the 32-bit float TIFF below, which keeps values above 1

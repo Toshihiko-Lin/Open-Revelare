@@ -1,5 +1,17 @@
 # OpenRevelare — 更新日志
 
+## v1.11.3
+
+**修复**
+
+- 改善线性 DNG 导出的默认外观。导出的文件将 SDR 成片标记为输出参照，并写入恒等色调曲线和黑位设置，让支持这些标签的 RAW 软件打开时更接近 OpenRevelare 的预览。已用 Adobe DNG Converter 18.3.2 对照验证全尺寸渲染。
+
+---
+
+**Fixed**
+
+- Improved the default appearance of linear DNG exports. The files mark the SDR render as output-referred and include an identity tone curve and black-point settings so compatible RAW software renders closer to the OpenRevelare preview. Verified with full-resolution renders from Adobe DNG Converter 18.3.2.
+
 ## v1.11.2（2026-11-24）
 
 **修复**

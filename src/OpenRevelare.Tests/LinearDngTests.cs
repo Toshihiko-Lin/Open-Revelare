@@ -53,6 +53,31 @@ public sealed class LinearDngTests
     }
 
     [Fact]
+    public void Requests_the_finished_render_as_the_raw_readers_starting_point()
+    {
+        string path = NewPath();
+        LinearDng.Write(Encoded(64, 48, (_, _) => (0.5f, 0.25f, 0.75f)), ColorSpaces.Srgb, path);
+
+        byte[] bytes = File.ReadAllBytes(path);
+        int root = BitConverter.ToInt32(bytes, 4);
+        var entries = new Dictionary<int, (ushort Type, uint Count, uint Value)>();
+        for (int i = 0; i < BitConverter.ToUInt16(bytes, root); i++)
+        {
+            int entry = root + 2 + i * 12;
+            entries.Add(BitConverter.ToUInt16(bytes, entry),
+                (BitConverter.ToUInt16(bytes, entry + 2), BitConverter.ToUInt32(bytes, entry + 4),
+                 BitConverter.ToUInt32(bytes, entry + 8)));
+        }
+
+        Assert.Equal(((ushort)3, 1u, 1u), entries[50879]); // ColorimetricReference: output-referred
+        Assert.Equal(((ushort)4, 1u, 1u), entries[51110]); // DefaultBlackRender: none
+        var (type, count, offset) = entries[50940];       // ProfileToneCurve: identity
+        Assert.Equal((11, 4u), ((int)type, count));
+        Assert.Equal(new[] { 0f, 0f, 1f, 1f },
+            Enumerable.Range(0, 4).Select(i => BitConverter.ToSingle(bytes, (int)offset + i * 4)));
+    }
+
+    [Fact]
     public void Writes_a_file_libraw_can_decode()
     {
         string path = NewPath();

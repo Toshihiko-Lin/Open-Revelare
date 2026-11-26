@@ -435,7 +435,7 @@ public partial class ExportDialog : Window
 
         ExportOptions selected = Collect();
         FormatHint.Text = dng
-            ? Loc.T("在 Lightroom / Camera Raw 中继续调色；反相与帧编辑已烘焙，不含显示曲线。")
+            ? Loc.T("保留成片调色，并请求 RAW 软件按原调色呈现。实际外观取决于软件的默认渲染设置。")
                 + (IsHdr ? " " + Loc.T("HDR 卷按 SDR 写出。") : "")
             : heic
             ? (IsHdr ? (gainMap ? Loc.T("普通查看器显示 SDR，支持 ISO 增益图的 HEIC 查看器可还原 HDR。") : Loc.T("保留 HDR 高光；需要支持 HDR HEIC 的查看器。"))
