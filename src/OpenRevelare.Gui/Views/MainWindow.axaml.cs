@@ -2860,30 +2860,49 @@ public partial class MainWindow : Window
     private void OnRemoveFrameClick(object? sender, RoutedEventArgs e) => Vm?.RemoveFrames();
     private void OnSortFramesClick(object? sender, RoutedEventArgs e) => Vm?.SortFramesByName();
 
-    private async void OnExportClick(object? sender, RoutedEventArgs e)
+    private bool _photoExportDialogPending;
+
+    private async Task RunPhotoExportDialogAsync(Func<MainViewModel, Task> export)
     {
-        if (Vm is null) return;
+        if (_photoExportDialogPending || _closePending || CloseApproved || Vm is not { HasLongTask: false } vm)
+            return;
+
+        _photoExportDialogPending = true;
+        try { await export(vm); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or InvalidOperationException or NotSupportedException or COMException)
+        {
+            vm.StatusText = Loc.T("导出失败：") + ex.Message;
+        }
+        finally { _photoExportDialogPending = false; }
+    }
+
+    private async void OnExportClick(object? sender, RoutedEventArgs e) =>
+        await RunPhotoExportDialogAsync(ExportCurrentWithDialogAsync);
+
+    private async Task ExportCurrentWithDialogAsync(MainViewModel vm)
+    {
         // Options first, destination second: the format decides the extension the save dialog
         // should be offering, so asking for a filename first asks in the wrong order.
         // namePreview: the naming scheme decides the name this export is OFFERED below, so the
         // dialog shows what the scheme makes of this frame.
-        var opts = new ExportDialog(rollMode: false, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
-                                    namePreview: Vm.ExportNamePreview,
+        var opts = new ExportDialog(rollMode: false, vm.CurrentOutputSpace, vm.ExportHdrLimitStops,
+                                    namePreview: vm.ExportNamePreview,
                                     sourceExifSummary: await ReadExportSourceSummaryAsync());
-        if (await opts.ShowDialog<bool>(this) != true) return;
+        if (!await ShowExportOptionsAsync(opts)) return;
         Models.ExportOptions opt = opts.Options;
 
         bool jpeg = opt.Format == Models.ExportFormat.Jpeg;
         bool heic = opt.Format == Models.ExportFormat.Heic;
         bool dng = opt.Format == Models.ExportFormat.Dng;
         bool floatTiff = opt.ExportLinear || opt.IsHdr;
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        using var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = Loc.T("导出正片"),
             DefaultExtension = opt.Extension,
             // The name a roll export would have given this frame: one frame done by hand then sits
             // next to the batch instead of standing out. Still editable in the dialog.
-            SuggestedFileName = Vm.SuggestedExportName(opt),
+            SuggestedFileName = vm.SuggestedExportName(opt),
             FileTypeChoices = new List<FilePickerFileType>
             {
                 dng
@@ -2898,8 +2917,9 @@ public partial class MainWindow : Window
                         { Patterns = new[] { "*.tiff", "*.tif" } },
             },
         });
-        string? path = file?.TryGetLocalPath();
-        if (path != null) await Vm.ExportAsync(path, opt);
+        if (file is null || _closePending || CloseApproved) return;
+        string path = file.TryGetLocalPath() ?? throw new IOException(Loc.T("无法访问所选导出位置。"));
+        await vm.ExportAsync(path, opt);
     }
 
     private async void OnAutoLensCorrectionCurrentClick(object? sender, RoutedEventArgs e)
@@ -2967,14 +2987,28 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnExportRollClick(object? sender, RoutedEventArgs e)
+    private async Task<bool> ShowExportOptionsAsync(ExportDialog dialog)
     {
-        if (Vm is null) return;
-        var opts = new ExportDialog(rollMode: true, Vm.CurrentOutputSpace, Vm.ExportHdrLimitStops,
-                                    namePreview: Vm.ExportNamePreview,
+        if (!await dialog.ShowDialog<bool>(this)) return false;
+
+        // Avalonia completes ShowDialog from Closed before clearing the dialog's Owner.
+        // Let that callback finish before AppKit attaches a picker sheet to the same window.
+        if (OperatingSystem.IsMacOS())
+            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
+
+        return IsVisible && !_closePending && !CloseApproved;
+    }
+
+    private async void OnExportRollClick(object? sender, RoutedEventArgs e) =>
+        await RunPhotoExportDialogAsync(ExportRollWithDialogAsync);
+
+    private async Task ExportRollWithDialogAsync(MainViewModel vm)
+    {
+        var opts = new ExportDialog(rollMode: true, vm.CurrentOutputSpace, vm.ExportHdrLimitStops,
+                                    namePreview: vm.ExportNamePreview,
                                     sourceExifSummary: await ReadExportSourceSummaryAsync(),
-                                    frames: Vm.Frames.ToArray());
-        if (await opts.ShowDialog<bool>(this) != true) return;
+                                    frames: vm.Frames.ToArray());
+        if (!await ShowExportOptionsAsync(opts)) return;
         Models.ExportOptions opt = opts.Options;
 
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
@@ -2982,12 +3016,11 @@ public partial class MainWindow : Window
             Title = Loc.F($"选择整卷导出目录（{opt.Summary()}）"),
             AllowMultiple = false,
         });
-        string? dir = folders.FirstOrDefault()?.TryGetLocalPath();
-        if (dir != null)
-        {
-            await Vm.ExportRollAsync(dir, opt);
-            if (!_closePending && !CloseApproved) await ShowBatchExportReportAsync();
-        }
+        using var folder = folders.FirstOrDefault();
+        if (folder is null || _closePending || CloseApproved) return;
+        string dir = folder.TryGetLocalPath() ?? throw new IOException(Loc.T("无法访问所选导出位置。"));
+        await vm.ExportRollAsync(dir, opt);
+        if (!_closePending && !CloseApproved) await ShowBatchExportReportAsync();
     }
 
     private async void OnBatchExportReportClick(object? sender, RoutedEventArgs e) => await ShowBatchExportReportAsync();

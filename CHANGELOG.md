@@ -1,5 +1,27 @@
 # OpenRevelare — 更新日志
 
+## v1.11.4（2026-11-27）
+
+**新增**
+
+- 线性 DNG 导出新增「PhotoLab 兼容」选项。
+
+**修复**
+
+- 改善 macOS 上选择导出位置时的稳定性。
+- 改善长文件名和重名处理，减少在较慢的目录导出时窗口无响应的情况。
+
+---
+
+**Added**
+
+- Added a PhotoLab compatibility option for linear DNG exports.
+
+**Fixed**
+
+- Improved stability when choosing where to save exports on macOS.
+- Improved handling of long and duplicate names, and kept the window responsive when checking slow export folders.
+
 ## v1.11.3（2026-11-26）
 
 **修复**

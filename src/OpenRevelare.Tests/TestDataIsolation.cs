@@ -35,6 +35,9 @@ public static class TestDataIsolation
     /// <summary>The throwaway root, under the system temp folder rather than the repo.</summary>
     public static string Root { get; } = Path.Combine(Path.GetTempPath(), "OpenRevelare-tests");
 
+    internal static string ExportRoot =>
+        Environment.GetEnvironmentVariable("OPENREVELARE_EXPORT_TEST_DIRECTORY") ?? Root;
+
     [ModuleInitializer]
     internal static void Redirect()
     {

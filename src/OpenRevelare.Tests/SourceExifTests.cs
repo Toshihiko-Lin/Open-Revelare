@@ -67,6 +67,29 @@ public sealed class SourceExifTests
         });
     }
 
+    [Fact]
+    public void PhotoLab_dng_uses_the_source_model_and_omits_the_output_reference_without_changing_pixels()
+    {
+        WithSource((source, folder) =>
+        {
+            RenderedFrame frame = Frame(hdr: false, 96, 64);
+            string standard = Path.Combine(folder, "standard.dng");
+            string compatible = Path.Combine(folder, "photolab.dng");
+            LinearDng.Write(frame.Pixels, ColorSpaces.Srgb, standard, sourceExif: source);
+            LinearDng.Write(frame.Pixels, ColorSpaces.Srgb, compatible, cameraModel: source.CameraModel,
+                sourceExif: source, markOutputReferred: false);
+
+            var standardRoot = ReadExport(standard, "dng").OfType<ExifIfd0Directory>().First();
+            var compatibleRoot = ReadExport(compatible, "dng").OfType<ExifIfd0Directory>().First();
+            Assert.Equal(1, standardRoot.GetInt32(50879));
+            Assert.False(compatibleRoot.ContainsTag(50879));
+            Assert.Equal("OpenRevelare sRGB", standardRoot.GetString(50708));
+            Assert.Equal("Copy Camera", compatibleRoot.GetString(50708));
+            Assert.Equal("Copy Camera", compatibleRoot.GetString(272));
+            Assert.Equal(RawDecode.DecodeRaw(standard).Data, RawDecode.DecodeRaw(compatible).Data);
+        });
+    }
+
     [Theory]
     [InlineData("tif")]
     [InlineData("heic")]

@@ -1746,8 +1746,8 @@ public partial class MainViewModel
         sourceStamp.RequireCurrent();
         CalibrationSources.RequireCurrent(ep);
         PrintLuts.RequireCurrent(ep.PrintLut);
-        SourceExif? sourceExif = SourceExif.ForExport(
-            opt.KeepSourceExif ? SourceExif.Read(sourcePath) : null, opt.KeepSourceExif, opt.FilmCapture);
+        SourceExif? inputExif = opt.KeepSourceExif ? SourceExif.Read(sourcePath) : null;
+        SourceExif? sourceExif = SourceExif.ForExport(inputExif, opt.KeepSourceExif, opt.FilmCapture);
         if (opt.Format == ExportFormat.Dng)
         {
             // A DNG is a BOUNDED, linear file, so it starts from the SDR rendition in the roll's
@@ -1763,7 +1763,10 @@ public partial class MainViewModel
                 : positive.Pixels;
             ct.ThrowIfCancellationRequested();
             sourceStamp.RequireCurrent();
-            LinearDng.Write(pixels, dngSpace, path, sourceExif: sourceExif);
+            string? cameraModel = opt.PhotoLabCompatibleDng ? inputExif?.CameraModel?.Trim() : null;
+            LinearDng.Write(pixels, dngSpace, path,
+                cameraModel: string.IsNullOrEmpty(cameraModel) ? null : cameraModel,
+                sourceExif: sourceExif, markOutputReferred: !opt.PhotoLabCompatibleDng);
             return null;
         }
 
@@ -1966,36 +1969,44 @@ public partial class MainViewModel
                 Name: ExportNaming.Expand(opt.NameTemplate, ExportNameFields(f, i + 1)))).ToList();
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
-            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var reserved = ExportFile.NewReservations();
-            ExportFile.CleanupStale(folder);
-            var items = new List<BatchExportItem>();
-            foreach (var frame in frames)
+            string rollTitle = _roll?.Title ?? "";
+            string? projectPath = _roll?.ProjectPath;
+            var snapshot = projectPath is not null ? BuildProjectData() : null;
+            var items = await Task.Run(() =>
             {
-                string name = frame.Name;
-                for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{frame.Name}_副本{dup - 1}");
-                string? output = ExportFile.Reserve(folder, name, opt.Extension, opt.Conflict, reserved);
-                var frameOptions = opt.ForFrame(frame.Index);
-                FrameParams ep = ForExport(frame.Params, frameOptions);
-                SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
-                    ? null : SourceStamp.TryCapture(ep.PrintLut);
-                items.Add(CreateBatchItem(frame.Path, output, frame.Box, ep, frameOptions,
-                    pipelineVersion, tiffInputAssumption, lutSource));
-            }
-            var job = new BatchExportJob(folder, items, _roll?.Title ?? "", opt.Summary());
+                ExportFile.CleanupStale(folder);
+                var usedNames = ExportFile.NewReservations();
+                var reserved = ExportFile.NewReservations();
+                var planned = new List<BatchExportItem>(frames.Count);
+                foreach (var frame in frames)
+                {
+                    owner.Token.ThrowIfCancellationRequested();
+                    string name = frame.Name;
+                    for (int dup = 2; !usedNames.Add(name); dup++) name = Loc.F($"{frame.Name}_副本{dup - 1}");
+                    string? output = ExportFile.Reserve(folder, name, opt.Extension, opt.Conflict, reserved);
+                    var frameOptions = opt.ForFrame(frame.Index);
+                    FrameParams ep = ForExport(frame.Params, frameOptions);
+                    SourceStamp? lutSource = PrintLuts.IsBuiltin(ep.PrintLut) || string.IsNullOrEmpty(ep.PrintLut)
+                        ? null : SourceStamp.TryCapture(ep.PrintLut);
+                    planned.Add(CreateBatchItem(frame.Path, output, frame.Box, ep, frameOptions,
+                        pipelineVersion, tiffInputAssumption, lutSource));
+                }
+                return planned;
+            }, owner.Token);
+            var job = new BatchExportJob(folder, items, rollTitle, opt.Summary());
             LastBatchExportJob = job;
-            if (_roll is { } roll)
+            if (projectPath is not null && snapshot is not null)
             {
                 var boxes = frames.Select(f => f.Box is { } b
                     ? new[] { b.X, b.Y, b.W, b.H } : null).ToArray();
-                var snapshot = BuildProjectData();
-                var saved = BatchExportStore.Create(roll.ProjectPath, snapshot, opt,
-                    job, boxes, pipelineVersion, tiffInputAssumption);
+                var saved = await Task.Run(() => BatchExportStore.Create(projectPath, snapshot, opt,
+                    job, boxes, pipelineVersion, tiffInputAssumption), owner.Token);
                 job.StateChangedAsync = () => Task.Run(() => BatchExportStore.Save(saved, job));
                 job.ValidateRecovery = () => BatchExportStore.Validate(saved, snapshot);
             }
             await RunBatchExportAsync(job, owner.Token);
         }
+        catch (OperationCanceledException) { StatusText = Loc.T("导出已取消"); }
         catch (Exception ex) { StatusText = Loc.T("整卷导出失败：") + ex.Message; }
         finally { EndPhotoExport(owner); }
     }
@@ -2226,9 +2237,10 @@ public partial class MainViewModel
             IReadOnlyList<ImageBuffer>? extendedCells = hdr ? thumbs.Extended : null;
             (int gridX, int gridY) = SheetComposer.GridOrigin(grid.Layout, opt);
 
-            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             await Task.Run(() =>
             {
+                ct.ThrowIfCancellationRequested();
+                if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
                 ct.ThrowIfCancellationRequested();
                 string ext = Path.GetExtension(path).ToLowerInvariant();
                 bool jpeg = ext is ".jpg" or ".jpeg";

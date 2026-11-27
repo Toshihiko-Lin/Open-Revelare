@@ -87,6 +87,8 @@ public sealed class ExportOptions
     /// <summary>Use ISO gain-map HEIC instead of direct PQ.</summary>
     public bool HeicAdaptiveHdr { get; set; }
 
+    public bool PhotoLabCompatibleDng { get; set; }
+
     /// <summary>Copy portable source capture EXIF; rendering/geometry tags are regenerated.</summary>
     public bool KeepSourceExif { get; set; } = true;
 
@@ -355,7 +357,8 @@ public sealed class ExportOptions
             _ => "LZW",
         };
         if (IsDng)
-            return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色");
+            return Loc.F($"16-bit 线性 DNG · {size} · {ResolvedColorSpace.Name} 原色")
+                + (PhotoLabCompatibleDng ? " · " + Loc.T("PhotoLab 兼容") : "");
         if (Format == ExportFormat.Heic)
         {
             if (MaxFileBytes is not null) size += " · " + Loc.F($"≤ {MaxFileSizeMb:0.#} MB");

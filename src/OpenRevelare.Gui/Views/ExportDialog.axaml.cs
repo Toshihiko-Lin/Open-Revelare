@@ -164,6 +164,7 @@ public partial class ExportDialog : Window
         QualitySlider.Value = Math.Clamp(saved.JpegQuality, 40, 100);
         HeicHdrBox.SelectedIndex = saved.HeicAdaptiveHdr ? 1 : 0;
         HeicQualitySlider.Value = Math.Clamp(saved.HeicQuality, 40, 100);
+        PhotoLabDngChk.IsChecked = saved.PhotoLabCompatibleDng;
         KeepExifChk.IsChecked = saved.KeepSourceExif;
         HdrBaseBox.SelectedIndex = Math.Max(0, ExportOptions.GainMapBaseSpaces.ToList()
             .FindIndex(space => space == saved.ResolvedHdrBaseSpace));
@@ -323,6 +324,7 @@ public partial class ExportDialog : Window
             JpegQuality = (int)QualitySlider.Value,
             HeicQuality = (int)HeicQualitySlider.Value,
             HeicAdaptiveHdr = HeicHdrBox.SelectedIndex == 1,
+            PhotoLabCompatibleDng = dng && PhotoLabDngChk.IsChecked == true,
             KeepSourceExif = KeepExifChk.IsChecked == true,
             FrameFilmCaptures = FilmInfoChk.IsChecked == true ? _filmEditor?.Snapshot() : null,
             FilmCapture = _filmEditor is null && FilmInfoChk.IsChecked == true && HasFilmCaptureDetails()
@@ -368,7 +370,7 @@ public partial class ExportDialog : Window
             || UpscaleChk is null || NameTemplateBox is null || NamePreviewLbl is null
             || SharpenBox is null || SharpenRow is null || IccRow is null
             || LongEdgeRow is null || PreviewRow is null
-            || NamePresetBox is null || CustomNameRow is null || FmtHeic is null
+            || NamePresetBox is null || CustomNameRow is null || FmtHeic is null || PhotoLabDngChk is null
             || HeicQualitySlider is null || HeicQualityLbl is null
             || JpegQualityRow is null || HeicQualityRow is null || HeicHdrBox is null || HeicHdrRow is null
             || JpegFormatDetail is null || HeicFormatDetail is null || TiffFormatDetail is null
@@ -383,6 +385,7 @@ public partial class ExportDialog : Window
             ? Loc.T("编辑胶片拍摄信息（已填写） →")
             : Loc.T("编辑胶片拍摄信息 →");
         TiffGroup.IsVisible = !jpeg && !dng && !heic;
+        PhotoLabDngChk.IsVisible = dng;
         JpegGroup.IsVisible = jpeg || heic;
         JpegQualityRow.IsVisible = jpeg;
         HeicQualityRow.IsVisible = heic;
@@ -435,7 +438,9 @@ public partial class ExportDialog : Window
 
         ExportOptions selected = Collect();
         FormatHint.Text = dng
-            ? Loc.T("保留成片调色，并请求 RAW 软件按原调色呈现。实际外观取决于软件的默认渲染设置。")
+            ? (selected.PhotoLabCompatibleDng
+                ? Loc.T("建议保留源 EXIF。PhotoLab 中的颜色可能与预览不同。")
+                : Loc.T("支持的软件会尽量保留预览效果。在 DxO PhotoLab 中打开时，请启用兼容选项。"))
                 + (IsHdr ? " " + Loc.T("HDR 卷按 SDR 写出。") : "")
             : heic
             ? (IsHdr ? (gainMap ? Loc.T("普通查看器显示 SDR，支持 ISO 增益图的 HEIC 查看器可还原 HDR。") : Loc.T("保留 HDR 高光；需要支持 HDR HEIC 的查看器。"))

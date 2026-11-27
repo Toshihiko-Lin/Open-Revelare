@@ -48,12 +48,12 @@ public static class LinearDng
     /// The buffer is NOT modified: decoding writes directly into the separate 16-bit payload,
     /// because callers may still hold the encoded frame for a thumbnail.
     /// </summary>
-    /// <param name="cameraModel">What the file reports as the camera. It is a made-up device by
-    /// definition — the pixels went through this program, not through a sensor — so it names the
-    /// program and the space, which is the honest answer and also what makes a host's per-camera
-    /// defaults land on the right bucket.</param>
+    /// <param name="cameraModel">DNG camera identity. Omit to identify the renderer and output space.</param>
+    /// <param name="markOutputReferred">Write ColorimetricReference for the finished SDR render.
+    /// Omit the tag for RAW readers such as PhotoLab that reject it.</param>
     public static void Write(ImageBuffer displayReferred, ColorSpaceDef space, string path,
-                             string? cameraModel = null, SourceExif? sourceExif = null)
+                             string? cameraModel = null, SourceExif? sourceExif = null,
+                             bool markOutputReferred = true)
     {
         ImageBuffer thumbSource = Resample.ToLongEdge(displayReferred, ThumbnailLongEdge, allowUpscale: false);
         byte[] thumb = Quantise8(thumbSource);
@@ -80,7 +80,6 @@ public static class LinearDng
             Entry.Rationals(50728, 1d, 1d, 1d),                    // AsShotNeutral: already balanced
             Entry.SignedRationals(50721, ColorMatrixD50(space)),   // ColorMatrix1
             Entry.Short(50778, 23),                                // CalibrationIlluminant1: D50
-            Entry.Short(50879, 1),                                 // ColorimetricReference: output-referred
             Entry.Floats(50940, 0f, 0f, 1f, 1f),                   // ProfileToneCurve: identity
             Entry.Long(51110, 1),                                  // DefaultBlackRender: none
             // The PREVIEW's profile, not the raw's: IFD0 holds display-referred pixels encoded in
@@ -88,6 +87,8 @@ public static class LinearDng
             // roll's thumbnail undersaturated. The raw itself is described by ColorMatrix1 above.
             Entry.Undefined(34675, IccProfiles.Build(space)),       // InterColorProfile
         };
+        if (markOutputReferred)
+            ifd0.Add(Entry.Short(50879, 1));                         // ColorimetricReference: output-referred
 
         var subIfd = new List<Entry>
         {

@@ -40,9 +40,11 @@ public sealed class SourceExif
         return root.Count + exif.Count + gps.Count == 0 ? null : new(root, exif, gps);
     }
 
+    public string CameraModel => Text(_root, 272);
+
     public string CaptureSummary => string.Join(" · ", new[]
     {
-        Text(_root, 271), Text(_root, 272), Text(_exif, 0xa434), CaptureTime,
+        Text(_root, 271), CameraModel, Text(_exif, 0xa434), CaptureTime,
     }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
     private string CaptureTime => Text(_exif, 0x9003) is { Length: > 0 } date ? date : Text(_root, 306);

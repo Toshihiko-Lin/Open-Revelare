@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Text;
+
 namespace OpenRevelare.Core;
 
 /// <summary>
@@ -22,14 +25,12 @@ namespace OpenRevelare.Core;
 public static class ExportFile
 {
     /// <summary>
-    /// Marks a file as an export in flight. Anything wearing this prefix is either being written
-    /// right now or was orphaned by a crash, so <see cref="CleanupStale"/> may delete it — which
-    /// is exactly why it must be a prefix nothing else would ever produce. The leading dot also
-    /// hides the staging file on Unix while it exists.
+    /// Identifies export staging files. The leading dot hides them on Unix.
     /// </summary>
     public const string TempPrefix = ".openrevelare-export-";
 
     private static int _sequence;
+    private static readonly TimeSpan StagingRetention = TimeSpan.FromDays(7);
 
     /// <summary>What to do when the reserved path is already taken.</summary>
     public enum ConflictPolicy
@@ -54,7 +55,8 @@ public static class ExportFile
         string full = Path.GetFullPath(path);
         string directory = Path.GetDirectoryName(full)
             ?? throw new IOException($"export path has no directory: {path}");
-        string name = Path.GetFileName(full);
+        string extension = Path.GetExtension(full);
+        if (Encoding.UTF8.GetByteCount(extension) > 32) extension = ".tmp";
         Directory.CreateDirectory(directory);
 
         // Same directory as the target, deliberately: a rename is only atomic within one volume,
@@ -62,7 +64,7 @@ public static class ExportFile
         for (int attempt = 0; attempt < 128; attempt++)
         {
             string temp = Path.Combine(directory,
-                $"{TempPrefix}{Environment.ProcessId}-{Interlocked.Increment(ref _sequence)}-{name}");
+                $"{TempPrefix}{Environment.ProcessId}-{Interlocked.Increment(ref _sequence)}-stage{extension}");
             try
             {
                 // CreateNew claims the name; it never adopts one a concurrent export owns.
@@ -92,20 +94,26 @@ public static class ExportFile
     }
 
     /// <summary>
-    /// Delete staging files orphaned in <paramref name="directory"/> by a previous crash. Call it
-    /// once when an export starts, never while one is running: a temp another export currently
-    /// holds open cannot be deleted and is skipped, but there is no reason to try.
+    /// Sweep old staging files. A grace period protects files on shared volumes, and a live
+    /// local process ID protects a writer even if the platform allows deleting open files.
     /// </summary>
     /// <returns>How many were removed. Failures are swallowed — a sweep that cannot run must
     /// not be the reason an export does not.</returns>
     public static int CleanupStale(string directory)
     {
         int removed = 0;
+        DateTime cutoff = DateTime.UtcNow - StagingRetention;
         try
         {
             foreach (string file in Directory.EnumerateFiles(directory, TempPrefix + "*"))
             {
-                try { File.Delete(file); removed++; }
+                try
+                {
+                    if (!TryReadStagingOwner(file, out int pid) || File.GetLastWriteTimeUtc(file) >= cutoff
+                        || IsProcessRunning(pid)) continue;
+                    File.Delete(file);
+                    removed++;
+                }
                 catch { /* held by a live export, or already gone */ }
             }
         }
@@ -113,9 +121,42 @@ public static class ExportFile
         return removed;
     }
 
-    /// <summary>The set <see cref="Reserve"/> expects — paths compared the way a filesystem that
-    /// ignores case would, because on Windows one is.</summary>
-    public static HashSet<string> NewReservations() => new(StringComparer.OrdinalIgnoreCase);
+    private static bool TryReadStagingOwner(string file, out int pid)
+    {
+        pid = 0;
+        ReadOnlySpan<char> name = Path.GetFileName(file).AsSpan();
+        if (!name.StartsWith(TempPrefix, StringComparison.Ordinal)) return false;
+        name = name[TempPrefix.Length..];
+        int separator = name.IndexOf('-');
+        if (separator <= 0 || !int.TryParse(name[..separator], out pid) || pid <= 0) return false;
+        name = name[(separator + 1)..];
+        separator = name.IndexOf('-');
+        return separator > 0 && separator < name.Length - 1 && int.TryParse(name[..separator], out int sequence)
+            && sequence > 0;
+    }
+
+    private static bool IsProcessRunning(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+    }
+
+    /// <summary>Compare reserved names conservatively across case and Unicode normalization.</summary>
+    public static HashSet<string> NewReservations() => new(ReservationComparer.Instance);
+
+    private sealed class ReservationComparer : IEqualityComparer<string>
+    {
+        public static ReservationComparer Instance { get; } = new();
+
+        public bool Equals(string? left, string? right) =>
+            StringComparer.OrdinalIgnoreCase.Equals(left?.Normalize(), right?.Normalize());
+
+        public int GetHashCode(string path) => StringComparer.OrdinalIgnoreCase.GetHashCode(path.Normalize());
+    }
 
     /// <summary>
     /// Claim an output path for <paramref name="stem"/>.<paramref name="extension"/> under
@@ -135,13 +176,13 @@ public static class ExportFile
         {
             switch (policy)
             {
-                case ConflictPolicy.Overwrite:
+                case ConflictPolicy.Overwrite when !Directory.Exists(first):
                     reserved.Add(first);
                     return first;
-                case ConflictPolicy.Skip when File.Exists(first):
+                case ConflictPolicy.Skip when File.Exists(first) || Directory.Exists(first):
                     return null;
                 case ConflictPolicy.Skip:
-                case ConflictPolicy.Unique when !File.Exists(first):
+                case ConflictPolicy.Unique when !File.Exists(first) && !Directory.Exists(first):
                     reserved.Add(first);
                     return first;
             }
@@ -151,7 +192,7 @@ public static class ExportFile
         for (int suffix = 2; suffix <= 100_000; suffix++)
         {
             string candidate = Candidate($"{stem} ({suffix})");
-            if (!File.Exists(candidate) && reserved.Add(candidate)) return candidate;
+            if (!File.Exists(candidate) && !Directory.Exists(candidate) && reserved.Add(candidate)) return candidate;
         }
 
         throw new IOException($"no free export name for {stem}.{extension} in {directory}");

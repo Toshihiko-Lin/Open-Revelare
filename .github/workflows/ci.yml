@@ -121,6 +121,9 @@ jobs:
       # 同一套回归测试也在 macOS 上跑一遍：这里的测试有相当一部分在验数值结果，
       # 而浮点行为、文化相关的数字解析、路径大小写都是跨平台会分岔的地方。
       - run: dotnet test -c Release --no-build --nologo
+      - name: 测试 APFS 和 ExFAT 导出
+        timeout-minutes: 8
+        run: bash packaging/macos/test-export-filesystems.sh
       # 原生 presenter 垫片（Obj-C++，src/OpenRevelare.Presentation.MacOS.Native）在这里真编，
       # 不放占位：只要 clang + SDK，几秒钟，而它是整个 mac HDR 预览唯一没有第二条发现
       # 渠道的部件 —— 2026-09-13 之前它从没在任何 Mac 上编过一次（见目录 README）。

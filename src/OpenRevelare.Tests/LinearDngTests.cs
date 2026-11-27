@@ -25,7 +25,7 @@ public sealed class LinearDngTests
     }
 
     private static string NewPath() =>
-        Path.Combine(TestDataIsolation.Root, $"linear-{Guid.NewGuid():N}.dng");
+        Path.Combine(TestDataIsolation.ExportRoot, $"linear-{Guid.NewGuid():N}.dng");
 
     [Fact]
     public void Both_image_directories_use_the_required_long_type_for_new_subfile_type()

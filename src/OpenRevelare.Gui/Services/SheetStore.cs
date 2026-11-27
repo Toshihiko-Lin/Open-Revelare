@@ -86,7 +86,9 @@ public static class SheetStore
             // Sheets are rewritten constantly, so this is the one directory where a crash mid-write
             // is likely enough to be worth sweeping on the regular maintenance pass.
             ExportFile.CleanupStale(Dir);
-            FileInfo[] files = dir.GetFiles("*.jpg");
+            FileInfo[] files = dir.GetFiles("*.jpg")
+                .Where(file => !file.Name.StartsWith(ExportFile.TempPrefix, StringComparison.Ordinal))
+                .ToArray();
             long total = files.Sum(f => f.Length);
             if (total <= budget) return;
             foreach (FileInfo f in files.OrderBy(f => f.LastWriteTimeUtc))

@@ -30,14 +30,16 @@ public partial class MainViewModel
             string srcPath = frame.Path;
             // Overwrite stays the rule for a single export: the save dialog already asked, and the
             // format came from the options dialog rather than being guessed from the extension.
-            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
             FrameParams ep = ForExport(p, opt);
             ColorPipelineVersion pipelineVersion = _colorPipelineVersion;
             TiffInputAssumption tiffInputAssumption = _tiffInputAssumption;
             var exportBox = SplitCropOf(frame);
             await PreparePhotoExportAsync();
             JpegIO.JpegFit? fit = await Task.Run(() =>
-                ExportPhoto(srcPath, exportBox, ep, path, opt, pipelineVersion, tiffInputAssumption, ct), ct);
+            {
+                if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } outDir) ExportFile.CleanupStale(outDir);
+                return ExportPhoto(srcPath, exportBox, ep, path, opt, pipelineVersion, tiffInputAssumption, ct);
+            }, ct);
             StatusText = Loc.F($"已导出：{Path.GetFileName(path)} · {opt.Summary()}") + DescribeFit(fit);
         }
         catch (OperationCanceledException) { StatusText = Loc.T("导出已取消"); }
